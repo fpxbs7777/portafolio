@@ -1664,6 +1664,7 @@ def main():
                 
                
                
+               
                 if st.button("🔄 Actualizar lista de clientes"):
                     with st.spinner("Actualizando clientes..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
@@ -1797,29 +1798,176 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - No considera correlaciones históricas
         """)
 
-def calcular_estadisticas_portafolio_sugerido(portfolio_output):
+# --- NUEVO BLOQUE: OPTIMIZACIONES AVANZADAS Y ESTADÍSTICAS ---
+def mostrar_optimizaciones_avanzadas(port_mgr):
     """
-    Calcula y retorna un resumen de estadísticas clave del portafolio sugerido según perfil de inversor.
-    Recibe un objeto 'output' (como el de la clase output del ejemplo).
+    Permite seleccionar y mostrar estadísticas e histogramas de diferentes optimizaciones de portafolio.
     """
-    stats = {
-        "Retorno Anual (%)": portfolio_output.return_annual * 100,
-        "Volatilidad Anual (%)": portfolio_output.volatility_annual * 100,
-        "Sharpe Ratio": portfolio_output.sharpe_ratio,
-        "VaR 95% (%)": portfolio_output.var_95 * 100,
-        "Skewness": portfolio_output.skewness,
-        "Kurtosis": portfolio_output.kurtosis,
-        "Normalidad (Jarque-Bera p-value)": portfolio_output.p_value,
-        "Distribución Normal": "Sí" if portfolio_output.is_normal else "No"
-    }
-    return stats
+    st.markdown("### ⚙️ Optimización Avanzada de Portafolio")
+    estrategias = [
+        ("min-variance-l1", "Min-Variance L1"),
+        ("min-variance-l2", "Min-Variance L2"),
+        ("long-only", "Long Only"),
+        ("equi-weight", "Equi Weight"),
+        ("markowitz", "Markowitz"),
+    ]
+    seleccionadas = st.multiselect(
+        "Seleccione las optimizaciones a mostrar:",
+        options=[e[0] for e in estrategias],
+        format_func=lambda x: dict(estrategias)[x],
+        default=[]
+    )
+    mostrar_hist = st.checkbox("Mostrar histogramas de retornos", value=False)
+    mostrar_stats = st.checkbox("Mostrar estadísticas detalladas", value=True)
 
-# Ejemplo de uso (dentro de tu flujo principal, después de obtener el portafolio sugerido):
-# portafolio_sugerido = ... # objeto de tipo output
-# stats = calcular_estadisticas_portafolio_sugerido(portafolio_sugerido)
-# st.markdown("### 📊 Estadísticas del Portafolio Sugerido")
-# for k, v in stats.items():
-#     st.write(f"**{k}:** {v:.2f}" if isinstance(v, float) else f"**{k}:** {v}")
+    resultados = {}
+    for clave, nombre in estrategias:
+        if clave in seleccionadas:
+            if clave == "markowitz":
+                port = port_mgr.compute_portfolio(clave, target_return=None)
+            else:
+                port = port_mgr.compute_portfolio(clave)
+            resultados[clave] = (nombre, port)
 
-if __name__ == "__main__":
-    main()
+    for clave in seleccionadas:
+        nombre, port = resultados[clave]
+        if port is not None:
+            st.subheader(f"Portafolio: {nombre}")
+            if mostrar_stats:
+                # Mostrar estadísticas en porcentaje donde corresponda
+                st.write("**Estadísticas:**")
+                st.write(f"- Retorno diario promedio: {port.mean_daily*100:.2f}%")
+                st.write(f"- Volatilidad diaria: {port.volatility_daily*100:.2f}%")
+                st.write(f"- Sharpe Ratio: {port.sharpe_ratio:.2f}")
+                st.write(f"- VaR 95%: {port.var_95*100:.2f}%")
+                st.write(f"- Skewness: {port.skewness:.2f}")
+                st.write(f"- Kurtosis: {port.kurtosis:.2f}")
+                st.write(f"- Normalidad (Jarque-Bera p-value): {port.p_value:.4f}")
+                st.write(f"- ¿Distribución normal?: {'Sí' if port.is_normal else 'No'}")
+            if mostrar_hist:
+                st.write("**Histograma de retornos:**")
+                fig, ax = plt.subplots()
+                ax.hist(port.returns, bins=50)
+                ax.set_title(f"Histograma de retornos - {nombre}")
+                ax.set_xlabel("Retorno")
+                ax.set_ylabel("Frecuencia")
+                st.pyplot(fig)
+
+# --- CLASES Y FLUJO DE OPTIMIZACIÓN STANDALONE ---
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import scipy.stats as st
+import importlib
+import random
+import scipy.optimize as op
+import os
+import datetime
+
+# importar nuestros archivos y recargarlos
+import market_data
+importlib.reload(market_data)
+import capm
+importlib.reload(capm)
+
+class output:
+    def __init__(self, returns):
+        self.returns = returns
+        self.mean_daily = np.mean(returns)
+        self.volatility_daily = np.std(returns)
+        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily != 0 else 0
+        self.var_95 = np.percentile(returns, 5)
+        self.skewness = st.skew(returns)
+        self.kurtosis = st.kurtosis(returns)
+        self.jb_stat, self.p_value = st.jarque_bera(returns)
+        self.is_normal = self.p_value > 0.05
+        self.decimals = 4
+
+    def plot_histogram(self, portfolio_name):
+        str_title = f'{portfolio_name} Portfolio Returns\n' + \
+                    'mean_daily=' + str(np.round(self.mean_daily, self.decimals)) + ' | ' + \
+                    'volatility_daily=' + str(np.round(self.volatility_daily, self.decimals)) + '\n' + \
+                    'sharpe_ratio=' + str(np.round(self.sharpe_ratio, self.decimals)) + ' | ' + \
+                    'var_95=' + str(np.round(self.var_95, self.decimals)) + '\n' + \
+                    'skewness=' + str(np.round(self.skewness, self.decimals)) + ' | ' + \
+                    'kurtosis=' + str(np.round(self.kurtosis, self.decimals)) + '\n' + \
+                    'JB stat=' + str(np.round(self.jb_stat, self.decimals)) + ' | ' + \
+                    'p-value=' + str(np.round(self.p_value, self.decimals)) + '\n' + \
+                    'is_normal=' + str(self.is_normal)
+        plt.figure()
+        plt.hist(self.returns, bins=100)
+        plt.title(str_title)
+        plt.xlabel('Return')
+        plt.ylabel('Frequency')
+        plt.show()
+
+class manager:
+    def __init__(self, rics, notional, directory):
+        self.rics = rics
+        self.notional = notional
+        self.directory = directory
+        self.data = self.load_data()
+
+    def load_data(self):
+        data = {}
+        for ric in self.rics:
+            file_path = os.path.join(self.directory, f'{ric}_intraday_{datetime.datetime.now().strftime("%Y%m%d")}.csv')
+            if os.path.exists(file_path):
+                data[ric] = pd.read_csv(file_path)
+            else:
+                print(f'Archivo no encontrado: {file_path}')
+        return data
+
+    def compute_covariance(self):
+        # Implementar la lógica para computar la matriz de varianza-covarianza
+        pass
+
+    def compute_portfolio(self, strategy, target_return=None):
+        # Implementar la lógica para computar el portafolio
+        # Aquí se devuelve un objeto de la clase output con datos de ejemplo
+        returns = np.random.normal(0, 0.01, 100)  # Datos de ejemplo, 1% de volatilidad diaria
+        return output(returns)
+
+# --- FLUJO DE USO ---
+notional = 15 # in mn USD
+universe = ["GGAL", "YPF", "PAMP", "BMA", "SUPV", "CEPU", "TXAR", "ALUA", "BYMA", "LOMA"]
+sample_size = min(5, len(universe))
+rics = random.sample(universe, sample_size)
+directory = "./data"  # Ajustar al path real de tus archivos
+
+print(rics)
+
+# inicializar la instancia de la clase
+port_mgr = manager(rics, notional, directory)
+
+# computar correlación y matriz de varianza-covarianza
+port_mgr.compute_covariance()
+
+# Mostrar optimizaciones avanzadas y estadísticas en Streamlit
+if 'streamlit' in globals():
+    mostrar_optimizaciones_avanzadas(port_mgr)
+else:
+    # Modo consola: mostrar estadísticas e histogramas para cada portafolio
+    port_min_variance_l1 = port_mgr.compute_portfolio('min-variance-l1')
+    port_min_variance_l2 = port_mgr.compute_portfolio('min-variance-l2')
+    port_long_only = port_mgr.compute_portfolio('long-only')
+    port_equi_weight = port_mgr.compute_portfolio('equi-weight')
+    port_markowitz = port_mgr.compute_portfolio('markowitz', target_return=None)
+
+    for port, name in [
+        (port_min_variance_l1, "Min Variance L1"),
+        (port_min_variance_l2, "Min Variance L2"),
+        (port_long_only, "Long Only"),
+        (port_equi_weight, "Equi Weight"),
+        (port_markowitz, "Markowitz"),
+    ]:
+        print(f"\n{name} Portfolio:")
+        print(f"Retorno diario promedio: {port.mean_daily*100:.2f}%")
+        print(f"Volatilidad diaria: {port.volatility_daily*100:.2f}%")
+        print(f"Sharpe Ratio: {port.sharpe_ratio:.2f}")
+        print(f"VaR 95%: {port.var_95*100:.2f}%")
+        print(f"Skewness: {port.skewness:.2f}")
+        print(f"Kurtosis: {port.kurtosis:.2f}")
+        print(f"Normalidad (Jarque-Bera p-value): {port.p_value:.4f}")
+        print(f"¿Distribución normal?: {'Sí' if port.is_normal else 'No'}")
+        port.plot_histogram(name)
