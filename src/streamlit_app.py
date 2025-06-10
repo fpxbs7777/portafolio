@@ -2056,3 +2056,6 @@ class distribucion:
         plt.hist(self.vector, bins=100)
         plt.title(self.str_titulo)
         plt.show()
+
+if __name__ == "__main__":
+    main()
