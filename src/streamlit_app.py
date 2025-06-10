@@ -129,16 +129,17 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
         respuesta = requests.get(url_portafolio, headers=encabezados)
-        st.info(f"🔍 Solicitando portafolio para cliente {id_cliente}")
-        st.info(f"📡 URL: {url_portafolio}")
-        st.info(f"📊 Status Code: {respuesta.status_code}")
+        # Eliminar mensajes informativos innecesarios
+        # st.info(f"🔍 Solicitando portafolio para cliente {id_cliente}")
+        # st.info(f"📡 URL: {url_portafolio}")
+        # st.info(f"📊 Status Code: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
             portafolio_data = respuesta.json()
-            st.success(f"✅ Portafolio obtenido exitosamente")
-            st.info(f"📋 Estructura de portafolio: {type(portafolio_data)}")
-            if isinstance(portafolio_data, dict):
-                st.info(f"🔑 Claves disponibles: {list(portafolio_data.keys())}")
+            # st.success(f"✅ Portafolio obtenido exitosamente")
+            # st.info(f"📋 Estructura de portafolio: {type(portafolio_data)}")
+            # if isinstance(portafolio_data, dict):
+            #     st.info(f"🔑 Claves disponibles: {list(portafolio_data.keys())}")
             return portafolio_data
         elif respuesta.status_code == 404:
             st.warning(f"⚠️ Cliente {id_cliente} no encontrado o sin portafolio")
@@ -774,10 +775,11 @@ def calcular_metricas_portafolio(activos_data, valor_total):
 
 def mostrar_resumen_portafolio(portafolio):
     """
-    Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas
+    Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas,
+    agrupando y explicando los valores para usuarios sin experiencia.
     """
     st.markdown("### 📈 Resumen del Portafolio")
-    
+
     activos = portafolio.get('activos', [])
     
     # Preparar datos para análisis con mejor extracción de valuación
@@ -905,203 +907,86 @@ def mostrar_resumen_portafolio(portafolio):
     
     if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
-        
-        # Calcular métricas comprehensivas del portafolio
         metricas = calcular_metricas_portafolio(datos_activos, valor_total)
-        
-        # === 1. INFORMACIÓN BÁSICA DEL PORTAFOLIO ===
+
+        # === 1. INFORMACIÓN GENERAL DEL PORTAFOLIO ===
         st.markdown("#### 📊 Información General")
+        st.write("""
+        **¿Qué significa cada valor?**
+        - **Total de Activos:** Cantidad de instrumentos diferentes que componen tu portafolio.
+        - **Símbolos Únicos:** Número de códigos únicos de instrumentos (por ejemplo, bonos o acciones).
+        - **Tipos de Activos:** Diversidad de clases de instrumentos (ej: acciones, bonos, fondos).
+        - **Valor Total del Portafolio:** Suma de los valores de todos tus activos.
+        """)
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total de Activos", len(datos_activos))
         col2.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         col3.metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        
-        # Mostrar el valor total con formato correcto y verificación
         valor_display = f"${valor_total:,.2f}"
-        if valor_total > 500000:  # Si parece demasiado alto
-            st.warning("⚠️ Verificar: el valor total parece alto")
         col4.metric("Valor Total del Portafolio", valor_display)
-        
-        # === 2. MÉTRICAS DE RIESGO ACTUALES ===
-        if metricas:
-            st.markdown("#### ⚠️ Análisis de Riesgo")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            col1.metric(
-                "Concentración del Portafolio", 
-                f"{metricas['concentracion']:.3f}",
-                help="Índice de Herfindahl: 0=perfectamente diversificado, 1=completamente concentrado"
-            )
-            col2.metric(
-                "VaR 95% (Valor en Riesgo)", 
-                f"${metricas['var_95']:,.0f}",
-                help="Valor mínimo del activo más pequeño en el 95% de los casos"
-            )
-            col3.metric(
-                "Volatilidad Estimada Anual", 
-                f"${metricas['riesgo_anual']:,.0f}",
-                help="Riesgo anual estimado basado en 20% de volatilidad"
-            )
-            
-            # Indicador visual de concentración
-            concentracion_status = "🟢 Diversificado" if metricas['concentracion'] < 0.25 else "🟡 Moderadamente Concentrado" if metricas['concentracion'] < 0.5 else "🔴 Altamente Concentrado"
-            col4.metric("Estado de Diversificación", concentracion_status)
-        
-        # === 3. PROYECCIONES DE RENDIMIENTO ===
-        if metricas:
-            st.markdown("#### 📈 Proyecciones de Rendimiento (Próximos 12 meses)")
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric(
-                "Retorno Esperado", 
-                f"${metricas['retorno_esperado_anual']:,.0f}",
-                delta=f"{(metricas['retorno_esperado_anual']/valor_total*100):.1f}%",
-                help="Retorno esperado promedio basado en 8% anual"
-            )
-            col2.metric(
-                "Escenario Optimista (95%)", 
-                f"${metricas['pl_percentil_95']:,.0f}",
-                delta=f"+{(metricas['pl_percentil_95']/valor_total*100):.1f}%",
-                help="Ganancia esperada en el mejor 5% de los casos"
-            )
-            col3.metric(
-                "Escenario Pesimista (5%)", 
-                f"${metricas['pl_percentil_5']:,.0f}",
-                delta=f"{(metricas['pl_percentil_5']/valor_total*100):.1f}%",
-                help="Pérdida máxima esperada en el peor 5% de los casos"
-            )
-        
+
+        # === 2. ANÁLISIS DE RIESGO ===
+        st.markdown("#### ⚠️ Análisis de Riesgo")
+        st.write("""
+        **¿Qué significa cada valor?**
+        - **Concentración del Portafolio:** Indica si tu dinero está repartido o concentrado en pocos activos (0 = diversificado, 1 = concentrado).
+        - **VaR 95% (Valor en Riesgo):** Pérdida máxima esperada en condiciones normales, con un 95% de confianza.
+        - **Volatilidad Estimada Anual:** Cuánto puede variar el valor de tu portafolio en un año.
+        - **Estado de Diversificación:** Indica visualmente si tu portafolio está bien diversificado.
+        """)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Concentración del Portafolio", f"{metricas['concentracion']:.3f}")
+        col2.metric("VaR 95% (Valor en Riesgo)", f"${metricas['var_95']:,.0f}")
+        col3.metric("Volatilidad Estimada Anual", f"${metricas['riesgo_anual']:,.0f}")
+        concentracion_status = "🟢 Diversificado" if metricas['concentracion'] < 0.25 else "🟡 Moderadamente Concentrado" if metricas['concentracion'] < 0.5 else "🔴 Altamente Concentrado"
+        col4.metric("Estado de Diversificación", concentracion_status)
+
+        # === 3. PROYECCIONES DE RENDIMIENTO (PRÓXIMOS 12 MESES) ===
+        st.markdown("#### 📈 Proyecciones de Rendimiento (Próximos 12 meses)")
+        st.write("""
+        **¿Qué significa cada valor?**
+        - **Retorno Esperado:** Ganancia promedio estimada para el próximo año.
+        - **Escenario Optimista (95%):** Ganancia esperada en el mejor 5% de los casos.
+        - **Escenario Pesimista (5%):** Pérdida máxima esperada en el peor 5% de los casos.
+        """)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}", delta=f"{(metricas['retorno_esperado_anual']/valor_total*100):.1f}%")
+        col2.metric("Escenario Optimista (95%)", f"${metricas['pl_percentil_95']:,.0f}", delta=f"+{(metricas['pl_percentil_95']/valor_total*100):.1f}%")
+        col3.metric("Escenario Pesimista (5%)", f"${metricas['pl_percentil_5']:,.0f}", delta=f"{(metricas['pl_percentil_5']/valor_total*100):.1f}%")
+
         # === 4. PROBABILIDADES DE ESCENARIOS ===
-        if metricas:
-            st.markdown("#### 🎯 Probabilidades de Escenarios")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            probs = metricas['probabilidades']
-            
-            col1.metric(
-                "Probabilidad de Ganancia", 
-                f"{probs['ganancia']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos positivos"
-            )
-            col2.metric(
-                "Probabilidad de Pérdida", 
-                f"{probs['perdida']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos negativos"
-            )
-            col3.metric(
-                "Prob. Ganancia > 10%", 
-                f"{probs['ganancia_mayor_10']*100:.1f}%",
-                help="Probabilidad de obtener más del 10% de ganancia"
-            )
-            col4.metric(
-                "Prob. Pérdida > 10%", 
-                f"{probs['perdida_mayor_10']*100:.1f}%",
-                help="Probabilidad de perder más del 10%"
-            )
-        
-        # === 5. DISTRIBUCIÓN DETALLADA DE ACTIVOS ===
-        if metricas:
-            st.markdown("#### 📊 Distribución Estadística de Valores por Activo")
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            quantiles = metricas['quantiles']
-            
-            col1.metric(
-                "Valor Mínimo (Q25)", 
-                f"${quantiles['q25']:,.0f}",
-                help="25% de los activos valen menos que este monto"
-            )
-            col2.metric(
-                "Valor Mediano (Q50)", 
-                f"${quantiles['q50']:,.0f}",
-                help="Valor medio de los activos del portafolio"
-            )
-            col3.metric(
-                "Tercer Cuartil (Q75)", 
-                f"${quantiles['q75']:,.0f}",
-                help="75% de los activos valen menos que este monto"
-            )
-            col4.metric(
-                "Percentil 90", 
-                f"${quantiles['q90']:,.0f}",
-                help="90% de los activos valen menos que este monto"
-            )
-            col5.metric(
-                "Valor Máximo (Q95)", 
-                f"${quantiles['q95']:,.0f}",
-                help="Solo el 5% de los activos supera este valor"
-            )
-        
-        # Información de debug mejorada
-        with st.expander("🔍 Información de Debug - Estructura del Portafolio"):
-            st.markdown("**Campos disponibles en los activos:**")
-            if activos:
-                campos_encontrados = set()
-                for activo in activos[:3]:
-                    campos_encontrados.update(activo.keys())
-                    if 'titulo' in activo and isinstance(activo['titulo'], dict):
-                        titulo_campos = [f"titulo.{k}" for k in activo['titulo'].keys()]
-                        campos_encontrados.update(titulo_campos)
-                
-                st.code(sorted(list(campos_encontrados)))
-                
-                st.markdown("**Muestra de datos de activo:**")
-                st.json(activos[0] if activos else {})
-        
-        # Gráficos de distribución
-        if valor_total > 0:
-            # Gráfico de distribución por tipo
-            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-                tipo_stats = df_activos.groupby('Tipo').agg({
-                    'Valuación': ['sum', 'count', 'mean']
-                }).round(2)
-                tipo_stats.columns = ['Valor_Total', 'Cantidad', 'Valor_Promedio']
-                tipo_stats = tipo_stats.reset_index()
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Pie chart por valor
-                    fig_pie = go.Figure(data=[go.Pie(
-                        labels=tipo_stats['Tipo'],
-                        values=tipo_stats['Valor_Total'],
-                        textinfo='label+percent+value',
-                        texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
-                    )])
-                    fig_pie.update_layout(title="Distribución por Valor", height=400)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                
-                with col2:
-                    # Bar chart por tipo
-                    fig_bar = go.Figure(data=[go.Bar(
-                        x=tipo_stats['Tipo'],
-                        y=tipo_stats['Valor_Total'],
-                        text=[f"${val:,.0f}" for val in tipo_stats['Valor_Total']],
-                        textposition='auto'
-                    )])
-                    fig_bar.update_layout(
-                        title="Valor por Tipo de Activo",
-                        xaxis_title="Tipo",
-                        yaxis_title="Valor ($)",
-                        height=400
-                    )
-                    st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Histograma de valores individuales
-            if len(datos_activos) > 1:
-                valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                if valores_activos:
-                    fig_hist = go.Figure(data=[go.Histogram(
-                        x=valores_activos,
-                        nbinsx=min(20, len(valores_activos))
-                    )])
-                    fig_hist.update_layout(
-                        title="Distribución de Valores por Activo",
-                        xaxis_title="Valor ($)",
-                        yaxis_title="Frecuencia",
-                        height=400
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
+        st.markdown("#### 🎯 Probabilidades de Escenarios")
+        st.write("""
+        **¿Qué significa cada valor?**
+        - **Probabilidad de Ganancia:** Chances de terminar el año con ganancias.
+        - **Probabilidad de Pérdida:** Chances de terminar el año con pérdidas.
+        - **Prob. Ganancia > 10%:** Probabilidad de ganar más del 10%.
+        - **Prob. Pérdida > 10%:** Probabilidad de perder más del 10%.
+        """)
+        probs = metricas['probabilidades']
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Probabilidad de Ganancia", f"{probs['ganancia']*100:.1f}%")
+        col2.metric("Probabilidad de Pérdida", f"{probs['perdida']*100:.1f}%")
+        col3.metric("Prob. Ganancia > 10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+        col4.metric("Prob. Pérdida > 10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+
+        # === 5. DISTRIBUCIÓN ESTADÍSTICA DE VALORES POR ACTIVO ===
+        st.markdown("#### 📊 Distribución Estadística de Valores por Activo")
+        st.write("""
+        **¿Qué significa cada valor?**
+        - **Valor Mínimo (Q25):** El 25% de los activos valen menos que este monto.
+        - **Valor Mediano (Q50):** La mitad de los activos valen menos y la otra mitad más.
+        - **Tercer Cuartil (Q75):** El 75% de los activos valen menos que este monto.
+        - **Percentil 90:** Solo el 10% de los activos supera este valor.
+        - **Valor Máximo (Q95):** Solo el 5% de los activos supera este valor.
+        """)
+        quantiles = metricas['quantiles']
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Valor Mínimo (Q25)", f"${quantiles['q25']:,.0f}")
+        col2.metric("Valor Mediano (Q50)", f"${quantiles['q50']:,.0f}")
+        col3.metric("Tercer Cuartil (Q75)", f"${quantiles['q75']:,.0f}")
+        col4.metric("Percentil 90", f"${quantiles['q90']:,.0f}")
+        col5.metric("Valor Máximo (Q95)", f"${quantiles['q95']:,.0f}")
         
         # Tabla de activos mejorada
         st.markdown("#### 📋 Detalle de Activos")
@@ -1866,6 +1751,3 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
-# Asegurar que main() se ejecute cuando se corre el script
-if __name__ == "__main__":
-    main()
