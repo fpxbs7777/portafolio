@@ -1667,9 +1667,6 @@ def main():
                         None
                     )
                     
-                   
-                   
-                   
                     if st.button("🔄 Actualizar lista de clientes"):
                         with st.spinner("Actualizando clientes..."):
                             nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
@@ -1679,9 +1676,7 @@ def main():
                 
                 else:
                     st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
-        else:
-            # Si no está corriendo bajo Streamlit, no hacer nada
-            pass
+        
 
 # ...existing code...
 if __name__ == "__main__":
