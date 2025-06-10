@@ -1675,8 +1675,16 @@ def main():
                 
                 else:
                     st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
-        # Llamar a la función principal de análisis si el usuario está autenticado y hay cliente seleccionado
-        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+
+        # Mostrar análisis solo si el usuario está autenticado y hay clientes cargados
+        if (
+            st.session_state.token_acceso
+            and st.session_state.clientes
+            and st.session_state.cliente_seleccionado
+        ):
             mostrar_analisis_portafolio()
+        elif st.session_state.token_acceso and st.session_state.clientes:
+            st.info("Seleccione un cliente en el menú lateral para continuar.")
+
 if __name__ == "__main__":
     main()
