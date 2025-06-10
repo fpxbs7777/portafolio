@@ -588,7 +588,8 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
     url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
+        'Authorization': f'Bearer {bearer_token}',
+        'Content-Type': 'application/json'
     }
     
     try:
@@ -1798,176 +1799,260 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - No considera correlaciones históricas
         """)
 
-# --- NUEVO BLOQUE: OPTIMIZACIONES AVANZADAS Y ESTADÍSTICAS ---
-def mostrar_optimizaciones_avanzadas(port_mgr):
-    """
-    Permite seleccionar y mostrar estadísticas e histogramas de diferentes optimizaciones de portafolio.
-    """
-    st.markdown("### ⚙️ Optimización Avanzada de Portafolio")
-    estrategias = [
-        ("min-variance-l1", "Min-Variance L1"),
-        ("min-variance-l2", "Min-Variance L2"),
-        ("long-only", "Long Only"),
-        ("equi-weight", "Equi Weight"),
-        ("markowitz", "Markowitz"),
-    ]
-    seleccionadas = st.multiselect(
-        "Seleccione las optimizaciones a mostrar:",
-        options=[e[0] for e in estrategias],
-        format_func=lambda x: dict(estrategias)[x],
-        default=[]
-    )
-    mostrar_hist = st.checkbox("Mostrar histogramas de retornos", value=False)
-    mostrar_stats = st.checkbox("Mostrar estadísticas detalladas", value=True)
-
-    resultados = {}
-    for clave, nombre in estrategias:
-        if clave in seleccionadas:
-            if clave == "markowitz":
-                port = port_mgr.compute_portfolio(clave, target_return=None)
-            else:
-                port = port_mgr.compute_portfolio(clave)
-            resultados[clave] = (nombre, port)
-
-    for clave in seleccionadas:
-        nombre, port = resultados[clave]
-        if port is not None:
-            st.subheader(f"Portafolio: {nombre}")
-            if mostrar_stats:
-                # Mostrar estadísticas en porcentaje donde corresponda
-                st.write("**Estadísticas:**")
-                st.write(f"- Retorno diario promedio: {port.mean_daily*100:.2f}%")
-                st.write(f"- Volatilidad diaria: {port.volatility_daily*100:.2f}%")
-                st.write(f"- Sharpe Ratio: {port.sharpe_ratio:.2f}")
-                st.write(f"- VaR 95%: {port.var_95*100:.2f}%")
-                st.write(f"- Skewness: {port.skewness:.2f}")
-                st.write(f"- Kurtosis: {port.kurtosis:.2f}")
-                st.write(f"- Normalidad (Jarque-Bera p-value): {port.p_value:.4f}")
-                st.write(f"- ¿Distribución normal?: {'Sí' if port.is_normal else 'No'}")
-            if mostrar_hist:
-                st.write("**Histograma de retornos:**")
-                fig, ax = plt.subplots()
-                ax.hist(port.returns, bins=50)
-                ax.set_title(f"Histograma de retornos - {nombre}")
-                ax.set_xlabel("Retorno")
-                ax.set_ylabel("Frecuencia")
-                st.pyplot(fig)
-
-# --- CLASES Y FLUJO DE OPTIMIZACIÓN STANDALONE ---
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import scipy.stats as st
-import importlib
-import random
-import scipy.optimize as op
+# === INTEGRACIÓN DE MARKET DATA ===
 import os
-import datetime
+import pandas as pd
+import numpy as np
+import scipy.stats as st
+import matplotlib.pyplot as plt
+import yfinance as yf
+import requests
 
-# importar nuestros archivos y recargarlos
-import market_data
-importlib.reload(market_data)
-import capm
-importlib.reload(capm)
+# Si tienes un archivo tokens.py con productor_token, importa aquí.
+try:
+    from tokens import productor_token
+    URL_BASE = "https://api.invertironline.com/api/v2"
+    TOKEN = productor_token
+except ImportError:
+    URL_BASE = ""
+    TOKEN = ""
 
-class output:
-    def __init__(self, returns):
-        self.returns = returns
-        self.mean_daily = np.mean(returns)
-        self.volatility_daily = np.std(returns)
-        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily != 0 else 0
-        self.var_95 = np.percentile(returns, 5)
-        self.skewness = st.skew(returns)
-        self.kurtosis = st.kurtosis(returns)
-        self.jb_stat, self.p_value = st.jarque_bera(returns)
-        self.is_normal = self.p_value > 0.05
-        self.decimals = 4
+def cargar_serie_tiempo(simbolo, directorio=None):
+    """
+    Carga la serie de tiempo de un activo desde la API de IOL o, en caso de error, desde Yahoo Finance.
+    """
+    if directorio is None:
+        mercado = "BCBA"
+        fecha_desde = "2010-01-01"
+        fecha_hasta = "2023-12-31"
+        try:
+            url = f"{URL_BASE}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+            encabezados = {"Authorization": f"Bearer {TOKEN}"}
+            respuesta = requests.get(url, headers=encabezados)
+            if respuesta.status_code == 200:
+                datos = respuesta.json()
+                if isinstance(datos, list) and len(datos) > 0:
+                    t = pd.DataFrame(datos)
+                    t['fecha'] = pd.to_datetime(t['fechaHora'], utc=True, errors='coerce').dt.normalize()
+                    t['cierre'] = t['ultimoPrecio']
+                    t = t[['fecha', 'cierre']].dropna()
+                    print(f"Datos obtenidos desde la API de IOL para {simbolo}.")
+                    return t
+                else:
+                    print(f"Respuesta vacía o inesperada para {simbolo} desde la API de IOL. Intentando con Yahoo Finance...")
+                    return obtener_datos_yfinance(simbolo)
+            else:
+                print(f"Error al obtener datos de IOL para {simbolo}: {respuesta.status_code}. Intentando con Yahoo Finance...")
+                return obtener_datos_yfinance(simbolo)
+        except Exception as e:
+            print(f"Error al obtener datos de IOL para {simbolo}: {e}. Intentando con Yahoo Finance...")
+            return obtener_datos_yfinance(simbolo)
+    else:
+        # Si se proporciona un directorio, se carga desde archivo CSV
+        path = os.path.join(directorio, f"{simbolo}.csv")
+        print(f"Cargando datos desde {path}")
+        try:
+            raw_data = pd.read_csv(path)
+        except Exception as e:
+            print(f"Error al cargar el archivo {path}: {e}")
+            return pd.DataFrame()
 
-    def plot_histogram(self, portfolio_name):
-        str_title = f'{portfolio_name} Portfolio Returns\n' + \
-                    'mean_daily=' + str(np.round(self.mean_daily, self.decimals)) + ' | ' + \
-                    'volatility_daily=' + str(np.round(self.volatility_daily, self.decimals)) + '\n' + \
-                    'sharpe_ratio=' + str(np.round(self.sharpe_ratio, self.decimals)) + ' | ' + \
-                    'var_95=' + str(np.round(self.var_95, self.decimals)) + '\n' + \
-                    'skewness=' + str(np.round(self.skewness, self.decimals)) + ' | ' + \
-                    'kurtosis=' + str(np.round(self.kurtosis, self.decimals)) + '\n' + \
-                    'JB stat=' + str(np.round(self.jb_stat, self.decimals)) + ' | ' + \
-                    'p-value=' + str(np.round(self.p_value, self.decimals)) + '\n' + \
-                    'is_normal=' + str(self.is_normal)
+        t = pd.DataFrame()
+        if 'datetime' in raw_data.columns:
+            t['fecha'] = pd.to_datetime(raw_data['datetime'], utc=True, errors='coerce').dt.normalize()
+            t['cierre'] = raw_data['Close']
+        elif 'fechaHora' in raw_data.columns:
+            t['fecha'] = pd.to_datetime(raw_data['fechaHora'], utc=True, errors='coerce').dt.normalize()
+            t['cierre'] = raw_data['ultimoPrecio']
+        elif 'Date' in raw_data.columns and 'Close' in raw_data.columns:
+            t['fecha'] = pd.to_datetime(raw_data['Date'], utc=True, errors='coerce').dt.normalize()
+            t['cierre'] = raw_data['Close']
+        else:
+            print(f"Formato de archivo desconocido para {simbolo}. Columnas disponibles: {raw_data.columns}")
+            return pd.DataFrame()
+
+        t = t.sort_values(by='fecha', ascending=True)
+        t['cierre_anterior'] = t['cierre'].shift(1)
+        t['retorno'] = t['cierre'] / t['cierre_anterior'] - 1
+        t = t.dropna(subset=['fecha', 'cierre', 'cierre_anterior', 'retorno'])
+        t = t.reset_index(drop=True)
+        return t
+
+def obtener_datos_yfinance(simbolo):
+    """
+    Obtiene datos desde Yahoo Finance. Ajusta el símbolo si es necesario.
+    """
+    simbolo_yf = simbolo
+    try:
+        df = yf.download(simbolo_yf, start="2010-01-01", end="2023-12-31", progress=False)
+        if df.empty:
+            print(f"Yahoo Finance no devolvió datos para {simbolo_yf}.")
+            return pd.DataFrame()
+        df = df.reset_index()
+        t = pd.DataFrame()
+        t['fecha'] = pd.to_datetime(df['Date'], utc=True, errors='coerce').dt.normalize()
+        t['cierre'] = df['Close']
+        t = t[['fecha', 'cierre']].dropna()
+        print(f"Datos obtenidos desde Yahoo Finance para {simbolo_yf}.")
+        return t
+    except Exception as e:
+        print(f"Error al descargar datos para {simbolo_yf} desde Yahoo Finance: {e}")
+        return pd.DataFrame()
+
+def obtener_byma():
+    """
+    Intenta obtener el índice BYMA desde la API de IOL. Si no está disponible, lo obtiene desde Yahoo Finance.
+    """
+    mercado = "BCBA"
+    simbolo_byma = "BYMA"
+    fecha_desde = "2010-01-01"
+    fecha_hasta = "2023-12-31"
+
+    try:
+        url = f"{URL_BASE}/{mercado}/Titulos/{simbolo_byma}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+        encabezados = {"Authorization": f"Bearer {TOKEN}"}
+        respuesta = requests.get(url, headers=encabezados)
+        if respuesta.status_code == 200:
+            datos = respuesta.json()
+            t = pd.DataFrame(datos)
+            t['fecha'] = pd.to_datetime(t['fecha'], utc=True, errors='coerce').dt.normalize()
+            t['cierre'] = t['ultimoPrecio']
+            print("Índice BYMA obtenido desde la API de IOL.")
+            return t
+        else:
+            print(f"Índice BYMA no disponible en la API de IOL: {respuesta.status_code}. Intentando con Yahoo Finance...")
+            return obtener_datos_yfinance("^BYMA")
+    except Exception as e:
+        print(f"Error al obtener el índice BYMA desde la API de IOL: {e}. Intentando con Yahoo Finance...")
+        return obtener_datos_yfinance("^BYMA")
+
+def obtener_serie_historica(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene la serie histórica de un título desde la API de IOL.
+    Si no está disponible, intenta obtener los datos desde Yahoo Finance.
+    """
+    url = f"{URL_BASE}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    encabezados = {"Authorization": f"Bearer {TOKEN}"}
+    try:
+        respuesta = requests.get(url, headers=encabezados)
+        if respuesta.status_code == 200:
+            datos = respuesta.json()
+            if isinstance(datos, list) and len(datos) > 0:
+                t = pd.DataFrame(datos)
+                t['fecha'] = pd.to_datetime(t['fechaHora'], utc=True, errors='coerce').dt.normalize()
+                t['cierre'] = t['ultimoPrecio']
+                t = t[['fecha', 'cierre']].dropna()
+                print(f"Datos históricos obtenidos desde la API de IOL para {simbolo}.")
+                return t
+            else:
+                print(f"Respuesta vacía o inesperada para {simbolo} desde la API de IOL. Intentando con Yahoo Finance...")
+                return obtener_datos_yfinance(simbolo)
+        else:
+            print(f"Error al obtener datos históricos de IOL para {simbolo}: {respuesta.status_code}. Intentando con Yahoo Finance...")
+            return obtener_datos_yfinance(simbolo)
+    except Exception as e:
+        print(f"Error al obtener datos históricos de IOL para {simbolo}: {e}. Intentando con Yahoo Finance...")
+        return obtener_datos_yfinance(simbolo)
+
+def sincronizar_series_tiempo(referencia, activo, directorio=None):
+    """
+    Sincroniza las series de tiempo de dos activos, asegurando que tengan las mismas fechas.
+    """
+    serie_tiempo_x = cargar_serie_tiempo(referencia, directorio)
+    serie_tiempo_y = cargar_serie_tiempo(activo, directorio)
+
+    if serie_tiempo_x.empty or serie_tiempo_y.empty:
+        print(f"Una de las series de tiempo está vacía: {referencia} o {activo}")
+        return pd.DataFrame()
+
+    fechas_comunes = pd.to_datetime(serie_tiempo_x['fecha']).isin(pd.to_datetime(serie_tiempo_y['fecha']))
+    serie_tiempo_x = serie_tiempo_x[fechas_comunes].sort_values(by='fecha').reset_index(drop=True)
+    serie_tiempo_y = serie_tiempo_y[serie_tiempo_y['fecha'].isin(serie_tiempo_x['fecha'])].sort_values(by='fecha').reset_index(drop=True)
+
+    if serie_tiempo_x.empty or serie_tiempo_y.empty:
+        print(f"No hay fechas comunes entre {referencia} y {activo}.")
+        return pd.DataFrame()
+
+    serie_tiempo = pd.DataFrame()
+    serie_tiempo['fecha'] = serie_tiempo_x['fecha']
+    serie_tiempo['cierre_x'] = serie_tiempo_x['cierre']
+    serie_tiempo['cierre_y'] = serie_tiempo_y['cierre']
+    serie_tiempo['retorno_x'] = serie_tiempo_x['cierre'].pct_change()
+    serie_tiempo['retorno_y'] = serie_tiempo_y['cierre'].pct_change()
+
+    return serie_tiempo
+
+def sincronizar_retornos(simbolos, directorio=None):
+    dic_series_tiempo = {}
+    for simbolo in simbolos:
+        t = cargar_serie_tiempo(simbolo, directorio)
+        dic_series_tiempo[simbolo] = t
+
+    fechas_comunes = set(dic_series_tiempo[simbolos[0]]['fecha'])
+    for simbolo in simbolos[1:]:
+        fechas_comunes = fechas_comunes.intersection(set(dic_series_tiempo[simbolo]['fecha']))
+    fechas_comunes = sorted(fechas_comunes)
+
+    df = pd.DataFrame({'fecha': fechas_comunes})
+    for simbolo in simbolos:
+        t = dic_series_tiempo[simbolo]
+        t = t[t['fecha'].isin(fechas_comunes)].sort_values(by='fecha').reset_index(drop=True)
+        df = df.merge(t[['fecha', 'retorno']], on='fecha', how='left')
+        df.rename(columns={'retorno': simbolo}, inplace=True)
+    return df
+
+class distribucion:
+    def __init__(self, simbolo, directorio=None, decimales=5):
+        self.simbolo = simbolo
+        self.directorio = directorio
+        self.decimales = decimales
+        self.str_titulo = None
+        self.serie_tiempo = None
+        self.vector = None
+        self.media_anual = None
+        self.volatilidad_anual = None
+        self.ratio_sharpe = None
+        self.var_95 = None
+        self.asimetria = None
+        self.curtosis = None
+        self.jb_stat = None
+        self.p_valor = None
+        self.es_normal = None
+
+    def cargar_serie_tiempo(self):
+        self.serie_tiempo = cargar_serie_tiempo(self.simbolo, self.directorio)
+        self.vector = self.serie_tiempo['retorno'].values
+        self.size = len(self.vector)
+        self.str_titulo = self.simbolo + " | datos reales"
+
+    def graficar_serie_tiempo(self):
         plt.figure()
-        plt.hist(self.returns, bins=100)
-        plt.title(str_title)
-        plt.xlabel('Return')
-        plt.ylabel('Frequency')
+        self.serie_tiempo.plot(kind='line', x='fecha', y='cierre', grid=True, color='blue',
+                            title='Serie de precios de cierre para ' + self.simbolo)
         plt.show()
 
-class manager:
-    def __init__(self, rics, notional, directory):
-        self.rics = rics
-        self.notional = notional
-        self.directory = directory
-        self.data = self.load_data()
+    def calcular_estadisticas(self, factor=252):
+        self.media_anual = st.tmean(self.vector) * factor
+        self.volatilidad_anual = st.tstd(self.vector) * np.sqrt(factor)
+        self.ratio_sharpe = self.media_anual / self.volatilidad_anual if self.volatilidad_anual > 0 else 0.0
+        self.var_95 = np.percentile(self.vector, 5)
+        self.asimetria = st.skew(self.vector)
+        self.curtosis = st.kurtosis(self.vector)
+        self.jb_stat = self.size / 6 * (self.asimetria**2 + (self.curtosis**2) / 4)
+        self.p_valor = 1 - st.chi2.cdf(self.jb_stat, df=2)
+        self.es_normal = (self.p_valor > 0.05)
 
-    def load_data(self):
-        data = {}
-        for ric in self.rics:
-            file_path = os.path.join(self.directory, f'{ric}_intraday_{datetime.datetime.now().strftime("%Y%m%d")}.csv')
-            if os.path.exists(file_path):
-                data[ric] = pd.read_csv(file_path)
-            else:
-                print(f'Archivo no encontrado: {file_path}')
-        return data
-
-    def compute_covariance(self):
-        # Implementar la lógica para computar la matriz de varianza-covarianza
-        pass
-
-    def compute_portfolio(self, strategy, target_return=None):
-        # Implementar la lógica para computar el portafolio
-        # Aquí se devuelve un objeto de la clase output con datos de ejemplo
-        returns = np.random.normal(0, 0.01, 100)  # Datos de ejemplo, 1% de volatilidad diaria
-        return output(returns)
-
-# --- FLUJO DE USO ---
-notional = 15 # in mn USD
-universe = ["GGAL", "YPF", "PAMP", "BMA", "SUPV", "CEPU", "TXAR", "ALUA", "BYMA", "LOMA"]
-sample_size = min(5, len(universe))
-rics = random.sample(universe, sample_size)
-directory = "./data"  # Ajustar al path real de tus archivos
-
-print(rics)
-
-# inicializar la instancia de la clase
-port_mgr = manager(rics, notional, directory)
-
-# computar correlación y matriz de varianza-covarianza
-port_mgr.compute_covariance()
-
-# Mostrar optimizaciones avanzadas y estadísticas en Streamlit
-if 'streamlit' in globals():
-    mostrar_optimizaciones_avanzadas(port_mgr)
-else:
-    # Modo consola: mostrar estadísticas e histogramas para cada portafolio
-    port_min_variance_l1 = port_mgr.compute_portfolio('min-variance-l1')
-    port_min_variance_l2 = port_mgr.compute_portfolio('min-variance-l2')
-    port_long_only = port_mgr.compute_portfolio('long-only')
-    port_equi_weight = port_mgr.compute_portfolio('equi-weight')
-    port_markowitz = port_mgr.compute_portfolio('markowitz', target_return=None)
-
-    for port, name in [
-        (port_min_variance_l1, "Min Variance L1"),
-        (port_min_variance_l2, "Min Variance L2"),
-        (port_long_only, "Long Only"),
-        (port_equi_weight, "Equi Weight"),
-        (port_markowitz, "Markowitz"),
-    ]:
-        print(f"\n{name} Portfolio:")
-        print(f"Retorno diario promedio: {port.mean_daily*100:.2f}%")
-        print(f"Volatilidad diaria: {port.volatility_daily*100:.2f}%")
-        print(f"Sharpe Ratio: {port.sharpe_ratio:.2f}")
-        print(f"VaR 95%: {port.var_95*100:.2f}%")
-        print(f"Skewness: {port.skewness:.2f}")
-        print(f"Kurtosis: {port.kurtosis:.2f}")
-        print(f"Normalidad (Jarque-Bera p-value): {port.p_value:.4f}")
-        print(f"¿Distribución normal?: {'Sí' if port.is_normal else 'No'}")
-        port.plot_histogram(name)
+    def graficar_histograma(self):
+        self.str_titulo += '\n' + 'media_anual=' + str(np.round(self.media_anual, self.decimales)) \
+                          + ' | ' + 'volatilidad_anual=' + str(np.round(self.volatilidad_anual, self.decimales)) \
+                          + '\n' + 'ratio_sharpe=' + str(np.round(self.ratio_sharpe, self.decimales)) \
+                          + ' | ' + 'var_95=' + str(np.round(self.var_95, self.decimales)) \
+                          + '\n' + 'asimetria=' + str(np.round(self.asimetria, self.decimales)) \
+                          + ' | ' + 'curtosis=' + str(np.round(self.curtosis, self.decimales)) \
+                          + '\n' + 'JB stat=' + str(np.round(self.jb_stat, self.decimales)) \
+                          + ' | ' + 'p-valor=' + str(np.round(self.p_valor, self.decimales)) \
+                          + '\n' + 'es_normal=' + str(self.es_normal)
+        plt.figure()
+        plt.hist(self.vector, bins=100)
+        plt.title(self.str_titulo)
+        plt.show()
