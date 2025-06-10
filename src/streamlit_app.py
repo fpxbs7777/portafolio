@@ -1570,492 +1570,119 @@ def main():
     """
     Función principal de la aplicación Streamlit
     """
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    # Asegura que la función main solo se ejecute en el hilo principal de Streamlit
+    import sys
+    if hasattr(st, "_is_running_with_streamlit") or sys.argv[0].endswith("streamlit"):
+        st.title("📊 IOL Portfolio Analyzer")
+        st.markdown("### Analizador Avanzado de Portafolios IOL")
     
-    # Inicializar session state
-    if 'token_acceso' not in st.session_state:
-        st.session_state.token_acceso = None
-    if 'refresh_token' not in st.session_state:
-        st.session_state.refresh_token = None
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = []
-    if 'cliente_seleccionado' not in st.session_state:
-        st.session_state.cliente_seleccionado = None
-    # Add missing date parameters
-    if 'fecha_desde' not in st.session_state:
-        st.session_state.fecha_desde = date.today() - timedelta(days=365)
-    if 'fecha_hasta' not in st.session_state:
-        st.session_state.fecha_hasta = date.today()
-    
-    # Sidebar para autenticación y configuración
-    with st.sidebar:
-        st.header("🔐 Autenticación IOL")
+        # Inicializar session state
+        if 'token_acceso' not in st.session_state:
+            st.session_state.token_acceso = None
+        if 'refresh_token' not in st.session_state:
+            st.session_state.refresh_token = None
+        if 'clientes' not in st.session_state:
+            st.session_state.clientes = []
+        if 'cliente_seleccionado' not in st.session_state:
+            st.session_state.cliente_seleccionado = None
+        # Add missing date parameters
+        if 'fecha_desde' not in st.session_state:
+            st.session_state.fecha_desde = date.today() - timedelta(days=365)
+        if 'fecha_hasta' not in st.session_state:
+            st.session_state.fecha_hasta = date.today()
         
-        if st.session_state.token_acceso is None:
-            # Formulario de login
-            with st.form("login_form"):
-                st.markdown("#### Ingrese sus credenciales de IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-                
-                if st.form_submit_button("🚀 Conectar"):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando con IOL..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
-        else:
-            # Usuario conectado
-            st.success("✅ Conectado a IOL")
+        # Sidebar para autenticación y configuración
+        with st.sidebar:
+            st.header("🔐 Autenticación IOL")
             
-            # Configuración de fechas
-            st.markdown("#### 📅 Configuración de Fechas")
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_desde = st.date_input(
-                    "Fecha desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
-                )
-            with col2:
-                fecha_hasta = st.date_input(
-                    "Fecha hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
-            
-            st.session_state.fecha_desde = fecha_desde
-            st.session_state.fecha_hasta = fecha_hasta
-            
-            # Obtener lista de clientes
-            if not st.session_state.clientes:
-                with st.spinner("Cargando clientes..."):
-                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                    st.session_state.clientes = clientes
-            
-            clientes = st.session_state.clientes
-            
-            if clientes:
-                st.info(f"👥 {len(clientes)} clientes disponibles")
-                
-                # Seleccionar cliente
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
-                )
-                
-                # Guardar cliente seleccionado en session state
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
-                
-               
-               
-               
-                if st.button("🔄 Actualizar lista de clientes"):
-                    with st.spinner("Actualizando clientes..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista de clientes actualizada")
-                        st.rerun()
-            
-            else:
-                st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
-    
-    # Contenido principal con manejo de errores mejorado
-    try:
-        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
-            mostrar_analisis_portafolio()
-        elif st.session_state.token_acceso:
-            st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
-        else:
-            st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
-    except Exception as e:
-        st.error(f"❌ Error en la aplicación: {str(e)}")
-        st.error("🔄 Por favor, recargue la página e intente nuevamente")
-
-def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
-    """
-    Muestra la optimización del portafolio usando datos históricos
-    """
-    st.markdown("### 🎯 Optimización de Portafolio")
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("No hay activos en el portafolio para optimizar")
-        return
-    
-    # Extraer símbolos del portafolio
-    simbolos = []
-    for activo in activos:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
-            simbolos.append(simbolo)
-    
-    if len(simbolos) < 2:
-        st.warning("Se necesitan al menos 2 activos para optimización")
-        return
-    
-    st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
-    
-    # Configuración de optimización
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        estrategia = st.selectbox(
-            "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight'],
-            format_func=lambda x: 'Optimización de Markowitz' if x == 'markowitz' else 'Pesos Iguales'
-        )
-    
-    with col2:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
-    
-    if ejecutar_optimizacion:
-        with st.spinner("Ejecutando optimización..."):
-            try:
-                # Crear manager de portafolio
-                manager = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
-                
-                # Cargar datos
-                if manager.load_data():
-                    # Computar optimización
-                    portfolio_result = manager.compute_portfolio(strategy=estrategia)
+            if st.session_state.token_acceso is None:
+                # Formulario de login
+                with st.form("login_form"):
+                    st.markdown("#### Ingrese sus credenciales de IOL")
+                    usuario = st.text_input("Usuario", placeholder="su_usuario")
+                    contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
                     
-                    if portfolio_result:
-                        st.success("✅ Optimización completada")
-                        
-                        # Mostrar resultados
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            weights_df = pd.DataFrame({
-                                'Activo': portfolio_result.asset_names,
-                                'Peso (%)': [w * 100 for w in portfolio_result.weights]
-                            })
-                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                            st.dataframe(weights_df, use_container_width=True)
-                        
-                        with col2:
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            metricas = portfolio_result.get_metrics_dict()
-                            
-                            st.metric("Retorno Diario Promedio", f"{metricas['Mean Daily']:.4f}")
-                            st.metric("Volatilidad Diaria", f"{metricas['Volatility Daily']:.4f}")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                        
-                        # Gráfico de distribución de retornos
-                        if portfolio_result.portfolio_returns is not None:
-                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                            fig = portfolio_result.plot_histogram_streamlit()
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Gráfico de pesos
-                        st.markdown("#### 🥧 Distribución de Pesos")
-                        fig_pie = go.Figure(data=[go.Pie(
-                            labels=portfolio_result.asset_names,
-                            values=portfolio_result.weights,
-                            textinfo='label+percent',
-                        )])
-                        fig_pie.update_layout(title="Distribución Optimizada de Activos")
-                        st.plotly_chart(fig_pie, use_container_width=True)
-                        
-                    else:
-                        st.error("❌ Error en la optimización")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
+                    if st.form_submit_button("🚀 Conectar"):
+                        if usuario and contraseña:
+                            with st.spinner("Conectando con IOL..."):
+                                token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                                
+                                if token_acceso:
+                                    st.session_state.token_acceso = token_acceso
+                                    st.session_state.refresh_token = refresh_token
+                                    st.success("✅ Conexión exitosa!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Error en la autenticación")
+                        else:
+                            st.warning("⚠️ Complete todos los campos")
+            else:
+                # Usuario conectado
+                st.success("✅ Conectado a IOL")
+                
+                # Configuración de fechas
+                st.markdown("#### 📅 Configuración de Fechas")
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha_desde = st.date_input(
+                        "Fecha desde:",
+                        value=st.session_state.fecha_desde,
+                        max_value=date.today()
+                    )
+                with col2:
+                    fecha_hasta = st.date_input(
+                        "Fecha hasta:",
+                        value=st.session_state.fecha_hasta,
+                        max_value=date.today()
+                    )
+                
+                st.session_state.fecha_desde = fecha_desde
+                st.session_state.fecha_hasta = fecha_hasta
+                
+                # Obtener lista de clientes
+                if not st.session_state.clientes:
+                    with st.spinner("Cargando clientes..."):
+                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        st.session_state.clientes = clientes
+                
+                clientes = st.session_state.clientes
+                
+                if clientes:
+                    st.info(f"👥 {len(clientes)} clientes disponibles")
                     
-            except Exception as e:
-                st.error(f"❌ Error durante la optimización: {str(e)}")
-    
-    # Información adicional
-    with st.expander("ℹ️ Información sobre las Estrategias"):
-        st.markdown("""
-        **Optimización de Markowitz:**
-        - Maximiza el ratio de Sharpe (retorno/riesgo)
-        - Considera la correlación entre activos
-        - Busca la frontera eficiente
-        
-        **Pesos Iguales:**
-        - Distribución uniforme entre todos los activos
-        - Estrategia simple de diversificación
-        - No considera correlaciones históricas
-        """)
-
-# === INTEGRACIÓN DE MARKET DATA ===
-import os
-import pandas as pd
-import numpy as np
-import scipy.stats as st
-import matplotlib.pyplot as plt
-import yfinance as yf
-import requests
-
-# Si tienes un archivo tokens.py con productor_token, importa aquí.
-try:
-    from tokens import productor_token
-    URL_BASE = "https://api.invertironline.com/api/v2"
-    TOKEN = productor_token
-except ImportError:
-    URL_BASE = ""
-    TOKEN = ""
-
-def cargar_serie_tiempo(simbolo, directorio=None):
-    """
-    Carga la serie de tiempo de un activo desde la API de IOL o, en caso de error, desde Yahoo Finance.
-    """
-    if directorio is None:
-        mercado = "BCBA"
-        fecha_desde = "2010-01-01"
-        fecha_hasta = "2023-12-31"
-        try:
-            url = f"{URL_BASE}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
-            encabezados = {"Authorization": f"Bearer {TOKEN}"}
-            respuesta = requests.get(url, headers=encabezados)
-            if respuesta.status_code == 200:
-                datos = respuesta.json()
-                if isinstance(datos, list) and len(datos) > 0:
-                    t = pd.DataFrame(datos)
-                    t['fecha'] = pd.to_datetime(t['fechaHora'], utc=True, errors='coerce').dt.normalize()
-                    t['cierre'] = t['ultimoPrecio']
-                    t = t[['fecha', 'cierre']].dropna()
-                    print(f"Datos obtenidos desde la API de IOL para {simbolo}.")
-                    return t
+                    # Seleccionar cliente
+                    cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                    cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                    
+                    cliente_seleccionado = st.selectbox(
+                        "Seleccione un cliente:",
+                        options=cliente_ids,
+                        format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
+                   
+                    )
+                    
+                    # Guardar cliente seleccionado en session state
+                    st.session_state.cliente_seleccionado = next(
+                        (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                        None
+                    )
+                    
+                   
+                   
+                   
+                    if st.button("🔄 Actualizar lista de clientes"):
+                        with st.spinner("Actualizando clientes..."):
+                            nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                            st.session_state.clientes = nuevos_clientes
+                            st.success("✅ Lista de clientes actualizada")
+                            st.rerun()
+                
                 else:
-                    print(f"Respuesta vacía o inesperada para {simbolo} desde la API de IOL. Intentando con Yahoo Finance...")
-                    return obtener_datos_yfinance(simbolo)
-            else:
-                print(f"Error al obtener datos de IOL para {simbolo}: {respuesta.status_code}. Intentando con Yahoo Finance...")
-                return obtener_datos_yfinance(simbolo)
-        except Exception as e:
-            print(f"Error al obtener datos de IOL para {simbolo}: {e}. Intentando con Yahoo Finance...")
-            return obtener_datos_yfinance(simbolo)
-    else:
-        # Si se proporciona un directorio, se carga desde archivo CSV
-        path = os.path.join(directorio, f"{simbolo}.csv")
-        print(f"Cargando datos desde {path}")
-        try:
-            raw_data = pd.read_csv(path)
-        except Exception as e:
-            print(f"Error al cargar el archivo {path}: {e}")
-            return pd.DataFrame()
-
-        t = pd.DataFrame()
-        if 'datetime' in raw_data.columns:
-            t['fecha'] = pd.to_datetime(raw_data['datetime'], utc=True, errors='coerce').dt.normalize()
-            t['cierre'] = raw_data['Close']
-        elif 'fechaHora' in raw_data.columns:
-            t['fecha'] = pd.to_datetime(raw_data['fechaHora'], utc=True, errors='coerce').dt.normalize()
-            t['cierre'] = raw_data['ultimoPrecio']
-        elif 'Date' in raw_data.columns and 'Close' in raw_data.columns:
-            t['fecha'] = pd.to_datetime(raw_data['Date'], utc=True, errors='coerce').dt.normalize()
-            t['cierre'] = raw_data['Close']
+                    st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
         else:
-            print(f"Formato de archivo desconocido para {simbolo}. Columnas disponibles: {raw_data.columns}")
-            return pd.DataFrame()
+            # Si no está corriendo bajo Streamlit, no hacer nada
+            pass
 
-        t = t.sort_values(by='fecha', ascending=True)
-        t['cierre_anterior'] = t['cierre'].shift(1)
-        t['retorno'] = t['cierre'] / t['cierre_anterior'] - 1
-        t = t.dropna(subset=['fecha', 'cierre', 'cierre_anterior', 'retorno'])
-        t = t.reset_index(drop=True)
-        return t
-
-def obtener_datos_yfinance(simbolo):
-    """
-    Obtiene datos desde Yahoo Finance. Ajusta el símbolo si es necesario.
-    """
-    simbolo_yf = simbolo
-    try:
-        df = yf.download(simbolo_yf, start="2010-01-01", end="2023-12-31", progress=False)
-        if df.empty:
-            print(f"Yahoo Finance no devolvió datos para {simbolo_yf}.")
-            return pd.DataFrame()
-        df = df.reset_index()
-        t = pd.DataFrame()
-        t['fecha'] = pd.to_datetime(df['Date'], utc=True, errors='coerce').dt.normalize()
-        t['cierre'] = df['Close']
-        t = t[['fecha', 'cierre']].dropna()
-        print(f"Datos obtenidos desde Yahoo Finance para {simbolo_yf}.")
-        return t
-    except Exception as e:
-        print(f"Error al descargar datos para {simbolo_yf} desde Yahoo Finance: {e}")
-        return pd.DataFrame()
-
-def obtener_byma():
-    """
-    Intenta obtener el índice BYMA desde la API de IOL. Si no está disponible, lo obtiene desde Yahoo Finance.
-    """
-    mercado = "BCBA"
-    simbolo_byma = "BYMA"
-    fecha_desde = "2010-01-01"
-    fecha_hasta = "2023-12-31"
-
-    try:
-        url = f"{URL_BASE}/{mercado}/Titulos/{simbolo_byma}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
-        encabezados = {"Authorization": f"Bearer {TOKEN}"}
-        respuesta = requests.get(url, headers=encabezados)
-        if respuesta.status_code == 200:
-            datos = respuesta.json()
-            t = pd.DataFrame(datos)
-            t['fecha'] = pd.to_datetime(t['fecha'], utc=True, errors='coerce').dt.normalize()
-            t['cierre'] = t['ultimoPrecio']
-            print("Índice BYMA obtenido desde la API de IOL.")
-            return t
-        else:
-            print(f"Índice BYMA no disponible en la API de IOL: {respuesta.status_code}. Intentando con Yahoo Finance...")
-            return obtener_datos_yfinance("^BYMA")
-    except Exception as e:
-        print(f"Error al obtener el índice BYMA desde la API de IOL: {e}. Intentando con Yahoo Finance...")
-        return obtener_datos_yfinance("^BYMA")
-
-def obtener_serie_historica(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
-    """
-    Obtiene la serie histórica de un título desde la API de IOL.
-    Si no está disponible, intenta obtener los datos desde Yahoo Finance.
-    """
-    url = f"{URL_BASE}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    encabezados = {"Authorization": f"Bearer {TOKEN}"}
-    try:
-        respuesta = requests.get(url, headers=encabezados)
-        if respuesta.status_code == 200:
-            datos = respuesta.json()
-            if isinstance(datos, list) and len(datos) > 0:
-                t = pd.DataFrame(datos)
-                t['fecha'] = pd.to_datetime(t['fechaHora'], utc=True, errors='coerce').dt.normalize()
-                t['cierre'] = t['ultimoPrecio']
-                t = t[['fecha', 'cierre']].dropna()
-                print(f"Datos históricos obtenidos desde la API de IOL para {simbolo}.")
-                return t
-            else:
-                print(f"Respuesta vacía o inesperada para {simbolo} desde la API de IOL. Intentando con Yahoo Finance...")
-                return obtener_datos_yfinance(simbolo)
-        else:
-            print(f"Error al obtener datos históricos de IOL para {simbolo}: {respuesta.status_code}. Intentando con Yahoo Finance...")
-            return obtener_datos_yfinance(simbolo)
-    except Exception as e:
-        print(f"Error al obtener datos históricos de IOL para {simbolo}: {e}. Intentando con Yahoo Finance...")
-        return obtener_datos_yfinance(simbolo)
-
-def sincronizar_series_tiempo(referencia, activo, directorio=None):
-    """
-    Sincroniza las series de tiempo de dos activos, asegurando que tengan las mismas fechas.
-    """
-    serie_tiempo_x = cargar_serie_tiempo(referencia, directorio)
-    serie_tiempo_y = cargar_serie_tiempo(activo, directorio)
-
-    if serie_tiempo_x.empty or serie_tiempo_y.empty:
-        print(f"Una de las series de tiempo está vacía: {referencia} o {activo}")
-        return pd.DataFrame()
-
-    fechas_comunes = pd.to_datetime(serie_tiempo_x['fecha']).isin(pd.to_datetime(serie_tiempo_y['fecha']))
-    serie_tiempo_x = serie_tiempo_x[fechas_comunes].sort_values(by='fecha').reset_index(drop=True)
-    serie_tiempo_y = serie_tiempo_y[serie_tiempo_y['fecha'].isin(serie_tiempo_x['fecha'])].sort_values(by='fecha').reset_index(drop=True)
-
-    if serie_tiempo_x.empty or serie_tiempo_y.empty:
-        print(f"No hay fechas comunes entre {referencia} y {activo}.")
-        return pd.DataFrame()
-
-    serie_tiempo = pd.DataFrame()
-    serie_tiempo['fecha'] = serie_tiempo_x['fecha']
-    serie_tiempo['cierre_x'] = serie_tiempo_x['cierre']
-    serie_tiempo['cierre_y'] = serie_tiempo_y['cierre']
-    serie_tiempo['retorno_x'] = serie_tiempo_x['cierre'].pct_change()
-    serie_tiempo['retorno_y'] = serie_tiempo_y['cierre'].pct_change()
-
-    return serie_tiempo
-
-def sincronizar_retornos(simbolos, directorio=None):
-    dic_series_tiempo = {}
-    for simbolo in simbolos:
-        t = cargar_serie_tiempo(simbolo, directorio)
-        dic_series_tiempo[simbolo] = t
-
-    fechas_comunes = set(dic_series_tiempo[simbolos[0]]['fecha'])
-    for simbolo in simbolos[1:]:
-        fechas_comunes = fechas_comunes.intersection(set(dic_series_tiempo[simbolo]['fecha']))
-    fechas_comunes = sorted(fechas_comunes)
-
-    df = pd.DataFrame({'fecha': fechas_comunes})
-    for simbolo in simbolos:
-        t = dic_series_tiempo[simbolo]
-        t = t[t['fecha'].isin(fechas_comunes)].sort_values(by='fecha').reset_index(drop=True)
-        df = df.merge(t[['fecha', 'retorno']], on='fecha', how='left')
-        df.rename(columns={'retorno': simbolo}, inplace=True)
-    return df
-
-class distribucion:
-    def __init__(self, simbolo, directorio=None, decimales=5):
-        self.simbolo = simbolo
-        self.directorio = directorio
-        self.decimales = decimales
-        self.str_titulo = None
-        self.serie_tiempo = None
-        self.vector = None
-        self.media_anual = None
-        self.volatilidad_anual = None
-        self.ratio_sharpe = None
-        self.var_95 = None
-        self.asimetria = None
-        self.curtosis = None
-        self.jb_stat = None
-        self.p_valor = None
-        self.es_normal = None
-
-    def cargar_serie_tiempo(self):
-        self.serie_tiempo = cargar_serie_tiempo(self.simbolo, self.directorio)
-        self.vector = self.serie_tiempo['retorno'].values
-        self.size = len(self.vector)
-        self.str_titulo = self.simbolo + " | datos reales"
-
-    def graficar_serie_tiempo(self):
-        plt.figure()
-        self.serie_tiempo.plot(kind='line', x='fecha', y='cierre', grid=True, color='blue',
-                            title='Serie de precios de cierre para ' + self.simbolo)
-        plt.show()
-
-    def calcular_estadisticas(self, factor=252):
-        self.media_anual = st.tmean(self.vector) * factor
-        self.volatilidad_anual = st.tstd(self.vector) * np.sqrt(factor)
-        self.ratio_sharpe = self.media_anual / self.volatilidad_anual if self.volatilidad_anual > 0 else 0.0
-        self.var_95 = np.percentile(self.vector, 5)
-        self.asimetria = st.skew(self.vector)
-        self.curtosis = st.kurtosis(self.vector)
-        self.jb_stat = self.size / 6 * (self.asimetria**2 + (self.curtosis**2) / 4)
-        self.p_valor = 1 - st.chi2.cdf(self.jb_stat, df=2)
-        self.es_normal = (self.p_valor > 0.05)
-
-    def graficar_histograma(self):
-        self.str_titulo += '\n' + 'media_anual=' + str(np.round(self.media_anual, self.decimales)) \
-                          + ' | ' + 'volatilidad_anual=' + str(np.round(self.volatilidad_anual, self.decimales)) \
-                          + '\n' + 'ratio_sharpe=' + str(np.round(self.ratio_sharpe, self.decimales)) \
-                          + ' | ' + 'var_95=' + str(np.round(self.var_95, self.decimales)) \
-                          + '\n' + 'asimetria=' + str(np.round(self.asimetria, self.decimales)) \
-                          + ' | ' + 'curtosis=' + str(np.round(self.curtosis, self.decimales)) \
-                          + '\n' + 'JB stat=' + str(np.round(self.jb_stat, self.decimales)) \
-                          + ' | ' + 'p-valor=' + str(np.round(self.p_valor, self.decimales)) \
-                          + '\n' + 'es_normal=' + str(self.es_normal)
-        plt.figure()
-        plt.hist(self.vector, bins=100)
-        plt.title(self.str_titulo)
-        plt.show()
-
+# ...existing code...
 if __name__ == "__main__":
     main()
