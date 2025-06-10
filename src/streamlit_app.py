@@ -1570,7 +1570,6 @@ def main():
     """
     Función principal de la aplicación Streamlit
     """
-    # Asegura que la función main solo se ejecute en el hilo principal de Streamlit
     import sys
     if hasattr(st, "_is_running_with_streamlit") or sys.argv[0].endswith("streamlit"):
         st.title("📊 IOL Portfolio Analyzer")
@@ -1676,8 +1675,8 @@ def main():
                 
                 else:
                     st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
-        
-
-# ...existing code...
+        # Llamar a la función principal de análisis si el usuario está autenticado y hay cliente seleccionado
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            mostrar_analisis_portafolio()
 if __name__ == "__main__":
     main()
