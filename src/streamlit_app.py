@@ -2361,7 +2361,7 @@ def mostrar_analisis_portafolio():
                     )])
                     
                     fig_perfil.update_layout(
-                        title="Composición por Perfil de Riesgo",
+                        title="Composición Sugerida",
                         height=300
                     )
                     
@@ -2812,3 +2812,6 @@ def main():
             
             else:
                 st.warning("⚠️ No se encontraron clientes asociados a su cuenta")
+
+if __name__ == "__main__":
+    main()
