@@ -1751,3 +1751,27 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
+
+def calcular_estadisticas_portafolio_sugerido(portfolio_output):
+    """
+    Calcula y retorna un resumen de estadísticas clave del portafolio sugerido según perfil de inversor.
+    Recibe un objeto 'output' (como el de la clase output del ejemplo).
+    """
+    stats = {
+        "Retorno Anual (%)": portfolio_output.return_annual * 100,
+        "Volatilidad Anual (%)": portfolio_output.volatility_annual * 100,
+        "Sharpe Ratio": portfolio_output.sharpe_ratio,
+        "VaR 95% (%)": portfolio_output.var_95 * 100,
+        "Skewness": portfolio_output.skewness,
+        "Kurtosis": portfolio_output.kurtosis,
+        "Normalidad (Jarque-Bera p-value)": portfolio_output.p_value,
+        "Distribución Normal": "Sí" if portfolio_output.is_normal else "No"
+    }
+    return stats
+
+# Ejemplo de uso (dentro de tu flujo principal, después de obtener el portafolio sugerido):
+# portafolio_sugerido = ... # objeto de tipo output
+# stats = calcular_estadisticas_portafolio_sugerido(portafolio_sugerido)
+# st.markdown("### 📊 Estadísticas del Portafolio Sugerido")
+# for k, v in stats.items():
+#     st.write(f"**{k}:** {v:.2f}" if isinstance(v, float) else f"**{k}:** {v}")
