@@ -687,59 +687,99 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
         st.warning(f"Error en optimización: {str(e)}. Usando pesos iguales.")
         return np.array([1/n_assets] * n_assets)
 
-def calcular_metricas_portafolio(activos_data, valor_total):
+def obtener_tasa_interes_caucion(token_portador):
     """
-    Calcula métricas comprehensivas del portafolio incluyendo P&L, quantiles y probabilidades
+    Obtiene la tasa de interés promedio de cauciones desde la API de IOL.
+    Devuelve la tasa como decimal anualizada (por ejemplo, 0.70 para 70% anual).
+    """
+    tasas = obtener_tasas_caucion(token_portador)
+    if tasas and isinstance(tasas, list):
+        tasas_validas = [t.get('tasa') for t in tasas if t.get('tasa') is not None]
+        if tasas_validas:
+            tasa_promedio = np.mean(tasas_validas) / 100  # Convertir a decimal
+            return tasa_promedio
+    return 0.0
+
+def obtener_tasas_yfinance():
+    """
+    Devuelve un diccionario de tasas de referencia obtenidas de yfinance.
+    """
+    tasas = {}
+    # Ejemplo: US 10Y Treasury, Argentina LEBAC, etc.
+    # Puedes agregar más tasas según lo que desees mostrar
+    tasas_yf = {
+        "US 10Y Treasury": "^TNX",
+        "Argentina Bonar 2030": "AL30.BA",
+        "Argentina Bonar 2029": "GD30.BA"
+    }
+    for nombre, ticker in tasas_yf.items():
+        try:
+            data = yf.Ticker(ticker)
+            hist = data.history(period="1mo")
+            if not hist.empty:
+                # Usar el último valor de 'Close' como tasa de referencia
+                tasa = hist['Close'][-1]
+                if "TNX" in ticker:
+                    tasa = tasa / 100  # TNX viene en %*10
+                tasas[nombre] = float(tasa)
+        except Exception:
+            continue
+    return tasas
+
+def seleccionar_tasa_interes(token_portador):
+    """
+    Permite seleccionar una tasa de interés de referencia para ajustar las ganancias.
+    Devuelve la tasa seleccionada (decimal anual).
+    """
+    st.markdown("#### Seleccione la tasa de interés de referencia para ajustar las ganancias")
+    tasas_yf = obtener_tasas_yfinance()
+    tasa_caucion = obtener_tasa_interes_caucion(token_portador)
+    opciones = {"Caución Promedio IOL": tasa_caucion}
+    opciones.update(tasas_yf)
+    nombres_opciones = list(opciones.keys())
+    seleccion = st.selectbox("Tasa de interés de referencia:", nombres_opciones)
+    tasa_seleccionada = opciones[seleccion]
+    st.info(f"Tasa seleccionada: {seleccion} ({tasa_seleccionada*100:.2f}% anual)")
+    return tasa_seleccionada
+
+def calcular_metricas_portafolio(activos_data, valor_total, tasa_interes_ajuste=None):
+    """
+    Calcula métricas comprehensivas del portafolio incluyendo P&L, quantiles y probabilidades.
+    Si se pasa una tasa_interes_ajuste, ajusta el retorno esperado a esa tasa.
     """
     try:
-        # Calcular estadísticas básicas
         valores = [activo['Valuación'] for activo in activos_data if activo['Valuación'] > 0]
-        
         if not valores:
             return None
-        
-        # Convertir a numpy array para cálculos
         valores_array = np.array(valores)
-        
-        # Estadísticas básicas
         media = np.mean(valores_array)
         mediana = np.median(valores_array)
         std_dev = np.std(valores_array)
-        var_95 = np.percentile(valores_array, 5)  # VaR al 5%
-        var_99 = np.percentile(valores_array, 1)  # VaR al 1%
-        
-        # Quantiles
+        var_95 = np.percentile(valores_array, 5)
+        var_99 = np.percentile(valores_array, 1)
         q25 = np.percentile(valores_array, 25)
-        q50 = np.percentile(valores_array, 50)  # Mediana
+        q50 = np.percentile(valores_array, 50)
         q75 = np.percentile(valores_array, 75)
         q90 = np.percentile(valores_array, 90)
         q95 = np.percentile(valores_array, 95)
-        
-        # Calcular concentración del portafolio
         pesos = valores_array / valor_total
-        concentracion = np.sum(pesos ** 2)  # Índice de Herfindahl
-        
-        # Simular retornos esperados (usando distribución normal)
-        # Asumiendo retorno anual promedio del 8% con volatilidad del 20%
-        retorno_esperado_anual = 0.08
+        concentracion = np.sum(pesos ** 2)
+        # Ajustar retorno esperado a la tasa seleccionada si se provee
+        if tasa_interes_ajuste is not None:
+            retorno_esperado_anual = tasa_interes_ajuste
+        else:
+            retorno_esperado_anual = 0.08
         volatilidad_anual = 0.20
-        
-        # Calcular métricas en términos monetarios
         retorno_esperado_pesos = valor_total * retorno_esperado_anual
         riesgo_anual_pesos = valor_total * volatilidad_anual
-        
-        # Simulación Monte Carlo simple para P&L esperado
         np.random.seed(42)
         num_simulaciones = 1000
         retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
         pl_simulado = valor_total * retornos_simulados
-        
-        # Probabilidades
         prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
         prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
         prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
         prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
-        
         return {
             'valor_total': valor_total,
             'media_activo': media,
@@ -773,6 +813,7 @@ def calcular_metricas_portafolio(activos_data, valor_total):
         st.error(f"Error calculando métricas del portafolio: {str(e)}")
         return None
 
+# --- Resumen del Portafolio ---
 def mostrar_resumen_portafolio(portafolio):
     """
     Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas,
@@ -907,7 +948,9 @@ def mostrar_resumen_portafolio(portafolio):
     
     if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
-        metricas = calcular_metricas_portafolio(datos_activos, valor_total)
+        # Selección de tasa de interés para ajuste de ganancias
+        tasa_interes_ajuste = seleccionar_tasa_interes(st.session_state.token_acceso)
+        metricas = calcular_metricas_portafolio(datos_activos, valor_total, tasa_interes_ajuste)
 
         # === 1. INFORMACIÓN GENERAL DEL PORTAFOLIO ===
         st.markdown("#### 📊 Información General")
@@ -1619,6 +1662,8 @@ def main():
                     None
                 )
                 
+               
+               
                 if st.button("🔄 Actualizar lista de clientes"):
                     with st.spinner("Actualizando clientes..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
@@ -1775,3 +1820,6 @@ def calcular_estadisticas_portafolio_sugerido(portfolio_output):
 # st.markdown("### 📊 Estadísticas del Portafolio Sugerido")
 # for k, v in stats.items():
 #     st.write(f"**{k}:** {v:.2f}" if isinstance(v, float) else f"**{k}:** {v}")
+
+if __name__ == "__main__":
+    main()
