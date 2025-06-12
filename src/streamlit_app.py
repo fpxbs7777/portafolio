@@ -69,8 +69,7 @@ def obtener_lista_clientes(token_portador):
         respuesta = requests.get(url_clientes, headers=encabezados)
         if respuesta.status_code == 200:
             clientes_data = respuesta.json()
-            # Debug: mostrar estructura de respuesta
-            st.info(f"📋 Estructura de respuesta de clientes: {type(clientes_data)}")
+            # st.info(f"📋 Estructura de respuesta de clientes: {type(clientes_data)}")
             if isinstance(clientes_data, list):
                 return clientes_data
             elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
@@ -129,16 +128,9 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
         respuesta = requests.get(url_portafolio, headers=encabezados)
-        st.info(f"🔍 Solicitando portafolio para cliente {id_cliente}")
-        st.info(f"📡 URL: {url_portafolio}")
-        st.info(f"📊 Status Code: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
             portafolio_data = respuesta.json()
-            st.success(f"✅ Portafolio obtenido exitosamente")
-            st.info(f"📋 Estructura de portafolio: {type(portafolio_data)}")
-            if isinstance(portafolio_data, dict):
-                st.info(f"🔑 Claves disponibles: {list(portafolio_data.keys())}")
             return portafolio_data
         elif respuesta.status_code == 404:
             st.warning(f"⚠️ Cliente {id_cliente} no encontrado o sin portafolio")
@@ -1637,6 +1629,519 @@ class PortfolioOutput:
         
         return fig
 
+def portfolio_variance(x, mtx_var_covar):
+    variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
+    return variance
+
+class manager:
+    def __init__(self, rics, notional, data):
+        self.rics = rics
+        self.notional = notional
+        self.data = data
+        self.timeseries = None
+        self.returns = None
+        self.cov_matrix = None
+        self.mean_returns = None
+        self.risk_free_rate = 0.40  # Tasa libre de riesgo anual
+
+    def load_intraday_timeseries(self, ticker):
+        return self.data[ticker]
+
+    def synchronise_timeseries(self):
+        dic_timeseries = {}
+        for ric in self.rics:
+            dic_timeseries[ric] = self.load_intraday_timeseries(ric)
+        self.timeseries = dic_timeseries
+
+    def compute_covariance(self):
+        self.synchronise_timeseries()
+        # Calcular retornos logarítmicos
+        returns_matrix = {}
+        for ric in self.rics:
+            prices = self.timeseries[ric]
+            returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        
+        # Convertir a DataFrame para alinear fechas
+        self.returns = pd.DataFrame(returns_matrix)
+        
+        # Calcular matriz de covarianza y retornos medios
+        self.cov_matrix = self.returns.cov() * 252  # Anualizar
+        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        
+        return self.cov_matrix, self.mean_returns
+
+    def compute_portfolio(self, portfolio_type=None, target_return=None):
+        if self.cov_matrix is None:
+            self.compute_covariance()
+            
+        n_assets = len(self.rics)
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        if portfolio_type == 'min-variance-l1':
+            # Minimizar varianza con restricción L1
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
+            ]
+            
+        elif portfolio_type == 'min-variance-l2':
+            # Minimizar varianza con restricción L2
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
+            ]
+            
+        elif portfolio_type == 'equi-weight':
+            # Pesos iguales
+            weights = np.ones(n_assets) / n_assets
+            return self._create_output(weights)
+            
+        elif portfolio_type == 'long-only':
+            # Optimización long-only estándar
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
+        elif portfolio_type == 'markowitz':
+            if target_return is not None:
+                # Optimización con retorno objetivo
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                ]
+            else:
+                # Maximizar Sharpe Ratio
+                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                def neg_sharpe_ratio(weights):
+                    port_ret = np.sum(self.mean_returns * weights)
+                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                    return -(port_ret - self.risk_free_rate) / port_vol
+                
+                result = optimize.minimize(
+                    neg_sharpe_ratio, 
+                    x0=np.ones(n_assets)/n_assets,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints
+                )
+                return self._create_output(result.x)
+        
+        # Optimización general de varianza mínima
+        result = optimize.minimize(
+            lambda x: portfolio_variance(x, self.cov_matrix),
+            x0=np.ones(n_assets)/n_assets,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+        
+        return self._create_output(result.x)
+
+    def _create_output(self, weights):
+        """Crea un objeto output con los pesos optimizados"""
+        port_ret = np.sum(self.mean_returns * weights)
+        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+        
+        # Calcular retornos del portafolio
+        portfolio_returns = self.returns.dot(weights)
+        
+        # Crear objeto output
+        port_output = output(portfolio_returns, self.notional)
+        port_output.weights = weights
+        port_output.dataframe_allocation = pd.DataFrame({
+            'rics': self.rics,
+            'weights': weights,
+            'volatilities': np.sqrt(np.diag(self.cov_matrix)),
+            'returns': self.mean_returns
+        })
+        
+        return port_output
+
+class output:
+    def __init__(self, returns, notional):
+        self.returns = returns
+        self.notional = notional
+        self.mean_daily = np.mean(returns)
+        self.volatility_daily = np.std(returns)
+        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
+        self.var_95 = np.percentile(returns, 5)
+        self.skewness = stats.skew(returns)
+        self.kurtosis = stats.kurtosis(returns)
+        self.jb_stat, self.p_value = stats.jarque_bera(returns)
+        self.is_normal = self.p_value > 0.05
+        self.decimals = 4
+        self.str_title = 'Portfolio Returns'
+        self.weights = np.ones(len(returns)) / len(returns) if len(returns) > 0 else np.array([])
+        self.dataframe_allocation = pd.DataFrame({
+            'rics': ['RIC' + str(i) for i in range(len(returns))],
+            'weights': self.weights,
+            'volatilities': np.random.rand(len(returns)),
+            'returns': np.random.rand(len(returns))
+        })
+        self.volatility_annual = self.volatility_daily * np.sqrt(252)
+        self.return_annual = self.mean_daily * 252
+
+    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
+        """
+        Versión para Streamlit del histograma usando Plotly
+        """
+        if len(self.returns) == 0:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        
+        fig = go.Figure(data=[go.Histogram(
+            x=self.returns,
+            nbinsx=30,
+            name="Retornos del Portafolio"
+        )])
+        
+        # Agregar métricas al título
+        metrics_title = (
+            f"{title}<br>"
+            f"Retorno Diario: {self.mean_daily:.4f} | "
+            f"Volatilidad: {self.volatility_daily:.4f}<br>"
+            f"Sharpe Ratio: {self.sharpe_ratio:.4f} | "
+            f"VaR 95%: {self.var_95:.4f}<br>"
+            f"Skewness: {self.skewness:.4f} | "
+            f"Kurtosis: {self.kurtosis:.4f}"
+        )
+        
+        fig.update_layout(
+            title=metrics_title,
+            xaxis_title="Retorno",
+            yaxis_title="Frecuencia",
+            showlegend=False,
+            height=500
+        )
+        
+        return fig
+
+    def get_metrics_dict(self):
+        """
+        Retorna las métricas en formato diccionario para compatibilidad
+        """
+        return {
+            'Mean Daily': self.mean_daily,
+            'Volatility Daily': self.volatility_daily,
+            'Sharpe Ratio': self.sharpe_ratio,
+            'VaR 95%': self.var_95,
+            'Return Annual': self.return_annual,
+            'Volatility Annual': self.volatility_annual,
+            'Skewness': self.skewness,
+            'Kurtosis': self.kurtosis,
+            'JB Stat': self.jb_stat,
+            'P-Value': self.p_value,
+            'Is Normal': self.is_normal
+        }
+
+def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
+    """
+    Calcula la frontera eficiente para un conjunto de activos
+    """
+    # special portfolios    
+    label1 = 'min-variance-l1'
+    label2 = 'min-variance-l2'
+    label3 = 'equi-weight'
+    label4 = 'long-only'
+    label5 = 'markowitz-none'
+    label6 = 'markowitz-target'
+    
+    # compute covariance matrix
+    port_mgr = manager(rics, notional, data)
+    port_mgr.compute_covariance()
+    
+    # compute vectors of returns and volatilities for Markowitz portfolios
+    min_returns = np.min(port_mgr.mean_returns)
+    max_returns = np.max(port_mgr.mean_returns)
+    returns = min_returns + np.linspace(0.05,0.95,100) * (max_returns-min_returns)
+    volatilities = np.zeros([len(returns),1])
+    
+    try:
+        for i, ret in enumerate(returns):
+            port = port_mgr.compute_portfolio('markowitz', ret)
+            volatilities[i] = port.volatility_annual
+    except Exception as e:
+        st.warning(f"Error calculando frontera eficiente: {str(e)}")
+        return None
+    
+    # compute special portfolios
+    portfolios = {}
+    try:
+        portfolios[label1] = port_mgr.compute_portfolio(label1)
+        portfolios[label2] = port_mgr.compute_portfolio(label2)
+        portfolios[label3] = port_mgr.compute_portfolio(label3)
+        portfolios[label4] = port_mgr.compute_portfolio(label4)
+        portfolios[label5] = port_mgr.compute_portfolio('markowitz')
+        portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
+    except Exception as e:
+        st.error(f"Error calculando portafolios especiales: {str(e)}")
+        return None
+    
+    return portfolios, returns, volatilities
+
+def mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Interfaz avanzada de optimización con frontera eficiente y múltiples estrategias
+    """
+    st.markdown("### 🎯 Optimización Avanzada de Portafolio")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para optimizar")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if len(simbolos) < 2:
+        st.warning("Se necesitan al menos 2 activos para optimización avanzada")
+        return
+    
+    st.info(f"📊 Optimización avanzada para {len(simbolos)} activos: {', '.join(simbolos[:5])}")
+    
+    # Configuración avanzada
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        estrategias = [
+            'min-variance-l1', 'min-variance-l2', 'equi-weight',
+            'long-only', 'markowitz', 'markowitz-target'
+        ]
+        estrategia_labels = {
+            'min-variance-l1': 'Mínima Varianza L1',
+            'min-variance-l2': 'Mínima Varianza L2',
+            'equi-weight': 'Pesos Iguales',
+            'long-only': 'Solo Largo',
+            'markowitz': 'Markowitz (Max Sharpe)',
+            'markowitz-target': 'Markowitz (Retorno Objetivo)'
+        }
+        
+        estrategia_seleccionada = st.selectbox(
+            "Estrategia de Optimización:",
+            options=estrategias,
+            format_func=lambda x: estrategia_labels[x]
+        )
+    
+    with col2:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.15, step=0.01,
+            help="Solo aplica para estrategia Markowitz con retorno objetivo"
+        )
+    
+    with col3:
+        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    
+    if st.button("🚀 Ejecutar Optimización Avanzada"):
+        with st.spinner("Ejecutando optimización avanzada..."):
+            try:
+                # Obtener datos históricos
+                mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                    token_acceso, simbolos, fecha_desde, fecha_hasta
+                )
+                
+                if mean_returns is not None and cov_matrix is not None:
+                    # Preparar datos para el manager
+                    data_dict = {}
+                    for simbolo in df_precios.columns:
+                        data_dict[simbolo] = df_precios[simbolo]
+                    
+                    # Crear manager avanzado
+                    notional = 100000  # Valor nominal para cálculos
+                    port_mgr = manager(list(df_precios.columns), notional, data_dict)
+                    
+                    # Calcular portafolio específico
+                    if estrategia_seleccionada == 'markowitz-target':
+                        portfolio_result = port_mgr.compute_portfolio('markowitz', target_return)
+                    else:
+                        portfolio_result = port_mgr.compute_portfolio(estrategia_seleccionada)
+                    
+                    if portfolio_result:
+                        st.success("✅ Optimización avanzada completada")
+                        
+                        # Mostrar resultados mejorados
+                        tab1, tab2, tab3, tab4 = st.tabs([
+                            "📊 Resultados", "📈 Métricas", "🥧 Distribución", "📉 Análisis"
+                        ])
+                        
+                        with tab1:
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("#### 📊 Pesos Optimizados")
+                                weights_df = pd.DataFrame({
+                                    'Activo': portfolio_result.dataframe_allocation['rics'],
+                                    'Peso (%)': [w * 100 for w in portfolio_result.weights],
+                                    'Retorno Esperado (%)': [r * 100 for r in portfolio_result.dataframe_allocation['returns']],
+                                    'Volatilidad (%)': [v * 100 for v in portfolio_result.dataframe_allocation['volatilities']]
+                                })
+                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                                st.dataframe(weights_df, use_container_width=True)
+                            
+                            with col2:
+                                st.markdown("#### 📈 Métricas del Portafolio")
+                                metricas = portfolio_result.get_metrics_dict()
+                                
+                                col_m1, col_m2 = st.columns(2)
+                                col_m1.metric("Retorno Anual", f"{metricas['Return Annual']:.2%}")
+                                col_m2.metric("Volatilidad Anual", f"{metricas['Volatility Annual']:.2%}")
+                                col_m1.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                                col_m2.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                        
+                        with tab2:
+                            st.markdown("#### 📊 Análisis Estadístico Completo")
+                            
+                            metricas = portfolio_result.get_metrics_dict()
+                            
+                            col1, col2, col3, col4 = st.columns(4)
+                            col1.metric("Skewness", f"{metricas['Skewness']:.4f}")
+                            col2.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+                            col3.metric("Jarque-Bera", f"{metricas['JB Stat']:.4f}")
+                            col4.metric("Es Normal", "Sí" if metricas['Is Normal'] else "No")
+                            
+                            # Interpretación de métricas
+                            st.markdown("#### 💡 Interpretación de Métricas")
+                            
+                            if metricas['Sharpe Ratio'] > 1:
+                                st.success("✅ Excelente ratio de Sharpe (>1)")
+                            elif metricas['Sharpe Ratio'] > 0.5:
+                                st.info("ℹ️ Buen ratio de Sharpe (>0.5)")
+                            else:
+                                st.warning("⚠️ Ratio de Sharpe bajo (<0.5)")
+                            
+                            if abs(metricas['Skewness']) < 0.5:
+                                st.success("✅ Distribución aproximadamente simétrica")
+                            else:
+                                direction = "positiva" if metricas['Skewness'] > 0 else "negativa"
+                                st.info(f"ℹ️ Asimetría {direction} detectada")
+                            
+                            if metricas['Is Normal']:
+                                st.success("✅ Los retornos siguen una distribución normal")
+                            else:
+                                st.warning("⚠️ Los retornos no siguen una distribución normal")
+                        
+                        with tab3:
+                            # Gráfico de distribución de retornos
+                            st.markdown("#### 📊 Distribución de Retornos")
+                            fig_hist = portfolio_result.plot_histogram_streamlit()
+                            st.plotly_chart(fig_hist, use_container_width=True)
+                            
+                            # Gráfico de pesos
+                            st.markdown("#### 🥧 Distribución de Pesos")
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=portfolio_result.dataframe_allocation['rics'],
+                                values=portfolio_result.weights,
+                                textinfo='label+percent+value',
+                                texttemplate='%{label}<br>%{percent}<br>%{value:.3f}',
+                            )])
+                            fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        
+                        with tab4:
+                            if mostrar_frontera:
+                                st.markdown("#### 📈 Frontera Eficiente")
+                                
+                                with st.spinner("Calculando frontera eficiente..."):
+                                    frontier_result = compute_efficient_frontier(
+                                        list(df_precios.columns), notional, target_return, True, data_dict
+                                    )
+                                
+                                if frontier_result:
+                                    portfolios, returns_frontier, volatilities_frontier = frontier_result
+                                    
+                                    # Crear gráfico de frontera eficiente
+                                    fig_frontier = go.Figure()
+                                    
+                                    # Agregar frontera eficiente
+                                    fig_frontier.add_trace(go.Scatter(
+                                        x=volatilities_frontier.flatten(),
+                                        y=returns_frontier,
+                                        mode='markers',
+                                        name='Frontera Eficiente',
+                                        marker=dict(size=3, color='lightblue')
+                                    ))
+                                    
+                                    # Agregar portafolios especiales
+                                    colors = ['red', 'blue', 'yellow', 'green', 'purple', 'orange']
+                                    symbols = ['circle', 'triangle-up', 'square', 'diamond', 'star', 'hexagon']
+                                    
+                                    for i, (label, port) in enumerate(portfolios.items()):
+                                        fig_frontier.add_trace(go.Scatter(
+                                            x=[port.volatility_annual],
+                                            y=[port.return_annual],
+                                            mode='markers',
+                                            name=label,
+                                            marker=dict(
+                                                size=10,
+                                                color=colors[i % len(colors)],
+                                                symbol=symbols[i % len(symbols)]
+                                            )
+                                        ))
+                                    
+                                    fig_frontier.update_layout(
+                                        title='Frontera Eficiente y Portafolios Especiales',
+                                        xaxis_title='Volatilidad Anual',
+                                        yaxis_title='Retorno Anual',
+                                        height=600
+                                    )
+                                    
+                                    st.plotly_chart(fig_frontier, use_container_width=True)
+                                    
+                                    # Tabla de comparación de portafolios
+                                    st.markdown("#### 📋 Comparación de Estrategias")
+                                    comparison_data = []
+                                    for label, port in portfolios.items():
+                                        comparison_data.append({
+                                            'Estrategia': label,
+                                            'Retorno Anual (%)': f"{port.return_annual:.2%}",
+                                            'Volatilidad Anual (%)': f"{port.volatility_annual:.2%}",
+                                            'Sharpe Ratio': f"{port.sharpe_ratio:.4f}",
+                                            'VaR 95%': f"{port.var_95:.4f}"
+                                        })
+                                    
+                                    df_comparison = pd.DataFrame(comparison_data)
+                                    st.dataframe(df_comparison, use_container_width=True)
+                            
+
+                            # Análisis de sensibilidad
+                            st.markdown("#### 🔍 Análisis de Sensibilidad")
+                            st.info("Esta funcionalidad mostraría cómo cambian los pesos óptimos ante variaciones en los parámetros del modelo.")
+                
+                else:
+                    st.error("❌ No se pudieron obtener los datos históricos necesarios")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante la optimización avanzada: {str(e)}")
+    
+    # Información adicional expandida
+    with st.expander("ℹ️ Información Detallada sobre las Estrategias"):
+        st.markdown("""
+        **Estrategias de Optimización Disponibles:**
+        
+        1. **Mínima Varianza L1**: Minimiza la varianza del portafolio con regularización L1 (promueve sparsity)
+        2. **Mínima Varianza L2**: Minimiza la varianza del portafolio con regularización L2 (penaliza pesos grandes)
+        3. **Pesos Iguales**: Distribución uniforme entre todos los activos (1/n)
+        4. **Solo Largo**: Optimización estándar sin ventas en corto
+        5. **Markowitz (Max Sharpe)**: Maximiza el ratio de Sharpe (retorno ajustado por riesgo)
+        6. **Markowitz (Retorno Objetivo)**: Minimiza riesgo para un retorno objetivo específico
+        
+        **Métricas Clave:**
+        - **Sharpe Ratio**: Retorno en exceso por unidad de riesgo (>1 excelente, >0.5 bueno)
+        - **Skewness**: Asimetría de la distribución (0 = simétrica)
+        - **Kurtosis**: "Colas gordas" de la distribución (3 = normal)
+        - **Jarque-Bera**: Test de normalidad (p-value > 0.05 = normal)
+        - **VaR 95%**: Pérdida máxima esperada en el 95% de los casos
+        """)
+
 def main():
     """
     Función principal de la aplicación Streamlit
@@ -1758,114 +2263,106 @@ def main():
 
 def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
-    Muestra la optimización del portafolio usando datos históricos
+    Muestra tanto la optimización básica como la avanzada
     """
-    st.markdown("### 🎯 Optimización de Portafolio")
+    # Crear tabs para diferentes tipos de optimización
+    tab_basica, tab_avanzada = st.tabs(["🔧 Optimización Básica", "⚙️ Optimización Avanzada"])
     
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("No hay activos en el portafolio para optimizar")
-        return
-    
-    # Extraer símbolos del portafolio
-    simbolos = []
-    for activo in activos:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
-            simbolos.append(simbolo)
-    
-    if len(simbolos) < 2:
-        st.warning("Se necesitan al menos 2 activos para optimización")
-        return
-    
-    st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
-    
-    # Configuración de optimización
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        estrategia = st.selectbox(
-            "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight'],
-            format_func=lambda x: 'Optimización de Markowitz' if x == 'markowitz' else 'Pesos Iguales'
-        )
-    
-    with col2:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
-    
-    if ejecutar_optimizacion:
-        with st.spinner("Ejecutando optimización..."):
-            try:
-                # Crear manager de portafolio
-                manager = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
-                
-                # Cargar datos
-                if manager.load_data():
-                    # Computar optimización
-                    portfolio_result = manager.compute_portfolio(strategy=estrategia)
-                    
-                    if portfolio_result:
-                        st.success("✅ Optimización completada")
-                        
-                        # Mostrar resultados
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            weights_df = pd.DataFrame({
-                                'Activo': portfolio_result.asset_names,
-                                'Peso (%)': [w * 100 for w in portfolio_result.weights]
-                            })
-                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                            st.dataframe(weights_df, use_container_width=True)
-                        
-                        with col2:
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            metricas = portfolio_result.get_metrics_dict()
-                            
-                            st.metric("Retorno Diario Promedio", f"{metricas['Mean Daily']:.4f}")
-                            st.metric("Volatilidad Diaria", f"{metricas['Volatility Daily']:.4f}")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                        
-                        # Gráfico de distribución de retornos
-                        if portfolio_result.portfolio_returns is not None:
-                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                            fig = portfolio_result.plot_histogram_streamlit()
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Gráfico de pesos
-                        st.markdown("#### 🥧 Distribución de Pesos")
-                        fig_pie = go.Figure(data=[go.Pie(
-                            labels=portfolio_result.asset_names,
-                            values=portfolio_result.weights,
-                            textinfo='label+percent',
-                        )])
-                        fig_pie.update_layout(title="Distribución Optimizada de Activos")
-                        st.plotly_chart(fig_pie, use_container_width=True)
-                        
-                    else:
-                        st.error("❌ Error en la optimización")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-                    
-            except Exception as e:
-                st.error(f"❌ Error durante la optimización: {str(e)}")
-    
-    # Información adicional
-    with st.expander("ℹ️ Información sobre las Estrategias"):
-        st.markdown("""
-        **Optimización de Markowitz:**
-        - Maximiza el ratio de Sharpe (retorno/riesgo)
-        - Considera la correlación entre activos
-        - Busca la frontera eficiente
+    with tab_basica:
+        # Código existente de optimización básica
+        st.markdown("### 🎯 Optimización Básica de Portafolio")
         
-        **Pesos Iguales:**
-        - Distribución uniforme entre todos los activos
-        - Estrategia simple de diversificación
-        - No considera correlaciones históricas
-        """)
-# Asegurar que main() se ejecute cuando se corre el script
-if __name__ == "__main__":
-    main()
+        activos = portafolio.get('activos', [])
+        if not activos:
+            st.warning("No hay activos en el portafolio para optimizar")
+            return
+        
+        # Extraer símbolos del portafolio
+        simbolos = []
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                simbolos.append(simbolo)
+        
+        if len(simbolos) < 2:
+            st.warning("Se necesitan al menos 2 activos para optimización")
+            return
+        
+        st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
+        
+        # Configuración de optimización
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            estrategia = st.selectbox(
+                "Estrategia de Optimización:",
+                options=['markowitz', 'equi-weight'],
+                format_func=lambda x: 'Optimización de Markowitz' if x == 'markowitz' else 'Pesos Iguales'
+            )
+        
+        with col2:
+            ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Básica")
+        
+        if ejecutar_optimizacion:
+            with st.spinner("Ejecutando optimización básica..."):
+                try:
+                    # Crear manager de portafolio
+                    manager_basic = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                    
+                    # Cargar datos
+                    if manager_basic.load_data():
+                        # Computar optimización
+                        portfolio_result = manager_basic.compute_portfolio(strategy=estrategia)
+                        
+                        if portfolio_result:
+                            st.success("✅ Optimización básica completada")
+                            
+                            # Mostrar resultados
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("#### 📊 Pesos Optimizados")
+                                weights_df = pd.DataFrame({
+                                    'Activo': portfolio_result.asset_names,
+                                    'Peso (%)': [w * 100 for w in portfolio_result.weights]
+                                })
+                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                                st.dataframe(weights_df, use_container_width=True)
+                            
+                            with col2:
+                                st.markdown("#### 📈 Métricas del Portafolio")
+                                metricas = portfolio_result.get_metrics_dict()
+                                
+                                st.metric("Retorno Diario Promedio", f"{metricas['Mean Daily']:.4f}")
+                                st.metric("Volatilidad Diaria", f"{metricas['Volatility Daily']:.4f}")
+                                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                            
+
+                            # Gráfico de distribución de retornos
+                            if portfolio_result.portfolio_returns is not None:
+                                st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
+                                fig = portfolio_result.plot_histogram_streamlit()
+                                st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Gráfico de pesos
+                            st.markdown("#### 🥧 Distribución de Pesos")
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=portfolio_result.asset_names,
+                                values=portfolio_result.weights,
+                                textinfo='label+percent',
+                            )])
+                            fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        
+                        else:
+                            st.error("❌ Error en la optimización básica")
+                    else:
+                        st.error("❌ No se pudieron cargar los datos históricos")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error durante la optimización básica: {str(e)}")
+    
+    with tab_avanzada:
+        mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta)
