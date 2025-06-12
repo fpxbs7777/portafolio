@@ -1748,7 +1748,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                     x=weights_df['Activo'],
                     y=weights_df['Peso (%)'],
                     text=weights_df['Peso (%)'].apply(lambda x: f'{x:.1f}%'),
-                    textposition='auto',
+                    textposition='auto'
                 ])
                 
                 fig_weights.update_layout(
@@ -1767,43 +1767,3 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
 
             else:
                 st.error("No se pudo completar la optimización")
-
-def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
-    # special portfolios    
-    label1 = 'min-variance-l1'
-    label2 = 'min-variance-l2'
-    label3 = 'equi-weight'
-    label4 = 'long-only'
-    label5 = 'markowitz-none'
-    label6 = 'markowitz-target'
-    
-    # compute covariance matrix
-    port_mgr = manager(rics, notional, data)
-    port_mgr.compute_covariance()
-    
-    # compute vectors of returns and volatilities for Markowitz portfolios
-    min_returns = np.min(port_mgr.returns)
-    max_returns = np.max(port_mgr.returns)
-    returns = min_returns + np.linspace(0.05, 0.95, 100) * (max_returns-min_returns)
-    volatilities = np.zeros([len(returns), 1])
-    
-    for i, ret in enumerate(returns):
-        port = port_mgr.compute_portfolio('markowitz', ret)
-        volatilities[i] = port.volatility_annual
-    
-    # compute special portfolios
-    port1 = port_mgr.compute_portfolio(label1)
-    port2 = port_mgr.compute_portfolio(label2)
-    port3 = port_mgr.compute_portfolio(label3)
-    port4 = port_mgr.compute_portfolio(label4)
-    port5 = port_mgr.compute_portfolio('markowitz')
-    port6 = port_mgr.compute_portfolio('markowitz', target_return)
-    
-    return {
-        label1: port1,
-        label2: port2,
-        label3: port3,
-        label4: port4,
-        label5: port5,
-        label6: port6
-    }
