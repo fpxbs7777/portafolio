@@ -1918,7 +1918,10 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     }
 # Asegurar que main() se ejecute cuando se corre el script
 def main():
-    pass  # El cuerpo de main ya está definido arriba
+    # El cuerpo de main debe contener la lógica principal de la app.
+    # Si ves "pass" aquí, reemplázalo por la lógica de la función main original.
+    # Si ya tienes la función main definida arriba, elimina esta definición vacía.
+    pass
 
 if __name__ == "__main__":
     main()
