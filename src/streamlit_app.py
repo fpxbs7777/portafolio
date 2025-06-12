@@ -1387,7 +1387,7 @@ def calcular_indice_diversificacion(portafolio):
         nivel = "Baja"
     
     return {
-        'hhi',
+        'hhi': hhi,
         'numero_efectivo_activos': numero_efectivo,
         'diversificacion_normalizada': diversificacion_normalizada,
         'nivel_diversificacion': nivel,
