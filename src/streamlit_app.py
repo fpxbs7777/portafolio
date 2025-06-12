@@ -1917,5 +1917,8 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         label6: port6
     }
 # Asegurar que main() se ejecute cuando se corre el script
+def main():
+    pass  # El cuerpo de main ya está definido arriba
+
 if __name__ == "__main__":
     main()
