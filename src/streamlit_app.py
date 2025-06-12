@@ -1918,10 +1918,98 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     }
 # Asegurar que main() se ejecute cuando se corre el script
 def main():
-    # El cuerpo de main debe contener la lógica principal de la app.
-    # Si ves "pass" aquí, reemplázalo por la lógica de la función main original.
-    # Si ya tienes la función main definida arriba, elimina esta definición vacía.
-    pass
+    """
+    Función principal de la aplicación Streamlit
+    """
+    st.title("📊 IOL Portfolio Analyzer")
+    
+    # Inicializar variables de estado de sesión si no existen
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=365)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+
+    # Sidebar para login y configuración
+    with st.sidebar:
+        st.header("🔐 Login")
+        
+        # Formulario de login
+        with st.form("login_form"):
+            usuario = st.text_input("Usuario IOL")
+            contraseña = st.text_input("Contraseña", type="password")
+            submitted = st.form_submit_button("Iniciar Sesión")
+            
+            if submitted:
+                with st.spinner("Autenticando..."):
+                    token_acceso, token_refresh = obtener_tokens(usuario, contraseña)
+                    if token_acceso:
+                        st.session_state.token_acceso = token_acceso
+                        st.success("✅ Login exitoso")
+                        st.rerun()
+        
+        # Mostrar estado de autenticación
+        if st.session_state.token_acceso:
+            st.success("🟢 Autenticado")
+            
+            # Selector de fechas
+            st.header("📅 Rango de Fechas")
+            fecha_desde = st.date_input(
+                "Desde",
+                value=st.session_state.fecha_desde,
+                max_value=date.today()
+            )
+            fecha_hasta = st.date_input(
+                "Hasta",
+                value=st.session_state.fecha_hasta,
+                max_value=date.today()
+            )
+            
+            if fecha_desde and fecha_hasta:
+                st.session_state.fecha_desde = fecha_desde
+                st.session_state.fecha_hasta = fecha_hasta
+        else:
+            st.warning("🔴 No autenticado")
+
+    # Contenido principal
+    if st.session_state.token_acceso:
+        # Obtener lista de clientes
+        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+        
+        if clientes:
+            # Selector de cliente
+            cliente_seleccionado = st.selectbox(
+                "Seleccionar Cliente",
+                options=clientes,
+                format_func=lambda x: x.get('apellidoYNombre', x.get('nombre', 'Cliente')),
+                key='cliente_selector'
+            )
+            
+            if cliente_seleccionado:
+                st.session_state.cliente_seleccionado = cliente_seleccionado
+                mostrar_analisis_portafolio()
+        else:
+            st.error("No se pudieron obtener los clientes")
+    else:
+        # Mensaje de bienvenida cuando no está autenticado
+        st.markdown("""
+        ## 👋 Bienvenido a IOL Portfolio Analyzer
+        
+        Para comenzar, inicie sesión con sus credenciales de IOL en el panel lateral.
+        
+        ### 🔑 Características principales:
+        - Análisis de portafolio
+        - Estado de cuenta
+        - Optimización de cartera
+        - Análisis técnico
+        - Cotizaciones en tiempo real
+        
+        ### 🔒 Seguridad
+        Sus credenciales son utilizadas únicamente para autenticación con IOL y no son almacenadas.
+        """)
 
 if __name__ == "__main__":
     main()
