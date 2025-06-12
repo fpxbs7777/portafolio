@@ -1744,6 +1744,7 @@ def main():
                 
                
                
+               
                 if st.button("🔄 Actualizar lista de clientes"):
                     with st.spinner("Actualizando clientes..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
@@ -2435,7 +2436,7 @@ def get_historical_data_for_optimization_optimized(token_portador, simbolos, fec
         mean_returns = returns.mean()
         cov_matrix = returns.cov()
         
-        # Mostrar estadísticas finales con mercados
+        # Mostrar estadísticas finales
         st.info(f"📊 Datos finales: {len(returns.columns)} activos, {len(returns)} observaciones de retornos")
         
         return mean_returns, cov_matrix, df_precios
@@ -2730,80 +2731,5 @@ class AdvancedPortfolioOutput:
         
         return fig
 
-def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data, token_acceso):
-    """
-    Calcula la frontera eficiente y portafolios especiales
-    """
-    try:
-        # Etiquetas de estrategias
-        strategies = {
-            'min-variance-l1': 'Mín. Varianza L1',
-            'min-variance-l2': 'Mín. Varianza L2', 
-            'equi-weight': 'Pesos Iguales',
-            'long-only': 'Solo Long',
-            'markowitz-sharpe': 'Máx. Sharpe',
-            'markowitz-target': 'Retorno Objetivo'
-        }
-        
-        # Crear manager de portafolio
-        port_mgr = AdvancedPortfolioManager(rics, notional, data)
-        
-        # Calcular matriz de covarianza
-        cov_result = port_mgr.compute_covariance()
-        if cov_result[0] is None:
-            return None
-        
-        # Calcular vectores de retornos y volatilidades para frontera de Markowitz
-        min_returns = np.min(port_mgr.mean_returns)
-        max_returns = np.max(port_mgr.mean_returns)
-        
-        # Crear rango de retornos objetivo
-        returns_range = min_returns + np.linspace(0.1, 0.9, 50) * (max_returns - min_returns)
-        volatilities = []
-        efficient_returns = []
-        
-        for target_ret in returns_range:
-            try:
-                port = port_mgr.compute_portfolio('markowitz', target_ret)
-                if port is not None:
-                    volatilities.append(port.volatility_annual)
-                    efficient_returns.append(target_ret)
-            except:
-                continue
-        
-        # Calcular portafolios especiales
-        portfolios = {}
-        
-        for strategy_key, strategy_name in strategies.items():
-            try:
-                if strategy_key == 'markowitz-sharpe':
-                    port = port_mgr.compute_portfolio('markowitz')
-                elif strategy_key == 'markowitz-target':
-                    port = port_mgr.compute_portfolio('markowitz', target_return)
-                else:
-                    port = port_mgr.compute_portfolio(strategy_key)
-                
-                if port is not None:
-                    portfolios[strategy_key] = {
-                        'portfolio': port,
-                        'name': strategy_name,
-                        'return': port.return_annual,
-                        'volatility': port.volatility_annual,
-                        'sharpe': (port.return_annual - port_mgr.risk_free_rate) / port.volatility_annual if port.volatility_annual > 0 else 0
-                    }
-            except Exception as e:
-                st.warning(f"Error calculando {strategy_name}: {str(e)}")
-                continue
-        
-        return {
-            'portfolios': portfolios,
-            'efficient_frontier': {
-                'returns': efficient_returns,
-                'volatilities': volatilities
-            },
-            'manager': port_mgr
-        }
-        
-    except Exception as e:
-        st.error(f"Error calculando frontera eficiente: {str(e)}")
-        return None
+if __name__ == "__main__":
+    main()
