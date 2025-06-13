@@ -129,16 +129,17 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
         respuesta = requests.get(url_portafolio, headers=encabezados)
-        st.info(f"🔍 Solicitando portafolio para cliente {id_cliente}")
-        st.info(f"📡 URL: {url_portafolio}")
-        st.info(f"📊 Status Code: {respuesta.status_code}")
+        # Eliminar mensajes de interfaz innecesarios
+        # st.info(f"🔍 Solicitando portafolio para cliente {id_cliente}")
+        # st.info(f"📡 URL: {url_portafolio}")
+        # st.info(f"📊 Status Code: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
             portafolio_data = respuesta.json()
-            st.success(f"✅ Portafolio obtenido exitosamente")
-            st.info(f"📋 Estructura de portafolio: {type(portafolio_data)}")
-            if isinstance(portafolio_data, dict):
-                st.info(f"🔑 Claves disponibles: {list(portafolio_data.keys())}")
+            # st.success(f"✅ Portafolio obtenido exitosamente")
+            # st.info(f"📋 Estructura de portafolio: {type(portafolio_data)}")
+            # if isinstance(portafolio_data, dict):
+            #     st.info(f"🔑 Claves disponibles: {list(portafolio_data.keys())}")
             return portafolio_data
         elif respuesta.status_code == 404:
             st.warning(f"⚠️ Cliente {id_cliente} no encontrado o sin portafolio")
@@ -1866,6 +1867,3 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
-# Asegurar que main() se ejecute cuando se corre el script
-if __name__ == "__main__":
-    main()
