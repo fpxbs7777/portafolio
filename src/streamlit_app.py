@@ -1762,6 +1762,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
     """
     Muestra la optimización del portafolio usando datos históricos con estrategias extendidas,
     incluyendo rebalanceo aleatorio con series aleatorias.
+    Procesa las series históricas usando la misma lógica que las estadísticas del portafolio.
     """
     st.markdown("### 🎯 Optimización de Portafolio")
 
@@ -1783,6 +1784,15 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         return
 
     st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
+
+    # --- Procesar series históricas reales para todos los activos seleccionados ---
+    # Usar la misma función que en el cálculo de estadísticas del portafolio
+    mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+        token_acceso, simbolos, fecha_desde, fecha_hasta
+    )
+    if df_precios is None or df_precios.empty or len(df_precios.columns) < 2:
+        st.error("No se pudieron obtener series históricas válidas para los activos seleccionados.")
+        return
 
     # Configuración de optimización extendida
     col1, col2, col3 = st.columns(3)
@@ -1817,23 +1827,20 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
     # --- Rebalanceo Aleatorio ---
     if ejecutar_optimizacion and estrategia == 'rebalanceo-aleatorio':
         st.markdown("#### 🔀 Simulación de Rebalanceo Aleatorio")
-        num_activos = st.slider("Cantidad de activos aleatorios:", min_value=2, max_value=len(simbolos), value=5)
+        num_activos = st.slider("Cantidad de activos aleatorios:", min_value=2, max_value=len(df_precios.columns), value=5)
         num_simulaciones = st.slider("Cantidad de simulaciones:", min_value=10, max_value=200, value=50)
-        ventana_dias = st.slider("Ventana de días para series aleatorias:", min_value=60, max_value=252, value=120)
+        ventana_dias = st.slider("Ventana de días para series aleatorias:", min_value=60, max_value=min(252, len(df_precios)), value=min(120, len(df_precios)))
         seed = st.number_input("Semilla aleatoria:", min_value=0, max_value=99999, value=42)
 
         if st.button("▶️ Ejecutar Simulación Aleatoria"):
             np.random.seed(seed)
             resultados = []
+            fechas = df_precios.index[-ventana_dias:]
             for i in range(num_simulaciones):
-                activos_sel = np.random.choice(simbolos, size=num_activos, replace=False)
-                # Generar series aleatorias (random walk lognormal)
-                precios = {}
-                for s in activos_sel:
-                    serie = np.exp(np.cumsum(np.random.normal(0, 0.01, ventana_dias)))
-                    precios[s] = pd.Series(serie)
-                df_precios = pd.DataFrame(precios)
-                returns = df_precios.pct_change().dropna()
+                activos_sel = np.random.choice(df_precios.columns, size=num_activos, replace=False)
+                # Usar series históricas reales, pero seleccionar ventanas aleatorias
+                precios_sel = df_precios[activos_sel].iloc[-ventana_dias:]
+                returns = precios_sel.pct_change().dropna()
                 weights = np.ones(num_activos) / num_activos
                 port_ret = np.sum(returns.mean() * weights) * 252
                 port_vol = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
@@ -1850,7 +1857,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                 name='Simulaciones'
             ))
             fig.update_layout(
-                title='Simulación de Portafolios Aleatorios',
+                title='Simulación de Portafolios Aleatorios (con series históricas reales)',
                 xaxis_title='Volatilidad Anual',
                 yaxis_title='Retorno Anual',
                 showlegend=False
@@ -1863,52 +1870,62 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
     if ejecutar_optimizacion and estrategia != 'rebalanceo-aleatorio':
         with st.spinner("Ejecutando optimización..."):
             try:
-                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
-                if manager_inst.load_data():
-                    use_target = target_return if estrategia == 'markowitz' else None
-                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
-                    if portfolio_result:
-                        st.success("✅ Optimización completada")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            if portfolio_result.dataframe_allocation is not None:
-                                weights_df = portfolio_result.dataframe_allocation.copy()
-                                weights_df['Peso (%)'] = weights_df['weights'] * 100
-                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                        with col2:
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            metricas = portfolio_result.get_metrics_dict()
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                                st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                            with col_b:
-                                st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                                st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                                st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                                normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                                st.metric("Normalidad", normalidad)
-                        if portfolio_result.returns is not None:
-                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                            fig = portfolio_result.plot_histogram_streamlit()
-                            st.plotly_chart(fig, use_container_width=True)
-                        if portfolio_result.weights is not None:
-                            st.markdown("#### 🥧 Distribución de Pesos")
-                            fig_pie = go.Figure(data=[go.Pie(
-                                labels=portfolio_result.dataframe_allocation['rics'],
-                                values=portfolio_result.weights,
-                                textinfo='label+percent',
-                            )])
-                            fig_pie.update_layout(title="Distribución Optimizada de Activos")
-                            st.plotly_chart(fig_pie, use_container_width=True)
-                    else:
-                        st.error("❌ Error en la optimización")
+                # Usar las series históricas procesadas
+                returns = df_precios.pct_change().dropna()
+                n_assets = len(df_precios.columns)
+                if estrategia == 'equi-weight':
+                    weights = np.array([1/n_assets] * n_assets)
                 else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
+                    weights = optimize_portfolio(returns, target_return=target_return)
+                portfolio_returns = (returns * weights).sum(axis=1)
+                # Crear objeto PortfolioOutput compatible
+                portfolio_result = PortfolioOutput(
+                    weights=weights,
+                    asset_names=list(df_precios.columns),
+                    returns=returns
+                )
+                portfolio_result.portfolio_returns = portfolio_returns
+                # Agregar dataframe_allocation para compatibilidad con UI
+                portfolio_result.dataframe_allocation = pd.DataFrame({
+                    'rics': list(df_precios.columns),
+                    'weights': weights,
+                    'volatilities': returns.std().values,
+                    'returns': returns.mean().values
+                })
+                st.success("✅ Optimización completada")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("#### 📊 Pesos Optimizados")
+                    if portfolio_result.dataframe_allocation is not None:
+                        weights_df = portfolio_result.dataframe_allocation.copy()
+                        weights_df['Peso (%)'] = weights_df['weights'] * 100
+                        weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                        st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                with col2:
+                    st.markdown("#### 📈 Métricas del Portafolio")
+                    metricas = portfolio_result.get_metrics_dict()
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.metric("Retorno Anual", f"{metricas.get('Annual Return', 0):.2%}")
+                        st.metric("Volatilidad Anual", f"{metricas.get('Annual Volatility', 0):.2%}")
+                        st.metric("Ratio de Sharpe", f"{metricas.get('Sharpe Ratio', 0):.4f}")
+                        st.metric("VaR 95%", f"{metricas.get('VaR 95%', 0):.4f}")
+                    with col_b:
+                        st.metric("Mean Daily", f"{metricas.get('Mean Daily', 0):.4f}")
+                        st.metric("Volatility Daily", f"{metricas.get('Volatility Daily', 0):.4f}")
+                if portfolio_result.portfolio_returns is not None:
+                    st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
+                    fig = portfolio_result.plot_histogram_streamlit()
+                    st.plotly_chart(fig, use_container_width=True)
+                if portfolio_result.weights is not None:
+                    st.markdown("#### 🥧 Distribución de Pesos")
+                    fig_pie = go.Figure(data=[go.Pie(
+                        labels=portfolio_result.dataframe_allocation['rics'],
+                        values=portfolio_result.weights,
+                        textinfo='label+percent',
+                    )])
+                    fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                    st.plotly_chart(fig_pie, use_container_width=True)
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
 
