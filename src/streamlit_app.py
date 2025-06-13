@@ -553,32 +553,31 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
 def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
     """
     Obtiene la serie histórica de precios para un símbolo y mercado específico.
-    Actualizada para usar nombres correctos de mercados IOL.
+    Usa el mapeo de mercados de IOL y busca automáticamente la clase 'D' si existe.
     """
     # Mapear nombres de mercados a los correctos de IOL
     mercados_mapping = {
         'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
+        'NYSE': 'nYSE',
         'NASDAQ': 'nASDAQ',
         'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+        'Merval': 'bCBA'
     }
-    
     mercado_correcto = mercados_mapping.get(mercado, mercado)
-    
-    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    # Buscar clase D si es bono
+    clase_d = obtener_clase_d(simbolo, mercado_correcto, bearer_token)
+    simbolo_final = clase_d if clase_d else simbolo
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo_final}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {bearer_token}'
     }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
-    except Exception:
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error en la solicitud de serie histórica para {simbolo_final} en {mercado_correcto}: {response.status_code}")
+        print(response.text)
         return None
 
 def obtener_clase_d(simbolo, mercado, bearer_token):
@@ -589,30 +588,27 @@ def obtener_clase_d(simbolo, mercado, bearer_token):
     # Mapear nombres de mercados a los correctos de IOL
     mercados_mapping = {
         'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
+        'NYSE': 'nYSE',
         'NASDAQ': 'nASDAQ',
         'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+        'Merval': 'bCBA'
     }
-    
     mercado_correcto = mercados_mapping.get(mercado, mercado)
-    
     url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {bearer_token}'
     }
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            clases = response.json()
-            for clase in clases:
-                if clase.get('simbolo', '').endswith('D'):
-                    return clase['simbolo']
-            return None
-        else:
-            return None
-    except Exception:
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        clases = response.json()
+        for clase in clases:
+            if clase.get('simbolo', '').endswith('D'):
+                return clase['simbolo']
+        return None
+    else:
+        print(f"Error al buscar clases para {simbolo} en {mercado_correcto}: {response.status_code}")
+        print(response.text)
         return None
 
 # --- Portfolio Optimization Functions ---
@@ -1653,6 +1649,7 @@ class manager:
             if ticker.upper() == "ADCGLOA":
                 mercados = ['FCI']
             elif ticker.upper().startswith("AE") or ticker.upper().endswith("D") or ticker.upper().endswith("C") or ticker.upper().endswith("O"):
+                # Bonos (puedes ajustar la lógica según nomenclatura)
                 mercados = ['bCBA']
             else:
                 mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
