@@ -239,116 +239,234 @@ def parse_datetime_flexible(datetime_string):
     except Exception:
         return None
 
+def validar_y_limpiar_datos_series(df_precios):
+    """
+    Valida y limpia datos de series temporales para análisis financiero
+    """
+    if df_precios is None or df_precios.empty:
+        return None, "DataFrame vacío o nulo"
+    
+    # Información inicial
+    st.info(f"🔍 Validando datos: {len(df_precios)} observaciones, {len(df_precios.columns)} activos")
+    
+    # 1. Eliminar columnas con todos los valores NaN
+    columnas_validas = df_precios.columns[~df_precios.isnull().all()]
+    if len(columnas_validas) < len(df_precios.columns):
+        columnas_eliminadas = set(df_precios.columns) - set(columnas_validas)
+        st.warning(f"⚠️ Eliminando {len(columnas_eliminadas)} activos sin datos: {list(columnas_eliminadas)}")
+        df_precios = df_precios[columnas_validas]
+    
+    # 2. Verificar que quedan datos suficientes
+    if df_precios.empty or len(df_precios.columns) == 0:
+        return None, "No quedan activos con datos válidos"
+    
+    # 3. Eliminar filas con más del 50% de valores faltantes
+    umbral_filas = len(df_precios.columns) * 0.5
+    filas_validas = df_precios.isnull().sum(axis=1) <= umbral_filas
+    if filas_validas.sum() < len(df_precios):
+        filas_eliminadas = len(df_precios) - filas_validas.sum()
+        st.info(f"🧹 Eliminando {filas_eliminadas} filas con >50% datos faltantes")
+        df_precios = df_precios[filas_validas]
+    
+    # 4. Verificar precios válidos (positivos)
+    for col in df_precios.columns:
+        precios_negativos = (df_precios[col] <= 0).sum()
+        if precios_negativos > 0:
+            st.warning(f"⚠️ {col}: {precios_negativos} precios negativos o cero encontrados")
+            # Reemplazar precios inválidos con NaN
+            df_precios[col] = df_precios[col].where(df_precios[col] > 0, np.nan)
+    
+    # 5. Detectar y manejar outliers extremos (variaciones > 50% en un día)
+    outliers_detectados = {}
+    for col in df_precios.columns:
+        returns_col = df_precios[col].pct_change()
+        outliers = np.abs(returns_col) > 0.5  # Cambios > 50%
+        if outliers.sum() > 0:
+            outliers_detectados[col] = outliers.sum()
+    
+    if outliers_detectados:
+        st.warning(f"⚠️ Outliers extremos detectados: {outliers_detectados}")
+        with st.expander("🔍 Ver detalles de outliers"):
+            for activo, cantidad in outliers_detectados.items():
+                st.text(f"{activo}: {cantidad} outliers")
+    
+    # 6. Rellenar valores faltantes con método mejorado
+    if df_precios.isnull().any().any():
+        st.info("🔧 Rellenando valores faltantes...")
+        
+        # Forward fill primero, luego backward fill
+        df_precios = df_precios.ffill().bfill()
+        
+        # Si aún hay NaN, usar interpolación lineal
+        if df_precios.isnull().any().any():
+            df_precios = df_precios.interpolate(method='linear')
+        
+        # Eliminar filas que aún tengan NaN
+        df_precios = df_precios.dropna()
+    
+    # 7. Verificación final
+    if df_precios.empty:
+        return None, "No quedan datos válidos después de la limpieza"
+    
+    if len(df_precios) < 30:
+        return None, f"Insuficientes observaciones después de limpieza: {len(df_precios)} < 30"
+    
+    # 8. Verificar variabilidad mínima
+    columnas_constantes = []
+    for col in df_precios.columns:
+        if df_precios[col].std() == 0 or df_precios[col].nunique() <= 1:
+            columnas_constantes.append(col)
+    
+    if columnas_constantes:
+        st.warning(f"⚠️ Eliminando activos con precios constantes: {columnas_constantes}")
+        df_precios = df_precios.drop(columns=columnas_constantes)
+    
+    if df_precios.empty or len(df_precios.columns) < 2:
+        return None, "Insuficientes activos con variabilidad después de limpieza"
+    
+    # Resumen final
+    st.success(f"✅ Datos validados: {len(df_precios)} observaciones, {len(df_precios.columns)} activos")
+    
+    return df_precios, "Validación exitosa"
+
+def detectar_mercado_automatico(simbolo, token_portador):
+    """
+    Detecta automáticamente el mercado de un activo probando diferentes mercados
+    Retorna (mercado, simbolo_corregido) o (None, None) si no se encuentra
+    """
+    # Lista de mercados principales de IOL en orden de prioridad
+    mercados_iol = [
+        'bCBA',      # Buenos Aires (principal mercado argentino)
+        'nYSE',      # New York Stock Exchange
+        'nASDAQ',    # NASDAQ
+        'rOFEX',     # ROFEX (mercado de futuros)
+        'FCI',       # Fondos Comunes de Inversión
+        'Opciones'   # Mercado de opciones
+    ]
+    
+    for mercado in mercados_iol:
+        try:
+            # Primero probar el símbolo tal como está
+            serie = obtener_serie_historica_iol(
+                token_portador, mercado, simbolo, 
+                (date.today() - timedelta(days=30)).strftime('%Y-%m-%d'),
+                date.today().strftime('%Y-%m-%d')
+            )
+            
+            if serie is not None and len(serie) > 5:
+                return mercado, simbolo
+            
+            # Si es bCBA, intentar buscar clase D para bonos
+            if mercado == 'bCBA':
+                clase_d = obtener_clase_d(simbolo, mercado, token_portador)
+                if clase_d:
+                    serie_d = obtener_serie_historica_iol(
+                        token_portador, mercado, clase_d,
+                        (date.today() - timedelta(days=30)).strftime('%Y-%m-%d'),
+                        date.today().strftime('%Y-%m-%d')
+                    )
+                    if serie_d is not None and len(serie_d) > 5:
+                        return mercado, clase_d
+                        
+        except Exception:
+            continue
+    
+    return None, None
+
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
     Obtiene la serie histórica de precios de un título desde la API de IOL.
-    Corrige los endpoints y parámetros para acciones/bonos, opciones y FCI.
+    Actualizada para manejar correctamente la estructura de respuesta de la API.
     """
+    # Determinar endpoint según tipo de instrumento
+    if mercado == "Opciones":
+        url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    elif mercado == "FCI":
+        url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    else:
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
-
-    # --- Endpoint y parseo según tipo ---
-    if mercado.lower() in ["opciones", "opcion"]:
-        # Opciones: Orleans Panel
-        url = (
-            f"https://api.invertironline.com/api/v2/cotizaciones-orleans-panel/"
-            f"{simbolo}/argentina/Todos?cotizacionInstrumentoModel.instrumento=opciones&cotizacionInstrumentoModel.pais=argentina"
-        )
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                # Orleans Panel devuelve {"titulos": [...]}
-                titulos = data.get("titulos", [])
-                precios = []
-                fechas = []
-                for item in titulos:
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if not data:
+                return None
+            
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    # Usar ultimoPrecio como precio principal según la documentación
                     precio = item.get('ultimoPrecio')
+                    
+                    # Si ultimoPrecio es 0 o None, intentar otros campos
                     if not precio or precio == 0:
                         precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                    fecha_str = item.get('fecha')
-                    if precio is not None and precio > 0 and fecha_str:
-                        fecha_parsed = parse_datetime_flexible(fecha_str)
-                        if fecha_parsed is not None:
-                            precios.append(precio)
-                            fechas.append(fecha_parsed)
-                if precios and fechas:
-                    serie = pd.Series(precios, index=fechas).sort_index()
-                    serie = serie[~serie.index.duplicated(keep='last')]
-                    return serie
-                else:
-                    return None
-            else:
-                return None
-        except Exception:
-            return None
-
-    elif mercado.lower() == "fci":
-        # FCI: solo cotización actual, no serie histórica
-        url = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                # Solo un valor actual, lo devolvemos como serie de un punto
-                precio = data.get('ultimoOperado') or data.get('ultimoPrecio') or data.get('valorCuotaparte')
-                fecha_str = data.get('fechaCorte') or data.get('fecha')
-                if precio is not None and fecha_str:
-                    fecha_parsed = parse_datetime_flexible(fecha_str)
-                    if fecha_parsed is not None:
-                        return pd.Series([precio], index=[fecha_parsed])
-                return None
-            else:
-                return None
-        except Exception:
-            return None
-
-    else:
-        # Acciones/Bonos: endpoint estándar
-        # Mapear nombres de mercados a los correctos de IOL
-        mercados_mapping = {
-            'BCBA': 'bCBA',
-            'NYSE': 'nYSE',
-            'NASDAQ': 'nASDAQ',
-            'ROFEX': 'rOFEX',
-            'Merval': 'bCBA'
-        }
-        mercado_correcto = mercados_mapping.get(mercado, mercado)
-        url = (
-            f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/"
-            f"{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        )
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                if not data:
-                    return None
-                precios = []
-                fechas = []
-                for item in data:
-                    precio = item.get('ultimoPrecio')
-                    if not precio or precio == 0:
-                        precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                    
                     fecha_str = item.get('fechaHora')
+                    
                     if precio is not None and precio > 0 and fecha_str:
                         fecha_parsed = parse_datetime_flexible(fecha_str)
                         if fecha_parsed is not None:
                             precios.append(precio)
                             fechas.append(fecha_parsed)
-                if precios and fechas:
-                    serie = pd.Series(precios, index=fechas).sort_index()
-                    serie = serie[~serie.index.duplicated(keep='last')]
-                    return serie
-                else:
-                    return None
+                            
+                except Exception as e:
+                    # Log individual item errors but continue processing
+                    continue
+            
+            if precios and fechas:
+                # Crear serie ordenada por fecha
+                serie = pd.Series(precios, index=fechas)
+                serie = serie.sort_index()  # Asegurar orden cronológico
+                
+                # Eliminar duplicados manteniendo el último valor
+                serie = serie[~serie.index.duplicated(keep='last')]
+                
+                return serie
             else:
                 return None
-        except Exception:
+                
+        elif response.status_code == 401:
+            # Token expirado o inválido
+            st.warning(f"⚠️ Token de autorización inválido para {simbolo}")
             return None
+            
+        elif response.status_code == 404:
+            # Símbolo no encontrado en este mercado
+            return None
+            
+        elif response.status_code == 400:
+            # Parámetros inválidos
+            st.warning(f"⚠️ Parámetros inválidos para {simbolo} en {mercado}")
+            return None
+            
+        elif response.status_code == 500:
+            # Error del servidor - silencioso para no interrumpir el flujo
+            return None
+            
+        else:
+            # Otros errores HTTP
+            return None
+            
+    except requests.exceptions.Timeout:
+        # Timeout - silencioso
+        return None
+    except requests.exceptions.ConnectionError:
+        # Error de conexión - silencioso
+        return None
+    except Exception as e:
+        # Error general - silencioso para no interrumpir el análisis
+        return None
 
 def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
     """
@@ -408,39 +526,58 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         for idx, simbolo in enumerate(simbolos):
             # Actualizar barra de progreso
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
-            
-            # Usar mercados correctos según la API de IOL (sin 'Merval')
+              # Usar mercados correctos con detección automática
             mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
             serie_obtenida = False
             
-            for mercado in mercados:
+            # Primero intentar detección automática de mercado
+            mercado_detectado, simbolo_corregido = detectar_mercado_automatico(simbolo, token_portador)
+            
+            if mercado_detectado and simbolo_corregido:
                 try:
-                    # Buscar clase D si es posible (solo para mercados tradicionales)
-                    simbolo_consulta = simbolo
-                    if mercado not in ['Opciones', 'FCI']:
-                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
-                        if clase_d:
-                            simbolo_consulta = clase_d
-                    
                     serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta, 
+                        token_portador, mercado_detectado, simbolo_corregido, 
                         fecha_desde_str, fecha_hasta_str
                     )
                     
-                    if serie is not None and len(serie) > 10:
-                        # Verificar que los datos no sean todos iguales
-                        if serie.nunique() > 1:
-                            df_precios[simbolo_consulta] = serie
-                            simbolos_exitosos.append(simbolo_consulta)
-                            serie_obtenida = True
-                            
-                            # Mostrar información del símbolo exitoso
-                            st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
-                            break
-                        
+                    if serie is not None and len(serie) > 10 and serie.nunique() > 1:
+                        df_precios[simbolo_corregido] = serie
+                        simbolos_exitosos.append(simbolo_corregido)
+                        serie_obtenida = True
+                        st.success(f"✅ {simbolo_corregido} ({mercado_detectado}): {len(serie)} puntos de datos [Auto-detectado]")
                 except Exception as e:
-                    detalles_errores[f"{simbolo}_{mercado}"] = str(e)
-                    continue
+                    detalles_errores[f"{simbolo}_auto_{mercado_detectado}"] = str(e)
+            
+            # Si la detección automática falló, probar manualmente todos los mercados
+            if not serie_obtenida:
+                for mercado in mercados:
+                    try:
+                        # Buscar clase D si es posible (solo para mercados tradicionales)
+                        simbolo_consulta = simbolo
+                        if mercado not in ['Opciones', 'FCI']:
+                            clase_d = obtener_clase_d(simbolo, mercado, token_portador)
+                            if clase_d:
+                                simbolo_consulta = clase_d
+                        
+                        serie = obtener_serie_historica_iol(
+                            token_portador, mercado, simbolo_consulta, 
+                            fecha_desde_str, fecha_hasta_str
+                        )
+                        
+                        if serie is not None and len(serie) > 10:
+                            # Verificar que los datos no sean todos iguales
+                            if serie.nunique() > 1:
+                                df_precios[simbolo_consulta] = serie
+                                simbolos_exitosos.append(simbolo_consulta)
+                                serie_obtenida = True
+                                
+                                # Mostrar información del símbolo exitoso
+                                st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
+                                break
+                            
+                    except Exception as e:
+                        detalles_errores[f"{simbolo}_{mercado}"] = str(e)
+                        continue
             
             # Si IOL falló completamente, intentar con yfinance como fallback
             if not serie_obtenida:
@@ -504,25 +641,27 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         if len(simbolos_exitosos) < len(simbolos):
             st.info(f"ℹ️ Continuando análisis con {len(simbolos_exitosos)} de {len(simbolos)} activos disponibles.")
-        
-        # Alinear datos por fechas comunes con mejor manejo
+          # Alinear datos por fechas comunes con mejor manejo
         st.info(f"📊 Alineando datos de {len(df_precios.columns)} activos...")
         
-        # Verificar que tenemos datos válidos antes de alinear
-        if df_precios.empty:
-            st.error("❌ DataFrame de precios está vacío")
+        # Usar función de validación y limpieza mejorada
+        df_precios_validado, mensaje_validacion = validar_y_limpiar_datos_series(df_precios)
+        
+        if df_precios_validado is None:
+            st.error(f"❌ Error en validación de datos: {mensaje_validacion}")
             return None, None, None
+        
+        df_precios = df_precios_validado
         
         # Mostrar información de debug sobre las fechas
         with st.expander("🔍 Debug - Información de fechas"):
             for col in df_precios.columns:
                 serie = df_precios[col]
                 st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
-        
-        # Intentar diferentes estrategias de alineación
+          # Intentar diferentes estrategias de alineación
         try:
-            # Estrategia 1: Forward fill y luego backward fill
-            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            # Estrategia 1: Forward fill y luego backward fill (pandas 2.0+ compatible)
+            df_precios_filled = df_precios.ffill().bfill()
             
             # Estrategia 2: Interpolar valores faltantes
             df_precios_interpolated = df_precios.interpolate(method='time')
@@ -663,41 +802,98 @@ def calculate_portfolio_metrics(returns, weights):
 def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
     """
     Optimiza un portafolio usando teoría moderna de portafolio
+    Versión mejorada con mejor manejo de errores y fallbacks
     """
     try:
-        from scipy.optimize import minimize
+        # Intentar importar scipy
+        try:
+            from scipy.optimize import minimize
+            scipy_available = True
+        except ImportError:
+            scipy_available = False
+            st.warning("scipy no disponible. Usando optimización simplificada.")
         
         n_assets = len(returns.columns)
         
+        if not scipy_available:
+            # Fallback: optimización simple sin scipy
+            if target_return is not None:
+                # Pesos proporcionales a los retornos esperados
+                mean_returns = returns.mean()
+                if mean_returns.sum() > 0:
+                    weights = mean_returns / mean_returns.sum()
+                    weights = weights.values
+                else:
+                    weights = np.array([1. / n_assets] * n_assets)
+            else:
+                # Pesos iguales
+                weights = np.array([1. / n_assets] * n_assets)
+            
+            return weights
+        
         # Función objetivo para maximizar el ratio de Sharpe
         def negative_sharpe(weights):
-            portfolio_return = np.sum(returns.mean() * weights) * 252
-            portfolio_std = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
-            if portfolio_std == 0:
-                return -np.inf
-            sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
-            return -sharpe_ratio
+            try:
+                portfolio_return = np.sum(returns.mean() * weights) * 252
+                portfolio_variance = np.dot(weights.T, np.dot(returns.cov() * 252, weights))
+                
+                if portfolio_variance <= 0:
+                    return 1e6  # Penalización alta
+                
+                portfolio_std = np.sqrt(portfolio_variance)
+                sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
+                return -sharpe_ratio
+            except Exception:
+                return 1e6  # Retornar valor alto en caso de error
         
         # Restricciones
         constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-        bounds = tuple((0, 1) for _ in range(n_assets))
+        bounds = tuple((0.01, 0.40) for _ in range(n_assets))  # Límites más conservadores
         
         # Pesos iniciales igualmente distribuidos
-        initial_guess = n_assets * [1. / n_assets]
+        initial_guess = np.array([1. / n_assets] * n_assets)
         
-        # Optimización
-        result = minimize(negative_sharpe, initial_guess, method='SLSQP',
-                         bounds=bounds, constraints=constraints)
+        # Múltiples intentos de optimización con diferentes métodos
+        methods = ['SLSQP', 'L-BFGS-B', 'TNC']
+        best_result = None
+        best_sharpe = -np.inf
         
-        if result.success:
-            return result.x
+        for method in methods:
+            try:
+                result = minimize(
+                    negative_sharpe, 
+                    initial_guess, 
+                    method=method,
+                    bounds=bounds, 
+                    constraints=constraints,
+                    options={'maxiter': 1000, 'ftol': 1e-9}
+                )
+                
+                if result.success and -result.fun > best_sharpe:
+                    best_result = result
+                    best_sharpe = -result.fun
+                    
+            except Exception as e:
+                continue
+        
+        if best_result is not None and best_result.success:
+            weights = best_result.x
+            # Normalizar pesos para asegurar que sumen 1
+            weights = weights / np.sum(weights)
+            return weights
         else:
-            st.warning("La optimización no convergió. Usando pesos iguales.")
-            return np.array(initial_guess)
+            st.warning("La optimización no convergió. Usando optimización conservadora.")
             
-    except ImportError:
-        st.warning("scipy no disponible. Usando pesos iguales.")
-        return np.array([1/n_assets] * n_assets)
+            # Fallback: optimización conservadora basada en volatilidad inversa
+            try:
+                volatilities = returns.std()
+                inv_vol = 1 / volatilities
+                weights = inv_vol / inv_vol.sum()
+                return weights.values
+            except Exception:
+                # Último fallback: pesos iguales
+                return np.array([1. / n_assets] * n_assets)
+            
     except Exception as e:
         st.warning(f"Error en optimización: {str(e)}. Usando pesos iguales.")
         return np.array([1/n_assets] * n_assets)
@@ -730,30 +926,41 @@ def calcular_metricas_portafolio(activos_data, valor_total):
         q90 = np.percentile(valores_array, 90)
         q95 = np.percentile(valores_array, 95)
         
-        # Calcular concentración del portafolio
-        pesos = valores_array / valor_total
-        concentracion = np.sum(pesos ** 2)  # Índice de Herfindahl
+        # Calcular concentración del portafolio (Índice de Herfindahl-Hirschman)
+        if valor_total > 0:
+            pesos = valores_array / valor_total
+            concentracion = np.sum(pesos ** 2)  # Índice de Herfindahl
+        else:
+            concentracion = 0
         
-        # Simular retornos esperados (usando distribución normal)
-        # Asumiendo retorno anual promedio del 8% con volatilidad del 20%
-        retorno_esperado_anual = 0.08
-        volatilidad_anual = 0.20
+        # Parámetros de simulación más realistas para el mercado argentino
+        retorno_esperado_anual = 0.15  # 15% retorno esperado (inflación + prima de riesgo)
+        volatilidad_anual = 0.35       # 35% volatilidad (mercado emergente)
         
         # Calcular métricas en términos monetarios
         retorno_esperado_pesos = valor_total * retorno_esperado_anual
         riesgo_anual_pesos = valor_total * volatilidad_anual
         
-        # Simulación Monte Carlo simple para P&L esperado
+        # Simulación Monte Carlo mejorada para P&L esperado
         np.random.seed(42)
-        num_simulaciones = 1000
+        num_simulaciones = 10000  # Más simulaciones para mejor precisión
+        
+        # Distribución normal con parámetros del mercado argentino
         retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
         pl_simulado = valor_total * retornos_simulados
         
-        # Probabilidades
+        # Probabilidades corregidas
         prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
         prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
         prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
         prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
+        prob_perdida_mayor_20 = np.sum(pl_simulado < -valor_total * 0.20) / num_simulaciones
+        prob_ganancia_mayor_20 = np.sum(pl_simulado > valor_total * 0.20) / num_simulaciones
+        
+        # Calcular métricas de riesgo adicionales
+        var_99_monetario = np.percentile(pl_simulado, 1)   # VaR 99%
+        var_95_monetario = np.percentile(pl_simulado, 5)   # VaR 95%
+        cvar_95 = np.mean(pl_simulado[pl_simulado <= var_95_monetario])  # CVaR (Expected Shortfall)
         
         return {
             'valor_total': valor_total,
@@ -777,11 +984,17 @@ def calcular_metricas_portafolio(activos_data, valor_total):
             'pl_esperado_medio': np.mean(pl_simulado),
             'pl_percentil_5': np.percentile(pl_simulado, 5),
             'pl_percentil_95': np.percentile(pl_simulado, 95),
+            'var_99_monetario': var_99_monetario,
+            'var_95_monetario': var_95_monetario,
+            'cvar_95': cvar_95,
+            'sharpe_estimado': retorno_esperado_anual / volatilidad_anual,
             'probabilidades': {
                 'ganancia': prob_ganancia,
                 'perdida': prob_perdida,
                 'perdida_mayor_10': prob_perdida_mayor_10,
-                'ganancia_mayor_10': prob_ganancia_mayor_10
+                'ganancia_mayor_10': prob_ganancia_mayor_10,
+                'perdida_mayor_20': prob_perdida_mayor_20,
+                'ganancia_mayor_20': prob_ganancia_mayor_20
             }
         }
     except Exception as e:
@@ -986,8 +1199,7 @@ def mostrar_resumen_portafolio(portafolio):
                 delta=f"{(metricas['pl_percentil_5']/valor_total*100):.1f}%",
                 help="Pérdida máxima esperada en el peor 5% de los casos"
             )
-        
-        # === 4. PROBABILIDADES DE ESCENARIOS ===
+          # === 4. PROBABILIDADES DE ESCENARIOS ===
         if metricas:
             st.markdown("#### 🎯 Probabilidades de Escenarios")
             
@@ -1013,6 +1225,29 @@ def mostrar_resumen_portafolio(portafolio):
                 "Prob. Pérdida > 10%", 
                 f"{probs['perdida_mayor_10']*100:.1f}%",
                 help="Probabilidad de perder más del 10%"
+            )
+            
+            # Segunda fila de probabilidades para escenarios extremos
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric(
+                "VaR 99% (monetario)", 
+                f"${metricas['var_99_monetario']:,.0f}",
+                help="Pérdida máxima esperada en el peor 1% de los casos"
+            )
+            col2.metric(
+                "CVaR 95%", 
+                f"${metricas['cvar_95']:,.0f}",
+                help="Pérdida promedio cuando se supera el VaR 95%"
+            )
+            col3.metric(
+                "Prob. Ganancia > 20%", 
+                f"{probs['ganancia_mayor_20']*100:.1f}%",
+                help="Probabilidad de obtener más del 20% de ganancia"
+            )
+            col4.metric(
+                "Sharpe Ratio Estimado", 
+                f"{metricas['sharpe_estimado']:.2f}",
+                help="Relación retorno/riesgo estimada"
             )
         
         # === 5. DISTRIBUCIÓN DETALLADA DE ACTIVOS ===
