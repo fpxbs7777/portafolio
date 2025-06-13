@@ -143,17 +143,21 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         elif respuesta.status_code == 404:
             st.warning(f"⚠️ Cliente {id_cliente} no encontrado o sin portafolio")
             st.error(f"Respuesta de la API: {respuesta.text}")
+            st.error("No se pudo obtener el portafolio para optimización")
             return None
         elif respuesta.status_code == 401:
             st.error("🔐 Token de autorización expirado o inválido")
             st.error(f"Respuesta de la API: {respuesta.text}")
+            st.error("No se pudo obtener el portafolio para optimización")
             return None
         else:
             st.error(f'❌ Error al obtener portafolio: {respuesta.status_code}')
             st.error(f'📄 Respuesta: {respuesta.text}')
+            st.error("No se pudo obtener el portafolio para optimización")
             return None
     except Exception as e:
         st.error(f'💥 Error de conexión al obtener portafolio: {str(e)}')
+        st.error("No se pudo obtener el portafolio para optimización")
         return None
 
 def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
@@ -1868,6 +1872,6 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
-# Asegurar que main() se ejecute cuando se corre el script
+
 if __name__ == "__main__":
     main()
