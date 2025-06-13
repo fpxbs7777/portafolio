@@ -142,9 +142,11 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
             return portafolio_data
         elif respuesta.status_code == 404:
             st.warning(f"⚠️ Cliente {id_cliente} no encontrado o sin portafolio")
+            st.error(f"Respuesta de la API: {respuesta.text}")
             return None
         elif respuesta.status_code == 401:
             st.error("🔐 Token de autorización expirado o inválido")
+            st.error(f"Respuesta de la API: {respuesta.text}")
             return None
         else:
             st.error(f'❌ Error al obtener portafolio: {respuesta.status_code}')
