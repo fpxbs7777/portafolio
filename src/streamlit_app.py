@@ -370,85 +370,86 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
-    Obtiene datos históricos para optimización de portafolio con manejo mejorado de errores.
-    Actualizada para mejor compatibilidad con la API de IOL.
+    Obtiene datos históricos para optimización de portafolio, detectando el mercado correcto.
+    Para FCI, usa el retorno anual como serie constante.
     """
     try:
         df_precios = pd.DataFrame()
         simbolos_exitosos = []
         simbolos_fallidos = []
         detalles_errores = {}
-        
-        # Convertir fechas a string en formato correcto
+
         fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
         fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
-        
+
         st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
-        
-        # Crear barra de progreso
+
         progress_bar = st.progress(0)
         total_simbolos = len(simbolos)
-        
+
         for idx, simbolo in enumerate(simbolos):
-            # Actualizar barra de progreso
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
-            
-            # Usar mercados correctos según la API de IOL (sin 'Merval')
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
             serie_obtenida = False
-            
-            for mercado in mercados:
-                try:
-                    # Buscar clase D si es posible (solo para mercados tradicionales)
-                    simbolo_consulta = simbolo
-                    if mercado not in ['Opciones', 'FCI']:
-                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
-                        if clase_d:
-                            simbolo_consulta = clase_d
-                    
-                    serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta, 
-                        fecha_desde_str, fecha_hasta_str
-                    )
-                    
-                    if serie is not None and len(serie) > 10:
-                        # Verificar que los datos no sean todos iguales
-                        if serie.nunique() > 1:
-                            df_precios[simbolo_consulta] = serie
-                            simbolos_exitosos.append(simbolo_consulta)
-                            serie_obtenida = True
-                            
-                            # Mostrar información del símbolo exitoso
-                            st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
-                            break
-                        
-                except Exception as e:
-                    detalles_errores[f"{simbolo}_{mercado}"] = str(e)
-                    continue
-            
-            # Si IOL falló completamente, intentar con yfinance como fallback
+
+            mercado = detectar_mercado_activo(token_portador, simbolo)
+            if mercado == 'FCI':
+                # Obtener info de FCI y simular serie de precios con retorno anual
+                info_fci = obtener_info_fci(token_portador, simbolo)
+                if info_fci and 'variacionAnual' in info_fci:
+                    variacion_anual = info_fci.get('variacionAnual', 0)
+                    # Simular una serie de precios con ese retorno anual
+                    dias = (fecha_hasta - fecha_desde).days
+                    fechas = pd.date_range(fecha_desde, fecha_hasta, freq='B')
+                    precio_inicial = 100
+                    # Suponemos crecimiento exponencial
+                    precios = precio_inicial * np.exp(np.linspace(0, np.log(1 + variacion_anual/100), len(fechas)))
+                    serie = pd.Series(precios, index=fechas)
+                    df_precios[simbolo] = serie
+                    simbolos_exitosos.append(simbolo)
+                    serie_obtenida = True
+                    st.success(f"✅ {simbolo} (FCI): Serie simulada con retorno anual {variacion_anual:.2f}%")
+                else:
+                    detalles_errores[simbolo] = "No se pudo obtener info FCI"
+            elif mercado == 'Opciones':
+                serie = obtener_serie_historica_iol(
+                    token_portador, 'Opciones', simbolo, fecha_desde_str, fecha_hasta_str
+                )
+                if serie is not None and len(serie) > 10 and serie.nunique() > 1:
+                    df_precios[simbolo] = serie
+                    simbolos_exitosos.append(simbolo)
+                    serie_obtenida = True
+                    st.success(f"✅ {simbolo} (Opciones): {len(serie)} puntos de datos")
+            elif mercado:
+                # Buscar clase D si es posible (solo para bonos)
+                clase_d = obtener_clase_d(simbolo, mercado, token_portador)
+                simbolo_consulta = clase_d if clase_d else simbolo
+                serie = obtener_serie_historica_iol(
+                    token_portador, mercado, simbolo_consulta, fecha_desde_str, fecha_hasta_str
+                )
+                if serie is not None and len(serie) > 10 and serie.nunique() > 1:
+                    df_precios[simbolo_consulta] = serie
+                    simbolos_exitosos.append(simbolo_consulta)
+                    serie_obtenida = True
+                    st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
+            # Fallback a yfinance solo si no se obtuvo nada
             if not serie_obtenida:
                 try:
                     serie_yf = obtener_datos_alternativos_yfinance(
                         simbolo, fecha_desde, fecha_hasta
                     )
-                    if serie_yf is not None and len(serie_yf) > 10:
-                        if serie_yf.nunique() > 1:
-                            df_precios[simbolo] = serie_yf
-                            simbolos_exitosos.append(simbolo)
-                            serie_obtenida = True
-                            st.info(f"ℹ️ {simbolo} (Yahoo Finance): {len(serie_yf)} puntos de datos")
+                    if serie_yf is not None and len(serie_yf) > 10 and serie_yf.nunique() > 1:
+                        df_precios[simbolo] = serie_yf
+                        simbolos_exitosos.append(simbolo)
+                        serie_obtenida = True
+                        st.info(f"ℹ️ {simbolo} (Yahoo Finance): {len(serie_yf)} puntos de datos")
                 except Exception as e:
                     detalles_errores[f"{simbolo}_yfinance"] = str(e)
-            
             if not serie_obtenida:
                 simbolos_fallidos.append(simbolo)
                 st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
-        
-        # Limpiar barra de progreso
+
         progress_bar.empty()
-        
-        # Informar resultados detallados
+
         if simbolos_exitosos:
             st.success(f"✅ Datos obtenidos para {len(simbolos_exitosos)} activos")
             with st.expander("📋 Ver activos exitosos"):
@@ -456,18 +457,17 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     if simbolo in df_precios.columns:
                         datos_info = f"{simbolo}: {len(df_precios[simbolo])} puntos, rango: {df_precios[simbolo].min():.2f} - {df_precios[simbolo].max():.2f}"
                         st.text(datos_info)
-        
+
         if simbolos_fallidos:
             st.warning(f"⚠️ No se pudieron obtener datos para {len(simbolos_fallidos)} activos")
             with st.expander("❌ Ver activos fallidos y errores"):
                 for simbolo in simbolos_fallidos:
                     st.text(f"• {simbolo}")
-                
                 if detalles_errores:
                     st.markdown("**Detalles de errores:**")
                     for key, error in detalles_errores.items():
                         st.text(f"{key}: {error}")
-        
+
         # Continuar si tenemos al menos 2 activos
         if len(simbolos_exitosos) < 2:
             if len(simbolos_exitosos) == 1:
@@ -1658,6 +1658,7 @@ def main():
                 if st.button("🔄 Actualizar lista de clientes"):
                     with st.spinner("Actualizando clientes..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+
                         st.session_state.clientes = nuevos_clientes
                         st.success("✅ Lista de clientes actualizada")
                         st.rerun()
