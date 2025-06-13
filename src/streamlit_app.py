@@ -2000,3 +2000,6 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Selecciona activos y series aleatoriamente
         - Simula portafolios para comparar con estrategias óptimas
         """)
+
+if __name__ == "__main__":
+    main()
