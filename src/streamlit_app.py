@@ -99,12 +99,13 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
         respuesta = requests.get(url_estado_cuenta, headers=encabezados)
-        st.info(f"💰 Solicitando estado de cuenta - URL: {url_estado_cuenta}")
-        st.info(f"📊 Status Code: {respuesta.status_code}")
+        # Eliminar mensajes de interfaz innecesarios
+        # st.info(f"💰 Solicitando estado de cuenta - URL: {url_estado_cuenta}")
+        # st.info(f"📊 Status Code: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
             estado_data = respuesta.json()
-            st.success(f"✅ Estado de cuenta obtenido exitosamente")
+            # st.success(f"✅ Estado de cuenta obtenido exitosamente")
             return estado_data
         elif respuesta.status_code == 401:
             st.warning(f"🔐 No autorizado - Token inválido o permisos insuficientes")
@@ -1868,5 +1869,5 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - No considera correlaciones históricas
         """)
 
-# Ejecutar la aplicación Streamlit siempre, incluso en entorno interactivo
-main()
+if __name__ == "__main__":
+    main()
