@@ -1468,40 +1468,142 @@ class PortfolioOutput:
 
 def main():
     """
-    Función principal de la aplicación Streamlit
+    Función principal de la aplicación Streamlit con manejo mejorado de errores
     """
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
-    
-    # Inicializar session state
-    if 'token_acceso' not in st.session_state:
-        st.session_state.token_acceso = None
-    if 'refresh_token' not in st.session_state:
-        st.session_state.refresh_token = None
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = []
-    if 'cliente_seleccionado' not in st.session_state:
-        st.session_state.cliente_seleccionado = None
-    # Add missing date parameters
-    if 'fecha_desde' not in st.session_state:
-        st.session_state.fecha_desde = date.today() - timedelta(days=365)
-    if 'fecha_hasta' not in st.session_state:
-        st.session_state.fecha_hasta = date.today()
-    
-    # Sidebar para autenticación y configuración
+    try:
+        # Configurar página
+        st.title("📊 IOL Portfolio Analyzer")
+        st.markdown("### Analizador Avanzado de Portafolios IOL")
+        
+        # Debug: Mostrar información del sistema
+        with st.expander("🔍 Debug - Información del Sistema", expanded=False):
+            st.write(f"Streamlit version: {st.__version__}")
+            st.write(f"Session state keys: {list(st.session_state.keys())}")
+            st.write(f"Python version: {sys.version}")
+        
+        # Inicializar session state de forma segura
+        init_session_state()
+        
+        # Sidebar para autenticación y configuración
+        try:
+            render_sidebar()
+        except Exception as e:
+            st.error(f"❌ Error en sidebar: {str(e)}")
+            st.warning("Continuando con configuración básica...")
+        
+        # Contenido principal con manejo de errores mejorado
+        try:
+            if st.session_state.get('token_acceso') and st.session_state.get('cliente_seleccionado'):
+                mostrar_analisis_portafolio()
+            elif st.session_state.get('token_acceso'):
+                st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
+                
+                # Opción para análisis sin cliente específico
+                st.markdown("---")
+                st.markdown("#### 🔍 Análisis Alternativo")
+                if st.button("📊 Análizar Estado de Cuenta Directo"):
+                    with st.spinner("Obteniendo estado de cuenta..."):
+                        estado_cuenta = obtener_estado_cuenta(st.session_state.token_acceso)
+                        if estado_cuenta:
+                            st.success("✅ Estado de cuenta obtenido")
+                            st.json(estado_cuenta)
+                        else:
+                            st.warning("⚠️ No se pudo obtener el estado de cuenta")
+            else:
+                st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
+                
+                # Mostrar información de ayuda
+                st.markdown("---")
+                st.markdown("#### 💡 Información de la Aplicación")
+                st.markdown("""
+                Esta aplicación le permite:
+                - 📊 Analizar su portafolio de IOL
+                - 📈 Obtener métricas de riesgo y rendimiento
+                - 🎯 Optimizar la distribución de activos
+                - 📋 Analizar FCIs disponibles
+                
+                **Para comenzar:**
+                1. Ingrese sus credenciales de IOL en la barra lateral
+                2. Seleccione un cliente de la lista
+                3. Explore las diferentes funcionalidades disponibles
+                """)
+                
+        except Exception as e:
+            st.error(f"❌ Error en contenido principal: {str(e)}")
+            st.error("🔄 Por favor, recargue la página e intente nuevamente")
+            
+            # Mostrar información de debug en caso de error
+            with st.expander("🔍 Información de Debug"):
+                st.code(f"Error: {str(e)}")
+                st.code(f"Session state: {dict(st.session_state)}")
+                
+    except Exception as e:
+        st.error(f"❌ Error crítico en la aplicación: {str(e)}")
+        st.markdown("### 🔧 Soluciones Sugeridas:")
+        st.markdown("""
+        1. **Recargue la página** completamente (Ctrl+F5)
+        2. **Verifique su conexión a internet**
+        3. **Limpie la caché del navegador**
+        4. **Contacte soporte técnico** si el problema persiste
+        """)
+
+def init_session_state():
+    """
+    Inicializa el session state de forma segura
+    """
+    try:
+        defaults = {
+            'token_acceso': None,
+            'refresh_token': None,
+            'clientes': [],
+            'cliente_seleccionado': None,
+            'fecha_desde': date.today() - timedelta(days=365),
+            'fecha_hasta': date.today(),
+            'debug_mode': False
+        }
+        
+        for key, default_value in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = default_value
+                
+    except Exception as e:
+        st.error(f"Error inicializando session state: {str(e)}")
+
+def render_sidebar():
+    """
+    Renderiza la barra lateral con manejo de errores
+    """
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
         
+        # Toggle de modo debug
+        st.session_state.debug_mode = st.checkbox("🔍 Modo Debug", value=st.session_state.get('debug_mode', False))
+        
         if st.session_state.token_acceso is None:
-            # Formulario de login
-            with st.form("login_form"):
-                st.markdown("#### Ingrese sus credenciales de IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-                
-                if st.form_submit_button("🚀 Conectar"):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando con IOL..."):
+            render_login_form()
+        else:
+            render_authenticated_sidebar()
+
+def render_login_form():
+    """
+    Renderiza el formulario de login
+    """
+    try:
+        with st.form("login_form"):
+            st.markdown("#### Ingrese sus credenciales de IOL")
+            usuario = st.text_input("Usuario", placeholder="su_usuario")
+            contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                conectar = st.form_submit_button("🚀 Conectar")
+            with col2:
+                demo_mode = st.form_submit_button("📋 Modo Demo")
+            
+            if conectar:
+                if usuario and contraseña:
+                    with st.spinner("Conectando con IOL..."):
+                        try:
                             token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
                             
                             if token_acceso:
@@ -1511,187 +1613,274 @@ def main():
                                 st.rerun()
                             else:
                                 st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
-        else:
-            # Usuario conectado
-            st.success("✅ Conectado a IOL")
-            
-            # Configuración de fechas
-            st.markdown("#### 📅 Configuración de Fechas")
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_desde = st.date_input(
-                    "Fecha desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
-                )
-            with col2:
-                fecha_hasta = st.date_input(
-                    "Fecha hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
-            
-            st.session_state.fecha_desde = fecha_desde
-            st.session_state.fecha_hasta = fecha_hasta
-            
-            # Obtener lista de clientes
-            if not st.session_state.clientes:
-                with st.spinner("Cargando clientes..."):
-                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                    st.session_state.clientes = clientes
-            
-            clientes = st.session_state.clientes
-            
-            if clientes:
-                st.info(f"👥 {len(clientes)} clientes disponibles")
-                
-                # Seleccionar cliente
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
-                )
-                
-                # Guardar cliente seleccionado en session state
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
-                
-                if st.button("🔄 Actualizar lista de clientes"):
-                    with st.spinner("Actualizando clientes..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista de clientes actualizada")
-                        st.rerun()
-            
-            else:
-                st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
-    
-    # Contenido principal con manejo de errores mejorado
-    try:
-        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
-            mostrar_analisis_portafolio()
-        elif st.session_state.token_acceso:
-            st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
-        else:
-            st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
-    except Exception as e:
-        st.error(f"❌ Error en la aplicación: {str(e)}")
-        st.error("🔄 Por favor, recargue la página e intente nuevamente")
-
-def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
-    """
-    Muestra la optimización del portafolio usando datos históricos
-    """
-    st.markdown("### 🎯 Optimización de Portafolio")
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("No hay activos en el portafolio para optimizar")
-        return
-    
-    # Extraer símbolos del portafolio
-    simbolos = []
-    for activo in activos:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
-            simbolos.append(simbolo)
-    
-    if len(simbolos) < 2:
-        st.warning("Se necesitan al menos 2 activos para optimización")
-        return
-    
-    st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
-    
-    # Configuración de optimización
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        estrategia = st.selectbox(
-            "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight'],
-            format_func=lambda x: 'Optimización de Markowitz' if x == 'markowitz' else 'Pesos Iguales'
-        )
-    
-    with col2:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
-    
-    if ejecutar_optimizacion:
-        with st.spinner("Ejecutando optimización..."):
-            try:
-                # Crear manager de portafolio
-                manager = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
-                
-                # Cargar datos
-                if manager.load_data():
-                    # Computar optimización
-                    portfolio_result = manager.compute_portfolio(strategy=estrategia)
-                    
-                    if portfolio_result:
-                        st.success("✅ Optimización completada")
-                        
-                        # Mostrar resultados
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            weights_df = pd.DataFrame({
-                                'Activo': portfolio_result.asset_names,
-                                'Peso (%)': [w * 100 for w in portfolio_result.weights]
-                            })
-                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                            st.dataframe(weights_df, use_container_width=True)
-                        
-                        with col2:
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            metricas = portfolio_result.get_metrics_dict()
-                            
-                            st.metric("Retorno Diario Promedio", f"{metricas['Mean Daily']:.4f}")
-                            st.metric("Volatilidad Diaria", f"{metricas['Volatility Daily']:.4f}")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                        
-                        # Gráfico de distribución de retornos
-                        if portfolio_result.portfolio_returns is not None:
-                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                            fig = portfolio_result.plot_histogram_streamlit()
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Gráfico de pesos
-                        st.markdown("#### 🥧 Distribución de Pesos")
-                        fig_pie = go.Figure(data=[go.Pie(
-                            labels=portfolio_result.asset_names,
-                            values=portfolio_result.weights,
-                            textinfo='label+percent',
-                        )])
-                        fig_pie.update_layout(title="Distribución Optimizada de Activos")
-                        st.plotly_chart(fig_pie, use_container_width=True)
-                        
-                    else:
-                        st.error("❌ Error en la optimización")
+                        except Exception as e:
+                            st.error(f"❌ Error de conexión: {str(e)}")
                 else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-                    
-            except Exception as e:
-                st.error(f"❌ Error durante la optimización: {str(e)}")
-    
-    # Información adicional
-    with st.expander("ℹ️ Información sobre las Estrategias"):
-        st.markdown("""
-        **Optimización de Markowitz:**
-        - Maximiza el ratio de Sharpe (retorno/riesgo)
-        - Considera la correlación entre activos
-        - Busca la frontera eficiente
+                    st.warning("⚠️ Complete todos los campos")
+            
+            if demo_mode:
+                st.session_state.token_acceso = "demo_token"
+                st.session_state.clientes = [
+                    {"numeroCliente": "DEMO001", "apellidoYNombre": "Usuario Demo"},
+                    {"numeroCliente": "DEMO002", "apellidoYNombre": "Cliente Ejemplo"}
+                ]
+                st.info("📋 Modo demo activado - Funcionalidad limitada")
+                st.rerun()
+                
+    except Exception as e:
+        st.error(f"Error en formulario de login: {str(e)}")
+
+def render_authenticated_sidebar():
+    """
+    Renderiza la sidebar para usuarios autenticados
+    """
+    try:
+        st.success("✅ Conectado a IOL")
         
-        **Pesos Iguales:**
-        - Distribución uniforme entre todos los activos
-        - Estrategia simple de diversificación
-        - No considera correlaciones históricas
-        """)
+        # Configuración de fechas
+        st.markdown("#### 📅 Configuración de Fechas")
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde = st.date_input(
+                "Fecha desde:",
+                value=st.session_state.fecha_desde,
+                max_value=date.today()
+            )
+        with col2:
+            fecha_hasta = st.date_input(
+                "Fecha hasta:",
+                value=st.session_state.fecha_hasta,
+                max_value=date.today()
+            )
+        
+        st.session_state.fecha_desde = fecha_desde
+        st.session_state.fecha_hasta = fecha_hasta
+        
+        # Manejo de clientes con fallback
+        render_client_selection()
+        
+        # Botón de desconexión
+        st.markdown("---")
+        if st.button("🔒 Desconectar"):
+            for key in ['token_acceso', 'refresh_token', 'clientes', 'cliente_seleccionado']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.success("✅ Desconectado")
+            st.rerun()
+            
+    except Exception as e:
+        st.error(f"Error en sidebar autenticado: {str(e)}")
+
+def render_client_selection():
+    """
+    Renderiza la selección de clientes con manejo de errores
+    """
+    try:
+        # Solo intentar obtener clientes si no es modo demo
+        if st.session_state.token_acceso != "demo_token" and not st.session_state.clientes:
+            if st.button("🔄 Cargar Clientes"):
+                with st.spinner("Cargando clientes..."):
+                    try:
+                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        if clientes:
+                            st.session_state.clientes = clientes
+                            st.success(f"✅ {len(clientes)} clientes cargados")
+                        else:
+                            st.warning("⚠️ No se encontraron clientes")
+                    except Exception as e:
+                        st.error(f"Error cargando clientes: {str(e)}")
+                        # Crear cliente por defecto
+                        st.session_state.clientes = [
+                            {"numeroCliente": "DEFAULT", "apellidoYNombre": "Cliente por Defecto"}
+                        ]
+                        st.info("ℹ️ Usando cliente por defecto")
+        
+        clientes = st.session_state.clientes
+        
+        if clientes:
+            st.info(f"👥 {len(clientes)} clientes disponibles")
+            
+            # Seleccionar cliente
+            try:
+                cliente_ids = [c.get('numeroCliente', c.get('id', f'cliente_{i}')) for i, c in enumerate(clientes)]
+                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', f'Cliente {i+1}')) for i, c in enumerate(clientes)]
+                
+                if cliente_ids:
+                    cliente_seleccionado = st.selectbox(
+                        "Seleccione un cliente:",
+                        options=cliente_ids,
+                        format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
+                    )
+                    
+                    # Guardar cliente seleccionado en session state
+                    st.session_state.cliente_seleccionado = next(
+                        (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                        None
+                    )
+                    
+                    if st.session_state.debug_mode:
+                        st.json(st.session_state.cliente_seleccionado)
+                        
+            except Exception as e:
+                st.error(f"Error en selección de cliente: {str(e)}")
+                # Usar primer cliente como fallback
+                if clientes:
+                    st.session_state.cliente_seleccionado = clientes[0]
+                    st.info("ℹ️ Usando primer cliente como fallback")
+        else:
+            st.warning("Sin clientes disponibles. Use el modo demo o verifique su conexión.")
+            
+    except Exception as e:
+        st.error(f"Error en render_client_selection: {str(e)}")
+
+def mostrar_analisis_portafolio():
+    """
+    Función principal mejorada para mostrar análisis de portafolio
+    """
+    try:
+        st.markdown("## 📊 Análisis de Portafolio")
+        
+        cliente = st.session_state.cliente_seleccionado
+        if not cliente:
+            st.error("No hay cliente seleccionado")
+            return
+        
+        cliente_id = cliente.get('numeroCliente', cliente.get('id', 'DEFAULT'))
+        st.info(f"📋 Analizando portafolio para: {cliente.get('apellidoYNombre', 'Cliente')}")
+        
+        # Tabs para diferentes análisis
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Estado Cuenta", "🎯 Optimización", "📈 FCIs", "🔍 Debug"])
+        
+        with tab1:
+            mostrar_estado_cuenta_tab(cliente_id)
+        
+        with tab2:
+            mostrar_optimizacion_tab(cliente_id)
+        
+        with tab3:
+            mostrar_analisis_fci()
+        
+        with tab4:
+            if st.session_state.debug_mode:
+                mostrar_debug_tab(cliente_id)
+            else:
+                st.info("Active el modo debug en la barra lateral para ver esta información")
+                
+    except Exception as e:
+        st.error(f"Error en análisis de portafolio: {str(e)}")
+
+def mostrar_estado_cuenta_tab(cliente_id):
+    """
+    Tab para mostrar estado de cuenta
+    """
+    try:
+        if st.button("💰 Obtener Estado de Cuenta"):
+            with st.spinner("Obteniendo estado de cuenta..."):
+                if st.session_state.token_acceso == "demo_token":
+                    st.info("📋 Modo Demo - Mostrando datos de ejemplo")
+                    estado_demo = {
+                        "saldoTotal": 150000,
+                        "activos": [
+                            {"titulo": {"simbolo": "YPFD", "descripcion": "YPF S.A."}, "cantidad": 100, "valuacion": 50000},
+                            {"titulo": {"simbolo": "GGAL", "descripcion": "Grupo Galicia"}, "cantidad": 200, "valuacion": 75000},
+                            {"titulo": {"simbolo": "ALUA", "descripcion": "Aluar"}, "cantidad": 150, "valuacion": 25000}
+                        ]
+                    }
+                    mostrar_resumen_portafolio(estado_demo)
+                else:
+                    estado_cuenta = obtener_estado_cuenta(st.session_state.token_acceso, cliente_id)
+                    if estado_cuenta:
+                        st.success("✅ Estado de cuenta obtenido")
+                        mostrar_resumen_portafolio(estado_cuenta)
+                    else:
+                        st.warning("⚠️ No se pudo obtener el estado de cuenta")
+                        
+    except Exception as e:
+        st.error(f"Error en estado de cuenta: {str(e)}")
+
+def mostrar_optimizacion_tab(cliente_id):
+    """
+    Tab para optimización de portafolio
+    """
+    try:
+        st.markdown("### 🎯 Optimización de Portafolio")
+        
+        if st.session_state.token_acceso == "demo_token":
+            st.info("📋 Modo Demo - Funcionalidad de optimización limitada")
+            simbolos_demo = ["YPFD", "GGAL", "ALUA", "TXAR"]
+            
+            if st.button("🚀 Ejecutar Optimización Demo"):
+                with st.spinner("Simulando optimización..."):
+                    # Simular optimización con datos demo
+                    import time
+                    time.sleep(2)
+                    
+                    weights_demo = [0.25, 0.35, 0.20, 0.20]
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("#### 📊 Pesos Optimizados")
+                        weights_df = pd.DataFrame({
+                            'Activo': simbolos_demo,
+                            'Peso (%)': [w * 100 for w in weights_demo]
+                        })
+                        st.dataframe(weights_df)
+                    
+                    with col2:
+                        st.markdown("#### 📈 Métricas")
+                        st.metric("Retorno Esperado", "8.5%")
+                        st.metric("Volatilidad", "15.2%")
+                        st.metric("Ratio Sharpe", "0.56")
+        else:
+            st.info("Funcionalidad de optimización disponible con datos reales")
+            
+    except Exception as e:
+        st.error(f"Error en optimización: {str(e)}")
+
+def mostrar_debug_tab(cliente_id):
+    """
+    Tab para información de debug
+    """
+    try:
+        st.markdown("### 🔍 Información de Debug")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Session State")
+            st.json(dict(st.session_state))
+        
+        with col2:
+            st.markdown("#### Cliente Actual")
+            st.json(st.session_state.cliente_seleccionado)
+        
+        # Test de conectividad
+        if st.button("🔗 Test Conectividad API"):
+            with st.spinner("Probando conectividad..."):
+                try:
+                    if st.session_state.token_acceso != "demo_token":
+                        # Test básico de API
+                        tipos_fondo = obtener_tipos_fondo_fci(st.session_state.token_acceso)
+                        if tipos_fondo:
+                            st.success("✅ Conectividad OK")
+                            st.json(tipos_fondo[:3])
+                        else:
+                            st.warning("⚠️ API responde pero sin datos")
+                    else:
+                        st.info("📋 Modo demo - No se puede probar conectividad real")
+                except Exception as e:
+                    st.error(f"❌ Error de conectividad: {str(e)}")
+                    
+    except Exception as e:
+        st.error(f"Error en debug: {str(e)}")
+
+if __name__ == "__main__":
+    import sys
+    
+    try:
+        main()
+    except Exception as e:
+        st.error(f"❌ Error crítico al inicializar la aplicación: {str(e)}")
+        st.markdown("### 🔧 Información de Debug:")
+        st.code(f"Error: {str(e)}")
+        st.markdown("**Por favor, recargue la página e intente nuevamente.**")
