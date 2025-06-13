@@ -1867,3 +1867,6 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
+
+# Ejecutar la aplicación Streamlit siempre, incluso en entorno interactivo
+main()
