@@ -6,10 +6,10 @@ from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
 import numpy as np
 import yfinance as yf
-from scipy import stats
+import scipy.optimize as op
+from scipy import stats # Added for skewness, kurtosis, jarque_bera
 import random
 import warnings
-from typing import Optional, Tuple, List, Dict, Any
 
 warnings.filterwarnings('ignore')
 
@@ -20,66 +20,73 @@ st.set_page_config(
     layout="wide"
 )
 
-def handle_request_errors(func):
-    """Decorador para centralizar el manejo de errores de requests."""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except requests.exceptions.HTTPError as http_err:
-            st.error(f'Error HTTP: {http_err}')
-        except requests.exceptions.ConnectionError as conn_err:
-            st.error(f'Error de conexión: {conn_err}')
-        except requests.exceptions.Timeout as timeout_err:
-            st.error(f'Timeout: {timeout_err}')
-        except requests.exceptions.RequestException as req_err:
-            st.error(f'Error en la solicitud: {req_err}')
-        except Exception as e:
-            st.error(f'Error inesperado: {str(e)}')
-        return None
-    return wrapper
-
 def obtener_encabezado_autorizacion(token_portador):
     return {
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
 
-@handle_request_errors
-def obtener_tokens(usuario: str, contraseña: str) -> Tuple[Optional[str], Optional[str]]:
+def obtener_tokens(usuario, contraseña):
     url_login = 'https://api.invertironline.com/token'
     datos = {
         'username': usuario,
         'password': contraseña,
         'grant_type': 'password'
     }
-    respuesta = requests.post(url_login, data=datos, timeout=15)
-    respuesta.raise_for_status()
-    respuesta_json = respuesta.json()
-    return respuesta_json['access_token'], respuesta_json['refresh_token']
+    try:
+        respuesta = requests.post(url_login, data=datos, timeout=15) # Added timeout
+        respuesta.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+        respuesta_json = respuesta.json()
+        return respuesta_json['access_token'], respuesta_json['refresh_token']
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f'Error HTTP al obtener tokens: {http_err}')
+        if respuesta.status_code == 400:
+            st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
+        elif respuesta.status_code == 401:
+            st.warning("No autorizado. Verifique sus credenciales o permisos.")
+        else:
+            st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
+        return None, None
+    except requests.exceptions.ConnectionError as conn_err:
+        st.error(f'Error de conexión al intentar obtener tokens: {conn_err}')
+        st.warning("No se pudo conectar al servidor de IOL. Verifique su conexión a internet y que el servicio de IOL esté disponible.")
+        return None, None
+    except requests.exceptions.Timeout as timeout_err:
+        st.error(f'Timeout al intentar obtener tokens: {timeout_err}')
+        st.warning("La solicitud a IOL tardó demasiado en responder. Intente más tarde.")
+        return None, None
+    except requests.exceptions.RequestException as req_err: # Catch any other requests error
+        st.error(f'Error en la solicitud al obtener tokens: {req_err}')
+        return None, None
+    except Exception as e: # General fallback
+        st.error(f'Error inesperado al obtener tokens: {str(e)}')
+        return None, None
 
-@st.cache_data(show_spinner=False)
-@handle_request_errors
-def obtener_lista_clientes(token_portador: str) -> List[Dict[str, Any]]:
+def obtener_lista_clientes(token_portador):
     url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
     encabezados = obtener_encabezado_autorizacion(token_portador)
-    respuesta = requests.get(url_clientes, headers=encabezados)
-    if respuesta.status_code == 200:
-        clientes_data = respuesta.json()
-        if isinstance(clientes_data, list):
-            return clientes_data
-        elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
-            return clientes_data['clientes']
+    try:
+        respuesta = requests.get(url_clientes, headers=encabezados)
+        if respuesta.status_code == 200:
+            clientes_data = respuesta.json()
+            # Debug: mostrar estructura de respuesta
+            st.info(f"📋 Estructura de respuesta de clientes: {type(clientes_data)}")
+            if isinstance(clientes_data, list):
+                return clientes_data
+            elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
+                return clientes_data['clientes']
+            else:
+                st.warning(f"Estructura de datos inesperada: {clientes_data}")
+                return []
         else:
-            st.warning(f"Estructura de datos inesperada: {clientes_data}")
+            st.error(f'Error al obtener la lista de clientes: {respuesta.status_code}')
+            st.error(f'Respuesta: {respuesta.text}')
             return []
-    else:
-        st.error(f'Error al obtener la lista de clientes: {respuesta.status_code}')
-        st.error(f'Respuesta: {respuesta.text}')
+    except Exception as e:
+        st.error(f'Error de conexión al obtener clientes: {str(e)}')
         return []
 
-@st.cache_data(show_spinner=False)
-@handle_request_errors
-def obtener_estado_cuenta(token_portador: str, id_cliente: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def obtener_estado_cuenta(token_portador, id_cliente=None):
     """
     Obtiene el estado de cuenta del usuario autenticado o cliente específico
     """
@@ -90,59 +97,64 @@ def obtener_estado_cuenta(token_portador: str, id_cliente: Optional[str] = None)
         url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
     
     encabezados = obtener_encabezado_autorizacion(token_portador)
-    respuesta = requests.get(url_estado_cuenta, headers=encabezados)
-    st.info(f"💰 Solicitando estado de cuenta - URL: {url_estado_cuenta}")
-    st.info(f"📊 Status Code: {respuesta.status_code}")
-    
-    if respuesta.status_code == 200:
-        estado_data = respuesta.json()
-        st.success(f"✅ Estado de cuenta obtenido exitosamente")
-        return estado_data
-    elif respuesta.status_code == 401:
-        st.warning(f"🔐 No autorizado - Token inválido o permisos insuficientes")
-        if id_cliente:
-            st.info("💡 Intentando con endpoint directo sin ID de cliente...")
-            # Intentar con endpoint directo
-            return obtener_estado_cuenta(token_portador, None)
-        return None
-    elif respuesta.status_code == 404:
-        st.warning(f"⚠️ Estado de cuenta no encontrado")
-        return None
-    else:
-        st.error(f'❌ Error al obtener estado de cuenta: {respuesta.status_code}')
-        st.error(f'📄 Respuesta: {respuesta.text}')
+    try:
+        respuesta = requests.get(url_estado_cuenta, headers=encabezados)
+        st.info(f"💰 Solicitando estado de cuenta - URL: {url_estado_cuenta}")
+        st.info(f"📊 Status Code: {respuesta.status_code}")
+        
+        if respuesta.status_code == 200:
+            estado_data = respuesta.json()
+            st.success(f"✅ Estado de cuenta obtenido exitosamente")
+            return estado_data
+        elif respuesta.status_code == 401:
+            st.warning(f"🔐 No autorizado - Token inválido o permisos insuficientes")
+            if id_cliente:
+                st.info("💡 Intentando con endpoint directo sin ID de cliente...")
+                # Intentar con endpoint directo
+                return obtener_estado_cuenta(token_portador, None)
+            return None
+        elif respuesta.status_code == 404:
+            st.warning(f"⚠️ Estado de cuenta no encontrado")
+            return None
+        else:
+            st.error(f'❌ Error al obtener estado de cuenta: {respuesta.status_code}')
+            st.error(f'📄 Respuesta: {respuesta.text}')
+            return None
+    except Exception as e:
+        st.error(f'💥 Error de conexión al obtener estado de cuenta: {str(e)}')
         return None
 
-@st.cache_data(show_spinner=False)
-@handle_request_errors
-def obtener_portafolio(token_portador: str, id_cliente: str, pais: str = 'Argentina') -> Optional[Dict[str, Any]]:
+def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
-    respuesta = requests.get(url_portafolio, headers=encabezados)
-    st.info(f"🔍 Solicitando portafolio para cliente {id_cliente}")
-    st.info(f"📡 URL: {url_portafolio}")
-    st.info(f"📊 Status Code: {respuesta.status_code}")
-    
-    if respuesta.status_code == 200:
-        portafolio_data = respuesta.json()
-        st.success(f"✅ Portafolio obtenido exitosamente")
-        st.info(f"📋 Estructura de portafolio: {type(portafolio_data)}")
-        if isinstance(portafolio_data, dict):
-            st.info(f"🔑 Claves disponibles: {list(portafolio_data.keys())}")
-        return portafolio_data
-    elif respuesta.status_code == 404:
-        st.warning(f"⚠️ Cliente {id_cliente} no encontrado o sin portafolio")
-        return None
-    elif respuesta.status_code == 401:
-        st.error("🔐 Token de autorización expirado o inválido")
-        return None
-    else:
-        st.error(f'❌ Error al obtener portafolio: {respuesta.status_code}')
-        st.error(f'📄 Respuesta: {respuesta.text}')
+    try:
+        respuesta = requests.get(url_portafolio, headers=encabezados)
+        st.info(f"🔍 Solicitando portafolio para cliente {id_cliente}")
+        st.info(f"📡 URL: {url_portafolio}")
+        st.info(f"📊 Status Code: {respuesta.status_code}")
+        
+        if respuesta.status_code == 200:
+            portafolio_data = respuesta.json()
+            st.success(f"✅ Portafolio obtenido exitosamente")
+            st.info(f"📋 Estructura de portafolio: {type(portafolio_data)}")
+            if isinstance(portafolio_data, dict):
+                st.info(f"🔑 Claves disponibles: {list(portafolio_data.keys())}")
+            return portafolio_data
+        elif respuesta.status_code == 404:
+            st.warning(f"⚠️ Cliente {id_cliente} no encontrado o sin portafolio")
+            return None
+        elif respuesta.status_code == 401:
+            st.error("🔐 Token de autorización expirado o inválido")
+            return None
+        else:
+            st.error(f'❌ Error al obtener portafolio: {respuesta.status_code}')
+            st.error(f'📄 Respuesta: {respuesta.text}')
+            return None
+    except Exception as e:
+        st.error(f'💥 Error de conexión al obtener portafolio: {str(e)}')
         return None
 
-@handle_request_errors
-def obtener_cotizacion_mep(token_portador: str, simbolo: str, id_plazo_compra: int, id_plazo_venta: int) -> Optional[Dict[str, Any]]:
+def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
     url_cotizacion_mep = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     datos = {
@@ -150,149 +162,475 @@ def obtener_cotizacion_mep(token_portador: str, simbolo: str, id_plazo_compra: i
         "idPlazoOperatoriaCompra": id_plazo_compra,
         "idPlazoOperatoriaVenta": id_plazo_venta
     }
-    respuesta = requests.post(url_cotizacion_mep, headers=encabezados, json=datos)
-    if respuesta.status_code == 200:
-        return respuesta.json()
-    else:
+    try:
+        respuesta = requests.post(url_cotizacion_mep, headers=encabezados, json=datos)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            return None
+    except Exception as e:
+        st.error(f'Error al obtener cotización MEP: {str(e)}')
         return None
 
-@handle_request_errors
-def obtener_tasas_caucion(token_portador: str, instrumento: str = "Cauciones", panel: str = "Todas", pais: str = "Argentina") -> Optional[Any]:
+def obtener_tasas_caucion(token_portador, instrumento="Cauciones", panel="Todas", pais="Argentina"):
     url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
-    headers = {"Authorization": f"Bearer {token_portador}"}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.json()
-    else:
+    headers = {
+        "Authorization": f"Bearer {token_portador}"
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        st.error(f'Error al obtener tasas de caución: {str(e)}')
         return None
 
-@handle_request_errors
-def obtener_cotizacion_actual(token_portador: str, mercado: str, simbolo: str) -> Optional[Dict[str, Any]]:
+def obtener_cotizacion_actual(token_portador, mercado, simbolo):
     """
     Obtiene la cotización actual de un título desde la API de IOL.
     """
     url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
     headers = obtener_encabezado_autorizacion(token_portador)
     
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.json()
-    else:
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener la cotización actual para {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f'Error al obtener cotización actual: {str(e)}')
         return None
 
-def parse_datetime_flexible(fecha_str):
-    """Parses a datetime object from a flexible date string format."""
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+def parse_datetime_flexible(datetime_string):
+    """
+    Parse datetime strings with flexible format handling
+    """
+    if not datetime_string:
+        return None
+    
+    # Common datetime formats from IOL API
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",  # With microseconds
+        "%Y-%m-%dT%H:%M:%S",     # Without microseconds
+        "%Y-%m-%d %H:%M:%S.%f",  # Space separator with microseconds
+        "%Y-%m-%d %H:%M:%S",     # Space separator without microseconds
+        "ISO8601",               # Let pandas infer ISO format
+        "mixed"                  # Let pandas infer mixed formats
+    ]
+    
+    for fmt in formats_to_try:
         try:
-            return pd.to_datetime(fecha_str, format=fmt)
-        except ValueError:
+            if fmt == "ISO8601":
+                return pd.to_datetime(datetime_string, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(datetime_string, format='mixed')
+            else:
+                return pd.to_datetime(datetime_string, format=fmt)
+        except Exception:
             continue
-    return None
 
-@handle_request_errors
-def obtener_tipo_instrumento(token_portador: str, simbolo: str) -> Optional[str]:
-    """Detecta el tipo de instrumento (opcion, fci, bono, etc) usando la API de IOL."""
-    url = f"https://api.invertironline.com/api/v2/Titulos/{simbolo}"
-    headers = {'Authorization': f'Bearer {token_portador}'}
-    resp = requests.get(url, headers=headers)
-    if resp.status_code == 200:
-        data = resp.json()
-        return data.get('tipo', '').lower()
-    return None
+    # Final fallback - let pandas infer automatically
+    try:
+        return pd.to_datetime(datetime_string, infer_datetime_format=True)
+    except Exception:
+        return None
 
-@st.cache_data(show_spinner=False)
-@handle_request_errors
-def obtener_serie_historica_iol(token_portador: str, mercado: str, simbolo: str, fecha_desde: str, fecha_hasta: str, ajustada: str = "ajustada") -> Optional[pd.Series]:
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
-    Obtiene la serie histórica de precios de un título desde la API de IOL, usando el endpoint correcto según el tipo de instrumento.
+    Obtiene la serie histórica de precios de un título desde la API de IOL.
+    Actualizada para manejar correctamente la estructura de respuesta de la API.
     """
-    tipo = obtener_tipo_instrumento(token_portador, simbolo)
-    if tipo == 'opciones':
+    # Determinar endpoint según tipo de instrumento
+    if mercado == "Opciones":
         url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    elif tipo == 'fci':
+    elif mercado == "FCI":
         url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     else:
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
-    response = requests.get(url, headers=headers, timeout=30)
-    if response.status_code == 401:
-        st.error(f"❌ No autorizado para obtener serie histórica de {simbolo}. Verifique su token y permisos.")
-        return None
-    if response.status_code == 200:
-        data = response.json()
-        if not data:
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if not data:
+                return None
+            
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    # Usar ultimoPrecio como precio principal según la documentación
+                    precio = item.get('ultimoPrecio')
+                    
+                    # Si ultimoPrecio es 0 o None, intentar otros campos
+                    if not precio or precio == 0:
+                        precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                    
+                    fecha_str = item.get('fechaHora')
+                    
+                    if precio is not None and precio > 0 and fecha_str:
+                        fecha_parsed = parse_datetime_flexible(fecha_str)
+                        if fecha_parsed is not None:
+                            precios.append(precio)
+                            fechas.append(fecha_parsed)
+                            
+                except Exception as e:
+                    # Log individual item errors but continue processing
+                    continue
+            
+            if precios and fechas:
+                # Crear serie ordenada por fecha
+                serie = pd.Series(precios, index=fechas)
+                serie = serie.sort_index()  # Asegurar orden cronológico
+                
+                # Eliminar duplicados manteniendo el último valor
+                serie = serie[~serie.index.duplicated(keep='last')]
+                
+                return serie
+            else:
+                return None
+                
+        elif response.status_code == 401:
+            # Token expirado o inválido
+            st.warning(f"⚠️ Token de autorización inválido para {simbolo}")
             return None
-        precios = []
-        fechas = []
-        for item in data:
-            precio = item.get('ultimoPrecio')
-            if not precio or precio == 0:
-                precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-            fecha_str = item.get('fechaHora')
-            if precio is not None and precio > 0 and fecha_str:
-                fecha_parsed = parse_datetime_flexible(fecha_str)
-                if fecha_parsed is not None:
-                    precios.append(precio)
-                    fechas.append(fecha_parsed)
-        if precios and fechas:
-            serie = pd.Series(precios, index=fechas)
-            serie = serie.sort_index()
-            serie = serie[~serie.index.duplicated(keep='last')]
-            return serie
+            
+        elif response.status_code == 404:
+            # Símbolo no encontrado en este mercado
+            return None
+            
+        elif response.status_code == 400:
+            # Parámetros inválidos
+            st.warning(f"⚠️ Parámetros inválidos para {simbolo} en {mercado}")
+            return None
+            
+        elif response.status_code == 500:
+            # Error del servidor - silencioso para no interrumpir el flujo
+            return None
+            
         else:
+            # Otros errores HTTP
             return None
-    else:
-        st.warning(f"⚠️ No se pudo obtener la serie histórica para {simbolo} (status {response.status_code})")
+            
+    except requests.exceptions.Timeout:
+        # Timeout - silencioso
+        return None
+    except requests.exceptions.ConnectionError:
+        # Error de conexión - silencioso
+        return None
+    except Exception as e:
+        # Error general - silencioso para no interrumpir el análisis
         return None
 
-@handle_request_errors
-def obtener_serie_historica(simbolo: str, mercado: str, fecha_desde: str, fecha_hasta: str, ajustada: str, bearer_token: str) -> Optional[Any]:
+def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
+    """
+    Fallback usando yfinance para símbolos que no estén disponibles en IOL
+    """
+    try:
+        # Mapear símbolos argentinos a Yahoo Finance si es posible
+        simbolo_yf = simbolo
+        
+        # Agregar sufijos comunes para acciones argentinas
+        sufijos_ar = ['.BA', '.AR']
+        
+        for sufijo in sufijos_ar:
+            try:
+                ticker = yf.Ticker(simbolo + sufijo)
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty and len(data) > 10:
+                    # Usar precio de cierre
+                    return data['Close']
+            except:
+                continue
+        
+        # Intentar sin sufijo
+        try:
+            ticker = yf.Ticker(simbolo)
+            data = ticker.history(start=fecha_desde, end=fecha_hasta)
+            if not data.empty and len(data) > 10:
+                return data['Close']
+        except:
+            pass
+            
+        return None
+    except Exception:
+        return None
+
+def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos históricos para optimización de portafolio con manejo mejorado de errores.
+    Actualizada para mejor compatibilidad con la API de IOL.
+    """
+    try:
+        df_precios = pd.DataFrame()
+        simbolos_exitosos = []
+        simbolos_fallidos = []
+        detalles_errores = {}
+        
+        # Convertir fechas a string en formato correcto
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
+        
+        st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
+        
+        # Crear barra de progreso
+        progress_bar = st.progress(0)
+        total_simbolos = len(simbolos)
+        
+        for idx, simbolo in enumerate(simbolos):
+            # Actualizar barra de progreso
+            progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
+            
+            # Usar mercados correctos según la API de IOL (sin 'Merval')
+            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
+            serie_obtenida = False
+            
+            for mercado in mercados:
+                try:
+                    # Buscar clase D si es posible (solo para mercados tradicionales)
+                    simbolo_consulta = simbolo
+                    if mercado not in ['Opciones', 'FCI']:
+                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
+                        if clase_d:
+                            simbolo_consulta = clase_d
+                    
+                    serie = obtener_serie_historica_iol(
+                        token_portador, mercado, simbolo_consulta, 
+                        fecha_desde_str, fecha_hasta_str
+                    )
+                    
+                    if serie is not None and len(serie) > 10:
+                        # Verificar que los datos no sean todos iguales
+                        if serie.nunique() > 1:
+                            df_precios[simbolo_consulta] = serie
+                            simbolos_exitosos.append(simbolo_consulta)
+                            serie_obtenida = True
+                            
+                            # Mostrar información del símbolo exitoso
+                            st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
+                            break
+                        
+                except Exception as e:
+                    detalles_errores[f"{simbolo}_{mercado}"] = str(e)
+                    continue
+            
+            # Si IOL falló completamente, intentar con yfinance como fallback
+            if not serie_obtenida:
+                try:
+                    serie_yf = obtener_datos_alternativos_yfinance(
+                        simbolo, fecha_desde, fecha_hasta
+                    )
+                    if serie_yf is not None and len(serie_yf) > 10:
+                        if serie_yf.nunique() > 1:
+                            df_precios[simbolo] = serie_yf
+                            simbolos_exitosos.append(simbolo)
+                            serie_obtenida = True
+                            st.info(f"ℹ️ {simbolo} (Yahoo Finance): {len(serie_yf)} puntos de datos")
+                except Exception as e:
+                    detalles_errores[f"{simbolo}_yfinance"] = str(e)
+            
+            if not serie_obtenida:
+                simbolos_fallidos.append(simbolo)
+                st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+        
+        # Limpiar barra de progreso
+        progress_bar.empty()
+        
+        # Informar resultados detallados
+        if simbolos_exitosos:
+            st.success(f"✅ Datos obtenidos para {len(simbolos_exitosos)} activos")
+            with st.expander("📋 Ver activos exitosos"):
+                for simbolo in simbolos_exitosos:
+                    if simbolo in df_precios.columns:
+                        datos_info = f"{simbolo}: {len(df_precios[simbolo])} puntos, rango: {df_precios[simbolo].min():.2f} - {df_precios[simbolo].max():.2f}"
+                        st.text(datos_info)
+        
+        if simbolos_fallidos:
+            st.warning(f"⚠️ No se pudieron obtener datos para {len(simbolos_fallidos)} activos")
+            with st.expander("❌ Ver activos fallidos y errores"):
+                for simbolo in simbolos_fallidos:
+                    st.text(f"• {simbolo}")
+                
+                if detalles_errores:
+                    st.markdown("**Detalles de errores:**")
+                    for key, error in detalles_errores.items():
+                        st.text(f"{key}: {error}")
+        
+        # Continuar si tenemos al menos 2 activos
+        if len(simbolos_exitosos) < 2:
+            if len(simbolos_exitosos) == 1:
+                st.error("❌ Se necesitan al menos 2 activos con datos históricos válidos para el análisis.")
+            else:
+                st.error("❌ No se pudieron obtener datos históricos para ningún activo.")
+            
+            # Mostrar sugerencias
+            st.markdown("#### 💡 Sugerencias para resolver el problema:")
+            st.markdown("""
+            1. **Verificar conectividad**: Asegúrese de que su conexión a IOL esté activa
+            2. **Revisar símbolos**: Algunos símbolos pueden haber cambiado o no estar disponibles
+            3. **Ajustar fechas**: Pruebe con un rango de fechas más amplio o diferente
+            4. **Verificar permisos**: Asegúrese de tener permisos para acceder a datos históricos
+            """)
+            
+            return None, None, None
+        
+        if len(simbolos_exitosos) < len(simbolos):
+            st.info(f"ℹ️ Continuando análisis con {len(simbolos_exitosos)} de {len(simbolos)} activos disponibles.")
+        
+        # Alinear datos por fechas comunes con mejor manejo
+        st.info(f"📊 Alineando datos de {len(df_precios.columns)} activos...")
+        
+        # Verificar que tenemos datos válidos antes de alinear
+        if df_precios.empty:
+            st.error("❌ DataFrame de precios está vacío")
+            return None, None, None
+        
+        # Mostrar información de debug sobre las fechas
+        with st.expander("🔍 Debug - Información de fechas"):
+            for col in df_precios.columns:
+                serie = df_precios[col]
+                st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
+        
+        # Intentar diferentes estrategias de alineación
+        try:
+            # Estrategia 1: Forward fill y luego backward fill
+            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            
+            # Estrategia 2: Interpolar valores faltantes
+            df_precios_interpolated = df_precios.interpolate(method='time')
+            
+            # Usar la estrategia que conserve más datos
+            if not df_precios_filled.dropna().empty:
+                df_precios = df_precios_filled.dropna()
+                st.info("✅ Usando estrategia forward/backward fill")
+            elif not df_precios_interpolated.dropna().empty:
+                df_precios = df_precios_interpolated.dropna()
+                st.info("✅ Usando estrategia de interpolación")
+            else:
+                # Estrategia 3: Usar solo fechas con datos completos
+                df_precios = df_precios.dropna()
+                st.info("✅ Usando solo fechas con datos completos")
+                
+        except Exception as e:
+            st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
+            df_precios = df_precios.dropna()
+        
+        if df_precios.empty:
+            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            return None, None, None
+        
+        st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
+        
+        # Calcular retornos
+        returns = df_precios.pct_change().dropna()
+        
+        if returns.empty or len(returns) < 30:
+            st.error("❌ No hay suficientes datos para calcular retornos válidos (mínimo 30 observaciones)")
+            return None, None, None
+        
+        # Verificar que los retornos no sean constantes
+        if (returns.std() == 0).any():
+            columnas_constantes = returns.columns[returns.std() == 0].tolist()
+            st.warning(f"⚠️ Removiendo activos con retornos constantes: {columnas_constantes}")
+            returns = returns.drop(columns=columnas_constantes)
+            df_precios = df_precios.drop(columns=columnas_constantes)
+        
+        if len(returns.columns) < 2:
+            st.error("❌ Después de filtrar, no quedan suficientes activos para análisis")
+            return None, None, None
+        
+        # Calcular métricas finales
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        
+        # Mostrar estadísticas finales
+        st.info(f"📊 Datos finales: {len(returns.columns)} activos, {len(returns)} observaciones de retornos")
+        
+        return mean_returns, cov_matrix, df_precios
+        
+    except Exception as e:
+        st.error(f"❌ Error crítico obteniendo datos históricos: {str(e)}")
+        with st.expander("🔍 Información de debug"):
+            st.code(f"Error: {str(e)}")
+            st.code(f"Símbolos: {simbolos}")
+            st.code(f"Rango de fechas: {fecha_desde} a {fecha_hasta}")
+        return None, None, None
+
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Obtiene la serie histórica de precios para un símbolo y mercado específico.
+    Actualizada para usar nombres correctos de mercados IOL.
+    """
+    # Mapear nombres de mercados a los correctos de IOL
     mercados_mapping = {
         'BCBA': 'bCBA',
         'NYSE': 'nYSE', 
         'NASDAQ': 'nASDAQ',
         'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'
+        'Merval': 'bCBA'  # Merval no existe, usar bCBA
     }
+    
     mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
     url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {bearer_token}'
     }
-    response = requests.get(url, headers=headers, timeout=30)
-    if response.status_code == 200:
-        return response.json()
-    else:
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception:
         return None
 
-@handle_request_errors
-def obtener_clase_d(simbolo: str, mercado: str, bearer_token: str) -> Optional[str]:
+def obtener_clase_d(simbolo, mercado, bearer_token):
+    """
+    Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
+    Devuelve el símbolo de la clase 'D' si existe, si no, devuelve None.
+    """
+    # Mapear nombres de mercados a los correctos de IOL
     mercados_mapping = {
         'BCBA': 'bCBA',
         'NYSE': 'nYSE', 
         'NASDAQ': 'nASDAQ',
         'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'
+        'Merval': 'bCBA'  # Merval no existe, usar bCBA
     }
+    
     mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
     url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {bearer_token}'
     }
-    response = requests.get(url, headers=headers, timeout=15)
-    if response.status_code == 200:
-        clases = response.json()
-        for clase in clases:
-            if clase.get('simbolo', '').endswith('D'):
-                return clase['simbolo']
-        return None
-    else:
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            clases = response.json()
+            for clase in clases:
+                if clase.get('simbolo', '').endswith('D'):
+                    return clase['simbolo']
+            return None
+        else:
+            return None
+    except Exception:
         return None
 
 # --- Portfolio Optimization Functions ---
@@ -1528,3 +1866,6 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
+# Asegurar que main() se ejecute cuando se corre el script
+if __name__ == "__main__":
+    main()
