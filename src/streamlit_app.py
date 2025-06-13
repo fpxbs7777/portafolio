@@ -1343,26 +1343,46 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
     st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
     
     # Configuración de optimización
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         estrategia = st.selectbox(
             "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight'],
-            format_func=lambda x: 'Optimización de Markowitz' if x == 'markowitz' else 'Pesos Iguales'
+            options=['markowitz', 'equi-weight', 'minimum-variance'],
+            format_func=lambda x: {
+                'markowitz': 'Optimización de Markowitz',
+                'equi-weight': 'Pesos Iguales',
+                'minimum-variance': 'Mínima Varianza'
+            }[x]
         )
     
     with col2:
+        rango_fechas_amplio = st.checkbox(
+            "Usar rango de fechas amplio",
+            value=False,
+            help="Usar 2 años de datos históricos para mejor análisis"
+        )
+    
+    with col3:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
-                # Crear manager de portafolio
-                manager = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                # Ajustar fechas si se solicita rango amplio
+                if rango_fechas_amplio:
+                    fecha_desde_opt = fecha_desde - timedelta(days=365)
+                    st.info(f"📅 Usando rango amplio: {fecha_desde_opt} hasta {fecha_hasta}")
+                else:
+                    fecha_desde_opt = fecha_desde
                 
-                # Cargar datos
-                if manager.load_data():
+                # Crear manager de portafolio con mejor manejo de errores
+                manager = PortfolioManagerEnhanced(simbolos, token_acceso, fecha_desde_opt, fecha_hasta)
+                
+                # Cargar datos con estrategias de fallback
+                data_loaded, num_assets_loaded = manager.load_data_with_fallback()
+                
+                if data_loaded and num_assets_loaded >= 2:
                     # Computar optimización
                     portfolio_result = manager.compute_portfolio(strategy=estrategia)
                     
@@ -1406,13 +1426,46 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                         fig_pie.update_layout(title="Distribución Optimizada de Activos")
                         st.plotly_chart(fig_pie, use_container_width=True)
                         
-                    else:
-                        st.error("❌ Error en la optimización")
+                elif data_loaded and num_assets_loaded == 1:
+                    st.warning("⚠️ Solo se pudo cargar 1 activo con datos válidos")
+                    st.markdown("#### 💡 Opciones disponibles:")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("🔄 Intentar con rango de fechas más amplio"):
+                            st.info("Reintentando con 2 años de datos...")
+                            # Recursión con rango amplio
+                            mostrar_optimizacion_portafolio(
+                                portafolio, token_acceso, 
+                                fecha_desde - timedelta(days=730), fecha_hasta
+                            )
+                    
+                    with col2:
+                        if st.button("📊 Análisis de activo único"):
+                            activo_unico = manager.get_single_asset_analysis()
+                            if activo_unico:
+                                st.markdown("#### 📈 Análisis del Activo Único")
+                                st.json(activo_unico)
                 else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
+                    st.error("❌ No se pudieron cargar datos suficientes para optimización")
+                    
+                    # Mostrar diagnóstico detallado
+                    diagnostico = manager.get_diagnostics()
+                    with st.expander("🔍 Diagnóstico Detallado"):
+                        st.json(diagnostico)
+                    
+                    # Sugerencias específicas
+                    st.markdown("#### 💡 Sugerencias Específicas:")
+                    st.markdown("1. **Verificar símbolos**: Algunos pueden estar mal escritos")
+                    st.markdown("2. **Ampliar rango de fechas**: Usar 1-2 años de datos")
+                    st.markdown("3. **Revisar mercados**: Algunos activos pueden estar en otros mercados")
+                    st.markdown("4. **Contactar soporte**: Si persiste el problema")
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
+                with st.expander("🔍 Detalles del error"):
+                    st.code(str(e))
     
     # Información adicional
     with st.expander("ℹ️ Información sobre las Estrategias"):
@@ -1426,12 +1479,17 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Distribución uniforme entre todos los activos
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
+        
+        **Mínima Varianza:**
+        - Minimiza el riesgo del portafolio
+        - Ideal para inversores conservadores
+        - Puede concentrarse en pocos activos
         """)
 
-# Clase PortfolioManager simplificada para compatibilidad
-class PortfolioManager:
+# Clase PortfolioManager mejorada
+class PortfolioManagerEnhanced:
     """
-    Clase simplificada para manejo de portafolio y optimización
+    Clase mejorada para manejo de portafolio y optimización con mejor tolerancia a fallos
     """
     def __init__(self, symbols, token, fecha_desde, fecha_hasta):
         self.symbols = symbols
@@ -1441,45 +1499,166 @@ class PortfolioManager:
         self.data_loaded = False
         self.returns = None
         self.prices = None
+        self.successful_symbols = []
+        self.failed_symbols = []
+        self.diagnostics = {}
     
-    def load_data(self):
+    def load_data_with_fallback(self):
         """
-        Carga datos históricos para los símbolos del portafolio
+        Carga datos históricos con múltiples estrategias de fallback
         """
         try:
+            # Estrategia 1: Intentar con función existente
             mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
                 self.token, self.symbols, self.fecha_desde, self.fecha_hasta
             )
             
-            if mean_returns is not None and cov_matrix is not None:
+            if mean_returns is not None and cov_matrix is not None and len(mean_returns) >= 2:
                 self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
                 self.prices = df_precios
                 self.mean_returns = mean_returns
                 self.cov_matrix = cov_matrix
                 self.data_loaded = True
-                return True
-            else:
-                return False
+                self.successful_symbols = list(mean_returns.index) if mean_returns is not None else []
+                return True, len(self.successful_symbols)
+            
+            # Estrategia 2: Intentar símbolo por símbolo con diferentes mercados
+            st.info("🔄 Intentando estrategia alternativa de carga de datos...")
+            
+            exitos = 0
+            datos_individuales = {}
+            
+            for simbolo in self.symbols:
+                datos_simbolo = self._obtener_datos_simbolo_robusto(simbolo)
+                if datos_simbolo is not None and len(datos_simbolo) > 10:
+                    datos_individuales[simbolo] = datos_simbolo
+                    exitos += 1
+                    self.successful_symbols.append(simbolo)
+                else:
+                    self.failed_symbols.append(simbolo)
+            
+            if exitos >= 2:
+                # Construir DataFrame con datos exitosos
+                df_combined = pd.DataFrame(datos_individuales)
+                df_combined = df_combined.fillna(method='ffill').fillna(method='bfill')
+                df_combined = df_combined.dropna()
+                
+                if len(df_combined) > 30:  # Suficientes observaciones
+                    self.prices = df_combined
+                    self.returns = df_combined.pct_change().dropna()
+                    self.mean_returns = self.returns.mean()
+                    self.cov_matrix = self.returns.cov()
+                    self.data_loaded = True
+                    return True, exitos
+            
+            # Estrategia 3: Si solo hay 1 activo exitoso, intentar con datos sintéticos para demo
+            if exitos == 1:
+                self.data_loaded = True
+                simbolo_unico = self.successful_symbols[0]
+                self.prices = pd.DataFrame({simbolo_unico: datos_individuales[simbolo_unico]})
+                self.returns = self.prices.pct_change().dropna()
+                return True, 1
+            
+            return False, 0
                 
         except Exception as e:
-            st.error(f"Error cargando datos: {str(e)}")
-            return False
+            self.diagnostics['error_general'] = str(e)
+            return False, 0
+    
+    def _obtener_datos_simbolo_robusto(self, simbolo):
+        """
+        Obtiene datos de un símbolo probando múltiples mercados y estrategias
+        """
+        mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
+        fecha_desde_str = self.fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = self.fecha_hasta.strftime('%Y-%m-%d')
+        
+        for mercado in mercados:
+            try:
+                # Intentar con clase D si aplica
+                simbolo_consulta = simbolo
+                if mercado in ['bCBA']:
+                    clase_d = obtener_clase_d(simbolo, mercado, self.token)
+                    if clase_d:
+                        simbolo_consulta = clase_d
+                
+                serie = obtener_serie_historica_iol(
+                    self.token, mercado, simbolo_consulta,
+                    fecha_desde_str, fecha_hasta_str
+                )
+                
+                if serie is not None and len(serie) > 10 and serie.nunique() > 1:
+                    return serie
+                    
+            except Exception as e:
+                self.diagnostics[f'{simbolo}_{mercado}'] = str(e)
+                continue
+        
+        # Fallback a yfinance
+        try:
+            serie_yf = obtener_datos_alternativos_yfinance(
+                simbolo, self.fecha_desde, self.fecha_hasta
+            )
+            if serie_yf is not None and len(serie_yf) > 10:
+                return serie_yf
+        except:
+            pass
+        
+        return None
+    
+    def get_single_asset_analysis(self):
+        """
+        Análisis para cuando solo hay un activo
+        """
+        if len(self.successful_symbols) == 1 and self.returns is not None:
+            simbolo = self.successful_symbols[0]
+            serie_retornos = self.returns[simbolo]
+            
+            return {
+                'simbolo': simbolo,
+                'observaciones': len(serie_retornos),
+                'retorno_promedio_diario': serie_retornos.mean(),
+                'volatilidad_diaria': serie_retornos.std(),
+                'retorno_anualizado': serie_retornos.mean() * 252,
+                'volatilidad_anualizada': serie_retornos.std() * np.sqrt(252),
+                'sharpe_ratio': (serie_retornos.mean() / serie_retornos.std()) if serie_retornos.std() > 0 else 0,
+                'var_95': np.percentile(serie_retornos, 5),
+                'sesgo': serie_retornos.skew(),
+                'curtosis': serie_retornos.kurtosis()
+            }
+        return None
+    
+    def get_diagnostics(self):
+        """
+        Retorna información de diagnóstico
+        """
+        return {
+            'simbolos_originales': self.symbols,
+            'simbolos_exitosos': self.successful_symbols,
+            'simbolos_fallidos': self.failed_symbols,
+            'rango_fechas': f"{self.fecha_desde} a {self.fecha_hasta}",
+            'errores_detallados': self.diagnostics
+        }
     
     def compute_portfolio(self, strategy='markowitz', target_return=None):
         """
-        Computa la optimización del portafolio
+        Computa la optimización del portafolio con manejo mejorado
         """
         if not self.data_loaded or self.returns is None:
             return None
         
         try:
-            # Optimización básica usando pesos iguales como fallback
             n_assets = len(self.returns.columns)
             
-            if strategy == 'equi-weight':
+            if n_assets == 1:
+                # Caso especial: un solo activo
+                weights = np.array([1.0])
+            elif strategy == 'equi-weight':
                 weights = np.array([1/n_assets] * n_assets)
+            elif strategy == 'minimum-variance':
+                weights = self._optimize_minimum_variance()
             else:
-                # Intentar optimización real
+                # Markowitz u otra optimización
                 weights = optimize_portfolio(self.returns, target_return=target_return)
             
             # Crear objeto de resultado
@@ -1494,73 +1673,37 @@ class PortfolioManager:
         except Exception as e:
             st.error(f"Error en optimización: {str(e)}")
             return None
-
-class PortfolioOutput:
-    """
-    Clase para almacenar resultados de optimización de portafolio
-    """
-    def __init__(self, weights, asset_names, returns):
-        self.weights = weights
-        self.asset_names = asset_names
-        self.returns = returns
-        self.portfolio_returns = None
-        
-        if returns is not None and len(weights) == len(returns.columns):
-            self.portfolio_returns = (returns * weights).sum(axis=1)
     
-    def get_metrics_dict(self):
+    def _optimize_minimum_variance(self):
         """
-        Calcula y retorna métricas del portafolio
+        Optimización de mínima varianza
         """
-        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
-            return {
-                'Mean Daily': 0,
-                'Volatility Daily': 0,
-                'Sharpe Ratio': 0,
-                'VaR 95%': 0
-            }
-        
-        mean_daily = self.portfolio_returns.mean()
-        vol_daily = self.portfolio_returns.std()
-        sharpe = mean_daily / vol_daily if vol_daily > 0 else 0
-        var_95 = np.percentile(self.portfolio_returns, 5)
-        
-        return {
-            'Mean Daily': mean_daily,
-            'Volatility Daily': vol_daily,
-            'Sharpe Ratio': sharpe,
-            'VaR 95%': var_95
-        }
-    
-    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
-        """
-        Crea un histograma de retornos usando Plotly para Streamlit
-        """
-        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
-            # Crear gráfico vacío
-            fig = go.Figure()
-            fig.add_annotation(
-                text="No hay datos suficientes para mostrar",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
-            )
-            fig.update_layout(title=title)
-            return fig
-        
-        fig = go.Figure(data=[go.Histogram(
-            x=self.portfolio_returns,
-            nbinsx=30,
-            name="Retornos del Portafolio"
-        )])
-        
-        fig.update_layout(
-            title=f"{title}",
-            xaxis_title="Retorno",
-            yaxis_title="Frecuencia",
-            showlegend=False
-        )
-        
-        return fig
+        try:
+            from scipy.optimize import minimize
+            
+            n_assets = len(self.returns.columns)
+            cov_matrix = self.returns.cov().values
+            
+            # Función objetivo: minimizar varianza
+            def portfolio_variance(weights):
+                return np.dot(weights.T, np.dot(cov_matrix, weights))
+            
+            # Restricciones y límites
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0, 1) for _ in range(n_assets))
+            initial_guess = np.array([1/n_assets] * n_assets)
+            
+            # Optimización
+            result = minimize(portfolio_variance, initial_guess, method='SLSQP',
+                            bounds=bounds, constraints=constraints)
+            
+            if result.success:
+                return result.x
+            else:
+                return np.array([1/n_assets] * n_assets)
+                
+        except Exception:
+            return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
 
 # --- Funciones de la aplicación Streamlit ---
 def mostrar_analisis_portafolio():
