@@ -1686,8 +1686,7 @@ class manager:
                     if serie_yf.nunique() > 1:
                         return serie_yf
             except Exception:
-                pass
-        
+                pass        
         return None
 
     def synchronise_timeseries(self):
@@ -1695,14 +1694,14 @@ class manager:
         Sincroniza las series temporales usando las funciones estándar de obtención de datos
         """
         if self.token_portador and self.fecha_desde and self.fecha_hasta:
-            # Usar la función completa de optimización
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+            # Usar la función completa de optimización (versión silenciosa para no interferir)
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization_silent(
                 self.token_portador, self.rics, self.fecha_desde, self.fecha_hasta
             )
             
             if mean_returns is not None and cov_matrix is not None and df_precios is not None:
                 self.timeseries = df_precios
-                self.returns = df_precios.pct_change().dropna()
+                self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
                 self.cov_matrix = cov_matrix
                 self.mean_returns = mean_returns
                 self.data_loaded = True
@@ -1723,6 +1722,7 @@ class manager:
     def compute_covariance(self):
         """
         Computa la matriz de covarianza usando datos sincronizados
+
         """
         if not self.data_loaded:
             if not self.synchronise_timeseries():
@@ -2083,7 +2083,7 @@ def ejecutar_simulacion_aleatoria_avanzada(token_acceso, paneles_disponibles, fe
                 for i in range(num_simulaciones):
                     progress_bar.progress((i + 1) / num_simulaciones, 
                                         text=f"Simulación {i+1}/{num_simulaciones}")
-                    
+
                     # Seleccionar activos aleatorios por panel
                     simbolos_seleccionados = []
                     for panel in paneles_seleccionados:
