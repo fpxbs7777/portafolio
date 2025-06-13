@@ -1697,78 +1697,79 @@ def main():
     """
     Función principal de la aplicación Streamlit
     """
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
-    
-    # Inicializar session state
-    if 'token_acceso' not in st.session_state:
-        st.session_state.token_acceso = None
-    if 'refresh_token' not in st.session_state:
-        st.session_state.refresh_token = None
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = []
-    if 'cliente_seleccionado' not in st.session_state:
-        st.session_state.cliente_seleccionado = None
-    # Add missing date parameters
-    if 'fecha_desde' not in st.session_state:
-        st.session_state.fecha_desde = date.today() - timedelta(days=365)
-    if 'fecha_hasta' not in st.session_state:
-        st.session_state.fecha_hasta = date.today()
-    
-    # Sidebar para autenticación y configuración
-    with st.sidebar:
-        st.header("🔐 Autenticación IOL")
+    try:
+        st.title("📊 IOL Portfolio Analyzer")
+        st.markdown("### Analizador Avanzado de Portafolios IOL")
         
-        if st.session_state.token_acceso is None:
-            # Formulario de login
-            with st.form("login_form"):
-                st.markdown("#### Ingrese sus credenciales de IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+        # Inicializar session state
+        if 'token_acceso' not in st.session_state:
+            st.session_state.token_acceso = None
+        if 'refresh_token' not in st.session_state:
+            st.session_state.refresh_token = None
+        if 'clientes' not in st.session_state:
+            st.session_state.clientes = []
+        if 'cliente_seleccionado' not in st.session_state:
+            st.session_state.cliente_seleccionado = None
+        # Add missing date parameters
+        if 'fecha_desde' not in st.session_state:
+            st.session_state.fecha_desde = date.today() - timedelta(days=365)
+        if 'fecha_hasta' not in st.session_state:
+            st.session_state.fecha_hasta = date.today()
+        
+        # Sidebar para autenticación y configuración
+        with st.sidebar:
+            st.header("🔐 Autenticación IOL")
+            
+            if st.session_state.token_acceso is None:
+                # Formulario de login
+                with st.form("login_form"):
+                    st.markdown("#### Ingrese sus credenciales de IOL")
+                    usuario = st.text_input("Usuario", placeholder="su_usuario")
+                    contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+                    
+                    if st.form_submit_button("🚀 Conectar"):
+                        if usuario and contraseña:
+                            with st.spinner("Conectando con IOL..."):
+                                token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                                
+                                if token_acceso:
+                                    st.session_state.token_acceso = token_acceso
+                                    st.session_state.refresh_token = refresh_token
+                                    st.success("✅ Conexión exitosa!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Error en la autenticación")
+                        else:
+                            st.warning("⚠️ Complete todos los campos")
+            else:
+                # Usuario conectado
+                st.success("✅ Conectado a IOL")
                 
-                if st.form_submit_button("🚀 Conectar"):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando con IOL..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
-        else:
-            # Usuario conectado
-            st.success("✅ Conectado a IOL")
-            
-            # Configuración de fechas
-            st.markdown("#### 📅 Configuración de Fechas")
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_desde = st.date_input(
-                    "Fecha desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
-                )
-            with col2:
-                fecha_hasta = st.date_input(
-                    "Fecha hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
-            
-            st.session_state.fecha_desde = fecha_desde
-            st.session_state.fecha_hasta = fecha_hasta
-            
-            # Obtener lista de clientes
-           
-            if not st.session_state.clientes:
-                with st.spinner("Cargando clientes..."):
-                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                    st.session_state.clientes = clientes
+                # Configuración de fechas
+                st.markdown("#### 📅 Configuración de Fechas")
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha_desde = st.date_input(
+                        "Fecha desde:",
+                        value=st.session_state.fecha_desde,
+                        max_value=date.today()
+                    )
+                with col2:
+                    fecha_hasta = st.date_input(
+                        "Fecha hasta:",
+                        value=st.session_state.fecha_hasta,
+                        max_value=date.today()
+                    )
+                
+                st.session_state.fecha_desde = fecha_desde
+                st.session_state.fecha_hasta = fecha_hasta
+                
+                # Obtener lista de clientes
+               
+                if not st.session_state.clientes:
+                    with st.spinner("Cargando clientes..."):
+                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        st.session_state.clientes = clientes
             
             clientes = st.session_state.clientes
             
