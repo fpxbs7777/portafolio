@@ -372,8 +372,8 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
-    Obtiene datos históricos para optimización de portafolio con manejo mejorado de errores.
-    Soporta correctamente FCI (como ADCGLOA) y bonos (como AE38).
+    Obtiene datos históricos para optimización de portafolio usando SOLO la función obtener_serie_historica_iol
+    (con fallback a yfinance solo si falla), para todos los instrumentos: acciones, bonos, FCI, opciones, etc.
     """
     try:
         df_precios = pd.DataFrame()
@@ -393,21 +393,26 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
 
             serie_obtenida = False
+            simbolo_upper = simbolo.upper()
 
-            # Determinar tipo de instrumento
-            if simbolo.upper() == "ADCGLOA":
-                # Fondo común de inversión
+            # Determinar mercados según el tipo de instrumento
+            if simbolo_upper == "ADCGLOA":
                 mercados = ['FCI']
-            elif simbolo.upper().startswith("AE") or simbolo.upper().endswith("D") or simbolo.upper().endswith("C") or simbolo.upper().endswith("O"):
-                # Bonos (puedes ajustar la lógica según nomenclatura)
+            elif simbolo_upper.startswith("AE") or simbolo_upper.endswith("D") or simbolo_upper.endswith("C") or simbolo_upper.endswith("O"):
                 mercados = ['bCBA']
+            elif simbolo_upper.endswith("48") or simbolo_upper.endswith("30") or simbolo_upper.endswith("29"):
+                mercados = ['bCBA']
+            elif simbolo_upper.startswith("MERV") or simbolo_upper.startswith("OPC"):
+                mercados = ['Opciones']
             else:
-                mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
+                mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
 
+            # Intentar obtener datos de cada mercado usando SIEMPRE obtener_serie_historica_iol
             for mercado in mercados:
                 try:
                     simbolo_consulta = simbolo
-                    if mercado not in ['Opciones', 'FCI']:
+                    # Buscar clase D solo para bonos en bCBA
+                    if mercado == 'bCBA' and (simbolo_upper.endswith("D") or simbolo_upper.endswith("C") or simbolo_upper.endswith("O") or simbolo_upper.startswith("AE")):
                         clase_d = obtener_clase_d(simbolo, mercado, token_portador)
                         if clase_d:
                             simbolo_consulta = clase_d
@@ -428,6 +433,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     detalles_errores[f"{simbolo}_{mercado}"] = str(e)
                     continue
 
+            # Fallback a yfinance solo si no se pudo obtener de IOL
             if not serie_obtenida:
                 try:
                     serie_yf = obtener_datos_alternativos_yfinance(
