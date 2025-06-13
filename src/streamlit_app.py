@@ -588,7 +588,8 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
     url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
+        'Authorization': f'Bearer {bearer_token}',
+        'Content-Type': 'application/json'
     }
     
     try:
@@ -1436,6 +1437,7 @@ def mostrar_estado_cuenta(estado_cuenta):
             if len(estadisticas) > 1:
                 st.markdown("##### 📊 Distribución de Volumen")
                 
+                # Crear gráfico demo
                 labels = [s.get('descripcion', f'Operación {i+1}') for i, s in enumerate(estadisticas)]
                 values = [s.get('volumen', 0) for s in estadisticas]
                 
@@ -1840,3 +1842,41 @@ def mostrar_cotizaciones_mercado(token_acceso):
                 {alerta['mensaje']}
             </div>
             """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("Bienvenido al analizador de portafolio de IOL. Ingrese sus credenciales para comenzar.")
+
+    with st.form("login_form"):
+        usuario = st.text_input("Usuario IOL", value="", type="default")
+        contraseña = st.text_input("Contraseña IOL", value="", type="password")
+        submit = st.form_submit_button("Iniciar sesión")
+
+    if submit:
+        with st.spinner("Autenticando..."):
+            access_token, refresh_token = obtener_tokens(usuario, contraseña)
+        if access_token:
+            st.success("✅ Autenticación exitosa")
+            # Tabs principales
+            tab1, tab2, tab3 = st.tabs(["💰 Estado de Cuenta", "📈 Portafolio", "💱 Mercado"])
+            with tab1:
+                estado_cuenta = obtener_estado_cuenta(access_token)
+                mostrar_estado_cuenta(estado_cuenta)
+            with tab2:
+                clientes = obtener_lista_clientes(access_token)
+                if clientes:
+                    cliente_sel = st.selectbox("Seleccione cliente", [c.get("nombre", "Sin nombre") for c in clientes])
+                    id_cliente = clientes[[c.get("nombre", "Sin nombre") for c in clientes].index(cliente_sel)].get("id")
+                else:
+                    id_cliente = None
+                portafolio = obtener_portafolio(access_token, id_cliente) if id_cliente else None
+                if portafolio:
+                    mostrar_resumen_portafolio(portafolio)
+                else:
+                    st.info("No se pudo obtener el portafolio.")
+            with tab3:
+                mostrar_cotizaciones_mercado(access_token)
+        else:
+            st.error("No se pudo autenticar. Verifique sus credenciales.")
+    else:
+        st.info("Ingrese sus credenciales y presione 'Iniciar sesión'.")
