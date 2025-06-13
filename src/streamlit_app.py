@@ -374,6 +374,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
     """
     Obtiene datos históricos para optimización de portafolio usando SOLO la función obtener_serie_historica_iol
     (con fallback a yfinance solo si falla), para todos los instrumentos: acciones, bonos, FCI, opciones, etc.
+    Alinea las fechas solo si hay al menos 2 activos con fechas comunes, si no, intenta devolver los datos disponibles.
     """
     try:
         df_precios = pd.DataFrame()
@@ -500,6 +501,17 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 serie = df_precios[col]
                 st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
 
+        # Solo alinear si hay al menos 2 activos con fechas comunes
+        fechas_comunes = set(df_precios.index)
+        for col in df_precios.columns:
+            fechas_comunes = fechas_comunes & set(df_precios[col].dropna().index)
+        if len(fechas_comunes) < 30:
+            st.warning("⚠️ No hay suficientes fechas comunes entre los activos. Se devolverán los datos disponibles sin alinear.")
+            # Devuelve los datos tal cual, para que el usuario vea los disponibles
+            mean_returns = df_precios.pct_change().mean()
+            cov_matrix = df_precios.pct_change().cov()
+            return mean_returns, cov_matrix, df_precios
+
         try:
             df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
             df_precios_interpolated = df_precios.interpolate(method='time')
@@ -525,8 +537,10 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         returns = df_precios.pct_change().dropna()
 
         if returns.empty or len(returns) < 30:
-            st.error("❌ No hay suficientes datos para calcular retornos válidos (mínimo 30 observaciones)")
-            return None, None, None
+            st.warning("⚠️ No hay suficientes fechas comunes para todos los activos. Se devolverán los datos disponibles.")
+            mean_returns = df_precios.pct_change().mean()
+            cov_matrix = df_precios.pct_change().cov()
+            return mean_returns, cov_matrix, df_precios
 
         # Verificar que los retornos no sean constantes
         if (returns.std() == 0).any():
