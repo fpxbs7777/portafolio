@@ -7,7 +7,7 @@ from datetime import date, timedelta, datetime
 import numpy as np
 import yfinance as yf
 import scipy.optimize as op
-from scipy import stats # Added for skewness, kurtosis, jarque_bera
+from scipy import stats
 import random
 import warnings
 
@@ -505,10 +505,10 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         # Intentar diferentes estrategias de alineación
         try:
-            # Estrategia 1: Forward fill y luego backward fill
-            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            # Forward fill y luego backward fill
+            df_precios_filled = df_precios.ffill().bfill()
             
-            # Estrategia 2: Interpolar valores faltantes
+            # Interpolar valores faltantes
             df_precios_interpolated = df_precios.interpolate(method='time')
             
             # Usar la estrategia que conserve más datos
@@ -519,7 +519,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 df_precios = df_precios_interpolated.dropna()
                 st.info("✅ Usando estrategia de interpolación")
             else:
-                # Estrategia 3: Usar solo fechas con datos completos
+                # Usar solo fechas con datos completos
                 df_precios = df_precios.dropna()
                 st.info("✅ Usando solo fechas con datos completos")
                 
@@ -567,37 +567,6 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             st.code(f"Símbolos: {simbolos}")
             st.code(f"Rango de fechas: {fecha_desde} a {fecha_hasta}")
         return None, None, None
-
-def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
-    """
-    Obtiene la serie histórica de precios para un símbolo y mercado específico.
-    Actualizada para usar nombres correctos de mercados IOL.
-    """
-    # Mapear nombres de mercados a los correctos de IOL
-    mercados_mapping = {
-        'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
-        'NASDAQ': 'nASDAQ',
-        'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'  # Merval no existe, usar bCBA
-    }
-    
-    mercado_correcto = mercados_mapping.get(mercado, mercado)
-    
-    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
-    except Exception:
-        return None
 
 def obtener_clase_d(simbolo, mercado, bearer_token):
     """
@@ -649,8 +618,6 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
     Optimiza un portafolio usando teoría moderna de portafolio
     """
     try:
-        from scipy.optimize import minimize
-        
         n_assets = len(returns.columns)
         
         # Función objetivo para maximizar el ratio de Sharpe
@@ -670,7 +637,7 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
         initial_guess = n_assets * [1. / n_assets]
         
         # Optimización
-        result = minimize(negative_sharpe, initial_guess, method='SLSQP',
+        result = op.minimize(negative_sharpe, initial_guess, method='SLSQP',
                          bounds=bounds, constraints=constraints)
         
         if result.success:
@@ -1170,13 +1137,12 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs para diferentes análisis
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen", 
         "💰 Estado de Cuenta", 
         "🎯 Optimización", 
         "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🏦 FCI"
+        "💱 Cotizaciones"
     ])
     
     with tab1:
@@ -1211,9 +1177,9 @@ def mostrar_analisis_portafolio():
 
     with tab3:
         # Optimización de portafolio
-        if 'portafolio' not in locals():
-            with st.spinner("Cargando portafolio para optimización..."):
-                portafolio = obtener_portafolio(token_acceso, id_cliente)
+        portafolio = None
+        with st.spinner("Cargando portafolio para optimización..."):
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
         
         if portafolio:
             mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
@@ -1226,8 +1192,7 @@ def mostrar_analisis_portafolio():
         st.info("🚧 Funcionalidad en desarrollo")
         
         # Placeholder para análisis técnico futuro
-        if 'portafolio' not in locals():
-            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        portafolio = obtener_portafolio(token_acceso, id_cliente) if 'portafolio' not in locals() else portafolio
         
         if portafolio:
             activos = portafolio.get('activos', [])
@@ -1247,9 +1212,6 @@ def mostrar_analisis_portafolio():
     with tab5:
         # Cotizaciones y mercado
         mostrar_cotizaciones_mercado(token_acceso)
-
-    with tab6:
-        mostrar_fci(token_acceso, fecha_desde, fecha_hasta)
 
 def mostrar_estado_cuenta(estado_cuenta):
     """
@@ -1507,135 +1469,147 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
-def obtener_lista_fci(token_portador):
+# Clase PortfolioManager simplificada para compatibilidad
+class PortfolioManager:
     """
-    Obtiene la lista de FCI disponibles desde la API de IOL.
+    Clase simplificada para manejo de portafolio y optimización
     """
-    url = "https://api.invertironline.com/api/v2/Titulos/FCI"
-    headers = obtener_encabezado_autorizacion(token_portador)
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Error al obtener lista de FCI: {response.status_code}")
-            return []
-    except Exception as e:
-        st.error(f"Error al obtener lista de FCI: {str(e)}")
-        return []
-
-def obtener_detalle_fci(token_portador, simbolo):
-    """
-    Obtiene el detalle de un FCI específico por símbolo.
-    """
-    url = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
-    headers = obtener_encabezado_autorizacion(token_portador)
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Error al obtener detalle de FCI {simbolo}: {response.status_code}")
-            return None
-    except Exception as e:
-        st.error(f"Error al obtener detalle de FCI {simbolo}: {str(e)}")
-        return None
-
-def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    """
-    Obtiene la serie histórica de un FCI usando el endpoint de FCI.
-    """
-    url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    headers = obtener_encabezado_autorizacion(token_portador)
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            if not data:
-                return None
-            precios, fechas = [], []
-            for item in data:
-                precio = item.get('ultimoPrecio') or item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                fecha_str = item.get('fechaHora')
-                if precio is not None and fecha_str:
-                    fecha_parsed = parse_datetime_flexible(fecha_str)
-                    if fecha_parsed is not None:
-                        precios.append(precio)
-                        fechas.append(fecha_parsed)
-            if precios and fechas:
-                serie = pd.Series(precios, index=fechas)
-                serie = serie.sort_index()
-                serie = serie[~serie.index.duplicated(keep='last')]
-                return serie
+    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
+        self.symbols = symbols
+        self.token = token
+        self.fecha_desde = fecha_desde
+        self.fecha_hasta = fecha_hasta
+        self.data_loaded = False
+        self.returns = None
+        self.prices = None
+    
+    def load_data(self):
+        """
+        Carga datos históricos para los símbolos del portafolio
+        """
+        try:
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
+            )
+            
+            if mean_returns is not None and cov_matrix is not None:
+                self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
+                self.prices = df_precios
+                self.mean_returns = mean_returns
+                self.cov_matrix = cov_matrix
+                self.data_loaded = True
+                return True
             else:
-                return None
-        else:
-            st.error(f"Error al obtener serie histórica de FCI {simbolo}: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            st.error(f"Error cargando datos: {str(e)}")
+            return False
+    
+    def compute_portfolio(self, strategy='markowitz', target_return=None):
+        """
+        Computa la optimización del portafolio
+        """
+        if not self.data_loaded or self.returns is None:
             return None
-    except Exception as e:
-        st.error(f"Error al obtener serie histórica de FCI {simbolo}: {str(e)}")
-        return None
+        
+        try:
+            # Optimización básica usando pesos iguales como fallback
+            n_assets = len(self.returns.columns)
+            
+            if strategy == 'equi-weight':
+                weights = np.array([1/n_assets] * n_assets)
+            else:
+                # Intentar optimización real
+                weights = optimize_portfolio(self.returns, target_return=target_return)
+            
+            # Crear objeto de resultado
+            portfolio_output = PortfolioOutput(
+                weights=weights,
+                asset_names=list(self.returns.columns),
+                returns=self.returns
+            )
+            
+            return portfolio_output
+            
+        except Exception as e:
+            st.error(f"Error en optimización: {str(e)}")
+            return None
 
-def mostrar_fci(token_acceso, fecha_desde, fecha_hasta):
+class PortfolioOutput:
     """
-    Muestra la lista de FCI, detalles y series históricas.
+    Clase para almacenar resultados de optimización de portafolio
     """
-    st.markdown("### 🏦 Fondos Comunes de Inversión (FCI)")
-    lista_fci = obtener_lista_fci(token_acceso)
-    if not lista_fci:
-        st.warning("No se encontraron FCI disponibles.")
-        return
-
-    df_fci = pd.DataFrame(lista_fci)
-    if df_fci.empty:
-        st.warning("No se pudieron procesar los datos de FCI.")
-        return
-
-    # Mostrar tabla básica de FCI
-    columnas_mostrar = ['simbolo', 'descripcion', 'tipoFondo', 'moneda', 'mercado', 'variacion', 'variacionMensual', 'variacionAnual']
-    columnas_disponibles = [c for c in columnas_mostrar if c in df_fci.columns]
-    st.dataframe(df_fci[columnas_disponibles], use_container_width=True)
-
-    # Selección de FCI
-    simbolos = df_fci['simbolo'].tolist()
-    simbolo_sel = st.selectbox("Seleccione un FCI para ver detalles y series:", options=simbolos)
-    if simbolo_sel:
-        detalle = obtener_detalle_fci(token_acceso, simbolo_sel)
-        if detalle:
-            st.markdown(f"#### Detalle de {detalle.get('descripcion', simbolo_sel)}")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Símbolo", detalle.get('simbolo', ''))
-            col2.metric("Tipo Fondo", detalle.get('tipoFondo', ''))
-            col3.metric("Moneda", detalle.get('moneda', ''))
-            st.write({k: detalle[k] for k in detalle if k not in ['simbolo', 'descripcion', 'tipoFondo', 'moneda']})
-
-        # Serie histórica y rendimientos
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
-        serie = obtener_serie_historica_fci(token_acceso, simbolo_sel, fecha_desde_str, fecha_hasta_str)
-        if serie is not None and len(serie) > 10:
-            st.markdown("#### Serie Histórica de Valor Cuotaparte")
+    def __init__(self, weights, asset_names, returns):
+        self.weights = weights
+        self.asset_names = asset_names
+        self.returns = returns
+        self.portfolio_returns = None
+        
+        if returns is not None and len(weights) == len(returns.columns):
+            self.portfolio_returns = (returns * weights).sum(axis=1)
+    
+    def get_metrics_dict(self):
+        """
+        Calcula y retorna métricas del portafolio
+        """
+        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
+            return {
+                'Mean Daily': 0,
+                'Volatility Daily': 0,
+                'Sharpe Ratio': 0,
+                'VaR 95%': 0
+            }
+        
+        mean_daily = self.portfolio_returns.mean()
+        vol_daily = self.portfolio_returns.std()
+        sharpe = mean_daily / vol_daily if vol_daily > 0 else 0
+        var_95 = np.percentile(self.portfolio_returns, 5)
+        
+        return {
+            'Mean Daily': mean_daily,
+            'Volatility Daily': vol_daily,
+            'Sharpe Ratio': sharpe,
+            'VaR 95%': var_95
+        }
+    
+    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
+        """
+        Crea un histograma de retornos usando Plotly para Streamlit
+        """
+        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
+            # Crear gráfico vacío
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=serie.index, y=serie.values, mode='lines', name='Valor Cuotaparte'))
-            fig.update_layout(title=f"Serie Histórica {simbolo_sel}", xaxis_title="Fecha", yaxis_title="Valor")
-            st.plotly_chart(fig, use_container_width=True)
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        
+        fig = go.Figure(data=[go.Histogram(
+            x=self.portfolio_returns,
+            nbinsx=30,
+            name="Retornos del Portafolio"
+        )])
+        
+        fig.update_layout(
+            title=f"{title}",
+            xaxis_title="Retorno",
+            yaxis_title="Frecuencia",
+            showlegend=False
+        )
+        
+        return fig
 
-            # Calcular y mostrar rendimientos
-            rendimientos = serie.pct_change().dropna()
-            st.markdown("#### Rendimientos Diarios")
-            st.line_chart(rendimientos)
-            st.write(f"Retorno promedio diario: {rendimientos.mean():.4%}")
-            st.write(f"Volatilidad diaria: {rendimientos.std():.4%}")
-            st.write(f"Retorno acumulado: {(serie.iloc[-1]/serie.iloc[0]-1):.2%}")
-        else:
-            st.info("No hay suficiente serie histórica para este FCI.")
 def main():
     """
     Función principal de la aplicación Streamlit
     """
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
-
+    
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
         st.session_state.token_acceso = None
@@ -1645,26 +1619,28 @@ def main():
         st.session_state.clientes = []
     if 'cliente_seleccionado' not in st.session_state:
         st.session_state.cliente_seleccionado = None
+    # Add missing date parameters
     if 'fecha_desde' not in st.session_state:
         st.session_state.fecha_desde = date.today() - timedelta(days=365)
     if 'fecha_hasta' not in st.session_state:
         st.session_state.fecha_hasta = date.today()
-
+    
     # Sidebar para autenticación y configuración
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
-
+        
         if st.session_state.token_acceso is None:
             # Formulario de login
             with st.form("login_form"):
                 st.markdown("#### Ingrese sus credenciales de IOL")
                 usuario = st.text_input("Usuario", placeholder="su_usuario")
                 contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-
+                
                 if st.form_submit_button("🚀 Conectar"):
                     if usuario and contraseña:
                         with st.spinner("Conectando con IOL..."):
                             token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            
                             if token_acceso:
                                 st.session_state.token_acceso = token_acceso
                                 st.session_state.refresh_token = refresh_token
@@ -1677,7 +1653,7 @@ def main():
         else:
             # Usuario conectado
             st.success("✅ Conectado a IOL")
-
+            
             # Configuración de fechas
             st.markdown("#### 📅 Configuración de Fechas")
             col1, col2 = st.columns(2)
@@ -1693,46 +1669,47 @@ def main():
                     value=st.session_state.fecha_hasta,
                     max_value=date.today()
                 )
-
+            
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
-
+            
             # Obtener lista de clientes
             if not st.session_state.clientes:
                 with st.spinner("Cargando clientes..."):
                     clientes = obtener_lista_clientes(st.session_state.token_acceso)
                     st.session_state.clientes = clientes
-
+            
             clientes = st.session_state.clientes
-
+            
             if clientes:
                 st.info(f"👥 {len(clientes)} clientes disponibles")
-
+                
                 # Seleccionar cliente
                 cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
                 cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-
+                
                 cliente_seleccionado = st.selectbox(
                     "Seleccione un cliente:",
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
                 )
-
+                
                 # Guardar cliente seleccionado en session state
                 st.session_state.cliente_seleccionado = next(
                     (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
                     None
                 )
-
+                
                 if st.button("🔄 Actualizar lista de clientes"):
                     with st.spinner("Actualizando clientes..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
                         st.session_state.clientes = nuevos_clientes
                         st.success("✅ Lista de clientes actualizada")
                         st.rerun()
+            
             else:
                 st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
-
+    
     # Contenido principal con manejo de errores mejorado
     try:
         if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
@@ -1740,11 +1717,118 @@ def main():
         elif st.session_state.token_acceso:
             st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
         else:
-            st.info("👋 Bienvenido. Ingrese sus credenciales de IOL en la barra lateral para comenzar.")
-            st.markdown("""
-            - Esta aplicación le permite analizar portafolios de IOL, ver FCI, optimizar carteras y más.
-            - Ingrese usuario y contraseña en la barra lateral para comenzar.
-            """)
+            st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
         st.error("🔄 Por favor, recargue la página e intente nuevamente")
+
+def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Muestra la optimización del portafolio usando datos históricos
+    """
+    st.markdown("### 🎯 Optimización de Portafolio")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para optimizar")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if len(simbolos) < 2:
+        st.warning("Se necesitan al menos 2 activos para optimización")
+        return
+    
+    st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
+    
+    # Configuración de optimización
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        estrategia = st.selectbox(
+            "Estrategia de Optimización:",
+            options=['markowitz', 'equi-weight'],
+            format_func=lambda x: 'Optimización de Markowitz' if x == 'markowitz' else 'Pesos Iguales'
+        )
+    
+    with col2:
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
+    
+    if ejecutar_optimizacion:
+        with st.spinner("Ejecutando optimización..."):
+            try:
+                # Crear manager de portafolio
+                manager = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                
+                # Cargar datos
+                if manager.load_data():
+                    # Computar optimización
+                    portfolio_result = manager.compute_portfolio(strategy=estrategia)
+                    
+                    if portfolio_result:
+                        st.success("✅ Optimización completada")
+                        
+                        # Mostrar resultados
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("#### 📊 Pesos Optimizados")
+                            weights_df = pd.DataFrame({
+                                'Activo': portfolio_result.asset_names,
+                                'Peso (%)': [w * 100 for w in portfolio_result.weights]
+                            })
+                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                            st.dataframe(weights_df, use_container_width=True)
+                        
+                        with col2:
+                            st.markdown("#### 📈 Métricas del Portafolio")
+                            metricas = portfolio_result.get_metrics_dict()
+                            
+                            st.metric("Retorno Diario Promedio", f"{metricas['Mean Daily']:.4f}")
+                            st.metric("Volatilidad Diaria", f"{metricas['Volatility Daily']:.4f}")
+                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                        
+                        # Gráfico de distribución de retornos
+                        if portfolio_result.portfolio_returns is not None:
+                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
+                            fig = portfolio_result.plot_histogram_streamlit()
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Gráfico de pesos
+                        st.markdown("#### 🥧 Distribución de Pesos")
+                        fig_pie = go.Figure(data=[go.Pie(
+                            labels=portfolio_result.asset_names,
+                            values=portfolio_result.weights,
+                            textinfo='label+percent',
+                        )])
+                        fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                        st.plotly_chart(fig_pie, use_container_width=True)
+                        
+                    else:
+                        st.error("❌ Error en la optimización")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+    
+    # Información adicional
+    with st.expander("ℹ️ Información sobre las Estrategias"):
+        st.markdown("""
+        **Optimización de Markowitz:**
+        - Maximiza el ratio de Sharpe (retorno/riesgo)
+        - Considera la correlación entre activos
+        - Busca la frontera eficiente
+        
+        **Pesos Iguales:**
+        - Distribución uniforme entre todos los activos
+        - Estrategia simple de diversificación
+        - No considera correlaciones históricas
+        """)
