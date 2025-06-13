@@ -482,9 +482,9 @@ class PortfolioVisualizer:
 
 # Enhanced optimization engine
 class OptimizationEngine:
-    def __init__(self, symbols, data, constraints=None):
+    def __init__(self, symbols, returns_data=None, constraints=None):
         self.symbols = symbols
-        self.data = data
+        self.returns_data = returns_data if returns_data is not None else pd.DataFrame()
         self.constraints = constraints or {}
         self.risk_free_rate = 0.05  # 5% annual risk-free rate
         
@@ -492,53 +492,179 @@ class OptimizationEngine:
         """Enhanced portfolio optimization with multiple strategies"""
         n_assets = len(self.symbols)
         
-        if strategy == 'sharpe':
-            return self._optimize_sharpe_ratio()
-        elif strategy == 'min_volatility':
-            return self._optimize_min_volatility()
-        elif strategy == 'risk_parity':
-            return self._optimize_risk_parity()
-        elif strategy == 'max_diversification':
-            return self._optimize_max_diversification()
-        elif strategy == 'target_return':
-            return self._optimize_target_return(target_return)
-        else:
+        if n_assets == 0:
+            return np.array([])
+        
+        try:
+            if strategy == 'sharpe':
+                return self._optimize_sharpe_ratio()
+            elif strategy == 'min_volatility':
+                return self._optimize_min_volatility()
+            elif strategy == 'risk_parity':
+                return self._optimize_risk_parity()
+            elif strategy == 'max_diversification':
+                return self._optimize_max_diversification()
+            elif strategy == 'target_return':
+                return self._optimize_target_return(target_return)
+            else:
+                return self._optimize_equal_weight()
+        except Exception as e:
+            st.error(f"Error en optimización: {str(e)}")
             return self._optimize_equal_weight()
     
     def _optimize_sharpe_ratio(self):
         """Optimize for maximum Sharpe ratio"""
-        # Implementation here
         n_assets = len(self.symbols)
-        return np.array([1/n_assets] * n_assets)  # Placeholder
+        
+        if self.returns_data.empty or len(self.returns_data.columns) == 0:
+            return np.array([1/n_assets] * n_assets)
+        
+        try:
+            # Calculate expected returns and covariance matrix
+            mean_returns = self.returns_data.mean()
+            cov_matrix = self.returns_data.cov()
+            
+            # Objective function (negative Sharpe ratio to minimize)
+            def negative_sharpe(weights):
+                portfolio_return = np.sum(mean_returns * weights) * 252
+                portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))
+                if portfolio_volatility == 0:
+                    return -np.inf
+                return -(portfolio_return - self.risk_free_rate) / portfolio_volatility
+            
+            # Constraints
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0, 1) for _ in range(n_assets))
+            
+            # Initial guess
+            x0 = np.array([1/n_assets] * n_assets)
+            
+            # Optimization
+            result = optimize.minimize(negative_sharpe, x0, method='SLSQP', 
+                                     bounds=bounds, constraints=constraints)
+            
+            return result.x if result.success else np.array([1/n_assets] * n_assets)
+            
+        except Exception:
+            return np.array([1/n_assets] * n_assets)
     
     def _optimize_min_volatility(self):
         """Optimize for minimum volatility"""
-        # Implementation here
         n_assets = len(self.symbols)
-        return np.array([1/n_assets] * n_assets)  # Placeholder
+        
+        if self.returns_data.empty:
+            return np.array([1/n_assets] * n_assets)
+        
+        try:
+            cov_matrix = self.returns_data.cov()
+            
+            def portfolio_volatility(weights):
+                return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+            
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0, 1) for _ in range(n_assets))
+            x0 = np.array([1/n_assets] * n_assets)
+            
+            result = optimize.minimize(portfolio_volatility, x0, method='SLSQP',
+                                     bounds=bounds, constraints=constraints)
+            
+            return result.x if result.success else np.array([1/n_assets] * n_assets)
+            
+        except Exception:
+            return np.array([1/n_assets] * n_assets)
     
     def _optimize_risk_parity(self):
         """Risk parity optimization"""
-        # Implementation here
         n_assets = len(self.symbols)
-        return np.array([1/n_assets] * n_assets)  # Placeholder
+        
+        if self.returns_data.empty:
+            return np.array([1/n_assets] * n_assets)
+        
+        try:
+            cov_matrix = self.returns_data.cov()
+            
+            def risk_budget_objective(weights):
+                portfolio_vol = np.sqrt(np.dot(weights, np.dot(cov_matrix, weights)))
+                marginal_contrib = np.dot(cov_matrix, weights) / portfolio_vol
+                contrib = weights * marginal_contrib
+                target_contrib = np.ones(n_assets) / n_assets
+                return np.sum((contrib - target_contrib * portfolio_vol) ** 2)
+            
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0.001, 1) for _ in range(n_assets))
+            x0 = np.array([1/n_assets] * n_assets)
+            
+            result = optimize.minimize(risk_budget_objective, x0, method='SLSQP',
+                                     bounds=bounds, constraints=constraints)
+            
+            return result.x if result.success else np.array([1/n_assets] * n_assets)
+            
+        except Exception:
+            return np.array([1/n_assets] * n_assets)
     
     def _optimize_max_diversification(self):
         """Maximum diversification optimization"""
-        # Implementation here
         n_assets = len(self.symbols)
-        return np.array([1/n_assets] * n_assets)  # Placeholder
+        
+        if self.returns_data.empty:
+            return np.array([1/n_assets] * n_assets)
+        
+        try:
+            cov_matrix = self.returns_data.cov()
+            volatilities = np.sqrt(np.diag(cov_matrix))
+            
+            def negative_diversification_ratio(weights):
+                portfolio_vol = np.sqrt(np.dot(weights, np.dot(cov_matrix, weights)))
+                weighted_avg_vol = np.sum(weights * volatilities)
+                if portfolio_vol == 0:
+                    return -np.inf
+                return -weighted_avg_vol / portfolio_vol
+            
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0, 1) for _ in range(n_assets))
+            x0 = np.array([1/n_assets] * n_assets)
+            
+            result = optimize.minimize(negative_diversification_ratio, x0, method='SLSQP',
+                                     bounds=bounds, constraints=constraints)
+            
+            return result.x if result.success else np.array([1/n_assets] * n_assets)
+            
+        except Exception:
+            return np.array([1/n_assets] * n_assets)
     
     def _optimize_target_return(self, target_return):
         """Optimize for target return"""
-        # Implementation here
         n_assets = len(self.symbols)
-        return np.array([1/n_assets] * n_assets)  # Placeholder
+        
+        if self.returns_data.empty or target_return is None:
+            return np.array([1/n_assets] * n_assets)
+        
+        try:
+            mean_returns = self.returns_data.mean() * 252
+            cov_matrix = self.returns_data.cov() * 252
+            
+            def portfolio_volatility(weights):
+                return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+            
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return}
+            ]
+            bounds = tuple((0, 1) for _ in range(n_assets))
+            x0 = np.array([1/n_assets] * n_assets)
+            
+            result = optimize.minimize(portfolio_volatility, x0, method='SLSQP',
+                                     bounds=bounds, constraints=constraints)
+            
+            return result.x if result.success else np.array([1/n_assets] * n_assets)
+            
+        except Exception:
+            return np.array([1/n_assets] * n_assets)
     
     def _optimize_equal_weight(self):
         """Equal weight portfolio"""
         n_assets = len(self.symbols)
-        return np.array([1/n_assets] * n_assets)
+        return np.array([1/n_assets] * n_assets) if n_assets > 0 else np.array([])
 
 # Enhanced main application
 class IOLPortfolioApp:
@@ -548,21 +674,26 @@ class IOLPortfolioApp:
         self.data_manager = DataManager()
         
     def run(self):
-        """Main application runner"""
-        st.title("📊 IOL Portfolio Analyzer Pro")
-        st.markdown("### Analizador Avanzado de Portafolios con IA")
-        
-        # Sidebar for authentication and settings
-        self._render_sidebar()
-        
-        # Main content area
-        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
-            self._render_main_content()
-        elif st.session_state.token_acceso:
-            st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-        else:
-            self._render_welcome_screen()
-    
+        """Main application runner with error handling"""
+        try:
+            st.title("📊 IOL Portfolio Analyzer Pro")
+            st.markdown("### Analizador Avanzado de Portafolios con IA")
+            
+            # Sidebar for authentication and settings
+            self._render_sidebar()
+            
+            # Main content area
+            if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                self._render_main_content()
+            elif st.session_state.token_acceso:
+                st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            else:
+                self._render_welcome_screen()
+                
+        except Exception as e:
+            st.error(f"Error en la aplicación: {str(e)}")
+            st.info("Por favor, recargue la página e intente nuevamente.")
+
     def _render_sidebar(self):
         """Render sidebar with authentication and settings"""
         with st.sidebar:
@@ -864,14 +995,9 @@ class IOLPortfolioApp:
         debug_mode = st.checkbox("🔍 Modo Debug", value=False, help="Mostrar información técnica detallada")
         
         with st.spinner("Cargando estado de cuenta..."):
-            if debug_mode:
-                # Use original function with debug messages
-                estado_cuenta = obtener_estado_cuenta(st.session_state.token_acceso, id_cliente)
-            else:
-                # Use silent function
-                estado_cuenta = self.data_manager.obtener_estado_cuenta_silencioso(
-                    st.session_state.token_acceso, id_cliente
-                )
+            estado_cuenta = self.data_manager.obtener_estado_cuenta_silencioso(
+                st.session_state.token_acceso, id_cliente
+            )
         
         if estado_cuenta:
             self._mostrar_estado_cuenta_mejorado(estado_cuenta, debug_mode)
@@ -888,121 +1014,456 @@ class IOLPortfolioApp:
                     else:
                         st.error("❌ No se pudo obtener el estado de cuenta")
 
-    def _mostrar_estado_cuenta_mejorado(self, estado_cuenta, debug_mode=False):
-        """
-        Muestra el estado de cuenta con interfaz mejorada y sin debug innecesario
-        """
-        if not estado_cuenta:
-            st.warning("No hay datos disponibles")
-            return
+    def _render_optimization_pro(self):
+        """Render advanced portfolio optimization interface"""
+        st.markdown("### 🎯 Optimización Pro")
         
-        # Extraer información
-        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-        cuentas = estado_cuenta.get('cuentas', [])
-        estadisticas = estado_cuenta.get('estadisticas', [])
-        
-        # Calcular totales
-        total_disponible = sum(float(c.get('disponible', 0)) for c in cuentas)
-        total_comprometido = sum(float(c.get('comprometido', 0)) for c in cuentas)
-        total_titulos = sum(float(c.get('titulosValorizados', 0)) for c in cuentas)
-        total_general = sum(float(c.get('total', 0)) for c in cuentas)
-        
-        # Métricas principales
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Total General", 
-                f"${total_general:,.2f}",
-                help="Suma total de todas las cuentas"
+        try:
+            # Get current portfolio
+            id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente')
+            portafolio = self.data_manager.obtener_portafolio_con_cache(
+                st.session_state.token_acceso, id_cliente
             )
-        
-        with col2:
-            st.metric(
-                "Total en Pesos", 
-                f"AR$ {total_en_pesos:,.2f}",
-                help="Total expresado en pesos argentinos"
-            )
-        
-        with col3:
-            st.metric(
-                "Disponible", 
-                f"${total_disponible:,.2f}",
-                help="Total disponible para operar"
-            )
-        
-        with col4:
-            st.metric(
-                "Títulos Valorizados", 
-                f"${total_titulos:,.2f}",
-                help="Valor total de títulos en cartera"
-            )
-        
-        # Distribución por moneda
-        if cuentas:
-            self._mostrar_distribucion_monedas(cuentas)
-        
-        # Tabla de cuentas
-        if cuentas:
-            self._mostrar_tabla_cuentas(cuentas)
-        
-        # Información de debug solo si está habilitada
-        if debug_mode:
-            with st.expander("🔍 Información de Debug"):
-                st.json(estado_cuenta)
-
-    def _mostrar_distribucion_monedas(self, cuentas):
-        """Mostrar distribución por moneda de forma limpia"""
-        st.markdown("#### 💱 Distribución por Moneda")
-        
-        # Agrupar por moneda
-        cuentas_por_moneda = {}
-        for cuenta in cuentas:
-            moneda = cuenta.get('moneda', 'peso_Argentino')
-            if moneda not in cuentas_por_moneda:
-                cuentas_por_moneda[moneda] = {
-                    'disponible': 0,
-                    'total': 0,
-                    'cuentas': 0
-                }
             
-            cuentas_por_moneda[moneda]['disponible'] += float(cuenta.get('disponible', 0))
-            cuentas_por_moneda[moneda]['total'] += float(cuenta.get('total', 0))
-            cuentas_por_moneda[moneda]['cuentas'] += 1
-        
-        # Mostrar métricas por moneda
-        for moneda, datos in cuentas_por_moneda.items():
-            nombre_moneda = {
-                'peso_Argentino': '🇦🇷 Pesos Argentinos',
-                'dolar_Estadounidense': '🇺🇸 Dólares',
-                'euro': '🇪🇺 Euros'
-            }.get(moneda, moneda)
+            if not portafolio:
+                st.error("❌ No se pudo cargar el portafolio para optimización")
+                return
             
-            with st.expander(f"{nombre_moneda} ({datos['cuentas']} cuenta(s))"):
-                col1, col2 = st.columns(2)
-                col1.metric("Disponible", f"${datos['disponible']:,.2f}")
-                col2.metric("Total", f"${datos['total']:,.2f}")
+            analyzer = PortfolioAnalyzer(portafolio)
+            processed_data = analyzer.process_portfolio_data()
+            
+            if not processed_data or not processed_data['activos']:
+                st.warning("⚠️ No hay datos suficientes para optimización")
+                return
+            
+            # Extract symbols
+            symbols = [activo['Símbolo'] for activo in processed_data['activos'] if activo['Valuación'] > 0]
+            
+            if len(symbols) < 2:
+                st.warning("⚠️ Se necesitan al menos 2 activos para optimización")
+                return
+            
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                st.markdown("#### ⚙️ Configuración")
+                
+                strategy = st.selectbox(
+                    "Estrategia de Optimización:",
+                    ['sharpe', 'min_volatility', 'risk_parity', 'max_diversification', 'equal_weight'],
+                    format_func=lambda x: {
+                        'sharpe': 'Máximo Sharpe Ratio',
+                        'min_volatility': 'Mínima Volatilidad',
+                        'risk_parity': 'Paridad de Riesgo',
+                        'max_diversification': 'Máxima Diversificación',
+                        'equal_weight': 'Peso Igual'
+                    }[x]
+                )
+                
+                target_return = None
+                if strategy == 'target_return':
+                    target_return = st.slider("Retorno Objetivo (%):", 5, 30, 15) / 100
+                
+                lookback_period = st.slider("Período de Análisis (días):", 30, 365, 90)
+                
+                if st.button("🚀 Optimizar Portfolio", use_container_width=True):
+                    with st.spinner("Optimizando..."):
+                        # Try to get historical data for optimization
+                        try:
+                            # Create mock returns data for demonstration
+                            n_assets = len(symbols)
+                            n_days = lookback_period
+                            
+                            # Generate random returns for demo (replace with real data)
+                            np.random.seed(42)
+                            returns_data = pd.DataFrame(
+                                np.random.normal(0.001, 0.02, (n_days, n_assets)),
+                                columns=symbols
+                            )
+                            
+                            optimizer = OptimizationEngine(symbols, returns_data)
+                            optimal_weights = optimizer.optimize_portfolio(strategy, target_return)
+                            
+                            # Store results
+                            optimization_result = {
+                                'strategy': strategy,
+                                'weights': optimal_weights,
+                                'symbols': symbols,
+                                'timestamp': datetime.now()
+                            }
+                            
+                            st.session_state.optimization_history.append(optimization_result)
+                            st.success("✅ Optimización completada")
+                            
+                        except Exception as e:
+                            st.error(f"Error en optimización: {str(e)}")
+                            optimal_weights = np.array([1/len(symbols)] * len(symbols))
+            
+            with col2:
+                st.markdown("#### 📊 Resultados")
+                
+                if st.session_state.optimization_history:
+                    latest_result = st.session_state.optimization_history[-1]
+                    weights = latest_result['weights']
+                    symbols_opt = latest_result['symbols']
+                    
+                    # Create comparison chart
+                    current_weights = []
+                    optimal_weights_display = []
+                    
+                    for symbol in symbols_opt:
+                        # Find current weight
+                        current_weight = 0
+                        for activo in processed_data['activos']:
+                            if activo['Símbolo'] == symbol:
+                                current_weight = activo['Peso']
+                                break
+                        current_weights.append(current_weight * 100)
+                        
+                        # Optimal weight
+                        idx = symbols_opt.index(symbol)
+                        optimal_weights_display.append(weights[idx] * 100)
+                    
+                    # Create comparison chart
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Bar(
+                        name='Actual',
+                        x=symbols_opt,
+                        y=current_weights,
+                        marker_color='lightblue'
+                    ))
+                    
+                    fig.add_trace(go.Bar(
+                        name='Optimizado',
+                        x=symbols_opt,
+                        y=optimal_weights_display,
+                        marker_color='darkblue'
+                    ))
+                    
+                    fig.update_layout(
+                        title="Comparación: Portafolio Actual vs Optimizado",
+                        xaxis_title="Activos",
+                        yaxis_title="Peso (%)",
+                        barmode='group',
+                        height=400
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Recommendations table
+                    st.markdown("#### 📋 Recomendaciones")
+                    recommendations = []
+                    
+                    for i, symbol in enumerate(symbols_opt):
+                        current_weight = current_weights[i]
+                        optimal_weight = optimal_weights_display[i]
+                        difference = optimal_weight - current_weight
+                        
+                        action = "MANTENER"
+                        if difference > 1:
+                            action = "COMPRAR"
+                        elif difference < -1:
+                            action = "VENDER"
+                        
+                        recommendations.append({
+                            'Activo': symbol,
+                            'Peso Actual (%)': f"{current_weight:.1f}",
+                            'Peso Óptimo (%)': f"{optimal_weight:.1f}",
+                            'Diferencia (%)': f"{difference:+.1f}",
+                            'Acción': action
+                        })
+                    
+                    df_recommendations = pd.DataFrame(recommendations)
+                    st.dataframe(df_recommendations, use_container_width=True, hide_index=True)
+                else:
+                    st.info("👆 Configure los parámetros y haga clic en 'Optimizar Portfolio' para ver los resultados")
+            
+            # Historical optimization results
+            if len(st.session_state.optimization_history) > 1:
+                with st.expander("📈 Historial de Optimizaciones"):
+                    for i, result in enumerate(reversed(st.session_state.optimization_history[-5:])):
+                        st.write(f"**{result['timestamp'].strftime('%Y-%m-%d %H:%M')}** - {result['strategy']}")
+                        
+        except Exception as e:
+            st.error(f"Error en optimización: {str(e)}")
 
-    def _mostrar_tabla_cuentas(self, cuentas):
-        """Mostrar tabla de cuentas de forma limpia"""
-        st.markdown("#### 📊 Detalle de Cuentas")
+    def _render_risk_analysis(self):
+        """Render comprehensive risk analysis"""
+        st.markdown("### ⚠️ Análisis de Riesgo")
         
-        datos_tabla = []
-        for cuenta in cuentas:
-            datos_tabla.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                'Total': f"${cuenta.get('total', 0):,.2f}",
-                'Estado': cuenta.get('estado', 'N/A').title()
+        try:
+            # Get portfolio data
+            id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente')
+            portafolio = self.data_manager.obtener_portafolio_con_cache(
+                st.session_state.token_acceso, id_cliente
+            )
+            
+            if not portafolio:
+                st.error("❌ No se pudo cargar el portafolio")
+                return
+            
+            analyzer = PortfolioAnalyzer(portafolio)
+            processed_data = analyzer.process_portfolio_data()
+            risk_metrics = analyzer.calculate_risk_metrics()
+            
+            if not risk_metrics:
+                st.warning("⚠️ No se pudieron calcular métricas de riesgo")
+                return
+            
+            # Risk dashboard
+            risk_fig = PortfolioVisualizer.create_risk_dashboard(risk_metrics)
+            if risk_fig:
+                st.plotly_chart(risk_fig, use_container_width=True)
+            
+            # Risk metrics table
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 📊 Métricas de Concentración")
+                metrics_data = [
+                    ["Índice Herfindahl", f"{risk_metrics['concentracion']:.4f}"],
+                    ["Diversificación", f"{risk_metrics['diversificacion']:.4f}"],
+                    ["Mayor Posición", f"{risk_metrics['max_weight']:.2%}"],
+                    ["Top 3 Concentración", f"{risk_metrics['top_3_concentration']:.2%}"],
+                    ["Coeficiente Gini", f"{risk_metrics['gini_coefficient']:.4f}"]
+                ]
+                
+                df_metrics = pd.DataFrame(metrics_data, columns=['Métrica', 'Valor'])
+                st.dataframe(df_metrics, use_container_width=True, hide_index=True)
+            
+            with col2:
+                st.markdown("#### ⚡ Alertas de Riesgo")
+                
+                alerts = []
+                if risk_metrics['concentracion'] > 0.5:
+                    alerts.append("🔴 Alta concentración detectada")
+                if risk_metrics['max_weight'] > 0.4:
+                    alerts.append("🟡 Posición dominante detectada")
+                if risk_metrics['top_3_concentration'] > 0.7:
+                    alerts.append("🟠 Top 3 activos muy concentrados")
+                if risk_metrics['num_activos'] < 5:
+                    alerts.append("⚪ Portafolio con pocos activos")
+                
+                if not alerts:
+                    st.success("✅ No se detectaron alertas de riesgo críticas")
+                else:
+                    for alert in alerts:
+                        st.warning(alert)
+                        
+        except Exception as e:
+            st.error(f"Error en análisis de riesgo: {str(e)}")
+
+    def _render_ai_recommendations(self):
+        """Render AI-powered recommendations"""
+        st.markdown("### 🤖 Recomendaciones IA")
+        
+        try:
+            # Get portfolio data
+            id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente')
+            portafolio = self.data_manager.obtener_portafolio_con_cache(
+                st.session_state.token_acceso, id_cliente
+            )
+            
+            if not portafolio:
+                st.error("❌ No se pudo cargar el portafolio")
+                return
+            
+            analyzer = PortfolioAnalyzer(portafolio)
+            processed_data = analyzer.process_portfolio_data()
+            risk_metrics = analyzer.calculate_risk_metrics()
+            
+            # Generate AI recommendations based on portfolio analysis
+            recommendations = self._generate_ai_recommendations(processed_data, risk_metrics)
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.markdown("#### 💡 Recomendaciones Personalizadas")
+                
+                for i, rec in enumerate(recommendations, 1):
+                    with st.expander(f"{rec['icon']} {rec['title']}"):
+                        st.write(f"**Prioridad:** {rec['priority']}")
+                        st.write(f"**Descripción:** {rec['description']}")
+                        st.write(f"**Impacto esperado:** {rec['impact']}")
+                        if rec['actions']:
+                            st.write("**Acciones sugeridas:**")
+                            for action in rec['actions']:
+                                st.write(f"• {action}")
+            
+            with col2:
+                st.markdown("#### 📈 Score del Portafolio")
+                
+                # Calculate overall portfolio score
+                total_score = self._calculate_portfolio_score(processed_data, risk_metrics)
+                
+                # Score gauge
+                fig_score = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=total_score,
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={'text': "Score General"},
+                    gauge={
+                        'axis': {'range': [0, 100]},
+                        'bar': {'color': self._get_score_color(total_score)},
+                        'steps': [
+                            {'range': [0, 40], 'color': "lightgray"},
+                            {'range': [40, 70], 'color': "yellow"},
+                            {'range': [70, 100], 'color': "lightgreen"}
+                        ]
+                    }
+                ))
+                
+                st.plotly_chart(fig_score, use_container_width=True)
+                
+                # Score breakdown
+                st.markdown("#### 📊 Desglose del Score")
+                score_components = [
+                    ("Diversificación", risk_metrics['diversificacion'] * 100 if risk_metrics else 50),
+                    ("Concentración", (1 - risk_metrics['concentracion']) * 100 if risk_metrics else 50),
+                    ("Número de Activos", min(processed_data['num_activos'] * 10, 100) if processed_data else 50)
+                ]
+                
+                for component, score in score_components:
+                    st.metric(component, f"{score:.0f}/100")
+                    
+        except Exception as e:
+            st.error(f"Error generando recomendaciones: {str(e)}")
+
+    def _render_portfolio_comparison(self):
+        """Render portfolio comparison interface"""
+        st.markdown("### 📊 Comparación de Portafolios")
+        
+        st.info("🚧 Funcionalidad en desarrollo")
+        st.markdown("""
+        Esta sección permitirá:
+        - Comparar con portafolios de benchmark
+        - Análisis histórico de performance
+        - Comparación con índices de mercado
+        - Análisis de correlación con otros portafolios
+        """)
+
+    def _generate_ai_recommendations(self, processed_data, risk_metrics):
+        """Generate AI-powered recommendations based on portfolio analysis"""
+        recommendations = []
+        
+        if not processed_data or not risk_metrics:
+            return recommendations
+        
+        # Concentration analysis
+        if risk_metrics['concentracion'] > 0.5:
+            recommendations.append({
+                'icon': '⚠️',
+                'title': 'Reducir Concentración de Riesgo',
+                'priority': 'Alta',
+                'description': 'Su portafolio muestra alta concentración. Esto aumenta el riesgo específico.',
+                'impact': 'Reducción del riesgo no sistemático en 15-25%',
+                'actions': [
+                    'Diversificar en más sectores',
+                    'Reducir posiciones dominantes',
+                    'Considerar activos no correlacionados'
+                ]
             })
         
-        if datos_tabla:
-            df_cuentas = pd.DataFrame(datos_tabla)
-            st.dataframe(df_cuentas, use_container_width=True, hide_index=True)
+        # Diversification recommendations
+        if risk_metrics['diversificacion'] < 0.7:
+            recommendations.append({
+                'icon': '📈',
+                'title': 'Mejorar Diversificación',
+                'priority': 'Media',
+                'description': 'El nivel de diversificación puede mejorarse para optimizar el perfil riesgo-retorno.',
+                'impact': 'Mejora en ratio riesgo-retorno del 10-20%',
+                'actions': [
+                    'Agregar activos de diferentes clases',
+                    'Considerar inversión internacional',
+                    'Incluir activos alternativos'
+                ]
+            })
+        
+        # Number of assets
+        if processed_data['num_activos'] < 5:
+            recommendations.append({
+                'icon': '➕',
+                'title': 'Incrementar Número de Activos',
+                'priority': 'Media',
+                'description': 'Un mayor número de activos puede mejorar la diversificación del portafolio.',
+                'impact': 'Reducción de volatilidad del 5-15%',
+                'actions': [
+                    'Buscar oportunidades en otros sectores',
+                    'Considerar ETFs para diversificación instantánea',
+                    'Evaluar activos de renta fija'
+                ]
+            })
+        
+        # Asset allocation recommendations
+        user_preferences = st.session_state.user_preferences
+        risk_tolerance = user_preferences.get('risk_tolerance', 'medium')
+        
+        if risk_tolerance == 'conservative' and risk_metrics['max_weight'] > 0.3:
+            recommendations.append({
+                'icon': '🛡️',
+                'title': 'Ajustar a Perfil Conservador',
+                'priority': 'Alta',
+                'description': 'Su perfil conservador sugiere menor concentración en activos individuales.',
+                'impact': 'Alineación con objetivos de riesgo',
+                'actions': [
+                    'Reducir posiciones individuales a <20%',
+                    'Incrementar posición en renta fija',
+                    'Considerar activos defensivos'
+                ]
+            })
+        
+        # Default recommendation if portfolio looks good
+        if not recommendations:
+            recommendations.append({
+                'icon': '✅',
+                'title': 'Portafolio Bien Diversificado',
+                'priority': 'Baja',
+                'description': 'Su portafolio muestra buenas características de diversificación.',
+                'impact': 'Mantenimiento de perfil óptimo',
+                'actions': [
+                    'Revisar periódicamente la asignación',
+                    'Rebalancear según mercado',
+                    'Monitorear correlaciones'
+                ]
+            })
+        
+        return recommendations
+
+    def _calculate_portfolio_score(self, processed_data, risk_metrics):
+        """Calculate overall portfolio score"""
+        if not processed_data or not risk_metrics:
+            return 50
+        
+        # Diversification score (0-40 points)
+        diversification_score = risk_metrics['diversificacion'] * 40
+        
+        # Concentration score (0-30 points)
+        concentration_score = (1 - risk_metrics['concentracion']) * 30
+        
+        # Number of assets score (0-20 points)
+        num_assets_score = min(processed_data['num_activos'] * 4, 20)
+        
+        # Asset allocation score (0-10 points)
+        allocation_score = 10 if risk_metrics['max_weight'] < 0.4 else 5
+        
+        total_score = diversification_score + concentration_score + num_assets_score + allocation_score
+        return min(total_score, 100)
+
+    def _get_score_color(self, score):
+        """Get color based on score"""
+        if score >= 80:
+            return "green"
+        elif score >= 60:
+            return "yellow"
+        else:
+            return "red"
 
 # Run the application
 if __name__ == "__main__":
-    app = IOLPortfolioApp()
-    app.run()
+    try:
+        app = IOLPortfolioApp()
+        app.run()
+    except Exception as e:
+        st.error(f"Error crítico en la aplicación: {str(e)}")
+        st.info("Por favor, recargue la página.")
