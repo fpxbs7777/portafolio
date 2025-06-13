@@ -1832,3 +1832,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
+
+# Ejecutar la aplicación principal
+if __name__ == "__main__":
+    main()
