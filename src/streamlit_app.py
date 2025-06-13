@@ -200,7 +200,7 @@ class DataManager:
 
     @staticmethod
     def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
-        """Enhanced portfolio retrieval"""
+        """Enhanced portfolio retrieval without debug messages"""
         url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
         encabezados = AuthManager.obtener_encabezado_autorizacion(token_portador)
         
@@ -210,17 +210,46 @@ class DataManager:
             if respuesta.status_code == 200:
                 return respuesta.json()
             elif respuesta.status_code == 404:
-                st.warning(f"⚠️ Portafolio no encontrado para cliente {id_cliente}")
+                # Log silently, don't show to user unless in debug mode
                 return None
             elif respuesta.status_code == 401:
                 st.error("🔐 Token expirado. Reinicie sesión.")
                 return None
             else:
-                st.error(f'Error {respuesta.status_code}: {respuesta.text}')
-                return None
+                if respuesta.status_code >= 500:
+                    # Server errors - log silently
+                    return None
+                else:
+                    st.error(f'Error {respuesta.status_code}: {respuesta.text}')
+                    return None
                 
         except Exception as e:
-            st.error(f'Error obteniendo portafolio: {str(e)}')
+            # Log connection errors silently unless in debug mode
+            return None
+
+    @staticmethod
+    def obtener_estado_cuenta_silencioso(token_portador, id_cliente=None):
+        """
+        Obtiene el estado de cuenta sin mostrar mensajes de debug
+        """
+        if id_cliente:
+            url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
+        else:
+            url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
+        
+        encabezados = AuthManager.obtener_encabezado_autorizacion(token_portador)
+        try:
+            respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
+            
+            if respuesta.status_code == 200:
+                return respuesta.json()
+            elif respuesta.status_code == 401 and id_cliente:
+                # Intentar con endpoint directo silenciosamente
+                return DataManager.obtener_estado_cuenta_silencioso(token_portador, None)
+            else:
+                return None
+                
+        except Exception:
             return None
 
 # Enhanced portfolio analysis
@@ -826,29 +855,152 @@ class IOLPortfolioApp:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
     
     def _render_account_status(self):
-        """Render account status (placeholder)"""
+        """Render account status with clean interface"""
         st.markdown("### 💰 Estado de Cuenta")
-        st.info("🚧 Funcionalidad en desarrollo")
-    
-    def _render_optimization_pro(self):
-        """Render enhanced optimization interface"""
-        st.markdown("### 🎯 Optimización Pro")
-        st.info("🚧 Optimización avanzada en desarrollo")
-    
-    def _render_risk_analysis(self):
-        """Render risk analysis"""
-        st.markdown("### ⚠️ Análisis de Riesgo")
-        st.info("🚧 Análisis de riesgo avanzado en desarrollo")
-    
-    def _render_ai_recommendations(self):
-        """Render AI recommendations"""
-        st.markdown("### 🤖 Recomendaciones IA")
-        st.info("🚧 Recomendaciones basadas en IA en desarrollo")
-    
-    def _render_portfolio_comparison(self):
-        """Render portfolio comparison"""
-        st.markdown("### 📊 Comparación de Portafolios")
-        st.info("🚧 Comparación de portafolios en desarrollo")
+        
+        id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente')
+        
+        # Add toggle for debug mode
+        debug_mode = st.checkbox("🔍 Modo Debug", value=False, help="Mostrar información técnica detallada")
+        
+        with st.spinner("Cargando estado de cuenta..."):
+            if debug_mode:
+                # Use original function with debug messages
+                estado_cuenta = obtener_estado_cuenta(st.session_state.token_acceso, id_cliente)
+            else:
+                # Use silent function
+                estado_cuenta = self.data_manager.obtener_estado_cuenta_silencioso(
+                    st.session_state.token_acceso, id_cliente
+                )
+        
+        if estado_cuenta:
+            self._mostrar_estado_cuenta_mejorado(estado_cuenta, debug_mode)
+        else:
+            st.warning("⚠️ No se pudo obtener el estado de cuenta")
+            
+            if st.button("🔄 Reintentar con endpoint alternativo"):
+                with st.spinner("Probando endpoint directo..."):
+                    estado_cuenta_directo = self.data_manager.obtener_estado_cuenta_silencioso(
+                        st.session_state.token_acceso, None
+                    )
+                    if estado_cuenta_directo:
+                        self._mostrar_estado_cuenta_mejorado(estado_cuenta_directo, debug_mode)
+                    else:
+                        st.error("❌ No se pudo obtener el estado de cuenta")
+
+    def _mostrar_estado_cuenta_mejorado(self, estado_cuenta, debug_mode=False):
+        """
+        Muestra el estado de cuenta con interfaz mejorada y sin debug innecesario
+        """
+        if not estado_cuenta:
+            st.warning("No hay datos disponibles")
+            return
+        
+        # Extraer información
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        cuentas = estado_cuenta.get('cuentas', [])
+        estadisticas = estado_cuenta.get('estadisticas', [])
+        
+        # Calcular totales
+        total_disponible = sum(float(c.get('disponible', 0)) for c in cuentas)
+        total_comprometido = sum(float(c.get('comprometido', 0)) for c in cuentas)
+        total_titulos = sum(float(c.get('titulosValorizados', 0)) for c in cuentas)
+        total_general = sum(float(c.get('total', 0)) for c in cuentas)
+        
+        # Métricas principales
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Total General", 
+                f"${total_general:,.2f}",
+                help="Suma total de todas las cuentas"
+            )
+        
+        with col2:
+            st.metric(
+                "Total en Pesos", 
+                f"AR$ {total_en_pesos:,.2f}",
+                help="Total expresado en pesos argentinos"
+            )
+        
+        with col3:
+            st.metric(
+                "Disponible", 
+                f"${total_disponible:,.2f}",
+                help="Total disponible para operar"
+            )
+        
+        with col4:
+            st.metric(
+                "Títulos Valorizados", 
+                f"${total_titulos:,.2f}",
+                help="Valor total de títulos en cartera"
+            )
+        
+        # Distribución por moneda
+        if cuentas:
+            self._mostrar_distribucion_monedas(cuentas)
+        
+        # Tabla de cuentas
+        if cuentas:
+            self._mostrar_tabla_cuentas(cuentas)
+        
+        # Información de debug solo si está habilitada
+        if debug_mode:
+            with st.expander("🔍 Información de Debug"):
+                st.json(estado_cuenta)
+
+    def _mostrar_distribucion_monedas(self, cuentas):
+        """Mostrar distribución por moneda de forma limpia"""
+        st.markdown("#### 💱 Distribución por Moneda")
+        
+        # Agrupar por moneda
+        cuentas_por_moneda = {}
+        for cuenta in cuentas:
+            moneda = cuenta.get('moneda', 'peso_Argentino')
+            if moneda not in cuentas_por_moneda:
+                cuentas_por_moneda[moneda] = {
+                    'disponible': 0,
+                    'total': 0,
+                    'cuentas': 0
+                }
+            
+            cuentas_por_moneda[moneda]['disponible'] += float(cuenta.get('disponible', 0))
+            cuentas_por_moneda[moneda]['total'] += float(cuenta.get('total', 0))
+            cuentas_por_moneda[moneda]['cuentas'] += 1
+        
+        # Mostrar métricas por moneda
+        for moneda, datos in cuentas_por_moneda.items():
+            nombre_moneda = {
+                'peso_Argentino': '🇦🇷 Pesos Argentinos',
+                'dolar_Estadounidense': '🇺🇸 Dólares',
+                'euro': '🇪🇺 Euros'
+            }.get(moneda, moneda)
+            
+            with st.expander(f"{nombre_moneda} ({datos['cuentas']} cuenta(s))"):
+                col1, col2 = st.columns(2)
+                col1.metric("Disponible", f"${datos['disponible']:,.2f}")
+                col2.metric("Total", f"${datos['total']:,.2f}")
+
+    def _mostrar_tabla_cuentas(self, cuentas):
+        """Mostrar tabla de cuentas de forma limpia"""
+        st.markdown("#### 📊 Detalle de Cuentas")
+        
+        datos_tabla = []
+        for cuenta in cuentas:
+            datos_tabla.append({
+                'Número': cuenta.get('numero', 'N/A'),
+                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                'Total': f"${cuenta.get('total', 0):,.2f}",
+                'Estado': cuenta.get('estado', 'N/A').title()
+            })
+        
+        if datos_tabla:
+            df_cuentas = pd.DataFrame(datos_tabla)
+            st.dataframe(df_cuentas, use_container_width=True, hide_index=True)
 
 # Run the application
 if __name__ == "__main__":
