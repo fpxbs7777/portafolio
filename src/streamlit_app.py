@@ -1627,41 +1627,130 @@ class PortfolioOutput:
 
 # Enhanced Portfolio Management Classes
 class manager:
-    def __init__(self, rics, notional, data):
+    def __init__(self, rics, notional, token_portador=None, fecha_desde=None, fecha_hasta=None):
         self.rics = rics
         self.notional = notional
-        self.data = data
+        self.token_portador = token_portador
+        self.fecha_desde = fecha_desde
+        self.fecha_hasta = fecha_hasta
         self.timeseries = None
         self.returns = None
         self.cov_matrix = None
         self.mean_returns = None
         self.risk_free_rate = 0.40  # Tasa libre de riesgo anual
+        self.data_loaded = False
 
     def load_intraday_timeseries(self, ticker):
-        return self.data[ticker]
+        """
+        Carga series históricas usando las mismas funciones que para estadísticas del portafolio
+        """
+        if self.token_portador and self.fecha_desde and self.fecha_hasta:
+            # Usar la función principal de obtención de datos históricos
+            fecha_desde_str = self.fecha_desde.strftime('%Y-%m-%d') if hasattr(self.fecha_desde, 'strftime') else str(self.fecha_desde)
+            fecha_hasta_str = self.fecha_hasta.strftime('%Y-%m-%d') if hasattr(self.fecha_hasta, 'strftime') else str(self.fecha_hasta)
+            
+            # Determinar tipo de instrumento usando la misma lógica
+            if ticker.upper() == "ADCGLOA":
+                mercados = ['FCI']
+            elif ticker.upper().startswith("AE") or ticker.upper().endswith("D") or ticker.upper().endswith("C") or ticker.upper().endswith("O"):
+                mercados = ['bCBA']
+            else:
+                mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
+            
+            # Intentar obtener datos de cada mercado
+            for mercado in mercados:
+                try:
+                    simbolo_consulta = ticker
+                    if mercado not in ['Opciones', 'FCI']:
+                        clase_d = obtener_clase_d(ticker, mercado, self.token_portador)
+                        if clase_d:
+                            simbolo_consulta = clase_d
+
+                    serie = obtener_serie_historica_iol(
+                        self.token_portador, mercado, simbolo_consulta,
+                        fecha_desde_str, fecha_hasta_str
+                    )
+
+                    if serie is not None and len(serie) > 10:
+                        if serie.nunique() > 1:
+                            return serie
+                except Exception:
+                    continue
+            
+            # Fallback a yfinance si IOL no funciona
+            try:
+                serie_yf = obtener_datos_alternativos_yfinance(
+                    ticker, self.fecha_desde, self.fecha_hasta
+                )
+                if serie_yf is not None and len(serie_yf) > 10:
+                    if serie_yf.nunique() > 1:
+                        return serie_yf
+            except Exception:
+                pass
+        
+        return None
 
     def synchronise_timeseries(self):
+        """
+        Sincroniza las series temporales usando las funciones estándar de obtención de datos
+        """
+        if self.token_portador and self.fecha_desde and self.fecha_hasta:
+            # Usar la función completa de optimización
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                self.token_portador, self.rics, self.fecha_desde, self.fecha_hasta
+            )
+            
+            if mean_returns is not None and cov_matrix is not None and df_precios is not None:
+                self.timeseries = df_precios
+                self.returns = df_precios.pct_change().dropna()
+                self.cov_matrix = cov_matrix
+                self.mean_returns = mean_returns
+                self.data_loaded = True
+                return True
+        
+        # Fallback al método original si no hay token
         dic_timeseries = {}
         for ric in self.rics:
-            dic_timeseries[ric] = self.load_intraday_timeseries(ric)
-        self.timeseries = dic_timeseries
+            serie = self.load_intraday_timeseries(ric)
+            if serie is not None:
+                dic_timeseries[ric] = serie
+        
+        if dic_timeseries:
+            self.timeseries = pd.DataFrame(dic_timeseries)
+            return True
+        return False
 
     def compute_covariance(self):
-        self.synchronise_timeseries()
-        # Calcular retornos logarítmicos
-        returns_matrix = {}
-        for ric in self.rics:
-            prices = self.timeseries[ric]
-            returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        """
+        Computa la matriz de covarianza usando datos sincronizados
+        """
+        if not self.data_loaded:
+            if not self.synchronise_timeseries():
+                return None, None
         
-        # Convertir a DataFrame para alinear fechas
-        self.returns = pd.DataFrame(returns_matrix)
+        if self.cov_matrix is not None and self.mean_returns is not None:
+            return self.cov_matrix, self.mean_returns
         
-        # Calcular matriz de covarianza y retornos medios
-        self.cov_matrix = self.returns.cov() * 252  # Anualizar
-        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        # Método de respaldo si no se cargaron datos con la función principal
+        if self.timeseries is not None:
+            # Calcular retornos logarítmicos
+            returns_matrix = {}
+            for ric in self.rics:
+                if ric in self.timeseries.columns:
+                    prices = self.timeseries[ric]
+                    returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+            
+            if returns_matrix:
+                # Convertir a DataFrame para alinear fechas
+                self.returns = pd.DataFrame(returns_matrix)
+                
+                # Calcular matriz de covarianza y retornos medios
+                self.cov_matrix = self.returns.cov() * 252  # Anualizar
+                self.mean_returns = self.returns.mean() * 252  # Anualizar
+                
+                return self.cov_matrix, self.mean_returns
         
-        return self.cov_matrix, self.mean_returns
+        return None, None
 
     def compute_portfolio(self, portfolio_type=None, target_return=None):
         if self.cov_matrix is None:
@@ -1826,8 +1915,11 @@ class output:
         
         return fig
 
-def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
-    """Computa la frontera eficiente y portafolios especiales"""
+def compute_efficient_frontier(rics, notional, target_return, include_min_variance, token_portador, fecha_desde, fecha_hasta):
+    """
+    Computa la frontera eficiente y portafolios especiales usando las mismas funciones 
+    de obtención de datos que para estadísticas del portafolio
+    """
     # special portfolios    
     label1 = 'min-variance-l1'
     label2 = 'min-variance-l2'
@@ -1836,13 +1928,17 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     label5 = 'markowitz-none'
     label6 = 'markowitz-target'
     
-    # compute covariance matrix
-    port_mgr = manager(rics, notional, data)
-    port_mgr.compute_covariance()
+    # compute covariance matrix usando las funciones estándar
+    port_mgr = manager(rics, notional, token_portador, fecha_desde, fecha_hasta)
+    cov_matrix, mean_returns = port_mgr.compute_covariance()
+    
+    if cov_matrix is None or mean_returns is None:
+        st.error("❌ No se pudieron obtener datos suficientes para calcular la frontera eficiente")
+        return {}, [], []
     
     # compute vectors of returns and volatilities for Markowitz portfolios
-    min_returns = np.min(port_mgr.mean_returns)
-    max_returns = np.max(port_mgr.mean_returns)
+    min_returns = np.min(mean_returns)
+    max_returns = np.max(mean_returns)
     returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
     volatilities = []
     valid_returns = []
@@ -1850,8 +1946,9 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     for ret in returns:
         try:
             port = port_mgr.compute_portfolio('markowitz', ret)
-            volatilities.append(port.volatility_annual)
-            valid_returns.append(ret)
+            if port is not None:
+                volatilities.append(port.volatility_annual)
+                valid_returns.append(ret)
         except:
             continue
     
@@ -2010,16 +2107,17 @@ def ejecutar_simulacion_aleatoria_avanzada(token_acceso, paneles_disponibles, fe
                         estrategias = ['equi-weight', 'markowitz', 'min-variance-l1', 'long-only']
                         
                         for estrategia in estrategias:
-                            try:
-                                # Crear manager para optimización
+                            try:                                # Crear manager para optimización usando las funciones estándar
                                 port_mgr = manager(
                                     list(df_precios.columns), 
                                     capital_disponible, 
-                                    df_precios.to_dict('series')
+                                    token_acceso,
+                                    fecha_desde,
+                                    fecha_hasta
                                 )
                                 
                                 # Computar portafolio optimizado
-                                portfolio_result = port_mgr.compute_portfolio(estrategia)
+                                portfolio_result = port_mgr.compute_portfolio(portfolio_type=estrategia)
                                 
                                 if portfolio_result:
                                     # Calcular métricas adicionales
@@ -2220,23 +2318,24 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
             try:
                 # Obtener datos históricos
                 mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                    token_acceso, simbolos, fecha_desde, fecha_hasta
-                )
+                    token_acceso, simbolos, fecha_desde, fecha_hasta                )
                 
                 if df_precios is None or df_precios.empty or len(df_precios.columns) < 2:
                     st.error("No se pudieron obtener series históricas válidas")
                     return
 
-                # Crear manager para optimización
+                # Crear manager para optimización usando las funciones estándar
                 port_mgr = manager(
                     list(df_precios.columns), 
                     100000,  # Valor nominal
-                    df_precios.to_dict('series')
+                    token_acceso,
+                    fecha_desde,
+                    fecha_hasta
                 )
                 
                 # Computar optimización
                 use_target = target_return if estrategia == 'markowitz' else None
-                portfolio_result = port_mgr.compute_portfolio(strategy=estrategia, target_return=use_target)
+                portfolio_result = port_mgr.compute_portfolio(portfolio_type=estrategia, target_return=use_target)
                 
                 if portfolio_result:
                     st.success("✅ Optimización completada")
@@ -2246,11 +2345,18 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                     
                     with col1:
                         st.markdown("#### 📊 Pesos Optimizados")
-                        if portfolio_result.dataframe_allocation is not None:
+                        if hasattr(portfolio_result, 'dataframe_allocation') and portfolio_result.dataframe_allocation is not None:
                             weights_df = portfolio_result.dataframe_allocation.copy()
                             weights_df['Peso (%)'] = weights_df['weights'] * 100
                             weights_df = weights_df.sort_values('Peso (%)', ascending=False)
                             st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                        elif hasattr(portfolio_result, 'weights'):
+                            # Crear DataFrame manual si no existe dataframe_allocation
+                            weights_df = pd.DataFrame({
+                                'Activo': list(df_precios.columns),
+                                'Peso (%)': portfolio_result.weights * 100
+                            }).sort_values('Peso (%)', ascending=False)
+                            st.dataframe(weights_df, use_container_width=True)
                     
                     with col2:
                         st.markdown("#### 📈 Métricas del Portafolio")
@@ -2258,52 +2364,48 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                         
                         col_a, col_b = st.columns(2)
                         with col_a:
-                            st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                            st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                            st.metric("Retorno Anual", f"{metricas.get('Annual Return', 0):.2%}")
+                            st.metric("Volatilidad Anual", f"{metricas.get('Annual Volatility', 0):.2%}")
                         with col_b:
-                            st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                            st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                            st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                            normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                            st.metric("Normalidad", normalidad)
+                            st.metric("Ratio de Sharpe", f"{metricas.get('Sharpe Ratio', 0):.4f}")
+                            st.metric("VaR 95%", f"{metricas.get('VaR 95%', 0):.4f}")
                     
                     # Gráfico de distribución de retornos
-                    if portfolio_result.returns is not None:
-                        st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                        fig = portfolio_result.plot_histogram_streamlit()
-                        st.plotly_chart(fig, use_container_width=True)
+                    st.markdown("#### 📊 Distribución de Retornos del Portafolio")
+                    if hasattr(portfolio_result, 'plot_histogram_streamlit'):
+                        fig_hist = portfolio_result.plot_histogram_streamlit()
+                        st.plotly_chart(fig_hist, use_container_width=True)
                     
                     # Gráfico de pesos
-                    if portfolio_result.weights is not None:
+                    if hasattr(portfolio_result, 'weights') and len(portfolio_result.weights) > 0:
                         st.markdown("#### 🥧 Distribución de Pesos")
                         fig_pie = go.Figure(data=[go.Pie(
-                            labels=portfolio_result.dataframe_allocation['rics'],
+                            labels=list(df_precios.columns),
                             values=portfolio_result.weights,
-                            textinfo='label+percent',
+                            hole=0.3
                         )])
-                        fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                        fig_pie.update_layout(title="Distribución de Pesos del Portafolio Optimizado")
                         st.plotly_chart(fig_pie, use_container_width=True)
                 
                 else:
-                    st.error("❌ Error en la optimización")
+                    st.error("❌ No se pudo completar la optimización")
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
+                with st.expander("🔍 Detalles del error"):
+                    st.code(str(e))
 
     if ejecutar_frontier and show_frontier:
         with st.spinner("Calculando frontera eficiente..."):
             try:
                 # Obtener datos históricos
                 mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                    token_acceso, simbolos, fecha_desde, fecha_hasta
-                )
+                    token_acceso, simbolos, fecha_desde, fecha_hasta                )
                 
                 if df_precios is not None and not df_precios.empty:
                     portfolios, returns, volatilities = compute_efficient_frontier(
                         list(df_precios.columns), 100000, target_return, True, 
-                        df_precios.to_dict('series')
+                        token_acceso, fecha_desde, fecha_hasta
                     )
                     
                     if portfolios and returns and volatilities:
@@ -2353,13 +2455,11 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                                     'Retorno Anual': f"{portfolio.return_annual:.2%}",
                                     'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
                                     'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                    'VaR 95%': f"{portfolio.var_95:.4f}"
-                                })
+                                    'VaR 95%': f"{portfolio.var_95:.4f}"                                })
                         
                         if comparison_data:
                             df_comparison = pd.DataFrame(comparison_data)
                             st.dataframe(df_comparison, use_container_width=True)
-                    
                     else:
                         st.error("❌ No se pudo calcular la frontera eficiente")
                 else:
