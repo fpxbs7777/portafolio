@@ -2250,6 +2250,140 @@ def ejecutar_simulacion_aleatoria_avanzada(token_acceso, paneles_disponibles, fe
             except Exception as e:
                 st.error(f"❌ Error durante la simulación: {str(e)}")
 
+def obtener_series_historicas_aleatorias_con_capital(
+    tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde,
+    fecha_hasta, ajustada, bearer_token, capital_ars
+):
+    """
+    Selecciona aleatoriamente activos por panel, pero solo descarga series históricas
+    de aquellos cuyo último precio permite comprar al menos 1 unidad con el capital disponible.
+    Si no alcanza, descarta los más caros y reintenta.
+    """
+    series_historicas = pd.DataFrame()
+    precios_ultimos = {}
+    seleccion_final = {}
+
+    for panel in paneles_seleccionados:
+        if panel in tickers_por_panel:
+            tickers = tickers_por_panel[panel]
+            random.shuffle(tickers)
+            seleccionados = []
+            for simbolo in tickers:
+                mercado = 'bCBA'
+                serie = obtener_serie_historica_iol(simbolo=simbolo, mercado=mercado, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, ajustada='SinAjustar', token_portador=bearer_token)
+                if serie is not None and len(serie) > 0:
+                    df = pd.DataFrame({'fecha': serie.index, 'precio': serie.values})
+                    df['simbolo'] = simbolo
+                    df['panel'] = panel
+                    precio_final = df['precio'].dropna().iloc[-1]
+                    precios_ultimos[simbolo] = precio_final
+                    seleccionados.append((simbolo, df, precio_final))
+                if len(seleccionados) >= cantidad_activos:
+                    break
+            # Ordenar por precio y filtrar por capital
+            seleccionados.sort(key=lambda x: x[2])
+            seleccionables = []
+            capital_restante = capital_ars
+            for simbolo, df, precio in seleccionados:
+                if precio <= capital_restante:
+                    seleccionables.append((simbolo, df, precio))
+                    capital_restante -= precio
+            # Si no hay suficientes activos asequibles, tomar los que se pueda
+            if len(seleccionables) < 2:
+                continue
+            else:
+                for simbolo, df, precio in seleccionables:
+                    series_historicas = pd.concat([series_historicas, df], ignore_index=True)
+                seleccion_final[panel] = [s[0] for s in seleccionables]
+    return series_historicas, seleccion_final
+
+def calcular_valorizado_portafolio(series_historicas, seleccion_final):
+    """
+    Calcula la evolución del índice valorizado de cada portafolio (por panel).
+    Devuelve un diccionario: {panel: pd.Series(valor_portafolio)}
+    """
+    portafolios_val = {}
+    for panel, simbolos in seleccion_final.items():
+        df_panel = series_historicas[series_historicas['panel'] == panel]
+        # Pivotear para tener fechas como índice y columnas por símbolo
+        df_pivot = df_panel.pivot_table(index='fecha', columns='simbolo', values='precio')
+        df_pivot = df_pivot[simbolos].sort_index()
+        # Calcular valorizado: suma simple (pesos iguales)
+        portafolio_val = df_pivot.sum(axis=1)
+        portafolios_val[panel] = portafolio_val
+    return portafolios_val
+
+def modo_optimizacion_aleatoria(token_acceso, fecha_desde, fecha_hasta):
+    """
+    Modo de optimización aleatoria: permite seleccionar paneles, cantidad de activos y capital,
+    selecciona activos aleatorios y muestra la evolución del portafolio y sus indicadores técnicos.
+    """
+    st.markdown("### 🎲 Modo Optimización Aleatoria")
+
+    paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
+    tickers_por_panel, tickers_df = obtener_tickers_por_panel(token_acceso, paneles, 'Argentina')
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        paneles_seleccionados = st.multiselect(
+            "Seleccionar Paneles:",
+            options=paneles,
+            default=paneles[:2] if len(paneles) >= 2 else paneles
+        )
+    with col2:
+        cantidad_activos = st.slider(
+            "Cantidad de activos por panel:",
+            min_value=1, max_value=10, value=3
+        )
+    with col3:
+        capital_ars = st.number_input(
+            "Capital disponible (ARS):",
+            min_value=1000.0, value=100000.0, step=1000.0
+        )
+
+    if st.button("🚀 Ejecutar Optimización Aleatoria"):
+        if not paneles_seleccionados:
+            st.warning("Seleccione al menos un panel")
+            return
+        with st.spinner("Ejecutando optimización aleatoria..."):
+            series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
+                tickers_por_panel, paneles_seleccionados, cantidad_activos,
+                fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'), 'SinAjustar', token_acceso, capital_ars
+            )
+            if series_historicas.empty or not seleccion_final:
+                st.error("No se pudieron obtener series históricas válidas para los activos seleccionados.")
+                return
+
+            st.success("✅ Series históricas obtenidas y activos seleccionados.")
+            st.write("Activos seleccionados por panel:", seleccion_final)
+            st.write("DataFrame de series históricas:", series_historicas.head())
+
+            portafolios_val = calcular_valorizado_portafolio(series_historicas, seleccion_final)
+            for panel, serie_val in portafolios_val.items():
+                st.markdown(f"#### 📈 Evolución del índice valorizado - {panel}")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=serie_val.index, y=serie_val.values, name=f'Índice valorizado {panel}'))
+                fig.update_layout(title=f'Evolución del índice valorizado - {panel}', xaxis_title='Fecha', yaxis_title='Valor del portafolio')
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Calcular y graficar RSI
+                rsi = calcular_rsi(serie_val)
+                fig_rsi = go.Figure()
+                fig_rsi.add_trace(go.Scatter(x=rsi.index, y=rsi.values, name='RSI'))
+                fig_rsi.add_hline(y=70, line_dash='dash', line_color='red')
+                fig_rsi.add_hline(y=30, line_dash='dash', line_color='green')
+                fig_rsi.update_layout(title=f'RSI del índice valorizado - {panel}', xaxis_title='Fecha', yaxis_title='RSI')
+                st.plotly_chart(fig_rsi, use_container_width=True)
+
+                # Calcular y graficar RVI
+                rvi = calcular_rvi(serie_val)
+                fig_rvi = go.Figure()
+                fig_rvi.add_trace(go.Scatter(x=rvi.index, y=rvi.values, name='RVI', line_color='#7E57C2'))
+                fig_rvi.add_hline(y=80, line_dash='dash', line_color='#787B86')
+                fig_rvi.add_hline(y=20, line_dash='dash', line_color='#787B86')
+                fig_rvi.update_layout(title=f'RVI (Relative Volatility Index) del índice valorizado - {panel}', xaxis_title='Fecha', yaxis_title='RVI')
+                st.plotly_chart(fig_rvi, use_container_width=True)
+
 def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
     Muestra la optimización del portafolio usando datos históricos con estrategias extendidas,
@@ -2308,8 +2442,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
 
     # --- Simulación Aleatoria Avanzada ---
     if estrategia == 'simulacion-aleatoria':
-        paneles_disponibles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
-        ejecutar_simulacion_aleatoria_avanzada(token_acceso, paneles_disponibles, fecha_desde, fecha_hasta)
+        modo_optimizacion_aleatoria(token_acceso, fecha_desde, fecha_hasta)
         return
 
     # --- Optimización estándar ---
