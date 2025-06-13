@@ -1694,14 +1694,13 @@ class manager:
 
     def synchronise_timeseries(self):
         """
-        Sincroniza las series temporales usando las funciones estándar de obtención de datos
+        Sincroniza las series temporales usando SIEMPRE get_historical_data_for_optimization,
+        igual que las estadísticas del portafolio.
         """
         if self.token_portador and self.fecha_desde and self.fecha_hasta:
-            # Usar la función completa de optimización (versión silenciosa para no interferir)
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization_silent(
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
                 self.token_portador, self.rics, self.fecha_desde, self.fecha_hasta
             )
-            
             if mean_returns is not None and cov_matrix is not None and df_precios is not None:
                 self.timeseries = df_precios
                 self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
@@ -1709,14 +1708,16 @@ class manager:
                 self.mean_returns = mean_returns
                 self.data_loaded = True
                 return True
-        
+            else:
+                return False
+
         # Fallback al método original si no hay token
         dic_timeseries = {}
         for ric in self.rics:
             serie = self.load_intraday_timeseries(ric)
             if serie is not None:
                 dic_timeseries[ric] = serie
-        
+
         if dic_timeseries:
             self.timeseries = pd.DataFrame(dic_timeseries)
             return True
@@ -1728,8 +1729,7 @@ class manager:
 
         """
         if not self.data_loaded:
-            if not self.synchronise_timeseries():
-                return None, None
+            self.synchronise_timeseries()
         
         if self.cov_matrix is not None and self.mean_returns is not None:
             return self.cov_matrix, self.mean_returns
