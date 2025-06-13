@@ -373,62 +373,61 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
     Obtiene datos históricos para optimización de portafolio con manejo mejorado de errores.
-    Actualizada para mejor compatibilidad con la API de IOL.
+    Soporta correctamente FCI (como ADCGLOA) y bonos (como AE38).
     """
     try:
         df_precios = pd.DataFrame()
         simbolos_exitosos = []
         simbolos_fallidos = []
         detalles_errores = {}
-        
-        # Convertir fechas a string en formato correcto
+
         fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
         fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
-        
+
         st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
-        
-        # Crear barra de progreso
+
         progress_bar = st.progress(0)
         total_simbolos = len(simbolos)
-        
+
         for idx, simbolo in enumerate(simbolos):
-            # Actualizar barra de progreso
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
-            
-            # Usar mercados correctos según la API de IOL (sin 'Merval')
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
+
             serie_obtenida = False
-            
+
+            # Determinar tipo de instrumento
+            if simbolo.upper() == "ADCGLOA":
+                # Fondo común de inversión
+                mercados = ['FCI']
+            elif simbolo.upper().startswith("AE") or simbolo.upper().endswith("D") or simbolo.upper().endswith("C") or simbolo.upper().endswith("O"):
+                # Bonos (puedes ajustar la lógica según nomenclatura)
+                mercados = ['bCBA']
+            else:
+                mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
+
             for mercado in mercados:
                 try:
-                    # Buscar clase D si es posible (solo para mercados tradicionales)
                     simbolo_consulta = simbolo
                     if mercado not in ['Opciones', 'FCI']:
                         clase_d = obtener_clase_d(simbolo, mercado, token_portador)
                         if clase_d:
                             simbolo_consulta = clase_d
-                    
+
                     serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta, 
+                        token_portador, mercado, simbolo_consulta,
                         fecha_desde_str, fecha_hasta_str
                     )
-                    
+
                     if serie is not None and len(serie) > 10:
-                        # Verificar que los datos no sean todos iguales
                         if serie.nunique() > 1:
-                            df_precios[simbolo_consulta] = serie
-                            simbolos_exitosos.append(simbolo_consulta)
+                            df_precios[simbolo] = serie
+                            simbolos_exitosos.append(simbolo)
                             serie_obtenida = True
-                            
-                            # Mostrar información del símbolo exitoso
-                            st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
+                            st.success(f"✅ {simbolo} ({mercado}): {len(serie)} puntos de datos")
                             break
-                        
                 except Exception as e:
                     detalles_errores[f"{simbolo}_{mercado}"] = str(e)
                     continue
-            
-            # Si IOL falló completamente, intentar con yfinance como fallback
+
             if not serie_obtenida:
                 try:
                     serie_yf = obtener_datos_alternativos_yfinance(
@@ -442,15 +441,13 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                             st.info(f"ℹ️ {simbolo} (Yahoo Finance): {len(serie_yf)} puntos de datos")
                 except Exception as e:
                     detalles_errores[f"{simbolo}_yfinance"] = str(e)
-            
+
             if not serie_obtenida:
                 simbolos_fallidos.append(simbolo)
                 st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
-        
-        # Limpiar barra de progreso
+
         progress_bar.empty()
-        
-        # Informar resultados detallados
+
         if simbolos_exitosos:
             st.success(f"✅ Datos obtenidos para {len(simbolos_exitosos)} activos")
             with st.expander("📋 Ver activos exitosos"):
@@ -458,26 +455,22 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     if simbolo in df_precios.columns:
                         datos_info = f"{simbolo}: {len(df_precios[simbolo])} puntos, rango: {df_precios[simbolo].min():.2f} - {df_precios[simbolo].max():.2f}"
                         st.text(datos_info)
-        
+
         if simbolos_fallidos:
             st.warning(f"⚠️ No se pudieron obtener datos para {len(simbolos_fallidos)} activos")
             with st.expander("❌ Ver activos fallidos y errores"):
                 for simbolo in simbolos_fallidos:
                     st.text(f"• {simbolo}")
-                
                 if detalles_errores:
                     st.markdown("**Detalles de errores:**")
                     for key, error in detalles_errores.items():
                         st.text(f"{key}: {error}")
-        
-        # Continuar si tenemos al menos 2 activos
+
         if len(simbolos_exitosos) < 2:
             if len(simbolos_exitosos) == 1:
                 st.error("❌ Se necesitan al menos 2 activos con datos históricos válidos para el análisis.")
             else:
                 st.error("❌ No se pudieron obtener datos históricos para ningún activo.")
-            
-            # Mostrar sugerencias
             st.markdown("#### 💡 Sugerencias para resolver el problema:")
             st.markdown("""
             1. **Verificar conectividad**: Asegúrese de que su conexión a IOL esté activa
@@ -485,35 +478,25 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             3. **Ajustar fechas**: Pruebe con un rango de fechas más amplio o diferente
             4. **Verificar permisos**: Asegúrese de tener permisos para acceder a datos históricos
             """)
-            
             return None, None, None
-        
+
         if len(simbolos_exitosos) < len(simbolos):
             st.info(f"ℹ️ Continuando análisis con {len(simbolos_exitosos)} de {len(simbolos)} activos disponibles.")
-        
-        # Alinear datos por fechas comunes con mejor manejo
+
         st.info(f"📊 Alineando datos de {len(df_precios.columns)} activos...")
-        
-        # Verificar que tenemos datos válidos antes de alinear
+
         if df_precios.empty:
             st.error("❌ DataFrame de precios está vacío")
             return None, None, None
-        
-        # Mostrar información de debug sobre las fechas
+
         with st.expander("🔍 Debug - Información de fechas"):
             for col in df_precios.columns:
                 serie = df_precios[col]
                 st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
-        
-        # Intentar diferentes estrategias de alineación
+
         try:
-            # Estrategia 1: Forward fill y luego backward fill
             df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
-            
-            # Estrategia 2: Interpolar valores faltantes
             df_precios_interpolated = df_precios.interpolate(method='time')
-            
-            # Usar la estrategia que conserve más datos
             if not df_precios_filled.dropna().empty:
                 df_precios = df_precios_filled.dropna()
                 st.info("✅ Usando estrategia forward/backward fill")
@@ -521,27 +504,24 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 df_precios = df_precios_interpolated.dropna()
                 st.info("✅ Usando estrategia de interpolación")
             else:
-                # Estrategia 3: Usar solo fechas con datos completos
                 df_precios = df_precios.dropna()
                 st.info("✅ Usando solo fechas con datos completos")
-                
         except Exception as e:
             st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
             df_precios = df_precios.dropna()
-        
+
         if df_precios.empty:
             st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
             return None, None, None
-        
+
         st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
-        
-        # Calcular retornos
+
         returns = df_precios.pct_change().dropna()
-        
+
         if returns.empty or len(returns) < 30:
             st.error("❌ No hay suficientes datos para calcular retornos válidos (mínimo 30 observaciones)")
             return None, None, None
-        
+
         # Verificar que los retornos no sean constantes
         if (returns.std() == 0).any():
             columnas_constantes = returns.columns[returns.std() == 0].tolist()
