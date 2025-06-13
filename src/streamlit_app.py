@@ -242,97 +242,113 @@ def parse_datetime_flexible(datetime_string):
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
     Obtiene la serie histórica de precios de un título desde la API de IOL.
-    Actualizada para manejar correctamente la estructura de respuesta de la API.
+    Corrige los endpoints y parámetros para acciones/bonos, opciones y FCI.
     """
-    # Determinar endpoint según tipo de instrumento
-    if mercado == "Opciones":
-        url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    elif mercado == "FCI":
-        url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    else:
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if not data:
-                return None
-            
-            precios = []
-            fechas = []
-            
-            for item in data:
-                try:
-                    # Usar ultimoPrecio como precio principal según la documentación
+
+    # --- Endpoint y parseo según tipo ---
+    if mercado.lower() in ["opciones", "opcion"]:
+        # Opciones: Orleans Panel
+        url = (
+            f"https://api.invertironline.com/api/v2/cotizaciones-orleans-panel/"
+            f"{simbolo}/argentina/Todos?cotizacionInstrumentoModel.instrumento=opciones&cotizacionInstrumentoModel.pais=argentina"
+        )
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                # Orleans Panel devuelve {"titulos": [...]}
+                titulos = data.get("titulos", [])
+                precios = []
+                fechas = []
+                for item in titulos:
                     precio = item.get('ultimoPrecio')
-                    
-                    # Si ultimoPrecio es 0 o None, intentar otros campos
                     if not precio or precio == 0:
                         precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                    
-                    fecha_str = item.get('fechaHora')
-                    
+                    fecha_str = item.get('fecha')
                     if precio is not None and precio > 0 and fecha_str:
                         fecha_parsed = parse_datetime_flexible(fecha_str)
                         if fecha_parsed is not None:
                             precios.append(precio)
                             fechas.append(fecha_parsed)
-                            
-                except Exception as e:
-                    # Log individual item errors but continue processing
-                    continue
-            
-            if precios and fechas:
-                # Crear serie ordenada por fecha
-                serie = pd.Series(precios, index=fechas)
-                serie = serie.sort_index()  # Asegurar orden cronológico
-                
-                # Eliminar duplicados manteniendo el último valor
-                serie = serie[~serie.index.duplicated(keep='last')]
-                
-                return serie
+                if precios and fechas:
+                    serie = pd.Series(precios, index=fechas).sort_index()
+                    serie = serie[~serie.index.duplicated(keep='last')]
+                    return serie
+                else:
+                    return None
             else:
                 return None
-                
-        elif response.status_code == 401:
-            # Token expirado o inválido
-            st.warning(f"⚠️ Token de autorización inválido para {simbolo}")
+        except Exception:
             return None
-            
-        elif response.status_code == 404:
-            # Símbolo no encontrado en este mercado
+
+    elif mercado.lower() == "fci":
+        # FCI: solo cotización actual, no serie histórica
+        url = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                # Solo un valor actual, lo devolvemos como serie de un punto
+                precio = data.get('ultimoOperado') or data.get('ultimoPrecio') or data.get('valorCuotaparte')
+                fecha_str = data.get('fechaCorte') or data.get('fecha')
+                if precio is not None and fecha_str:
+                    fecha_parsed = parse_datetime_flexible(fecha_str)
+                    if fecha_parsed is not None:
+                        return pd.Series([precio], index=[fecha_parsed])
+                return None
+            else:
+                return None
+        except Exception:
             return None
-            
-        elif response.status_code == 400:
-            # Parámetros inválidos
-            st.warning(f"⚠️ Parámetros inválidos para {simbolo} en {mercado}")
+
+    else:
+        # Acciones/Bonos: endpoint estándar
+        # Mapear nombres de mercados a los correctos de IOL
+        mercados_mapping = {
+            'BCBA': 'bCBA',
+            'NYSE': 'nYSE',
+            'NASDAQ': 'nASDAQ',
+            'ROFEX': 'rOFEX',
+            'Merval': 'bCBA'
+        }
+        mercado_correcto = mercados_mapping.get(mercado, mercado)
+        url = (
+            f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/"
+            f"{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        )
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                if not data:
+                    return None
+                precios = []
+                fechas = []
+                for item in data:
+                    precio = item.get('ultimoPrecio')
+                    if not precio or precio == 0:
+                        precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                    fecha_str = item.get('fechaHora')
+                    if precio is not None and precio > 0 and fecha_str:
+                        fecha_parsed = parse_datetime_flexible(fecha_str)
+                        if fecha_parsed is not None:
+                            precios.append(precio)
+                            fechas.append(fecha_parsed)
+                if precios and fechas:
+                    serie = pd.Series(precios, index=fechas).sort_index()
+                    serie = serie[~serie.index.duplicated(keep='last')]
+                    return serie
+                else:
+                    return None
+            else:
+                return None
+        except Exception:
             return None
-            
-        elif response.status_code == 500:
-            # Error del servidor - silencioso para no interrumpir el flujo
-            return None
-            
-        else:
-            # Otros errores HTTP
-            return None
-            
-    except requests.exceptions.Timeout:
-        # Timeout - silencioso
-        return None
-    except requests.exceptions.ConnectionError:
-        # Error de conexión - silencioso
-        return None
-    except Exception as e:
-        # Error general - silencioso para no interrumpir el análisis
-        return None
 
 def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
     """
@@ -1866,6 +1882,3 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
-# Asegurar que main() se ejecute cuando se corre el script
-if __name__ == "__main__":
-    main()
