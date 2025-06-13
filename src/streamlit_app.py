@@ -2158,3 +2158,7 @@ def main():
             st.code(str(e))
             st.markdown("**Session State:**")
             st.json(dict(st.session_state))
+
+# Asegurar que main() se ejecute cuando se corre el script
+if __name__ == "__main__":
+    main()
