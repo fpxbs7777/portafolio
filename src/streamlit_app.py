@@ -1150,6 +1150,103 @@ def mostrar_resumen_portafolio(portafolio):
     else:
         st.warning("No se pudieron procesar los datos de los activos")
 
+def mostrar_analisis_portafolio():
+    """
+    Función principal para mostrar el análisis del portafolio del cliente seleccionado
+    """
+    cliente = st.session_state.cliente_seleccionado
+    token_acceso = st.session_state.token_acceso
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
+    
+    if not cliente:
+        st.error("No hay cliente seleccionado")
+        return
+    
+    # Obtener ID del cliente
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+    
+    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+    
+    # Crear tabs para diferentes análisis
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📈 Resumen", 
+        "💰 Estado de Cuenta", 
+        "🎯 Optimización", 
+        "📊 Análisis Técnico",
+        "💱 Cotizaciones"
+    ])
+    
+    with tab1:
+        # Obtener portafolio
+        with st.spinner("Cargando portafolio..."):
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if portafolio:
+            mostrar_resumen_portafolio(portafolio)
+        else:
+            st.warning("No se pudo obtener el portafolio del cliente")
+    
+    with tab2:
+        # Mostrar estado de cuenta - intentar primero con ID cliente, luego sin ID
+        with st.spinner("Cargando estado de cuenta..."):
+            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        
+        if estado_cuenta:
+            mostrar_estado_cuenta(estado_cuenta)
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
+            
+            # Ofrecer alternativa
+            st.markdown("#### 🔄 Intentar con endpoint alternativo")
+            if st.button("🚀 Probar endpoint directo"):
+                with st.spinner("Probando endpoint directo..."):
+                    estado_cuenta_directo = obtener_estado_cuenta(token_acceso, None)
+                    if estado_cuenta_directo:
+                        mostrar_estado_cuenta(estado_cuenta_directo)
+                    else:
+                        st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
+
+    with tab3:
+        # Optimización de portafolio
+        if 'portafolio' not in locals():
+            with st.spinner("Cargando portafolio para optimización..."):
+                portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if portafolio:
+            mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        else:
+            st.warning("No se pudo obtener el portafolio para optimización")
+    
+    with tab4:
+        # Análisis técnico
+        st.markdown("### 📊 Análisis Técnico")
+        st.info("🚧 Funcionalidad en desarrollo")
+        
+        # Placeholder para análisis técnico futuro
+        if 'portafolio' not in locals():
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if portafolio:
+            activos = portafolio.get('activos', [])
+            if activos:
+                simbolos = [activo.get('titulo', {}).get('simbolo', '') for activo in activos]
+                simbolos = [s for s in simbolos if s]
+                
+                if simbolos:
+                    simbolo_seleccionado = st.selectbox(
+                        "Seleccione un activo para análisis técnico:",
+                        options=simbolos
+                    )
+                    
+                    if simbolo_seleccionado:
+                        st.info(f"Análisis técnico para {simbolo_seleccionado} estará disponible próximamente")
+    
+    with tab5:
+        # Cotizaciones y mercado
+        mostrar_cotizaciones_mercado(token_acceso)
+
 def mostrar_estado_cuenta(estado_cuenta):
     """
     Muestra el estado de cuenta del cliente con parsing mejorado según la estructura de la API
@@ -1316,6 +1413,348 @@ def mostrar_estado_cuenta(estado_cuenta):
         with col2:
             st.markdown("**Estructura completa:**")
             st.json(estado_cuenta)
+    
+    # Alertas y recomendaciones
+    if total_general == 0 and total_en_pesos == 0:
+        st.warning("⚠️ No se encontraron saldos en las cuentas")
+        st.markdown("#### 💡 Posibles causas:")
+        st.markdown("""
+        1. **Cuentas vacías**: Las cuentas pueden no tener saldos actualmente
+        2. **Permisos**: Verificar que tenga permisos para ver estados de cuenta
+        3. **Sincronización**: Los datos pueden estar siendo actualizados por IOL
+        """)
+    
+    elif total_disponible == 0 and total_titulos_valorizados > 0:
+        st.info("ℹ️ **Cartera invertida**: Todo el capital está invertido en títulos")
+    
+    elif total_disponible > 0:
+        porcentaje_invertido = (total_titulos_valorizados / total_general * 100) if total_general > 0 else 0
+        if porcentaje_invertido < 50:
+            st.info(f"💡 **Oportunidad de inversión**: Tiene {porcentaje_invertido:.1f}% invertido. Considere revisar oportunidades de inversión.")
+        else:
+            st.success(f"✅ **Buena distribución**: Tiene {porcentaje_invertido:.1f}% de su capital invertido.")
+
+def mostrar_cotizaciones_mercado(token_acceso):
+    """
+    Muestra cotizaciones y datos de mercado
+    """
+    st.markdown("### 💱 Cotizaciones y Mercado")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 💰 Cotización MEP")
+        
+        # Formulario para consultar MEP
+        with st.form("mep_form"):
+            simbolo_mep = st.text_input("Símbolo para MEP", value="AL30", help="Ej: AL30, GD30, etc.")
+            id_plazo_compra = st.number_input("ID Plazo Compra", value=1, min_value=1)
+            id_plazo_venta = st.number_input("ID Plazo Venta", value=1, min_value=1)
+            
+            if st.form_submit_button("Consultar MEP"):
+                if simbolo_mep:
+                    with st.spinner("Consultando cotización MEP..."):
+                        cotizacion_mep = obtener_cotizacion_mep(
+                            token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
+                        )
+                    
+                    if cotizacion_mep:
+                        st.success("✅ Cotización MEP obtenida")
+                        
+                        # Mostrar datos de MEP
+                        if isinstance(cotizacion_mep, dict):
+                            # Extraer precio si está disponible
+                            precio_mep = cotizacion_mep.get('precio', cotizacion_mep.get('cotizacion', 'N/A'))
+                            
+                            col_mep1, col_mep2 = st.columns(2)
+                            col_mep1.metric("Símbolo", simbolo_mep)
+                            col_mep2.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
+                        
+                        with st.expander("Ver detalles MEP"):
+                            st.json(cotizacion_mep)
+                    else:
+                        st.error("❌ No se pudo obtener la cotización MEP")
+    
+    with col2:
+        st.markdown("#### 🏦 Tasas de Caución")
+        
+        if st.button("🔄 Actualizar Tasas de Caución"):
+            with st.spinner("Consultando tasas de caución..."):
+                tasas_caucion = obtener_tasas_caucion(token_acceso)
+            
+            if tasas_caucion:
+                st.success("✅ Tasas de caución obtenidas")
+                
+                # Mostrar tasas si es una lista
+                if isinstance(tasas_caucion, list) and tasas_caucion:
+                    df_tasas = pd.DataFrame(tasas_caucion)
+                    
+                    # Mostrar solo columnas relevantes si están disponibles
+                    columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
+                    columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
+                    
+                    if columnas_disponibles:
+                        st.dataframe(df_tasas[columnas_disponibles].head(10))
+                    else:
+                        st.dataframe(df_tasas.head(10))
+                
+                with st.expander("Ver datos completos de caución"):
+                    st.json(tasas_caucion)
+            else:
+                st.error("❌ No se pudieron obtener las tasas de caución")
+
+# Clase PortfolioManager simplificada para compatibilidad
+class PortfolioManager:
+    """
+    Clase simplificada para manejo de portafolio y optimización
+    """
+    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
+        self.symbols = symbols
+        self.token = token
+        self.fecha_desde = fecha_desde
+        self.fecha_hasta = fecha_hasta
+        self.data_loaded = False
+        self.returns = None
+        self.prices = None
+    
+    def load_data(self):
+        """
+        Carga datos históricos para los símbolos del portafolio
+        """
+        try:
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
+            )
+            
+            if mean_returns is not None and cov_matrix is not None:
+                self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
+                self.prices = df_precios
+                self.mean_returns = mean_returns
+                self.cov_matrix = cov_matrix
+                self.data_loaded = True
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            st.error(f"Error cargando datos: {str(e)}")
+            return False
+    
+    def compute_portfolio(self, strategy='markowitz', target_return=None):
+        """
+        Computa la optimización del portafolio
+        """
+        if not self.data_loaded or self.returns is None:
+            return None
+        
+        try:
+            # Optimización básica usando pesos iguales como fallback
+            n_assets = len(self.returns.columns)
+            
+            if strategy == 'equi-weight':
+                weights = np.array([1/n_assets] * n_assets)
+            else:
+                # Intentar optimización real
+                weights = optimize_portfolio(self.returns, target_return=target_return)
+            
+            # Crear objeto de resultado
+            portfolio_output = PortfolioOutput(
+                weights=weights,
+                asset_names=list(self.returns.columns),
+                returns=self.returns
+            )
+            
+            return portfolio_output
+            
+        except Exception as e:
+            st.error(f"Error en optimización: {str(e)}")
+            return None
+
+class PortfolioOutput:
+    """
+    Clase para almacenar resultados de optimización de portafolio
+    """
+    def __init__(self, weights, asset_names, returns):
+        self.weights = weights
+        self.asset_names = asset_names
+        self.returns = returns
+        self.portfolio_returns = None
+        
+        if returns is not None and len(weights) == len(returns.columns):
+            self.portfolio_returns = (returns * weights).sum(axis=1)
+    
+    def get_metrics_dict(self):
+        """
+        Calcula y retorna métricas del portafolio
+        """
+        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
+            return {
+                'Mean Daily': 0,
+                'Volatility Daily': 0,
+                'Sharpe Ratio': 0,
+                'VaR 95%': 0
+            }
+        
+        mean_daily = self.portfolio_returns.mean()
+        vol_daily = self.portfolio_returns.std()
+        sharpe = mean_daily / vol_daily if vol_daily > 0 else 0
+        var_95 = np.percentile(self.portfolio_returns, 5)
+        
+        return {
+            'Mean Daily': mean_daily,
+            'Volatility Daily': vol_daily,
+            'Sharpe Ratio': sharpe,
+            'VaR 95%': var_95
+        }
+    
+    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
+        """
+        Crea un histograma de retornos usando Plotly para Streamlit
+        """
+        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
+            # Crear gráfico vacío
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        
+        fig = go.Figure(data=[go.Histogram(
+            x=self.portfolio_returns,
+            nbinsx=30,
+            name="Retornos del Portafolio"
+        )])
+        
+        fig.update_layout(
+            title=f"{title}",
+            xaxis_title="Retorno",
+            yaxis_title="Frecuencia",
+            showlegend=False
+        )
+        
+        return fig
+
+def main():
+    """
+    Función principal de la aplicación Streamlit
+    """
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    
+    # Inicializar session state
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'refresh_token' not in st.session_state:
+        st.session_state.refresh_token = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    # Add missing date parameters
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=365)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+    
+    # Sidebar para autenticación y configuración
+    with st.sidebar:
+        st.header("🔐 Autenticación IOL")
+        
+        if st.session_state.token_acceso is None:
+            # Formulario de login
+            with st.form("login_form"):
+                st.markdown("#### Ingrese sus credenciales de IOL")
+                usuario = st.text_input("Usuario", placeholder="su_usuario")
+                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+                
+                if st.form_submit_button("🚀 Conectar"):
+                    if usuario and contraseña:
+                        with st.spinner("Conectando con IOL..."):
+                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            
+                            if token_acceso:
+                                st.session_state.token_acceso = token_acceso
+                                st.session_state.refresh_token = refresh_token
+                                st.success("✅ Conexión exitosa!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error en la autenticación")
+                    else:
+                        st.warning("⚠️ Complete todos los campos")
+        else:
+            # Usuario conectado
+            st.success("✅ Conectado a IOL")
+            
+            # Configuración de fechas
+            st.markdown("#### 📅 Configuración de Fechas")
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_desde = st.date_input(
+                    "Fecha desde:",
+                    value=st.session_state.fecha_desde,
+                    max_value=date.today()
+                )
+            with col2:
+                fecha_hasta = st.date_input(
+                    "Fecha hasta:",
+                    value=st.session_state.fecha_hasta,
+                    max_value=date.today()
+                )
+            
+            st.session_state.fecha_desde = fecha_desde
+            st.session_state.fecha_hasta = fecha_hasta
+            
+            # Obtener lista de clientes
+            if not st.session_state.clientes:
+                with st.spinner("Cargando clientes..."):
+                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    st.session_state.clientes = clientes
+            
+            clientes = st.session_state.clientes
+            
+            if clientes:
+                st.info(f"👥 {len(clientes)} clientes disponibles")
+                
+                # Seleccionar cliente
+                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                
+                cliente_seleccionado = st.selectbox(
+                    "Seleccione un cliente:",
+                    options=cliente_ids,
+                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
+                )
+                
+                # Guardar cliente seleccionado en session state
+                st.session_state.cliente_seleccionado = next(
+                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                    None
+                )
+                
+                if st.button("🔄 Actualizar lista de clientes"):
+                    with st.spinner("Actualizando clientes..."):
+                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        st.session_state.clientes = nuevos_clientes
+                        st.success("✅ Lista de clientes actualizada")
+                        st.rerun()
+            
+            else:
+                st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
+    
+    # Contenido principal con manejo de errores mejorado
+    try:
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            mostrar_analisis_portafolio()
+        elif st.session_state.token_acceso:
+            st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
+        else:
+            st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
+    except Exception as e:
+        st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.error("🔄 Por favor, recargue la página e intente nuevamente")
 
 def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
@@ -1343,46 +1782,26 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
     st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
     
     # Configuración de optimización
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         estrategia = st.selectbox(
             "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight', 'minimum-variance'],
-            format_func=lambda x: {
-                'markowitz': 'Optimización de Markowitz',
-                'equi-weight': 'Pesos Iguales',
-                'minimum-variance': 'Mínima Varianza'
-            }[x]
+            options=['markowitz', 'equi-weight'],
+            format_func=lambda x: 'Optimización de Markowitz' if x == 'markowitz' else 'Pesos Iguales'
         )
     
     with col2:
-        rango_fechas_amplio = st.checkbox(
-            "Usar rango de fechas amplio",
-            value=False,
-            help="Usar 2 años de datos históricos para mejor análisis"
-        )
-    
-    with col3:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
-                # Ajustar fechas si se solicita rango amplio
-                if rango_fechas_amplio:
-                    fecha_desde_opt = fecha_desde - timedelta(days=365)
-                    st.info(f"📅 Usando rango amplio: {fecha_desde_opt} hasta {fecha_hasta}")
-                else:
-                    fecha_desde_opt = fecha_desde
+                # Crear manager de portafolio
+                manager = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
                 
-                # Crear manager de portafolio con mejor manejo de errores
-                manager = PortfolioManagerEnhanced(simbolos, token_acceso, fecha_desde_opt, fecha_hasta)
-                
-                # Cargar datos con estrategias de fallback
-                data_loaded, num_assets_loaded = manager.load_data_with_fallback()
-                
-                if data_loaded and num_assets_loaded >= 2:
+                # Cargar datos
+                if manager.load_data():
                     # Computar optimización
                     portfolio_result = manager.compute_portfolio(strategy=estrategia)
                     
@@ -1426,46 +1845,13 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                         fig_pie.update_layout(title="Distribución Optimizada de Activos")
                         st.plotly_chart(fig_pie, use_container_width=True)
                         
-                elif data_loaded and num_assets_loaded == 1:
-                    st.warning("⚠️ Solo se pudo cargar 1 activo con datos válidos")
-                    st.markdown("#### 💡 Opciones disponibles:")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if st.button("🔄 Intentar con rango de fechas más amplio"):
-                            st.info("Reintentando con 2 años de datos...")
-                            # Recursión con rango amplio
-                            mostrar_optimizacion_portafolio(
-                                portafolio, token_acceso, 
-                                fecha_desde - timedelta(days=730), fecha_hasta
-                            )
-                    
-                    with col2:
-                        if st.button("📊 Análisis de activo único"):
-                            activo_unico = manager.get_single_asset_analysis()
-                            if activo_unico:
-                                st.markdown("#### 📈 Análisis del Activo Único")
-                                st.json(activo_unico)
+                    else:
+                        st.error("❌ Error en la optimización")
                 else:
-                    st.error("❌ No se pudieron cargar datos suficientes para optimización")
-                    
-                    # Mostrar diagnóstico detallado
-                    diagnostico = manager.get_diagnostics()
-                    with st.expander("🔍 Diagnóstico Detallado"):
-                        st.json(diagnostico)
-                    
-                    # Sugerencias específicas
-                    st.markdown("#### 💡 Sugerencias Específicas:")
-                    st.markdown("1. **Verificar símbolos**: Algunos pueden estar mal escritos")
-                    st.markdown("2. **Ampliar rango de fechas**: Usar 1-2 años de datos")
-                    st.markdown("3. **Revisar mercados**: Algunos activos pueden estar en otros mercados")
-                    st.markdown("4. **Contactar soporte**: Si persiste el problema")
+                    st.error("❌ No se pudieron cargar los datos históricos")
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
-                with st.expander("🔍 Detalles del error"):
-                    st.code(str(e))
     
     # Información adicional
     with st.expander("ℹ️ Información sobre las Estrategias"):
@@ -1479,1315 +1865,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Distribución uniforme entre todos los activos
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
-        
-        **Mínima Varianza:**
-        - Minimiza el riesgo del portafolio
-        - Ideal para inversores conservadores
-        - Puede concentrarse en pocos activos
         """)
-
-# Clase PortfolioManager mejorada
-class PortfolioManagerEnhanced:
-    """
-    Clase mejorada para manejo de portafolio y optimización con mejor tolerancia a fallos
-    """
-    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
-        self.symbols = symbols
-        self.token = token
-        self.fecha_desde = fecha_desde
-        self.fecha_hasta = fecha_hasta
-        self.data_loaded = False
-        self.returns = None
-        self.prices = None
-        self.successful_symbols = []
-        self.failed_symbols = []
-        self.diagnostics = {}
-    
-    def load_data_with_fallback(self):
-        """
-        Carga datos históricos con múltiples estrategias de fallback
-        """
-        try:
-            # Estrategia 1: Intentar con función existente
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
-            )
-            
-            if mean_returns is not None and cov_matrix is not None and len(mean_returns) >= 2:
-                self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
-                self.prices = df_precios
-                self.mean_returns = mean_returns
-                self.cov_matrix = cov_matrix
-                self.data_loaded = True
-                self.successful_symbols = list(mean_returns.index) if mean_returns is not None else []
-                return True, len(self.successful_symbols)
-            
-            # Estrategia 2: Intentar símbolo por símbolo con diferentes mercados
-            st.info("🔄 Intentando estrategia alternativa de carga de datos...")
-            
-            exitos = 0
-            datos_individuales = {}
-            
-            for simbolo in self.symbols:
-                datos_simbolo = self._obtener_datos_simbolo_robusto(simbolo)
-                if datos_simbolo is not None and len(datos_simbolo) > 10:
-                    datos_individuales[simbolo] = datos_simbolo
-                    exitos += 1
-                    self.successful_symbols.append(simbolo)
-                else:
-                    self.failed_symbols.append(simbolo)
-            
-            if exitos >= 2:
-                # Construir DataFrame con datos exitosos
-                df_combined = pd.DataFrame(datos_individuales)
-                df_combined = df_combined.fillna(method='ffill').fillna(method='bfill')
-                df_combined = df_combined.dropna()
-                
-                if len(df_combined) > 30:  # Suficientes observaciones
-                    self.prices = df_combined
-                    self.returns = df_combined.pct_change().dropna()
-                    self.mean_returns = self.returns.mean()
-                    self.cov_matrix = self.returns.cov()
-                    self.data_loaded = True
-                    return True, exitos
-            
-            # Estrategia 3: Si solo hay 1 activo exitoso, intentar con datos sintéticos para demo
-            if exitos == 1:
-                self.data_loaded = True
-                simbolo_unico = self.successful_symbols[0]
-                self.prices = pd.DataFrame({simbolo_unico: datos_individuales[simbolo_unico]})
-                self.returns = self.prices.pct_change().dropna()
-                return True, 1
-            
-            return False, 0
-                
-        except Exception as e:
-            self.diagnostics['error_general'] = str(e)
-            return False, 0
-    
-    def _obtener_datos_simbolo_robusto(self, simbolo):
-        """
-        Obtiene datos de un símbolo probando múltiples mercados y estrategias
-        """
-        mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
-        fecha_desde_str = self.fecha_desde.strftime('%Y-%m-%d')
-        fecha_hasta_str = self.fecha_hasta.strftime('%Y-%m-%d')
-        
-        for mercado in mercados:
-            try:
-                # Intentar con clase D si aplica
-                simbolo_consulta = simbolo
-                if mercado in ['bCBA']:
-                    clase_d = obtener_clase_d(simbolo, mercado, self.token)
-                    if clase_d:
-                        simbolo_consulta = clase_d
-                
-                serie = obtener_serie_historica_iol(
-                    self.token, mercado, simbolo_consulta,
-                    fecha_desde_str, fecha_hasta_str
-                )
-                
-                if serie is not None and len(serie) > 10 and serie.nunique() > 1:
-                    return serie
-                    
-            except Exception as e:
-                self.diagnostics[f'{simbolo}_{mercado}'] = str(e)
-                continue
-        
-        # Fallback a yfinance
-        try:
-            serie_yf = obtener_datos_alternativos_yfinance(
-                simbolo, self.fecha_desde, self.fecha_hasta
-            )
-            if serie_yf is not None and len(serie_yf) > 10:
-                return serie_yf
-        except:
-            pass
-        
-        return None
-    
-    def get_single_asset_analysis(self):
-        """
-        Análisis para cuando solo hay un activo
-        """
-        if len(self.successful_symbols) == 1 and self.returns is not None:
-            simbolo = self.successful_symbols[0]
-            serie_retornos = self.returns[simbolo]
-            
-            return {
-                'simbolo': simbolo,
-                'observaciones': len(serie_retornos),
-                'retorno_promedio_diario': serie_retornos.mean(),
-                'volatilidad_diaria': serie_retornos.std(),
-                'retorno_anualizado': serie_retornos.mean() * 252,
-                'volatilidad_anualizada': serie_retornos.std() * np.sqrt(252),
-                'sharpe_ratio': (serie_retornos.mean() / serie_retornos.std()) if serie_retornos.std() > 0 else 0,
-                'var_95': np.percentile(serie_retornos, 5),
-                'sesgo': serie_retornos.skew(),
-                'curtosis': serie_retornos.kurtosis()
-            }
-        return None
-    
-    def get_diagnostics(self):
-        """
-        Retorna información de diagnóstico
-        """
-        return {
-            'simbolos_originales': self.symbols,
-            'simbolos_exitosos': self.successful_symbols,
-            'simbolos_fallidos': self.failed_symbols,
-            'rango_fechas': f"{self.fecha_desde} a {self.fecha_hasta}",
-            'errores_detallados': self.diagnostics
-        }
-    
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
-        """
-        Computa la optimización del portafolio con manejo mejorado
-        """
-        if not self.data_loaded or self.returns is None:
-            return None
-        
-        try:
-            n_assets = len(self.returns.columns)
-            
-            if n_assets == 1:
-                # Caso especial: un solo activo
-                weights = np.array([1.0])
-            elif strategy == 'equi-weight':
-                weights = np.array([1/n_assets] * n_assets)
-            elif strategy == 'minimum-variance':
-                weights = self._optimize_minimum_variance()
-            else:
-                # Markowitz u otra optimización
-                weights = optimize_portfolio(self.returns, target_return=target_return)
-            
-            # Crear objeto de resultado
-            portfolio_output = PortfolioOutput(
-                weights=weights,
-                asset_names=list(self.returns.columns),
-                returns=self.returns
-            )
-            
-            return portfolio_output
-            
-        except Exception as e:
-            st.error(f"Error en optimización: {str(e)}")
-            return None
-    
-    def _optimize_minimum_variance(self):
-        """
-        Optimización de mínima varianza
-        """
-        try:
-            from scipy.optimize import minimize
-            
-            n_assets = len(self.returns.columns)
-            cov_matrix = self.returns.cov().values
-            
-            # Función objetivo: minimizar varianza
-            def portfolio_variance(weights):
-                return np.dot(weights.T, np.dot(cov_matrix, weights))
-            
-            # Restricciones y límites
-            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-            bounds = tuple((0, 1) for _ in range(n_assets))
-            initial_guess = np.array([1/n_assets] * n_assets)
-            
-            # Optimización
-            result = minimize(portfolio_variance, initial_guess, method='SLSQP',
-                            bounds=bounds, constraints=constraints)
-            
-            if result.success:
-                return result.x
-            else:
-                return np.array([1/n_assets] * n_assets)
-                
-        except Exception:
-            return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
-
-class PortfolioOutput:
-    """
-    Clase para almacenar resultados de optimización de portafolio
-    """
-    def __init__(self, weights, asset_names, returns):
-        self.weights = weights
-        self.asset_names = asset_names
-        self.returns = returns
-        self.portfolio_returns = None
-        
-        if returns is not None and len(weights) == len(returns.columns):
-            self.portfolio_returns = (returns * weights).sum(axis=1)
-    
-    def get_metrics_dict(self):
-        """
-        Calcula y retorna métricas del portafolio
-        """
-        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
-            return {
-                'Mean Daily': 0,
-                'Volatility Daily': 0,
-                'Sharpe Ratio': 0,
-                'VaR 95%': 0
-            }
-        
-        mean_daily = self.portfolio_returns.mean()
-        vol_daily = self.portfolio_returns.std()
-        sharpe = mean_daily / vol_daily if vol_daily > 0 else 0
-        var_95 = np.percentile(self.portfolio_returns, 5)
-        
-        return {
-            'Mean Daily': mean_daily,
-                       'Volatility Daily': vol_daily,
-            'Sharpe Ratio': sharpe,
-            'VaR 95%': var_95
-        }
-    
-    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
-        """
-        Crea un histograma de retornos usando Plotly para Streamlit
-        """
-        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
-            # Crear gráfico vacío
-            fig = go.Figure()
-            fig.add_annotation(
-                text="No hay datos suficientes para mostrar",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
-            )
-            fig.update_layout(title=title)
-            return fig
-        
-        fig = go.Figure(data=[go.Histogram(
-            x=self.portfolio_returns,
-            nbinsx=30,
-            name="Retornos del Portafolio"
-        )])
-        
-        fig.update_layout(
-            title=f"{title}",
-            xaxis_title="Retorno",
-            yaxis_title="Frecuencia",
-            showlegend=False
-        )
-        
-        return fig
-
-# --- Funciones de la aplicación Streamlit ---
-def mostrar_analisis_portafolio():
-    """
-    Función principal para mostrar el análisis del portafolio del cliente seleccionado
-    """
-    cliente = st.session_state.cliente_seleccionado
-    token_acceso = st.session_state.token_acceso
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
-    
-    if not cliente:
-        st.error("No hay cliente seleccionado")
-        return
-    
-    # Obtener ID del cliente
-    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-    
-    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
-    
-    # Reorganizar tabs en orden lógico de uso
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Dashboard General", 
-        "💰 Estado Financiero", 
-        "🎯 Optimización y Estrategias", 
-        "📈 Análisis Avanzado",
-        "🛠️ Herramientas de Mercado"
-    ])
-    
-    with tab1:
-        st.markdown("### 📊 Dashboard General del Portafolio")
-        
-        # Sub-navegación dentro del dashboard
-        dashboard_option = st.selectbox(
-            "Seleccione vista del dashboard:",
-            ["Resumen Ejecutivo", "Composición Detallada", "Métricas de Riesgo"],
-            key="dashboard_nav"
-        )
-        
-        # Obtener portafolio una vez para todo el dashboard
-        with st.spinner("Cargando datos del portafolio..."):
-            portafolio = obtener_portafolio(token_acceso, id_cliente)
-        
-        if portafolio:
-            if dashboard_option == "Resumen Ejecutivo":
-                # Vista de alto nivel con métricas clave
-                st.markdown("#### 🎯 Vista Ejecutiva")
-                mostrar_resumen_portafolio(portafolio)
-                
-            elif dashboard_option == "Composición Detallada":
-                # Análisis detallado de composición
-                st.markdown("#### 🔍 Análisis Detallado de Composición")
-                mostrar_composicion_detallada(portafolio)
-                
-            elif dashboard_option == "Métricas de Riesgo":
-                # Enfoque en riesgo y diversificación
-                st.markdown("#### ⚠️ Análisis de Riesgo y Diversificación")
-                mostrar_analisis_riesgo(portafolio)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente")
-    
-    with tab2:
-        st.markdown("### 💰 Estado Financiero Completo")
-        
-        # Sub-navegación para estado financiero
-        financial_option = st.selectbox(
-            "Seleccione vista financiera:",
-            ["Estado de Cuenta", "Flujos de Efectivo", "Histórico de Operaciones"],
-            key="financial_nav"
-        )
-        
-        if financial_option == "Estado de Cuenta":
-            # Estado de cuenta actual
-            with st.spinner("Cargando estado de cuenta..."):
-                estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-            
-            if estado_cuenta:
-                mostrar_estado_cuenta(estado_cuenta)
-            else:
-                st.warning("No se pudo obtener el estado de cuenta")
-                
-                # Ofrecer alternativa
-                if st.button("🔄 Probar endpoint alternativo"):
-                    with st.spinner("Probando endpoint directo..."):
-                        estado_cuenta_directo = obtener_estado_cuenta(token_acceso, None)
-                        if estado_cuenta_directo:
-                            mostrar_estado_cuenta(estado_cuenta_directo)
-                        else:
-                            st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
-        
-        elif financial_option == "Flujos de Efectivo":
-            st.info("🚧 Análisis de flujos de efectivo en desarrollo")
-            mostrar_placeholder_flujos_efectivo()
-            
-        elif financial_option == "Histórico de Operaciones":
-            st.info("🚧 Histórico de operaciones en desarrollo")
-            mostrar_placeholder_historico_operaciones()
-
-    with tab3:
-        st.markdown("### 🎯 Optimización y Estrategias")
-        
-        # Sub-navegación para optimización
-        optimization_option = st.selectbox(
-            "Seleccione estrategia:",
-            ["Optimización de Markowitz", "Rebalanceo Automático", "Análisis de Escenarios"],
-            key="optimization_nav"
-        )
-        
-        # Obtener portafolio para optimización
-        if 'portafolio' not in locals():
-            with st.spinner("Cargando portafolio para optimización..."):
-                portafolio = obtener_portafolio(token_acceso, id_cliente)
-        
-        if portafolio:
-            if optimization_option == "Optimización de Markowitz":
-                mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
-                
-            elif optimization_option == "Rebalanceo Automático":
-                st.info("🚧 Herramienta de rebalanceo automático en desarrollo")
-                mostrar_placeholder_rebalanceo()
-                
-            elif optimization_option == "Análisis de Escenarios":
-                st.info("🚧 Análisis de escenarios en desarrollo")
-                mostrar_placeholder_escenarios()
-        else:
-            st.warning("No se pudo obtener el portafolio para optimización")
-    
-    with tab4:
-        st.markdown("### 📈 Análisis Avanzado")
-        
-        # Sub-navegación para análisis avanzado
-        advanced_option = st.selectbox(
-            "Seleccione tipo de análisis:",
-            ["Análisis Técnico", "Correlaciones", "Backtesting", "Monte Carlo"],
-            key="advanced_nav"
-        )
-        
-        if advanced_option == "Análisis Técnico":
-            mostrar_analisis_tecnico(portafolio if 'portafolio' in locals() else None, token_acceso, id_cliente)
-            
-        elif advanced_option == "Correlaciones":
-            st.info("🚧 Matriz de correlaciones en desarrollo")
-            mostrar_placeholder_correlaciones()
-            
-        elif advanced_option == "Backtesting":
-            st.info("🚧 Backtesting de estrategias en desarrollo")
-            mostrar_placeholder_backtesting()
-            
-        elif advanced_option == "Monte Carlo":
-            st.info("🚧 Simulación Monte Carlo en desarrollo")
-            mostrar_placeholder_montecarlo()
-    
-    with tab5:
-        st.markdown("### 🛠️ Herramientas de Mercado")
-        
-        # Sub-navegación para herramientas
-        tools_option = st.selectbox(
-            "Seleccione herramienta:",
-            ["Cotizaciones en Tiempo Real", "Calculadora MEP", "Tasas de Caución", "Alertas de Mercado"],
-            key="tools_nav"
-        )
-        
-        if tools_option == "Cotizaciones en Tiempo Real":
-            mostrar_cotizaciones_tiempo_real(token_acceso)
-            
-        elif tools_option == "Calculadora MEP":
-            mostrar_calculadora_mep(token_acceso)
-            
-        elif tools_option == "Tasas de Caución":
-            mostrar_tasas_caucion_detalladas(token_acceso)
-            
-        elif tools_option == "Alertas de Mercado":
-            st.info("🚧 Sistema de alertas en desarrollo")
-            mostrar_placeholder_alertas()
-
-# Nuevas funciones de apoyo para la reorganización
-
-def mostrar_composicion_detallada(portafolio):
-    """Muestra análisis detallado de composición del portafolio"""
-    st.markdown("#### 📊 Composición Detallada")
-    # Implementar análisis de composición más detallado
-    mostrar_resumen_portafolio(portafolio)  # Por ahora usa la función existente
-
-def mostrar_analisis_riesgo(portafolio):
-    """Muestra análisis específico de riesgo"""
-    st.markdown("#### ⚠️ Análisis de Riesgo")
-    # Implementar análisis de riesgo específico
-    mostrar_resumen_portafolio(portafolio)  # Por ahora usa la función existente
-
-def mostrar_analisis_tecnico(portafolio, token_acceso, id_cliente):
-    """Análisis técnico mejorado con herramientas integradas de TradingView"""
-    st.markdown("#### 📊 Análisis Técnico Avanzado")
-    
-    if not portafolio:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
-    if portafolio:
-        activos = portafolio.get('activos', [])
-        if activos:
-            simbolos = [activo.get('titulo', {}).get('simbolo', '') for activo in activos]
-            simbolos = [s for s in simbolos if s]
-            
-            if simbolos:
-                # Panel de configuración principal
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    simbolo_seleccionado = st.selectbox(
-                        "📈 Seleccione un activo:",
-                        options=simbolos,
-                        key="tech_analysis_symbol"
-                    )
-                
-                with col2:
-                    tipo_analisis = st.selectbox(
-                        "🔧 Tipo de Análisis:",
-                        ["Indicadores Técnicos", "Gráficos Interactivos", "Patrones de Precios", "Análisis Multi-Timeframe"],
-                        key="analysis_type"
-                    )
-                
-                with col3:
-                    timeframe = st.selectbox(
-                        "⏰ Timeframe:",
-                        ["1D", "1W", "1M", "3M", "6M", "1Y"],
-                        index=3,
-                        key="timeframe_selector"
-                    )
-                
-                # Tabs para diferentes herramientas
-                tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                    "📊 Indicadores", "✏️ Herramientas de Dibujo", "📈 Análisis de Precios", 
-                    "🔄 Comparación", "⚙️ Configuración Avanzada"
-                ])
-                
-                with tab1:
-                    mostrar_indicadores_tecnicos(simbolo_seleccionado, token_acceso, timeframe)
-                
-                with tab2:
-                    mostrar_herramientas_dibujo(simbolo_seleccionado, token_acceso)
-                
-                with tab3:
-                    mostrar_analisis_precios(simbolo_seleccionado, token_acceso, timeframe)
-                
-                with tab4:
-                    mostrar_comparacion_activos(simbolos, token_acceso, timeframe)
-                
-                with tab5:
-                    mostrar_configuracion_avanzada()
-                
-                # Gráfico principal integrado
-                if simbolo_seleccionado:
-                    mostrar_grafico_principal_integrado(simbolo_seleccionado, token_acceso, timeframe, tipo_analisis)
-                    
-    else:
-        st.warning("No se pudo cargar el portafolio para análisis técnico")
-
-def mostrar_indicadores_tecnicos(simbolo, token_acceso, timeframe):
-    """Panel de indicadores técnicos avanzados"""
-    st.markdown("##### 📊 Indicadores Técnicos")
-    
-    # Configuración de indicadores
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("###### 📈 Indicadores de Tendencia")
-        
-        # Moving Averages
-        ma_enabled = st.checkbox("Moving Averages", value=True, key="ma_enabled")
-        if ma_enabled:
-            ma_periods = st.multiselect(
-                "Períodos MA:",
-                [5, 10, 20, 50, 100, 200],
-                default=[20, 50],
-                key="ma_periods"
-            )
-            ma_type = st.selectbox(
-                "Tipo MA:",
-                ["SMA", "EMA", "WMA", "HMA"],
-                key="ma_type"
-            )
-        
-        # MACD
-        macd_enabled = st.checkbox("MACD", value=True, key="macd_enabled")
-        if macd_enabled:
-            macd_fast = st.number_input("MACD Fast:", value=12, key="macd_fast")
-            macd_slow = st.number_input("MACD Slow:", value=26, key="macd_slow")
-            macd_signal = st.number_input("MACD Signal:", value=9, key="macd_signal")
-        
-        # Bollinger Bands
-        bb_enabled = st.checkbox("Bollinger Bands", value=False, key="bb_enabled")
-        if bb_enabled:
-            bb_period = st.number_input("BB Período:", value=20, key="bb_period")
-            bb_std = st.number_input("BB Desviación:", value=2.0, step=0.1, key="bb_std")
-    
-    with col2:
-        st.markdown("###### ⚡ Indicadores de Momentum")
-        
-        # RSI
-        rsi_enabled = st.checkbox("RSI", value=True, key="rsi_enabled")
-        if rsi_enabled:
-            rsi_period = st.number_input("RSI Período:", value=14, key="rsi_period")
-            rsi_overbought = st.number_input("RSI Sobrecompra:", value=70, key="rsi_ob")
-            rsi_oversold = st.number_input("RSI Sobreventa:", value=30, key="rsi_os")
-        
-        # Stochastic
-        stoch_enabled = st.checkbox("Stochastic", value=False, key="stoch_enabled")
-        if stoch_enabled:
-            stoch_k = st.number_input("Stoch %K:", value=14, key="stoch_k")
-            stoch_d = st.number_input("Stoch %D:", value=3, key="stoch_d")
-        
-        # Williams %R
-        williams_enabled = st.checkbox("Williams %R", value=False, key="williams_enabled")
-        if williams_enabled:
-            williams_period = st.number_input("Williams Período:", value=14, key="williams_period")
-    
-    # Configuración de volumen
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        st.markdown("###### 📊 Indicadores de Volumen")
-        
-        volume_enabled = st.checkbox("Volumen", value=True, key="volume_enabled")
-        vwap_enabled = st.checkbox("VWAP", value=False, key="vwap_enabled")
-        obv_enabled = st.checkbox("On Balance Volume", value=False, key="obv_enabled")
-    
-    with col4:
-        st.markdown("###### 🎯 Indicadores Personalizados")
-        
-        # Permitir agregar indicadores personalizados
-        custom_indicator = st.text_input(
-            "Indicador personalizado:",
-            placeholder="Ej: Ichimoku, Fibonacci, etc.",
-            key="custom_indicator"
-        )
-        
-        if custom_indicator:
-            st.info(f"Indicador '{custom_indicator}' se agregará próximamente")
-    
-    # Botón para aplicar configuración
-    if st.button("🚀 Aplicar Indicadores", key="apply_indicators"):
-        # Aquí se aplicarían los indicadores al gráfico
-        configuracion_indicadores = {
-            'moving_averages': {'enabled': ma_enabled, 'periods': ma_periods if ma_enabled else [], 'type': ma_type if ma_enabled else 'SMA'},
-            'macd': {'enabled': macd_enabled, 'fast': macd_fast if macd_enabled else 12, 'slow': macd_slow if macd_enabled else 26, 'signal': macd_signal if macd_enabled else 9},
-            'bollinger_bands': {'enabled': bb_enabled, 'period': bb_period if bb_enabled else 20, 'std': bb_std if bb_enabled else 2.0},
-            'rsi': {'enabled': rsi_enabled, 'period': rsi_period if rsi_enabled else 14, 'overbought': rsi_overbought if rsi_enabled else 70, 'oversold': rsi_oversold if rsi_enabled else 30},
-            'stochastic': {'enabled': stoch_enabled, 'k': stoch_k if stoch_enabled else 14, 'd': stoch_d if stoch_enabled else 3},
-            'williams': {'enabled': williams_enabled, 'period': williams_period if williams_enabled else 14},
-            'volume': volume_enabled,
-            'vwap': vwap_enabled,
-            'obv': obv_enabled
-        }
-        
-        st.success("✅ Configuración de indicadores aplicada")
-        st.json(configuracion_indicadores)
-
-def mostrar_herramientas_dibujo(simbolo, token_acceso):
-    """Panel de herramientas de dibujo avanzadas"""
-    st.markdown("##### ✏️ Herramientas de Dibujo")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("###### 📏 Líneas y Formas")
-        
-        # Herramientas básicas de línea
-        if st.button("📏 Línea de Tendencia", key="trend_line"):
-            st.info("Modo: Línea de Tendencia activado")
-        
-        if st.button("📐 Línea Horizontal", key="horizontal_line"):
-            st.info("Modo: Línea Horizontal activado")
-        
-        if st.button("📏 Línea Vertical", key="vertical_line"):
-            st.info("Modo: Línea Vertical activado")
-        
-        if st.button("🔺 Canal de Tendencia", key="trend_channel"):
-            st.info("Modo: Canal de Tendencia activado")
-        
-        if st.button("📦 Rectángulo", key="rectangle"):
-            st.info("Modo: Rectángulo activado")
-    
-    with col2:
-        st.markdown("###### 🎯 Herramientas Fibonacci")
-        
-        if st.button("🌀 Retroceso Fibonacci", key="fib_retracement"):
-            st.info("Modo: Retroceso Fibonacci activado")
-        
-        if st.button("📈 Extensión Fibonacci", key="fib_extension"):
-            st.info("Modo: Extensión Fibonacci activado")
-        
-        if st.button("⚡ Abanico Fibonacci", key="fib_fan"):
-            st.info("Modo: Abanico Fibonacci activado")
-        
-        if st.button("⏰ Zonas Temporales Fibonacci", key="fib_time"):
-            st.info("Modo: Zonas Temporales Fibonacci activado")
-    
-    with col3:
-        st.markdown("###### 🎨 Herramientas Avanzadas")
-        
-        if st.button("🎯 Gann Square", key="gann_square"):
-            st.info("Modo: Gann Square activado")
-        
-        if st.button("📊 Pitchfork", key="pitchfork"):
-            st.info("Modo: Pitchfork activado")
-        
-        if st.button("💬 Texto/Nota", key="text_note"):
-            st.info("Modo: Agregar Texto activado")
-        
-        if st.button("🚨 Alerta de Precio", key="price_alert"):
-            st.info("Modo: Alerta de Precio activado")
-    
-    # Configuración de estilo de dibujo
-    st.markdown("###### 🎨 Configuración de Estilo")
-    
-    col4, col5, col6 = st.columns(3)
-    
-    with col4:
-        line_color = st.color_picker("Color de línea:", "#FF0000", key="line_color")
-        line_width = st.slider("Grosor de línea:", 1, 5, 2, key="line_width")
-    
-    with col5:
-        line_style = st.selectbox(
-            "Estilo de línea:",
-            ["Sólida", "Punteada", "Discontinua"],
-            key="line_style"
-        )
-    
-    with col6:
-        if st.button("🗑️ Limpiar Dibujos", key="clear_drawings"):
-            st.warning("Todos los dibujos han sido eliminados")
-
-def mostrar_analisis_precios(simbolo, token_acceso, timeframe):
-    """Panel de análisis de precios avanzado"""
-    st.markdown("##### 📈 Análisis de Precios")
-    
-    # Obtener datos históricos para análisis
-    with st.spinner(f"Cargando datos de {simbolo}..."):
-        fecha_hasta = date.today()
-        fecha_desde = fecha_hasta - timedelta(days=365)
-        
-        # Simular datos para demostración
-        datos_precio = simular_datos_precio(simbolo, fecha_desde, fecha_hasta)
-    
-    if datos_precio is not None:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("###### 📊 Estadísticas de Precio")
-            
-            precio_actual = datos_precio['close'].iloc[-1]
-            precio_anterior = datos_precio['close'].iloc[-2]
-            variacion = ((precio_actual - precio_anterior) / precio_anterior) * 100
-            
-            st.metric("Precio Actual", f"${precio_actual:.2f}", f"{variacion:+.2f}%")
-            
-            # Estadísticas adicionales
-            max_52w = datos_precio['high'].max()
-            min_52w = datos_precio['low'].min()
-            volatilidad = datos_precio['close'].pct_change().std() * np.sqrt(252) * 100;
-            
-            st.metric("Máximo 52s", f"${max_52w:.2f}")
-            st.metric("Mínimo 52s", f"${min_52w:.2f}")
-            st.metric("Volatilidad Anual", f"{volatilidad:.1f}%")
-        
-        with col2:
-            st.markdown("###### 🎯 Niveles Clave")
-            
-            # Calcular soportes y resistencias
-            resistencia_1 = calcular_resistencia(datos_precio, nivel=1)
-            resistencia_2 = calcular_resistencia(datos_precio, nivel=2)
-            soporte_1 = calcular_soporte(datos_precio, nivel=1)
-            soporte_2 = calcular_soporte(datos_precio, nivel=2)
-            
-            st.write(f"🔴 **Resistencia 2:** ${resistencia_2:.2f}")
-            st.write(f"🟠 **Resistencia 1:** ${resistencia_1:.2f}")
-            st.write(f"⚪ **Precio Actual:** ${precio_actual:.2f}")
-            st.write(f"🟢 **Soporte 1:** ${soporte_1:.2f}")
-            st.write(f"🔵 **Soporte 2:** ${soporte_2:.2f}")
-        
-        # Análisis de patrones
-        st.markdown("###### 🔍 Detección de Patrones")
-        
-        patrones_detectados = detectar_patrones_precio(datos_precio)
-        
-        if patrones_detectados:
-            for patron in patrones_detectados:
-                st.info(f"📊 Patrón detectado: **{patron['nombre']}** - Confianza: {patron['confianza']:.0%}")
-        else:
-            st.info("No se detectaron patrones significativos en el período analizado")
-        
-        # Gráfico de análisis de precios
-        fig_precio = crear_grafico_analisis_precio(datos_precio, simbolo)
-        st.plotly_chart(fig_precio, use_container_width=True)
-    
-    else:
-        st.warning(f"No se pudieron cargar los datos de {simbolo}")
-
-def mostrar_comparacion_activos(simbolos, token_acceso, timeframe):
-    """Panel de comparación entre múltiples activos"""
-    st.markdown("##### 🔄 Comparación de Activos")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        activos_comparar = st.multiselect(
-            "Seleccione activos para comparar:",
-            options=simbolos,
-            default=simbolos[:min(3, len(simbolos))],
-            key="assets_to_compare"
-        )
-    
-    with col2:
-        tipo_comparacion = st.selectbox(
-            "Tipo de comparación:",
-            ["Rendimiento Relativo", "Precios Absolutos", "Volatilidad", "Correlación"],
-            key="comparison_type"
-        )
-    
-    if len(activos_comparar) >= 2:
-        # Generar datos de comparación
-        datos_comparacion = generar_datos_comparacion(activos_comparar, timeframe)
-        
-        if tipo_comparacion == "Rendimiento Relativo":
-            fig_comp = crear_grafico_rendimiento_relativo(datos_comparacion, activos_comparar)
-            st.plotly_chart(fig_comp, use_container_width=True)
-            
-        elif tipo_comparacion == "Correlación":
-            matriz_correlacion = calcular_matriz_correlacion(datos_comparacion)
-            fig_corr = crear_grafico_correlacion(matriz_correlacion, activos_comparar)
-            st.plotly_chart(fig_corr, use_container_width=True)
-            
-        # Tabla de métricas comparativas
-        st.markdown("###### 📊 Métricas Comparativas")
-        
-        tabla_metricas = crear_tabla_metricas_comparativas(datos_comparacion, activos_comparar)
-        st.dataframe(tabla_metricas, use_container_width=True)
-    
-    else:
-        st.info("Seleccione al menos 2 activos para comparar")
-
-def mostrar_configuracion_avanzada():
-    """Panel de configuración avanzada para análisis técnico"""
-    st.markdown("##### ⚙️ Configuración Avanzada")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("###### 🎨 Personalización Visual")
-        
-        theme_chart = st.selectbox(
-            "Tema del gráfico:",
-            ["Oscuro", "Claro", "Personalizado"],
-            key="chart_theme"
-        )
-        
-        grid_enabled = st.checkbox("Mostrar grilla", value=True, key="grid_enabled")
-        volume_visible = st.checkbox("Mostrar volumen", value=True, key="volume_visible")
-        crosshair_enabled = st.checkbox("Crosshair", value=True, key="crosshair_enabled")
-    
-    with col2:
-        st.markdown("###### 📊 Configuración de Datos")
-        
-        data_source = st.selectbox(
-            "Fuente de datos:",
-            ["IOL API", "Yahoo Finance", "Alpha Vantage"],
-            key="data_source"
-        )
-        
-        update_frequency = st.selectbox(
-            "Frecuencia de actualización:",
-            ["Tiempo Real", "1 minuto", "5 minutos", "Manual"],
-            index=2,
-            key="update_frequency"
-        )
-        
-        cache_enabled = st.checkbox("Habilitar cache", value=True, key="cache_enabled")
-    
-    # Configuración de alertas
-    st.markdown("###### 🚨 Configuración de Alertas")
-    
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        alerts_enabled = st.checkbox("Habilitar alertas", value=False, key="alerts_enabled")
-        if alerts_enabled:
-            alert_email = st.text_input("Email para alertas:", key="alert_email")
-    
-    with col4:
-        if alerts_enabled:
-            alert_types = st.multiselect(
-                "Tipos de alerta:",
-                ["Precio", "Volumen", "Indicadores", "Patrones"],
-                key="alert_types"
-            )
-    
-    # Guardar configuración
-    if st.button("💾 Guardar Configuración", key="save_config"):
-        config = {
-            'theme': theme_chart,
-            'grid': grid_enabled,
-            'volume': volume_visible,
-            'crosshair': crosshair_enabled,
-            'data_source': data_source,
-            'update_frequency': update_frequency,
-            'cache': cache_enabled,
-            'alerts': alerts_enabled
-        }
-        st.success("✅ Configuración guardada")
-        st.json(config)
-
-def mostrar_grafico_principal_integrado(simbolo, token_acceso, timeframe, tipo_analisis):
-    """Gráfico principal integrado con TradingView-like interface"""
-    st.markdown(f"##### 📊 Gráfico Principal - {simbolo}")
-    
-    # Toolbar superior del gráfico
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        chart_type = st.selectbox(
-            "Tipo:",
-            ["Velas", "Barras", "Línea", "Renko", "Heikin Ashi"],
-            key="chart_type_main"
-        )
-    
-    with col2:
-        interval = st.selectbox(
-            "Intervalo:",
-            ["1m", "5m", "15m", "1h", "4h", "1D", "1W"],
-            index=5,
-            key="interval_main"
-        )
-    
-    with col3:
-        if st.button("📊 Agregar Indicador", key="add_indicator_main"):
-            st.info("Selector de indicadores abierto")
-    
-    with col4:
-        if st.button("✏️ Herramientas", key="drawing_tools_main"):
-            st.info("Panel de herramientas de dibujo abierto")
-    
-    with col5:
-        if st.button("💾 Guardar Layout", key="save_layout_main"):
-            st.success("Layout guardado")
-    
-    # Generar datos para el gráfico principal
-    datos_grafico = generar_datos_grafico_principal(simbolo, timeframe, interval)
-    
-    if datos_grafico is not None:
-        # Crear gráfico principal con subplots para indicadores
-        fig_main = crear_grafico_principal_completo(datos_grafico, simbolo, chart_type, tipo_analisis)
-        st.plotly_chart(fig_main, use_container_width=True, config={'displayModeBar': True})
-        
-        # Panel de información en tiempo real
-        mostrar_panel_informacion_tiempo_real(simbolo, datos_grafico)
-    
-    else:
-        st.error(f"No se pudieron cargar los datos para {simbolo}")
-
-# Funciones auxiliares para análisis técnico
-
-def simular_datos_precio(simbolo, fecha_desde, fecha_hasta):
-    """Simula datos de precio para demostración"""
-    try:
-        fechas = pd.date_range(fecha_desde, fecha_hasta, freq='D')
-        np.random.seed(hash(simbolo) % 2**32)  # Seed basado en símbolo para consistencia
-        
-        precio_inicial = 100 + np.random.random() * 50
-        rendimientos = np.random.normal(0.001, 0.02, len(fechas))
-        precios = [precio_inicial]
-        
-        for r in rendimientos[1:]:
-            precio_siguiente = precios[-1] * (1 + r)
-            precios.append(max(precio_siguiente, 1))  # Evitar precios negativos
-        
-        # Generar OHLCV
-        data = []
-        for i, (fecha, precio) in enumerate(zip(fechas, precios)):
-            volatilidad_diaria = 0.01 + np.random.random() * 0.02
-            high = precio * (1 + volatilidad_diaria)
-            low = precio * (1 - volatilidad_diaria)
-            open_price = precios[i-1] if i > 0 else precio
-            close_price = precio
-            volume = np.random.randint(1000, 10000)
-            
-            data.append({
-                'date': fecha,
-                'open': open_price,
-                'high': high,
-                'low': low,
-                'close': close_price,
-                'volume': volume
-            })
-        
-        return pd.DataFrame(data).set_index('date')
-    
-    except Exception as e:
-        st.error(f"Error generando datos: {str(e)}")
-        return None
-
-def calcular_resistencia(datos, nivel=1):
-    """Calcula niveles de resistencia"""
-    try:
-        high_prices = datos['high'].tail(100)  # Últimos 100 días
-        resistencias = []
-        
-        for i in range(2, len(high_prices)-2):
-            if (high_prices.iloc[i] > high_prices.iloc[i-1] and 
-                high_prices.iloc[i] > high_prices.iloc[i-2] and
-                high_prices.iloc[i] > high_prices.iloc[i+1] and 
-                high_prices.iloc[i] > high_prices.iloc[i+2]):
-                resistencias.append(high_prices.iloc[i])
-        
-        if resistencias:
-            resistencias_sorted = sorted(resistencias, reverse=True)
-            return resistencias_sorted[min(nivel-1, len(resistencias_sorted)-1)]
-        else:
-            return datos['high'].max()
-    
-    except Exception:
-        return datos['high'].max()
-
-def calcular_soporte(datos, nivel=1):
-    """Calcula niveles de soporte"""
-    try:
-        low_prices = datos['low'].tail(100)  # Últimos 100 días
-        soportes = []
-        
-        for i in range(2, len(low_prices)-2):
-            if (low_prices.iloc[i] < low_prices.iloc[i-1] and 
-                low_prices.iloc[i] < low_prices.iloc[i-2] and
-                low_prices.iloc[i] < low_prices.iloc[i+1] and 
-                low_prices.iloc[i] < low_prices.iloc[i+2]):
-                soportes.append(low_prices.iloc[i])
-        
-        if soportes:
-            soportes_sorted = sorted(soportes)
-            return soportes_sorted[min(nivel-1, len(soportes_sorted)-1)]
-        else:
-            return datos['low'].min()
-    
-    except Exception:
-        return datos['low'].min()
-
-def detectar_patrones_precio(datos):
-    """Detecta patrones básicos en los precios"""
-    patrones = []
-    
-    try:
-        # Patrón de tendencia alcista
-        precios_recientes = datos['close'].tail(20)
-        if len(precios_recientes) >= 10:
-            tendencia = np.polyfit(range(len(precios_recientes)), precios_recientes, 1)[0]
-            if tendencia > 0:
-                patrones.append({
-                    'nombre': 'Tendencia Alcista',
-                    'confianza': min(abs(tendencia) * 100, 0.9)
-                })
-            elif tendencia < 0:
-                patrones.append({
-                    'nombre': 'Tendencia Bajista',
-                    'confianza': min(abs(tendencia) * 100, 0.9)
-                })
-        
-        # Patrón de doble techo/suelo (simplificado)
-        if len(datos) >= 50:
-            high_recent = datos['high'].tail(50)
-            max_idx = high_recent.idxmax()
-            if max_idx not in high_recent.tail(10).index:  # El máximo no está en los últimos 10 días
-                patrones.append({
-                    'nombre': 'Posible Doble Techo',
-                    'confianza': 0.6
-                })
-    
-    except Exception:
-        pass
-    
-    return patrones
-
-def crear_grafico_analisis_precio(datos, simbolo):
-    """Crea gráfico de análisis de precios"""
-    fig = go.Figure()
-    
-    # Gráfico de velas
-    fig.add_trace(go.Candlestick(
-        x=datos.index,
-        open=datos['open'],
-        high=datos['high'],
-        low=datos['low'],
-        close=datos['close'],
-        name=simbolo
-    ))
-    
-    # Añadir niveles de soporte y resistencia
-    resistencia = calcular_resistencia(datos)
-    soporte = calcular_soporte(datos)
-    
-    fig.add_hline(y=resistencia, line_dash="dash", line_color="red", 
-                  annotation_text="Resistencia")
-    fig.add_hline(y=soporte, line_dash="dash", line_color="green", 
-                  annotation_text="Soporte")
-    
-    fig.update_layout(
-        title=f"Análisis de Precios - {simbolo}",
-        yaxis_title="Precio",
-        xaxis_rangeslider_visible=False,
-        height=500
-    )
-    
-    return fig
-
-def generar_datos_comparacion(activos, timeframe):
-    """Genera datos para comparación de activos"""
-    datos = {}
-    
-    for activo in activos:
-        # Simular datos para cada activo
-        fecha_hasta = date.today()
-        fecha_desde = fecha_hasta - timedelta(days=365)
-        datos[activo] = simular_datos_precio(activo, fecha_desde, fecha_hasta)
-    
-    return datos
-
-def crear_grafico_rendimiento_relativo(datos_comparacion, activos):
-    """Crea gráfico de rendimiento relativo"""
-    fig = go.Figure()
-    
-    for activo in activos:
-        if activo in datos_comparacion and datos_comparacion[activo] is not None:
-            precios = datos_comparacion[activo]['close']
-            rendimiento_acumulado = (precios / precios.iloc[0] - 1) * 100;
-            
-            fig.add_trace(go.Scatter(
-                x=rendimiento_acumulado.index,
-                y=rendimiento_acumulado,
-                mode='lines',
-                name=activo
-            ))
-    
-    fig.update_layout(
-        title="Rendimiento Relativo (%)",
-        yaxis_title="Rendimiento (%)",
-        height=400
-    )
-    
-    return fig
-
-def calcular_matriz_correlacion(datos_comparacion):
-    """Calcula matriz de correlación entre activos"""
-    precios_df = pd.DataFrame()
-    
-    for activo, datos in datos_comparacion.items():
-        if datos is not None:
-            precios_df[activo] = datos['close']
-    
-    return precios_df.corr()
-
-def crear_grafico_correlacion(matriz_correlacion, activos):
-    """Crea gráfico de matriz de correlación"""
-    fig = go.Figure(data=go.Heatmap(
-        z=matriz_correlacion.values,
-        x=activos,
-        y=activos,
-        colorscale='RdBu',
-        zmid=0
-    ))
-    
-    fig.update_layout(
-        title="Matriz de Correlación",
-        height=400
-    )
-    
-    return fig
-
-def crear_tabla_metricas_comparativas(datos_comparacion, activos):
-    """Crea tabla de métricas comparativas"""
-    metricas = []
-    
-    for activo in activos:
-        if activo in datos_comparacion and datos_comparacion[activo] is not None:
-            datos = datos_comparacion[activo]
-            rendimientos = datos['close'].pct_change().dropna()
-            
-            metricas.append({
-                'Activo': activo,
-                'Precio Actual': f"${datos['close'].iloc[-1]:.2f}",
-                'Rendimiento Anual': f"{(datos['close'].iloc[-1] / datos['close'].iloc[0] - 1) * 100:.1f}%",
-                'Volatilidad': f"{rendimientos.std() * np.sqrt(252) * 100:.1f}%",
-                'Sharpe Ratio': f"{(rendimientos.mean() / rendimientos.std() * np.sqrt(252)):.2f}",
-                'Max Drawdown': f"{((datos['close'] / datos['close'].cummax() - 1).min() * 100):.1f}%"
-            })
-    
-    return pd.DataFrame(metricas)
-
-def generar_datos_grafico_principal(simbolo, timeframe, interval):
-    """Genera datos para el gráfico principal"""
-    fecha_hasta = date.today()
-    
-    # Mapear timeframe a días
-    timeframe_days = {
-        '1M': 30,
-        '3M': 90,
-        '6M': 180,
-        '1Y': 365
-    }
-    
-    dias = timeframe_days.get(timeframe, 90)
-    fecha_desde = fecha_hasta - timedelta(days=dias)
-    
-    return simular_datos_precio(simbolo, fecha_desde, fecha_hasta)
-
-def crear_grafico_principal_completo(datos, simbolo, chart_type, tipo_analisis):
-    """Crea el gráfico principal completo con indicadores"""
-    from plotly.subplots import make_subplots
-    
-    # Crear subplots (precio principal + indicadores)
-    fig = make_subplots(
-        rows=3, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.05,
-        subplot_titles=[f'{simbolo} - Precio', 'RSI', 'Volumen'],
-        row_heights=[0.6, 0.2, 0.2]
-    )
-    
-    # Gráfico principal de precio
-    if chart_type == "Velas":
-        fig.add_trace(go.Candlestick(
-            x=datos.index,
-            open=datos['open'],
-            high=datos['high'],
-            low=datos['low'],
-            close=datos['close'],
-            name=simbolo
-        ), row=1, col=1)
-    else:  # Línea como fallback
-        fig.add_trace(go.Scatter(
-            x=datos.index,
-            y=datos['close'],
-            mode='lines',
-            name=simbolo
-        ), row=1, col=1)
-    
-    # Agregar MA 20
-    ma20 = datos['close'].rolling(20).mean()
-    fig.add_trace(go.Scatter(
-        x=datos.index,
-        y=ma20,
-        mode='lines',
-        name='MA 20',
-        line=dict(color='blue', width=1)
-    ), row=1, col=1)
-    
-    # RSI
-    rsi = calcular_rsi(datos['close'])
-    fig.add_trace(go.Scatter(
-        x=datos.index,
-        y=rsi,
-        mode='lines',
-        name='RSI',
-        line=dict(color='purple')
-    ), row=2, col=1)
-    
-    # Líneas de sobrecompra y sobreventa para RSI
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-    
-    # Volumen
-    fig.add_trace(go.Bar(
-        x=datos.index,
-        y=datos['volume'],
-        name='Volumen',
-        marker_color='rgba(158,202,225,0.6)'
-    ), row=3, col=1)
-    
-    fig.update_layout(
-        height=800,
-        showlegend=True,
-        xaxis_rangeslider_visible=False
-    )
-    
-    return fig
-
-def calcular_rsi(precios, periodo=14):
-    """Calcula el RSI (Relative Strength Index)"""
-    delta = precios.diff()
-    ganancia = (delta.where(delta > 0, 0)).rolling(window=periodo).mean()
-    perdida = (-delta.where(delta < 0, 0)).rolling(window=periodo).mean()
-    
-    rs = ganancia / perdida
-    rsi = 100 - (100 / (1 + rs))
-    
-    return rsi
-
-def mostrar_panel_informacion_tiempo_real(simbolo, datos):
-    """Panel de información en tiempo real"""
-    st.markdown("##### 📊 Información en Tiempo Real")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    precio_actual = datos['close'].iloc[-1]
-    precio_anterior = datos['close'].iloc[-2]
-    variacion = precio_actual - precio_anterior
-    variacion_pct = (variacion / precio_anterior) * 100
-    
-    with col1:
-        st.metric("Precio", f"${precio_actual:.2f}", f"{variacion:+.2f}")
-    
-    with col2:
-        st.metric("Variación %", f"{variacion_pct:+.2f}%")
-    
-    with col3:
-        volumen_actual = datos['volume'].iloc[-1]
-        volumen_promedio = datos['volume'].tail(20).mean()
-        st.metric("Volumen", f"{volumen_actual:,.0f}", 
-                 f"{((volumen_actual/volumen_promedio-1)*100):+.1f}%")
-    
-    with col4:
-        high_dia = datos['high'].iloc[-1]
-        low_dia = datos['low'].iloc[-1]
-        st.metric("Rango del Día", f"${low_dia:.2f} - ${high_dia:.2f}")
+# Asegurar que main() se ejecute cuando se corre el script
+if __name__ == "__main__":
+    main()
