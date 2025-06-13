@@ -7,7 +7,7 @@ from datetime import date, timedelta, datetime
 import numpy as np
 import yfinance as yf
 import scipy.optimize as op
-from scipy import stats
+from scipy import stats # Added for skewness, kurtosis, jarque_bera
 import random
 import warnings
 
@@ -505,10 +505,10 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         # Intentar diferentes estrategias de alineación
         try:
-            # Forward fill y luego backward fill
-            df_precios_filled = df_precios.ffill().bfill()
+            # Estrategia 1: Forward fill y luego backward fill
+            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
             
-            # Interpolar valores faltantes
+            # Estrategia 2: Interpolar valores faltantes
             df_precios_interpolated = df_precios.interpolate(method='time')
             
             # Usar la estrategia que conserve más datos
@@ -519,7 +519,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 df_precios = df_precios_interpolated.dropna()
                 st.info("✅ Usando estrategia de interpolación")
             else:
-                # Usar solo fechas con datos completos
+                # Estrategia 3: Usar solo fechas con datos completos
                 df_precios = df_precios.dropna()
                 st.info("✅ Usando solo fechas con datos completos")
                 
@@ -567,6 +567,37 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             st.code(f"Símbolos: {simbolos}")
             st.code(f"Rango de fechas: {fecha_desde} a {fecha_hasta}")
         return None, None, None
+
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Obtiene la serie histórica de precios para un símbolo y mercado específico.
+    Actualizada para usar nombres correctos de mercados IOL.
+    """
+    # Mapear nombres de mercados a los correctos de IOL
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFEX': 'rOFEX',
+        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception:
+        return None
 
 def obtener_clase_d(simbolo, mercado, bearer_token):
     """
@@ -618,6 +649,8 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
     Optimiza un portafolio usando teoría moderna de portafolio
     """
     try:
+        from scipy.optimize import minimize
+        
         n_assets = len(returns.columns)
         
         # Función objetivo para maximizar el ratio de Sharpe
@@ -637,7 +670,7 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
         initial_guess = n_assets * [1. / n_assets]
         
         # Optimización
-        result = op.minimize(negative_sharpe, initial_guess, method='SLSQP',
+        result = minimize(negative_sharpe, initial_guess, method='SLSQP',
                          bounds=bounds, constraints=constraints)
         
         if result.success:
@@ -1177,9 +1210,9 @@ def mostrar_analisis_portafolio():
 
     with tab3:
         # Optimización de portafolio
-        portafolio = None
-        with st.spinner("Cargando portafolio para optimización..."):
-            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if 'portafolio' not in locals():
+            with st.spinner("Cargando portafolio para optimización..."):
+                portafolio = obtener_portafolio(token_acceso, id_cliente)
         
         if portafolio:
             mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
@@ -1192,7 +1225,8 @@ def mostrar_analisis_portafolio():
         st.info("🚧 Funcionalidad en desarrollo")
         
         # Placeholder para análisis técnico futuro
-        portafolio = obtener_portafolio(token_acceso, id_cliente) if 'portafolio' not in locals() else portafolio
+        if 'portafolio' not in locals():
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
         
         if portafolio:
             activos = portafolio.get('activos', [])
@@ -1832,7 +1866,6 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
-
-# Ejecutar la aplicación principal
+# Asegurar que main() se ejecute cuando se corre el script
 if __name__ == "__main__":
     main()
