@@ -1756,4 +1756,409 @@ def mostrar_analisis_tecnico(portafolio, token_acceso, id_cliente):
     st.markdown("#### 📊 Análisis Técnico Avanzado")
     
     if not portafolio:
-        portafolio = obtener_portafolio(token_ac
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    
+    if portafolio:
+        activos = portafolio.get('activos', [])
+        if activos:
+            simbolos = [activo.get('titulo', {}).get('simbolo', '') for activo in activos]
+            simbolos = [s for s in simbolos if s]
+            
+            if simbolos:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    simbolo_seleccionado = st.selectbox(
+                        "Seleccione un activo:",
+                        options=simbolos,
+                        key="tech_analysis_symbol"
+                    )
+                
+                with col2:
+                    indicador = st.selectbox(
+                        "Indicador técnico:",
+                        ["RSI", "MACD", "Bandas de Bollinger", "Media Móvil"],
+                        key="tech_indicator"
+                    )
+                
+                if simbolo_seleccionado:
+                    st.info(f"Análisis técnico de {simbolo_seleccionado} con {indicador} estará disponible próximamente")
+    else:
+        st.warning("No se pudo cargar el portafolio para análisis técnico")
+
+def mostrar_cotizaciones_tiempo_real(token_acceso):
+    """Cotizaciones en tiempo real mejoradas"""
+    st.markdown("#### 💱 Cotizaciones en Tiempo Real")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        simbolo_consulta = st.text_input(
+            "Símbolo a consultar:",
+            placeholder="Ej: GGAL, YPFD, AL30",
+            key="realtime_symbol"
+        )
+        
+        mercado_consulta = st.selectbox(
+            "Mercado:",
+            ["bCBA", "nYSE", "nASDAQ"],
+            key="realtime_market"
+        )
+    
+    with col2:
+        if st.button("🔄 Obtener Cotización", key="get_quote"):
+            if simbolo_consulta:
+                with st.spinner(f"Consultando {simbolo_consulta}..."):
+                    cotizacion = obtener_cotizacion_actual(token_acceso, mercado_consulta, simbolo_consulta)
+                    
+                    if cotizacion:
+                        # Mostrar cotización
+                        ultimo_precio = cotizacion.get('ultimoPrecio', 'N/A')
+                        variacion = cotizacion.get('variacionPorcentual', 'N/A')
+                        
+                        col_quote1, col_quote2 = st.columns(2)
+                        col_quote1.metric("Último Precio", f"${ultimo_precio}")
+                        col_quote2.metric("Variación %", f"{variacion}%")
+                        
+                        with st.expander("Ver detalles completos"):
+                            st.json(cotizacion)
+                    else:
+                        st.error(f"No se pudo obtener cotización para {simbolo_consulta}")
+
+def mostrar_calculadora_mep(token_acceso):
+    """Calculadora MEP mejorada"""
+    st.markdown("#### 💰 Calculadora MEP")
+    
+    with st.form("mep_calculator"):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            simbolo_mep = st.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
+        
+        with col2:
+            id_plazo_compra = st.number_input("Plazo Compra", value=1, min_value=1)
+        
+        with col3:
+            id_plazo_venta = st.number_input("Plazo Venta", value=1, min_value=1)
+        
+        monto_pesos = st.number_input("Monto en Pesos ARS", value=100000, min_value=1000)
+        
+        if st.form_submit_button("💱 Calcular MEP"):
+            if simbolo_mep:
+                with st.spinner("Calculando MEP..."):
+                    cotizacion_mep = obtener_cotizacion_mep(
+                        token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
+                    )
+                
+                if cotizacion_mep:
+                    # Mostrar resultados del cálculo
+                    precio_mep = cotizacion_mep.get('precio', cotizacion_mep.get('cotizacion', 0))
+                    
+                    if precio_mep and precio_mep > 0:
+                        dolares_obtenidos = monto_pesos / precio_mep
+                        
+                        col_result1, col_result2, col_result3 = st.columns(3)
+                        col_result1.metric("Cotización MEP", f"${precio_mep:.2f}")
+                        col_result2.metric("Dólares Obtenidos", f"USD {dolares_obtenidos:.2f}")
+                        col_result3.metric("Costo Efectivo", f"${precio_mep:.2f} por USD")
+                    else:
+                        st.warning("No se pudo obtener precio válido")
+                else:
+                    st.error("❌ No se pudo obtener la cotización MEP")
+
+def mostrar_tasas_caucion_detalladas(token_acceso):
+    """Tasas de caución con más detalle"""
+    st.markdown("#### 🏦 Tasas de Caución Detalladas")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Actualizar Tasas", key="update_rates"):
+            with st.spinner("Consultando tasas..."):
+                tasas_caucion = obtener_tasas_caucion(token_acceso)
+            
+            if tasas_caucion:
+                st.success("✅ Tasas actualizadas")
+                
+                if isinstance(tasas_caucion, list) and tasas_caucion:
+                    df_tasas = pd.DataFrame(tasas_caucion)
+                    
+                    # Filtrar y ordenar
+                    if 'tasa' in df_tasas.columns:
+                        df_tasas = df_tasas.sort_values('tasa', ascending=False)
+                    
+                    st.dataframe(df_tasas.head(20), use_container_width=True)
+                else:
+                    st.warning("Formato de datos inesperado")
+            else:
+                st.error("❌ No se pudieron obtener las tasas")
+    
+    with col2:
+        # Calculadora de rendimiento
+        st.markdown("##### 📊 Calculadora de Rendimiento")
+        
+        with st.form("yield_calculator"):
+            capital_inicial = st.number_input("Capital Inicial ($)", value=100000)
+            tasa_anual = st.number_input("Tasa Anual (%)", value=45.0, step=0.1)
+            dias_inversion = st.number_input("Días de Inversión", value=30, min_value=1)
+            
+            if st.form_submit_button("💰 Calcular Rendimiento"):
+                rendimiento_diario = tasa_anual / 365 / 100
+                rendimiento_total = capital_inicial * (1 + rendimiento_diario) ** dias_inversion
+                ganancia = rendimiento_total - capital_inicial
+                
+                st.metric("Capital Final", f"${rendimiento_total:,.2f}")
+                st.metric("Ganancia", f"${ganancia:,.2f}")
+                st.metric("Rendimiento %", f"{(ganancia/capital_inicial*100):.2f}%")
+
+# Funciones placeholder para desarrollo futuro
+def mostrar_placeholder_flujos_efectivo():
+    st.info("📊 Próximamente: Análisis detallado de flujos de efectivo entrantes y salientes")
+
+def mostrar_placeholder_historico_operaciones():
+    st.info("📈 Próximamente: Histórico completo de compras, ventas y dividendos")
+
+def mostrar_placeholder_rebalanceo():
+    st.info("⚖️ Próximamente: Herramienta automática de rebalanceo de portafolio")
+
+def mostrar_placeholder_escenarios():
+    st.info("🎭 Próximamente: Análisis de diferentes escenarios de mercado")
+
+def mostrar_placeholder_correlaciones():
+    st.info("🔗 Próximamente: Matriz de correlaciones entre activos")
+
+def mostrar_placeholder_backtesting():
+    st.info("⏮️ Próximamente: Backtesting de estrategias de inversión")
+
+def mostrar_placeholder_montecarlo():
+    st.info("🎲 Próximamente: Simulaciones Monte Carlo para proyecciones")
+
+def mostrar_placeholder_alertas():
+    st.info("🔔 Próximamente: Sistema de alertas personalizables")
+
+def main():
+    """
+    Función principal de la aplicación Streamlit
+    """
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    
+    # Inicializar session state
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'refresh_token' not in st.session_state:
+        st.session_state.refresh_token = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    # Add missing date parameters
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=365)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+    
+    # Sidebar reorganizada with mejor flujo
+    with st.sidebar:
+        st.header("🔐 Panel de Control")
+        
+        # Sección 1: Estado de Conexión
+        st.markdown("#### 📡 Estado de Conexión")
+        
+        if st.session_state.token_acceso is None:
+            st.error("🔴 Desconectado")
+            
+            # Formulario de login mejorado
+            with st.form("login_form"):
+                st.markdown("##### Credenciales IOL")
+                usuario = st.text_input("👤 Usuario", placeholder="su_usuario")
+                contraseña = st.text_input("🔒 Contraseña", type="password", placeholder="su_contraseña")
+                
+                # Opciones avanzadas
+                with st.expander("⚙️ Configuración Avanzada"):
+                    recordar_sesion = st.checkbox("Recordar por más tiempo", value=False)
+                    endpoint_alternativo = st.checkbox("Usar endpoint alternativo", value=False)
+                
+                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
+                    if usuario and contraseña:
+                        with st.spinner("🔄 Conectando con IOL..."):
+                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            
+                            if token_acceso:
+                                st.session_state.token_acceso = token_acceso
+                                st.session_state.refresh_token = refresh_token
+                                st.success("✅ ¡Conexión exitosa!")
+                                st.balloons()
+                                st.rerun()
+                            else:
+                                st.error("❌ Error en la autenticación")
+                    else:
+                        st.warning("⚠️ Complete todos los campos")
+        else:
+            # Usuario conectado - panel mejorado
+            st.success("🟢 Conectado a IOL")
+            
+            # Sección 2: Configuración de Análisis
+            st.markdown("#### ⚙️ Configuración de Análisis")
+            
+            with st.expander("📅 Rango de Fechas", expanded=True):
+                fecha_desde = st.date_input(
+                    "📅 Desde:",
+                    value=st.session_state.fecha_desde,
+                    max_value=date.today(),
+                    key="fecha_desde_input"
+                )
+                fecha_hasta = st.date_input(
+                    "📅 Hasta:",
+                    value=st.session_state.fecha_hasta,
+                    max_value=date.today(),
+                    key="fecha_hasta_input"
+                )
+                
+                # Botones de rango rápido
+                col1, col2, col3 = st.columns(3)
+                if col1.button("1M", help="Último mes"):
+                    st.session_state.fecha_desde = date.today() - timedelta(days=30)
+                    st.rerun()
+                if col2.button("6M", help="Últimos 6 meses"):
+                    st.session_state.fecha_desde = date.today() - timedelta(days=180)
+                    st.rerun()
+                if col3.button("1A", help="Último año"):
+                    st.session_state.fecha_desde = date.today() - timedelta(days=365)
+                    st.rerun()
+            
+            st.session_state.fecha_desde = fecha_desde
+            st.session_state.fecha_hasta = fecha_hasta
+            
+            # Sección 3: Selección de Cliente
+            st.markdown("#### 👥 Selección de Cliente")
+            
+            # Obtener lista de clientes
+            if not st.session_state.clientes:
+                with st.spinner("🔄 Cargando clientes..."):
+                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    st.session_state.clientes = clientes
+            
+            clientes = st.session_state.clientes
+            
+            if clientes:
+                st.success(f"✅ {len(clientes)} clientes disponibles")
+                
+                # Seleccionar cliente con mejor UX
+                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                
+                cliente_seleccionado = st.selectbox(
+                    "🎯 Cliente:",
+                    options=cliente_ids,
+                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido",
+                    key="cliente_selector"
+                )
+                
+                # Guardar cliente seleccionado en session state
+                st.session_state.cliente_seleccionado = next(
+                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                    None
+                )
+                
+                # Mostrar info del cliente seleccionado
+                if st.session_state.cliente_seleccionado:
+                    cliente_info = st.session_state.cliente_seleccionado
+                    with st.expander("ℹ️ Info del Cliente"):
+                        st.text(f"ID: {cliente_info.get('numeroCliente', 'N/A')}")
+                        st.text(f"Nombre: {cliente_info.get('apellidoYNombre', 'N/A')}")
+                
+                if st.button("🔄 Actualizar Clientes", use_container_width=True):
+                    with st.spinner("🔄 Actualizando..."):
+                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        st.session_state.clientes = nuevos_clientes
+                        st.success("✅ Lista actualizada")
+                        st.rerun()
+            
+            else:
+                st.warning("⚠️ No se encontraron clientes")
+                st.markdown("**Posibles causas:**")
+                st.markdown("- Permisos insuficientes")
+                st.markdown("- Problema de conectividad")
+                st.markdown("- Token expirado")
+            
+            # Sección 4: Acciones Rápidas
+            st.markdown("#### ⚡ Acciones Rápidas")
+            
+            if st.button("🔄 Reconectar", use_container_width=True):
+                st.session_state.token_acceso = None
+                st.session_state.refresh_token = None
+                st.rerun()
+            
+            if st.button("🗑️ Limpiar Cache", use_container_width=True):
+                st.session_state.clientes = []
+                st.session_state.cliente_seleccionado = None
+                st.success("✅ Cache limpiado")
+                st.rerun()
+    
+    # Contenido principal con mejor manejo de estados
+    try:
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            # Mostrar breadcrumb
+            cliente_nombre = st.session_state.cliente_seleccionado.get('apellidoYNombre', 'Cliente')
+            st.markdown(f"📍 **Navegación:** Inicio > {cliente_nombre} > Análisis de Portafolio")
+            
+            mostrar_analisis_portafolio()
+        elif st.session_state.token_acceso:
+            # Conectado pero sin cliente
+            st.info("🎯 **Paso 2:** Seleccione un cliente en la barra lateral para comenzar el análisis")
+            
+            # Mostrar resumen de conexión
+            col1, col2, col3 = st.columns(3)
+            col1.success("✅ Conectado a IOL")
+            col2.info(f"📅 Rango: {st.session_state.fecha_desde} - {st.session_state.fecha_hasta}")
+            col3.warning("⏳ Esperando selección de cliente")
+            
+        else:
+            # No conectado
+            st.info("🔐 **Paso 1:** Ingrese sus credenciales de IOL en la barra lateral para comenzar")
+            
+            # Mostrar información de ayuda
+            st.markdown("### 🚀 Bienvenido al IOL Portfolio Analyzer")
+            
+
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("""
+                #### ✨ Características Principales:
+                - 📊 **Dashboard Ejecutivo** - Vista general del portafolio
+                - 💰 **Estado Financiero** - Análisis de cuentas y flujos
+                - 🎯 **Optimización** - Estrategias de Markowitz y rebalanceo
+                - 📈 **Análisis Avanzado** - Técnico, correlaciones, backtesting
+                - 🛠️ **Herramientas** - MEP, cotizaciones, alertas
+                """)
+            
+            with col2:
+                st.markdown("""
+                #### 🔧 Pasos para Comenzar:
+                1. **Conectar** - Ingrese sus credenciales IOL
+                2. **Seleccionar** - Elija el cliente a analizar
+                3. **Configurar** - Ajuste fechas y parámetros
+                4. **Analizar** - Explore las diferentes herramientas
+                """)
+                
+    except Exception as e:
+        st.error(f"❌ Error en la aplicación: {str(e)}")
+        
+        # Botón de recuperación
+        if st.button("🔄 Reiniciar Aplicación"):
+            # Limpiar session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+        
+        # Información de debug en expander
+        with st.expander("🔍 Información de Debug"):
+            st.code(str(e))
+            st.markdown("**Session State:**")
+            st.json(dict(st.session_state))
+
+# Asegurar que main() se ejecute cuando se corre el script
+if __name__ == "__main__":
+    main()
