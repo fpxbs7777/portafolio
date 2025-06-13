@@ -1994,8 +1994,7 @@ def main():
             
             else:
                 st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
-    
-    # Contenido principal con manejo de errores mejorado
+      # Contenido principal con manejo de errores mejorado
     try:
         if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
             mostrar_analisis_portafolio()
@@ -2117,3 +2116,16 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
+
+# Ejecutar la aplicación principal
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"❌ Error crítico en la aplicación: {str(e)}")
+        st.error("🔄 Por favor, recargue la página e intente nuevamente")
+        
+        # Mostrar información de debug en caso de error crítico
+        with st.expander("🔍 Información de Debug"):
+            import traceback
+            st.code(traceback.format_exc())
