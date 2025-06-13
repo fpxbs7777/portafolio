@@ -1705,6 +1705,73 @@ class PortfolioManagerEnhanced:
         except Exception:
             return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
 
+class PortfolioOutput:
+    """
+    Clase para almacenar resultados de optimización de portafolio
+    """
+    def __init__(self, weights, asset_names, returns):
+        self.weights = weights
+        self.asset_names = asset_names
+        self.returns = returns
+        self.portfolio_returns = None
+        
+        if returns is not None and len(weights) == len(returns.columns):
+            self.portfolio_returns = (returns * weights).sum(axis=1)
+    
+    def get_metrics_dict(self):
+        """
+        Calcula y retorna métricas del portafolio
+        """
+        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
+            return {
+                'Mean Daily': 0,
+                'Volatility Daily': 0,
+                'Sharpe Ratio': 0,
+                'VaR 95%': 0
+            }
+        
+        mean_daily = self.portfolio_returns.mean()
+        vol_daily = self.portfolio_returns.std()
+        sharpe = mean_daily / vol_daily if vol_daily > 0 else 0
+        var_95 = np.percentile(self.portfolio_returns, 5)
+        
+        return {
+            'Mean Daily': mean_daily,
+                       'Volatility Daily': vol_daily,
+            'Sharpe Ratio': sharpe,
+            'VaR 95%': var_95
+        }
+    
+    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
+        """
+        Crea un histograma de retornos usando Plotly para Streamlit
+        """
+        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
+            # Crear gráfico vacío
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        
+        fig = go.Figure(data=[go.Histogram(
+            x=self.portfolio_returns,
+            nbinsx=30,
+            name="Retornos del Portafolio"
+        )])
+        
+        fig.update_layout(
+            title=f"{title}",
+            xaxis_title="Retorno",
+            yaxis_title="Frecuencia",
+            showlegend=False
+        )
+        
+        return fig
+
 # --- Funciones de la aplicación Streamlit ---
 def mostrar_analisis_portafolio():
     """
@@ -2163,7 +2230,7 @@ def mostrar_analisis_precios(simbolo, token_acceso, timeframe):
             # Estadísticas adicionales
             max_52w = datos_precio['high'].max()
             min_52w = datos_precio['low'].min()
-            volatilidad = datos_precio['close'].pct_change().std() * np.sqrt(252) * 100
+            volatilidad = datos_precio['close'].pct_change().std() * np.sqrt(252) * 100;
             
             st.metric("Máximo 52s", f"${max_52w:.2f}")
             st.metric("Mínimo 52s", f"${min_52w:.2f}")
