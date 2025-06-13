@@ -310,7 +310,14 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 
         elif response.status_code == 401:
             # Token expirado o inválido
-            st.warning(f"⚠️ Token de autorización inválido para {simbolo}")
+            st.warning(f"⚠️ Token de autorización inválido para {simbolo} en {mercado}. Verifique que su sesión esté activa y tenga permisos suficientes.")
+            # Mostrar detalle del mensaje si está disponible
+            try:
+                msg = response.json().get("message", "")
+                if msg:
+                    st.error(f"Detalle: {msg}")
+            except Exception:
+                pass
             return None
             
         elif response.status_code == 404:
@@ -1723,6 +1730,7 @@ def main():
             st.session_state.fecha_hasta = fecha_hasta
             
             # Obtener lista de clientes
+           
             if not st.session_state.clientes:
                 with st.spinner("Cargando clientes..."):
                     clientes = obtener_lista_clientes(st.session_state.token_acceso)
@@ -1731,4 +1739,96 @@ def main():
             clientes = st.session_state.clientes
             
             if clientes:
-                st.info(f"
+                st.info(f"📋 {len(clientes)} clientes encontrados")
+                
+                # Seleccionar cliente
+                cliente_ids = [cliente.get('id') for cliente in clientes]
+                cliente_nombres = [f"{cliente.get('apellidoYNombre', '')} ({cliente.get('numeroCliente', '')})" for cliente in clientes]
+                
+                cliente_seleccionado = st.selectbox(
+                    "Seleccione un cliente para analizar:",
+                    options=cliente_nombres,
+                    index=0
+                )
+                
+                # Obtener datos del cliente seleccionado
+                if cliente_seleccionado:
+                    index = cliente_nombres.index(cliente_seleccionado)
+                    st.session_state.cliente_seleccionado = clientes[index]
+                    st.success(f"Cliente seleccionado: {cliente_seleccionado}")
+                    
+                    # Cargar portafolio automáticamente
+                    with st.spinner("Cargando portafolio del cliente..."):
+                        portafolio = obtener_portafolio(st.session_state.token_acceso, clientes[index]['id'])
+                        if portafolio:
+                            mostrar_resumen_portafolio(portafolio)
+                        else:
+                            st.warning("No se pudo obtener el portafolio del cliente")
+        
+        # Footer con información de versión y créditos
+        st.markdown("---")
+        st.markdown("### 📚 Acerca de esta aplicación")
+        st.markdown(
+            """
+            Esta es una herramienta avanzada para el análisis y optimización de portafolios de inversión,
+            diseñada para ser utilizada por asesores financieros y clientes de IOL.
+            
+            - **Desarrollador**: Su Nombre / Su Empresa
+            - **Versión**: 1.0.0
+            - **Fecha**: Octubre 2023
+            
+            **Créditos especiales**:
+            - Agradecimientos a la comunidad de Streamlit y a los desarrolladores de la API de IOL por su apoyo y documentación.
+            """
+        )
+        
+        st.markdown("#### 📞 Contacto")
+        st.markdown(
+            """
+            Para consultas o soporte, por favor contacte a:
+            - **Email**: soporte@suempresa.com
+            - **Teléfono**: +54 11 1234-5678
+            """
+        )
+        
+        st.markdown("#### 🔗 Enlaces útiles")
+        st.markdown(
+            """
+            - [Documentación de la API de IOL](https://api.invertironline.com/documentacion)
+            - [Soporte técnico de IOL](https://www.invertironline.com/soporte)
+            - [Comunidad de desarrolladores de Streamlit](https://discuss.streamlit.io/)
+            """
+        )
+        
+        # Mostrar información de sesión y depuración si es necesario
+        if st.session_state.token_acceso:
+            with st.expander("🔍 Información de sesión"):
+                st.text(f"Token de acceso: {st.session_state.token_acceso[:30]}...")
+                st.text(f"Refresh token: {st.session_state.refresh_token[:30]}...")
+        
+        if st.checkbox("Mostrar información de depuración", False):
+            with st.expander("🛠️ Debug - Información adicional"):
+                st.write("Clientes cargados:")
+                st.json(st.session_state.clientes)
+                
+                if st.session_state.cliente_seleccionado:
+                    st.write("Cliente seleccionado:")
+                    st.json(st.session_state.cliente_seleccionado)
+                
+                if 'portafolio' in locals():
+                    st.write("Portafolio cargado:")
+                    st.json(portafolio)
+                
+                st.write("Parámetros actuales:")
+                st.code(f"Fecha desde: {st.session_state.fecha_desde}")
+                st.code(f"Fecha hasta: {st.session_state.fecha_hasta}")
+                st.code(f"Token activo: {st.session_state.token_acceso is not None}")
+    
+    except Exception as e:
+        st.error(f"❌ Error crítico en la aplicación: {str(e)}")
+        with st.expander("🔍 Información de debug"):
+            st.code(f"Error: {str(e)}")
+            st.code(f"Token activo: {st.session_state.token_acceso is not None}")
+            st.code(f"Clientes cargados: {len(st.session_state.clientes) if st.session_state.clientes else 0}")
+            st.code(f"Cliente seleccionado: {st.session_state.cliente_seleccionado}")
+            st.code(f"Rango de fechas: {st.session_state.fecha_desde} a {st.session_state.fecha_hasta}")
