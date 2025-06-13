@@ -1549,8 +1549,8 @@ class PortfolioManager:
             return portfolio_output
             
         except Exception as e:
-            st.error(f"Error en optimización: {str(e)}")
-            return None
+            st.error(f"Error en optimización: {str(e)}. Usando pesos iguales.")
+            return np.array([1/n_assets] * n_assets)
 
 class PortfolioOutput:
     """
@@ -1610,6 +1610,12 @@ class PortfolioOutput:
             name="Retornos del Portafolio"
         )])
         
+        # Agregar líneas de métricas importantes
+        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
+                     annotation_text=f"Media: {self.mean_daily:.4f}")
+        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
+                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
+        
         fig.update_layout(
             title=f"{title}",
             xaxis_title="Retorno",
@@ -1618,6 +1624,784 @@ class PortfolioOutput:
         )
         
         return fig
+
+# Enhanced Portfolio Management Classes
+class manager:
+    def __init__(self, rics, notional, data):
+        self.rics = rics
+        self.notional = notional
+        self.data = data
+        self.timeseries = None
+        self.returns = None
+        self.cov_matrix = None
+        self.mean_returns = None
+        self.risk_free_rate = 0.40  # Tasa libre de riesgo anual
+
+    def load_intraday_timeseries(self, ticker):
+        return self.data[ticker]
+
+    def synchronise_timeseries(self):
+        dic_timeseries = {}
+        for ric in self.rics:
+            dic_timeseries[ric] = self.load_intraday_timeseries(ric)
+        self.timeseries = dic_timeseries
+
+    def compute_covariance(self):
+        self.synchronise_timeseries()
+        # Calcular retornos logarítmicos
+        returns_matrix = {}
+        for ric in self.rics:
+            prices = self.timeseries[ric]
+            returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        
+        # Convertir a DataFrame para alinear fechas
+        self.returns = pd.DataFrame(returns_matrix)
+        
+        # Calcular matriz de covarianza y retornos medios
+        self.cov_matrix = self.returns.cov() * 252  # Anualizar
+        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        
+        return self.cov_matrix, self.mean_returns
+
+    def compute_portfolio(self, portfolio_type=None, target_return=None):
+        if self.cov_matrix is None:
+            self.compute_covariance()
+            
+        n_assets = len(self.rics)
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        if portfolio_type == 'min-variance-l1':
+            # Minimizar varianza con restricción L1
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
+            ]
+            
+        elif portfolio_type == 'min-variance-l2':
+            # Minimizar varianza con restricción L2
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
+            ]
+            
+        elif portfolio_type == 'equi-weight':
+            # Pesos iguales
+            weights = np.ones(n_assets) / n_assets
+            return self._create_output(weights)
+            
+        elif portfolio_type == 'long-only':
+            # Optimización long-only estándar
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
+        elif portfolio_type == 'markowitz':
+            if target_return is not None:
+                # Optimización con retorno objetivo
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                ]
+            else:
+                # Maximizar Sharpe Ratio
+                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                def neg_sharpe_ratio(weights):
+                    port_ret = np.sum(self.mean_returns * weights)
+                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                    if port_vol == 0:
+                        return np.inf
+                    return -(port_ret - self.risk_free_rate) / port_vol
+                
+                result = op.minimize(
+                    neg_sharpe_ratio, 
+                    x0=np.ones(n_assets)/n_assets,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints
+                )
+                return self._create_output(result.x)
+        
+        # Optimización general de varianza mínima
+        result = op.minimize(
+            lambda x: portfolio_variance(x, self.cov_matrix),
+            x0=np.ones(n_assets)/n_assets,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+        
+        return self._create_output(result.x)
+
+    def _create_output(self, weights):
+        """Crea un objeto output con los pesos optimizados"""
+        port_ret = np.sum(self.mean_returns * weights)
+        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+        
+        # Calcular retornos del portafolio
+        portfolio_returns = self.returns.dot(weights)
+        
+        # Crear objeto output
+        port_output = output(portfolio_returns, self.notional)
+        port_output.weights = weights
+        port_output.dataframe_allocation = pd.DataFrame({
+            'rics': self.rics,
+            'weights': weights,
+            'volatilities': np.sqrt(np.diag(self.cov_matrix)),
+            'returns': self.mean_returns
+        })
+        
+        return port_output
+
+def portfolio_variance(x, mtx_var_covar):
+    """Calcula la varianza del portafolio"""
+    variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
+    return variance
+
+class output:
+    def __init__(self, returns, notional):
+        self.returns = returns
+        self.notional = notional
+        self.mean_daily = np.mean(returns)
+        self.volatility_daily = np.std(returns)
+        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
+        self.var_95 = np.percentile(returns, 5)
+        self.skewness = stats.skew(returns)
+        self.kurtosis = stats.kurtosis(returns)
+        self.jb_stat, self.p_value = stats.jarque_bera(returns)
+        self.is_normal = self.p_value > 0.05
+        self.decimals = 4
+        self.str_title = 'Portfolio Returns'
+        self.volatility_annual = self.volatility_daily * np.sqrt(252)
+        self.return_annual = self.mean_daily * 252
+        
+        # Placeholders que serán actualizados por el manager
+        self.weights = None
+        self.dataframe_allocation = None
+
+    def get_metrics_dict(self):
+        """Retorna métricas del portafolio en formato diccionario"""
+        return {
+            'Mean Daily': self.mean_daily,
+            'Volatility Daily': self.volatility_daily,
+            'Sharpe Ratio': self.sharpe_ratio,
+            'VaR 95%': self.var_95,
+            'Skewness': self.skewness,
+            'Kurtosis': self.kurtosis,
+            'JB Statistic': self.jb_stat,
+            'P-Value': self.p_value,
+            'Is Normal': self.is_normal,
+            'Annual Return': self.return_annual,
+            'Annual Volatility': self.volatility_annual
+        }
+
+    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
+        """Crea un histograma de retornos usando Plotly para Streamlit"""
+        if self.returns is None or len(self.returns) == 0:
+            # Crear gráfico vacío
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        
+        fig = go.Figure(data=[go.Histogram(
+            x=self.returns,
+            nbinsx=30,
+            name="Retornos del Portafolio"
+        )])
+        
+        # Agregar líneas de métricas importantes
+        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
+                     annotation_text=f"Media: {self.mean_daily:.4f}")
+        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
+                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
+        
+        fig.update_layout(
+            title=f"{title}",
+            xaxis_title="Retorno",
+            yaxis_title="Frecuencia",
+            showlegend=False
+        )
+        
+        return fig
+
+def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
+    """Computa la frontera eficiente y portafolios especiales"""
+    # special portfolios    
+    label1 = 'min-variance-l1'
+    label2 = 'min-variance-l2'
+    label3 = 'equi-weight'
+    label4 = 'long-only'
+    label5 = 'markowitz-none'
+    label6 = 'markowitz-target'
+    
+    # compute covariance matrix
+    port_mgr = manager(rics, notional, data)
+    port_mgr.compute_covariance()
+    
+    # compute vectors of returns and volatilities for Markowitz portfolios
+    min_returns = np.min(port_mgr.mean_returns)
+    max_returns = np.max(port_mgr.mean_returns)
+    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
+    volatilities = []
+    valid_returns = []
+    
+    for ret in returns:
+        try:
+            port = port_mgr.compute_portfolio('markowitz', ret)
+            volatilities.append(port.volatility_annual)
+            valid_returns.append(ret)
+        except:
+            continue
+    
+    # compute special portfolios
+    portfolios = {}
+    try:
+        portfolios[label1] = port_mgr.compute_portfolio(label1)
+    except:
+        portfolios[label1] = None
+        
+    try:
+        portfolios[label2] = port_mgr.compute_portfolio(label2)
+    except:
+        portfolios[label2] = None
+        
+    portfolios[label3] = port_mgr.compute_portfolio(label3)
+    portfolios[label4] = port_mgr.compute_portfolio(label4)
+    portfolios[label5] = port_mgr.compute_portfolio('markowitz')
+    
+    try:
+        portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
+    except:
+        portfolios[label6] = None
+    
+    return portfolios, valid_returns, volatilities
+
+def obtener_tickers_por_panel(token_portador, paneles, pais):
+    """Obtiene tickers organizados por panel desde la API de IOL"""
+    tickers_por_panel = {}
+    tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
+    
+    for panel in paneles:
+        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+        params = {
+            'cotizacionInstrumentoModel.instrumento': panel,
+            'cotizacionInstrumentoModel.pais': pais.lower()
+        }
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        
+        try:
+            respuesta = requests.get(url, headers=encabezados, params=params)
+            if respuesta.status_code == 200:
+                datos = respuesta.json()
+                tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+                tickers_por_panel[panel] = tickers
+                panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
+                tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
+            else:
+                st.warning(f'Error obteniendo panel {panel}: {respuesta.status_code}')
+        except Exception as e:
+            st.warning(f'Error de conexión para panel {panel}: {str(e)}')
+    
+    return tickers_por_panel, tickers_df
+
+def calcular_rsi(series, period=14):
+    """Calcula el RSI de una serie de precios."""
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calcular_rvi(series, period=14):
+    """
+    Calcula el Relative Volatility Index (RVI) de una serie de precios.
+    El RVI es similar al RSI pero usa la desviación estándar de los cambios de precio.
+    """
+    delta = series.diff()
+    std = delta.rolling(window=period).std()
+    up = std.where(delta > 0, 0)
+    down = std.where(delta < 0, 0).abs()
+    up_mean = up.rolling(window=period).mean()
+    down_mean = down.rolling(window=period).mean()
+    rvi = 100 * up_mean / (up_mean + down_mean)
+    return rvi
+
+def ejecutar_simulacion_aleatoria_avanzada(token_acceso, paneles_disponibles, fecha_desde, fecha_hasta):
+    """
+    Ejecuta simulación aleatoria avanzada seleccionando activos por panel
+    y aplicando estrategias de optimización sobre portafolios aleatorios
+    """
+    st.markdown("### 🎲 Simulación Aleatoria Avanzada")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        paneles_seleccionados = st.multiselect(
+            "Seleccionar Paneles:",
+            options=paneles_disponibles,
+            default=paneles_disponibles[:2] if len(paneles_disponibles) >= 2 else paneles_disponibles
+        )
+    
+    with col2:
+        cantidad_activos_por_panel = st.slider(
+            "Activos por Panel:",
+            min_value=1, max_value=10, value=3
+        )
+        
+    with col3:
+        num_simulaciones = st.slider(
+            "Número de Simulaciones:",
+            min_value=10, max_value=100, value=30
+        )
+    
+    capital_disponible = st.number_input(
+        "Capital Disponible (ARS):",
+        min_value=1000.0, value=100000.0, step=1000.0
+    )
+    
+    if st.button("🚀 Ejecutar Simulación Aleatoria Avanzada"):
+        if not paneles_seleccionados:
+            st.warning("Seleccione al menos un panel")
+            return
+        
+        with st.spinner("Ejecutando simulación aleatoria avanzada..."):
+            try:
+                # Obtener tickers por panel
+                tickers_por_panel, tickers_df = obtener_tickers_por_panel(
+                    token_acceso, paneles_seleccionados, 'Argentina'
+                )
+                
+                if not tickers_por_panel:
+                    st.error("No se pudieron obtener tickers de los paneles")
+                    return
+                
+                # Ejecutar simulaciones
+                resultados_simulacion = []
+                
+                progress_bar = st.progress(0)
+                
+                for i in range(num_simulaciones):
+                    progress_bar.progress((i + 1) / num_simulaciones, 
+                                        text=f"Simulación {i+1}/{num_simulaciones}")
+                    
+                    # Seleccionar activos aleatorios por panel
+                    simbolos_seleccionados = []
+                    for panel in paneles_seleccionados:
+                        if panel in tickers_por_panel and tickers_por_panel[panel]:
+                            cantidad_disponible = min(cantidad_activos_por_panel, 
+                                                    len(tickers_por_panel[panel]))
+                            seleccion = random.sample(tickers_por_panel[panel], 
+                                                    cantidad_disponible)
+                            simbolos_seleccionados.extend(seleccion)
+                    
+                    if len(simbolos_seleccionados) < 2:
+                        continue
+                    
+                    # Obtener datos históricos para la selección
+                    mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                        token_acceso, simbolos_seleccionados, fecha_desde, fecha_hasta
+                    )
+                    
+                    if mean_returns is not None and cov_matrix is not None and df_precios is not None:
+                        # Aplicar diferentes estrategias de optimización
+                        estrategias = ['equi-weight', 'markowitz', 'min-variance-l1', 'long-only']
+                        
+                        for estrategia in estrategias:
+                            try:
+                                # Crear manager para optimización
+                                port_mgr = manager(
+                                    list(df_precios.columns), 
+                                    capital_disponible, 
+                                    df_precios.to_dict('series')
+                                )
+                                
+                                # Computar portafolio optimizado
+                                portfolio_result = port_mgr.compute_portfolio(estrategia)
+                                
+                                if portfolio_result:
+                                    # Calcular métricas adicionales
+                                    returns_portfolio = portfolio_result.returns
+                                    rsi_portfolio = calcular_rsi(pd.Series(returns_portfolio.cumsum()))
+                                    
+                                    resultados_simulacion.append({
+                                        'Simulacion': i + 1,
+                                        'Estrategia': estrategia,
+                                        'Paneles': ', '.join(paneles_seleccionados),
+                                        'Num_Activos': len(simbolos_seleccionados),
+                                        'Retorno_Anual': portfolio_result.return_annual,
+                                        'Volatilidad_Anual': portfolio_result.volatility_annual,
+                                        'Sharpe_Ratio': portfolio_result.sharpe_ratio,
+                                        'VaR_95': portfolio_result.var_95,
+                                        'Skewness': portfolio_result.skewness,
+                                        'Kurtosis': portfolio_result.kurtosis,
+                                        'RSI_Final': rsi_portfolio.iloc[-1] if len(rsi_portfolio) > 0 else np.nan
+                                    })
+                            except Exception as e:
+                                continue
+                
+                progress_bar.empty()
+                
+                if resultados_simulacion:
+                    df_resultados = pd.DataFrame(resultados_simulacion)
+                    
+                    st.success(f"✅ Simulación completada: {len(resultados_simulacion)} resultados")
+                    
+                    # Mostrar estadísticas por estrategia
+                    st.markdown("#### 📊 Resumen por Estrategia")
+                    
+                    stats_por_estrategia = df_resultados.groupby('Estrategia').agg({
+                        'Retorno_Anual': ['mean', 'std', 'min', 'max'],
+                        'Volatilidad_Anual': ['mean', 'std'],
+                        'Sharpe_Ratio': ['mean', 'std'],
+                        'VaR_95': ['mean', 'std']
+                    }).round(4)
+                    
+                    st.dataframe(stats_por_estrategia, use_container_width=True)
+                    
+                    # Gráfico de dispersión Retorno vs Volatilidad
+                    st.markdown("#### 📈 Frontera de Simulaciones: Retorno vs Volatilidad")
+                    
+                    fig_scatter = go.Figure()
+                    
+                    estrategias_unicas = df_resultados['Estrategia'].unique()
+                    colors = ['red', 'blue', 'green', 'orange', 'purple']
+                    
+                    for i, estrategia in enumerate(estrategias_unicas):
+                        df_estrategia = df_resultados[df_resultados['Estrategia'] == estrategia]
+                        
+                        fig_scatter.add_trace(go.Scatter(
+                            x=df_estrategia['Volatilidad_Anual'],
+                            y=df_estrategia['Retorno_Anual'],
+                            mode='markers',
+                            name=estrategia.title(),
+                            marker=dict(
+                                color=colors[i % len(colors)],
+                                size=8,
+                                opacity=0.7
+                            ),
+                            text=df_estrategia['Sharpe_Ratio'],
+                            hovertemplate="<b>%{fullData.name}</b><br>" +
+                                        "Volatilidad: %{x:.2%}<br>" +
+                                        "Retorno: %{y:.2%}<br>" +
+                                        "Sharpe: %{text:.3f}<extra></extra>"
+                        ))
+                    
+                    fig_scatter.update_layout(
+                        title='Simulaciones Aleatorias: Retorno vs Volatilidad por Estrategia',
+                        xaxis_title='Volatilidad Anual',
+                        yaxis_title='Retorno Anual',
+                        showlegend=True,
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+                    
+                    # Boxplot de Sharpe Ratios por estrategia
+                    st.markdown("#### 📦 Distribución de Sharpe Ratios por Estrategia")
+                    
+                    fig_box = go.Figure()
+                    
+                    for estrategia in estrategias_unicas:
+                        df_estrategia = df_resultados[df_resultados['Estrategia'] == estrategia]
+                        
+                        fig_box.add_trace(go.Box(
+                            y=df_estrategia['Sharpe_Ratio'],
+                            name=estrategia.title(),
+                            boxpoints='outliers'
+                        ))
+                    
+                    fig_box.update_layout(
+                        title='Distribución de Sharpe Ratios por Estrategia',
+                        yaxis_title='Sharpe Ratio',
+                        height=400
+                    )
+                    
+                    st.plotly_chart(fig_box, use_container_width=True)
+                    
+                    # Tabla detallada con mejores resultados
+                    st.markdown("#### 🏆 Top 10 Mejores Simulaciones (por Sharpe Ratio)")
+                    
+                    top_simulaciones = df_resultados.nlargest(10, 'Sharpe_Ratio') [
+                        ['Simulacion', 'Estrategia', 'Retorno_Anual', 'Volatilidad_Anual', 
+                         'Sharpe_Ratio', 'VaR_95']
+                    ].copy()
+                    
+                    # Formatear columnas para mejor visualización
+                    top_simulaciones['Retorno_Anual'] = top_simulaciones['Retorno_Anual'].apply(lambda x: f"{x:.2%}")
+                    top_simulaciones['Volatilidad_Anual'] = top_simulaciones['Volatilidad_Anual'].apply(lambda x: f"{x:.2%}")
+                    top_simulaciones['Sharpe_Ratio'] = top_simulaciones['Sharpe_Ratio'].apply(lambda x: f"{x:.4f}")
+                    top_simulaciones['VaR_95'] = top_simulaciones['VaR_95'].apply(lambda x: f"{x:.4f}")
+                    
+                    st.dataframe(top_simulaciones, use_container_width=True)
+                    
+                    # Opción de descargar resultados
+                    csv = df_resultados.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Descargar Resultados Completos (CSV)",
+                        data=csv,
+                        file_name=f"simulacion_aleatoria_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                
+                else:
+                    st.error("❌ No se generaron resultados válidos en la simulación")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante la simulación: {str(e)}")
+
+def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Muestra la optimización del portafolio usando datos históricos con estrategias extendidas,
+    incluyendo rebalanceo aleatorio con series aleatorias.
+    """
+    st.markdown("### 🎯 Optimización de Portafolio")
+
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para optimizar")
+        return
+
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+
+    if len(simbolos) < 2:
+        st.warning("Se necesitan al menos 2 activos para optimización")
+        return
+
+    st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
+
+    # Configuración de optimización extendida
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        estrategia = st.selectbox(
+            "Estrategia de Optimización:",
+            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only', 'simulacion-aleatoria'],
+            format_func=lambda x: {
+                'markowitz': 'Optimización de Markowitz',
+                'equi-weight': 'Pesos Iguales',
+                'min-variance-l1': 'Mínima Varianza L1',
+                'min-variance-l2': 'Mínima Varianza L2',
+                'long-only': 'Solo Posiciones Largas',
+                'simulacion-aleatoria': 'Simulación Aleatoria Avanzada'
+            }[x]
+        )
+    with col2:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+            help="Solo aplica para estrategia Markowitz"
+        )
+    with col3:
+        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
+    with col2:
+        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+
+    # --- Simulación Aleatoria Avanzada ---
+    if estrategia == 'simulacion-aleatoria':
+        paneles_disponibles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
+        ejecutar_simulacion_aleatoria_avanzada(token_acceso, paneles_disponibles, fecha_desde, fecha_hasta)
+        return
+
+    # --- Optimización estándar ---
+    if ejecutar_optimizacion:
+        with st.spinner("Ejecutando optimización..."):
+            try:
+                # Obtener datos históricos
+                mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                    token_acceso, simbolos, fecha_desde, fecha_hasta
+                )
+                
+                if df_precios is None or df_precios.empty or len(df_precios.columns) < 2:
+                    st.error("No se pudieron obtener series históricas válidas")
+                    return
+
+                # Crear manager para optimización
+                port_mgr = manager(
+                    list(df_precios.columns), 
+                    100000,  # Valor nominal
+                    df_precios.to_dict('series')
+                )
+                
+                # Computar optimización
+                use_target = target_return if estrategia == 'markowitz' else None
+                portfolio_result = port_mgr.compute_portfolio(strategy=estrategia, target_return=use_target)
+                
+                if portfolio_result:
+                    st.success("✅ Optimización completada")
+                    
+                    # Mostrar resultados
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### 📊 Pesos Optimizados")
+                        if portfolio_result.dataframe_allocation is not None:
+                            weights_df = portfolio_result.dataframe_allocation.copy()
+                            weights_df['Peso (%)'] = weights_df['weights'] * 100
+                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                            st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                    
+                    with col2:
+                        st.markdown("#### 📈 Métricas del Portafolio")
+                        metricas = portfolio_result.get_metrics_dict()
+                        
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
+                            st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
+                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                        with col_b:
+                            st.metric("Skewness", f"{metricas['Skewness']:.4f}")
+                            st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+                            st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+                            normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
+                            st.metric("Normalidad", normalidad)
+                    
+                    # Gráfico de distribución de retornos
+                    if portfolio_result.returns is not None:
+                        st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
+                        fig = portfolio_result.plot_histogram_streamlit()
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Gráfico de pesos
+                    if portfolio_result.weights is not None:
+                        st.markdown("#### 🥧 Distribución de Pesos")
+                        fig_pie = go.Figure(data=[go.Pie(
+                            labels=portfolio_result.dataframe_allocation['rics'],
+                            values=portfolio_result.weights,
+                            textinfo='label+percent',
+                        )])
+                        fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                        st.plotly_chart(fig_pie, use_container_width=True)
+                
+                else:
+                    st.error("❌ Error en la optimización")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+
+    if ejecutar_frontier and show_frontier:
+        with st.spinner("Calculando frontera eficiente..."):
+            try:
+                # Obtener datos históricos
+                mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                    token_acceso, simbolos, fecha_desde, fecha_hasta
+                )
+                
+                if df_precios is not None and not df_precios.empty:
+                    portfolios, returns, volatilities = compute_efficient_frontier(
+                        list(df_precios.columns), 100000, target_return, True, 
+                        df_precios.to_dict('series')
+                    )
+                    
+                    if portfolios and returns and volatilities:
+                        st.success("✅ Frontera eficiente calculada")
+                        
+                        # Crear gráfico de frontera eficiente
+                        fig = go.Figure()
+                        
+                        # Línea de frontera eficiente
+                        fig.add_trace(go.Scatter(
+                            x=volatilities, y=returns,
+                            mode='lines+markers',
+                            name='Frontera Eficiente',
+                            line=dict(color='blue')
+                        ))
+                        
+                        # Portafolios especiales
+                        colors = ['red', 'green', 'yellow', 'orange', 'purple']
+                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
+                        
+                        for i, (label, portfolio) in enumerate(portfolios.items()):
+                            if portfolio is not None:
+                                fig.add_trace(go.Scatter(
+                                    x=[portfolio.volatility_annual], 
+                                    y=[portfolio.return_annual],
+                                    mode='markers',
+                                    name=labels[i] if i < len(labels) else label,
+                                    marker=dict(size=10, color=colors[i % len(colors)])
+                                ))
+                        
+                        fig.update_layout(
+                            title='Frontera Eficiente del Portafolio',
+                            xaxis_title='Volatilidad Anual',
+                            yaxis_title='Retorno Anual',
+                            showlegend=True
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tabla comparativa
+                        st.markdown("#### 📊 Comparación de Estrategias")
+                        comparison_data = []
+                        for label, portfolio in portfolios.items():
+                            if portfolio is not None:
+                                comparison_data.append({
+                                    'Estrategia': label,
+                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                    'VaR 95%': f"{portfolio.var_95:.4f}"
+                                })
+                        
+                        if comparison_data:
+                            df_comparison = pd.DataFrame(comparison_data)
+                            st.dataframe(df_comparison, use_container_width=True)
+                    
+                    else:
+                        st.error("❌ No se pudo calcular la frontera eficiente")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+
+    # Información adicional extendida
+    with st.expander("ℹ️ Información sobre las Estrategias"):
+        st.markdown("""
+        **Optimización de Markowitz:**
+        - Maximiza el ratio de Sharpe (retorno/riesgo)
+        - Considera la correlación entre activos
+        - Busca la frontera eficiente
+
+        **Pesos Iguales:**
+        - Distribución uniforme entre todos los activos
+        - Estrategia simple de diversificación
+        - No considera correlaciones históricas
+
+        **Mínima Varianza L1:**
+        - Minimiza la varianza del portafolio
+        - Restricción L1 para regularización
+        - Tiende a generar portafolios más concentrados
+
+        **Mínima Varianza L2:**
+        - Minimiza la varianza del portafolio
+        - Restricción L2 para regularización
+        - Genera portafolios más diversificados
+
+        **Solo Posiciones Largas:**
+        - Optimización estándar sin restricciones adicionales
+        - Permite solo posiciones compradoras
+        - Suma de pesos = 100%
+
+        **Simulación Aleatoria Avanzada:**
+        - Selecciona activos aleatorios por panel
+        - Aplica múltiples estrategias de optimización
+        - Compara rendimiento entre estrategias
+        - Incluye análisis de RSI y RVI
+        """)
 
 def main():
     """
@@ -1737,266 +2521,6 @@ def main():
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
         st.error("🔄 Por favor, recargue la página e intente nuevamente")
-
-def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
-    """
-    Muestra la optimización del portafolio usando datos históricos con estrategias extendidas,
-    incluyendo rebalanceo aleatorio con series aleatorias.
-    Procesa las series históricas usando la misma lógica que las estadísticas del portafolio.
-    """
-    st.markdown("### 🎯 Optimización de Portafolio")
-
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("No hay activos en el portafolio para optimizar")
-        return
-
-    # Extraer símbolos del portafolio
-    simbolos = []
-    for activo in activos:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
-            simbolos.append(simbolo)
-
-    if len(simbolos) < 2:
-        st.warning("Se necesitan al menos 2 activos para optimización")
-        return
-
-    st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
-
-    # --- Procesar series históricas reales para todos los activos seleccionados ---
-    # Usar la misma función que en el cálculo de estadísticas del portafolio
-    mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-        token_acceso, simbolos, fecha_desde, fecha_hasta
-    )
-    if df_precios is None or df_precios.empty or len(df_precios.columns) < 2:
-        st.error("No se pudieron obtener series históricas válidas para los activos seleccionados.")
-        return
-
-    # Configuración de optimización extendida
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        estrategia = st.selectbox(
-            "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only', 'rebalanceo-aleatorio'],
-            format_func=lambda x: {
-                'markowitz': 'Optimización de Markowitz',
-                'equi-weight': 'Pesos Iguales',
-                'min-variance-l1': 'Mínima Varianza L1',
-                'min-variance-l2': 'Mínima Varianza L2',
-                'long-only': 'Solo Posiciones Largas',
-                'rebalanceo-aleatorio': 'Rebalanceo Aleatorio (Series Aleatorias)'
-            }[x]
-        )
-    with col2:
-        target_return = st.number_input(
-            "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para estrategia Markowitz"
-        )
-    with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
-    with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-
-    # --- Rebalanceo Aleatorio ---
-    if ejecutar_optimizacion and estrategia == 'rebalanceo-aleatorio':
-        st.markdown("#### 🔀 Simulación de Rebalanceo Aleatorio")
-        num_activos = st.slider("Cantidad de activos aleatorios:", min_value=2, max_value=len(df_precios.columns), value=5)
-        num_simulaciones = st.slider("Cantidad de simulaciones:", min_value=10, max_value=200, value=50)
-        ventana_dias = st.slider("Ventana de días para series aleatorias:", min_value=60, max_value=min(252, len(df_precios)), value=min(120, len(df_precios)))
-        seed = st.number_input("Semilla aleatoria:", min_value=0, max_value=99999, value=42)
-
-        if st.button("▶️ Ejecutar Simulación Aleatoria"):
-            np.random.seed(seed)
-            resultados = []
-            fechas = df_precios.index[-ventana_dias:]
-            for i in range(num_simulaciones):
-                activos_sel = np.random.choice(df_precios.columns, size=num_activos, replace=False)
-                # Usar series históricas reales, pero seleccionar ventanas aleatorias
-                precios_sel = df_precios[activos_sel].iloc[-ventana_dias:]
-                returns = precios_sel.pct_change().dropna()
-                weights = np.ones(num_activos) / num_activos
-                port_ret = np.sum(returns.mean() * weights) * 252
-                port_vol = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
-                sharpe = port_ret / port_vol if port_vol > 0 else 0
-                resultados.append({'Retorno': port_ret, 'Volatilidad': port_vol, 'Sharpe': sharpe})
-            df_resultados = pd.DataFrame(resultados)
-            st.success(f"Simulaciones completadas: {num_simulaciones}")
-            st.markdown("##### Distribución de Retorno y Volatilidad (Simulaciones Aleatorias)")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df_resultados['Volatilidad'], y=df_resultados['Retorno'],
-                mode='markers', marker=dict(color=df_resultados['Sharpe'], colorscale='Viridis', showscale=True),
-                text=[f"Sharpe: {s:.2f}" for s in df_resultados['Sharpe']],
-                name='Simulaciones'
-            ))
-            fig.update_layout(
-                title='Simulación de Portafolios Aleatorios (con series históricas reales)',
-                xaxis_title='Volatilidad Anual',
-                yaxis_title='Retorno Anual',
-                showlegend=False
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(df_resultados.describe(), use_container_width=True)
-            return
-
-    # --- Optimización real ---
-    if ejecutar_optimizacion and estrategia != 'rebalanceo-aleatorio':
-        with st.spinner("Ejecutando optimización..."):
-            try:
-                # Usar las series históricas procesadas
-                returns = df_precios.pct_change().dropna()
-                n_assets = len(df_precios.columns)
-                if estrategia == 'equi-weight':
-                    weights = np.array([1/n_assets] * n_assets)
-                else:
-                    weights = optimize_portfolio(returns, target_return=target_return)
-                portfolio_returns = (returns * weights).sum(axis=1)
-                # Crear objeto PortfolioOutput compatible
-                portfolio_result = PortfolioOutput(
-                    weights=weights,
-                    asset_names=list(df_precios.columns),
-                    returns=returns
-                )
-                portfolio_result.portfolio_returns = portfolio_returns
-                # Agregar dataframe_allocation para compatibilidad con UI
-                portfolio_result.dataframe_allocation = pd.DataFrame({
-                    'rics': list(df_precios.columns),
-                    'weights': weights,
-                    'volatilities': returns.std().values,
-                    'returns': returns.mean().values
-                })
-                st.success("✅ Optimización completada")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("#### 📊 Pesos Optimizados")
-                    if portfolio_result.dataframe_allocation is not None:
-                        weights_df = portfolio_result.dataframe_allocation.copy()
-                        weights_df['Peso (%)'] = weights_df['weights'] * 100
-                        weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                        st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                with col2:
-                    st.markdown("#### 📈 Métricas del Portafolio")
-                    metricas = portfolio_result.get_metrics_dict()
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        st.metric("Retorno Anual", f"{metricas.get('Annual Return', 0):.2%}")
-                        st.metric("Volatilidad Anual", f"{metricas.get('Annual Volatility', 0):.2%}")
-                        st.metric("Ratio de Sharpe", f"{metricas.get('Sharpe Ratio', 0):.4f}")
-                        st.metric("VaR 95%", f"{metricas.get('VaR 95%', 0):.4f}")
-                    with col_b:
-                        st.metric("Mean Daily", f"{metricas.get('Mean Daily', 0):.4f}")
-                        st.metric("Volatility Daily", f"{metricas.get('Volatility Daily', 0):.4f}")
-                if portfolio_result.portfolio_returns is not None:
-                    st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                    fig = portfolio_result.plot_histogram_streamlit()
-                    st.plotly_chart(fig, use_container_width=True)
-                if portfolio_result.weights is not None:
-                    st.markdown("#### 🥧 Distribución de Pesos")
-                    fig_pie = go.Figure(data=[go.Pie(
-                        labels=portfolio_result.dataframe_allocation['rics'],
-                        values=portfolio_result.weights,
-                        textinfo='label+percent',
-                    )])
-                    fig_pie.update_layout(title="Distribución Optimizada de Activos")
-                    st.plotly_chart(fig_pie, use_container_width=True)
-            except Exception as e:
-                st.error(f"❌ Error durante la optimización: {str(e)}")
-
-    if ejecutar_frontier and show_frontier:
-        with st.spinner("Calculando frontera eficiente..."):
-            try:
-                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
-                if manager_inst.load_data():
-                    portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
-                        target_return=target_return, include_min_variance=True
-                    )
-                    if portfolios and returns and volatilities:
-                        st.success("✅ Frontera eficiente calculada")
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=volatilities, y=returns,
-                            mode='lines+markers',
-                            name='Frontera Eficiente',
-                            line=dict(color='blue')
-                        ))
-                        colors = ['red', 'green', 'yellow', 'orange', 'purple', 'pink']
-                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
-                        for i, (label, portfolio) in enumerate(portfolios.items()):
-                            if portfolio is not None:
-                                fig.add_trace(go.Scatter(
-                                    x=[portfolio.volatility_annual], 
-                                    y=[portfolio.return_annual],
-                                    mode='markers',
-                                    name=labels[i] if i < len(labels) else label,
-                                    marker=dict(size=10, color=colors[i % len(colors)])
-                                ))
-                        fig.update_layout(
-                            title='Frontera Eficiente del Portafolio',
-                            xaxis_title='Volatilidad Anual',
-                            yaxis_title='Retorno Anual',
-                            showlegend=True
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        st.markdown("#### 📊 Comparación de Estrategias")
-                        comparison_data = []
-                        for label, portfolio in portfolios.items():
-                            if portfolio is not None:
-                                comparison_data.append({
-                                    'Estrategia': label,
-                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                    'VaR 95%': f"{portfolio.var_95:.4f}"
-                                })
-                        if comparison_data:
-                            df_comparison = pd.DataFrame(comparison_data)
-                            st.dataframe(df_comparison, use_container_width=True)
-                    else:
-                        st.error("❌ No se pudo calcular la frontera eficiente")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-            except Exception as e:
-                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
-
-    # Información adicional extendida
-    with st.expander("ℹ️ Información sobre las Estrategias"):
-        st.markdown("""
-        **Optimización de Markowitz:**
-        - Maximiza el ratio de Sharpe (retorno/riesgo)
-        - Considera la correlación entre activos
-        - Busca la frontera eficiente
-
-        **Pesos Iguales:**
-        - Distribución uniforme entre todos los activos
-        - Estrategia simple de diversificación
-        - No considera correlaciones históricas
-
-        **Mínima Varianza L1:**
-        - Minimiza la varianza del portafolio
-        - Restricción L1 para regularización
-        - Tiende a generar portafolios más concentrados
-
-        **Mínima Varianza L2:**
-        - Minimiza la varianza del portafolio
-        - Restricción L2 para regularización
-        - Genera portafolios más diversificados
-
-        **Solo Posiciones Largas:**
-        - Optimización estándar sin restricciones adicionales
-        - Permite solo posiciones compradoras
-        - Suma de pesos = 100%
-
-        **Rebalanceo Aleatorio:**
-        - Selecciona activos y series aleatoriamente
-        - Simula portafolios para comparar con estrategias óptimas
-        """)
 
 if __name__ == "__main__":
     main()
