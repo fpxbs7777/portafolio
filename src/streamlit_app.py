@@ -180,12 +180,36 @@ def obtener_cotizacion_actual(token_portador: str, mercado: str, simbolo: str) -
     else:
         return None
 
+def parse_datetime_flexible(fecha_str):
+    """Parses a datetime object from a flexible date string format."""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+        try:
+            return pd.to_datetime(fecha_str, format=fmt)
+        except ValueError:
+            continue
+    return None
+
+@handle_request_errors
+def obtener_tipo_instrumento(token_portador: str, simbolo: str) -> Optional[str]:
+    """Detecta el tipo de instrumento (opcion, fci, bono, etc) usando la API de IOL."""
+    url = f"https://api.invertironline.com/api/v2/Titulos/{simbolo}"
+    headers = {'Authorization': f'Bearer {token_portador}'}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        return data.get('tipo', '').lower()
+    return None
+
 @st.cache_data(show_spinner=False)
 @handle_request_errors
 def obtener_serie_historica_iol(token_portador: str, mercado: str, simbolo: str, fecha_desde: str, fecha_hasta: str, ajustada: str = "ajustada") -> Optional[pd.Series]:
-    if mercado == "Opciones":
+    """
+    Obtiene la serie histórica de precios de un título desde la API de IOL, usando el endpoint correcto según el tipo de instrumento.
+    """
+    tipo = obtener_tipo_instrumento(token_portador, simbolo)
+    if tipo == 'opciones':
         url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    elif mercado == "FCI":
+    elif tipo == 'fci':
         url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     else:
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
@@ -195,6 +219,9 @@ def obtener_serie_historica_iol(token_portador: str, mercado: str, simbolo: str,
         'Content-Type': 'application/json'
     }
     response = requests.get(url, headers=headers, timeout=30)
+    if response.status_code == 401:
+        st.error(f"❌ No autorizado para obtener serie histórica de {simbolo}. Verifique su token y permisos.")
+        return None
     if response.status_code == 200:
         data = response.json()
         if not data:
@@ -219,6 +246,7 @@ def obtener_serie_historica_iol(token_portador: str, mercado: str, simbolo: str,
         else:
             return None
     else:
+        st.warning(f"⚠️ No se pudo obtener la serie histórica para {simbolo} (status {response.status_code})")
         return None
 
 @handle_request_errors
