@@ -1525,6 +1525,40 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
+def obtener_cotizacion_orleans_panel(token_portador, instrumento, pais, panel="Todos"):
+    """
+    Consulta la API Orleans Panel para obtener cotizaciones de un instrumento específico.
+    """
+    url = (
+        f"https://api.invertironline.com/api/v2/cotizaciones-orleans-panel/"
+        f"{instrumento}/{pais}/{panel}"
+        f"?cotizacionInstrumentoModel.instrumento={instrumento}&cotizacionInstrumentoModel.pais={pais}"
+    )
+    headers = {
+        "Authorization": f"Bearer {token_portador}",
+        "Accept": "application/json"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 401:
+            st.warning(f"⚠️ Token de autorización inválido para Orleans Panel ({instrumento}).")
+            try:
+                msg = response.json().get("message", "")
+                if msg:
+                    st.error(f"Detalle: {msg}")
+            except Exception:
+                pass
+            return None
+        else:
+            st.error(f"Error Orleans Panel: {response.status_code}")
+            st.error(f"Respuesta: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener cotización Orleans Panel: {str(e)}")
+        return None
+
 # Clase PortfolioManager simplificada para compatibilidad
 class PortfolioManager:
     """
