@@ -777,9 +777,9 @@ def mostrar_resumen_portafolio(portafolio):
     Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas
     """
     st.markdown("### 📈 Resumen del Portafolio")
-    
+
     activos = portafolio.get('activos', [])
-    
+
     # Preparar datos para análisis con mejor extracción de valuación
     datos_activos = []
     valor_total = 0
@@ -880,174 +880,95 @@ def mostrar_resumen_portafolio(portafolio):
             st.warning(f"Error procesando activo: {str(e)}")
             continue
     
-    # Mostrar información de debug para verificar el cálculo
-    with st.expander("🔍 Debug - Verificación de Valuaciones"):
-        st.write("**Valuaciones individuales por activo:**")
-        for i, activo_data in enumerate(datos_activos):
-            st.write(f"{activo_data['Símbolo']}: ${activo_data['Valuación']:,.2f}")
-        st.write(f"**Suma total calculada: ${valor_total:,.2f}**")
-        
-        # Verificar si el valor parece estar en una escala incorrecta
-        if valor_total > 100000:
-            st.warning("⚠️ El valor total parece ser muy alto. Verificando posibles errores de escala...")
-            # Intentar detectar si los valores están multiplicados por 10
-            valor_corregido = valor_total / 10
-            st.info(f"💡 Valor corregido (÷10): ${valor_corregido:,.2f}")
-            
-            # Preguntar al usuario si quiere usar el valor corregido
-            if st.button("🔧 Usar valor corregido"):
-                valor_total = valor_corregido
-                # Corregir también las valuaciones individuales
-                for activo_data in datos_activos:
-                    activo_data['Valuación'] = activo_data['Valuación'] / 10
-                st.success("✅ Valores corregidos aplicados")
-                st.rerun()
-    
+    # Menú de navegación interno para secciones del resumen
+    menu_secciones = [
+        "📊 Información General",
+        "📊 Distribución Estadística",
+        "⚠️ Análisis de Riesgo",
+        "📈 Proyecciones de Rendimiento",
+        "🎯 Probabilidades de Escenarios",
+        "🔍 Debug - Verificación de Valuaciones"
+    ]
+    seccion = st.radio("Ir a sección:", menu_secciones, horizontal=True)
+
+    # Calcular métricas comprehensivas del portafolio
     if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
-        
-        # Calcular métricas comprehensivas del portafolio
         metricas = calcular_metricas_portafolio(datos_activos, valor_total)
-        
+
         # === 1. INFORMACIÓN BÁSICA DEL PORTAFOLIO ===
-        st.markdown("#### 📊 Información General")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de Activos", len(datos_activos))
-        col2.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        col3.metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        
-        # Mostrar el valor total con formato correcto y verificación
-        valor_display = f"${valor_total:,.2f}"
-        if valor_total > 500000:  # Si parece demasiado alto
-            st.warning("⚠️ Verificar: el valor total parece alto")
-        col4.metric("Valor Total del Portafolio", valor_display)
-        
-        # === 2. MÉTRICAS DE RIESGO ACTUALES ===
-        if metricas:
-            st.markdown("#### ⚠️ Análisis de Riesgo")
+        if seccion == "📊 Información General":
+            st.markdown("#### 📊 Información General")
             col1, col2, col3, col4 = st.columns(4)
-            
-            col1.metric(
-                "Concentración del Portafolio", 
-                f"{metricas['concentracion']:.3f}",
-                help="Índice de Herfindahl: 0=perfectamente diversificado, 1=completamente concentrado"
-            )
-            col2.metric(
-                "VaR 95% (Valor en Riesgo)", 
-                f"${metricas['var_95']:,.0f}",
-                help="Valor mínimo del activo más pequeño en el 95% de los casos"
-            )
-            col3.metric(
-                "Volatilidad Estimada Anual", 
-                f"${metricas['riesgo_anual']:,.0f}",
-                help="Riesgo anual estimado basado en 20% de volatilidad"
-            )
-            
-            # Indicador visual de concentración
-            concentracion_status = "🟢 Diversificado" if metricas['concentracion'] < 0.25 else "🟡 Moderadamente Concentrado" if metricas['concentracion'] < 0.5 else "🔴 Altamente Concentrado"
-            col4.metric("Estado de Diversificación", concentracion_status)
-        
-        # === 3. PROYECCIONES DE RENDIMIENTO ===
-        if metricas:
-            st.markdown("#### 📈 Proyecciones de Rendimiento (Próximos 12 meses)")
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric(
-                "Retorno Esperado", 
-                f"${metricas['retorno_esperado_anual']:,.0f}",
-                delta=f"{(metricas['retorno_esperado_anual']/valor_total*100):.1f}%",
-                help="Retorno esperado promedio basado en 8% anual"
-            )
-            col2.metric(
-                "Escenario Optimista (95%)", 
-                f"${metricas['pl_percentil_95']:,.0f}",
-                delta=f"+{(metricas['pl_percentil_95']/valor_total*100):.1f}%",
-                help="Ganancia esperada en el mejor 5% de los casos"
-            )
-            col3.metric(
-                "Escenario Pesimista (5%)", 
-                f"${metricas['pl_percentil_5']:,.0f}",
-                delta=f"{(metricas['pl_percentil_5']/valor_total*100):.1f}%",
-                help="Pérdida máxima esperada en el peor 5% de los casos"
-            )
-        
-        # === 4. PROBABILIDADES DE ESCENARIOS ===
-        if metricas:
-            st.markdown("#### 🎯 Probabilidades de Escenarios")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            probs = metricas['probabilidades']
-            
-            col1.metric(
-                "Probabilidad de Ganancia", 
-                f"{probs['ganancia']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos positivos"
-            )
-            col2.metric(
-                "Probabilidad de Pérdida", 
-                f"{probs['perdida']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos negativos"
-            )
-            col3.metric(
-                "Prob. Ganancia > 10%", 
-                f"{probs['ganancia_mayor_10']*100:.1f}%",
-                help="Probabilidad de obtener más del 10% de ganancia"
-            )
-            col4.metric(
-                "Prob. Pérdida > 10%", 
-                f"{probs['perdida_mayor_10']*100:.1f}%",
-                help="Probabilidad de perder más del 10%"
-            )
-        
-        # === 5. DISTRIBUCIÓN DETALLADA DE ACTIVOS ===
-        if metricas:
+            col1.metric("Total de Activos", len(datos_activos))
+            col2.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+            col3.metric("Tipos de Activos", df_activos['Tipo'].nunique())
+            valor_display = f"${valor_total:,.2f}"
+            if valor_total > 500000:
+                st.warning("⚠️ Verificar: el valor total parece alto")
+            col4.metric("Valor Total del Portafolio", valor_display)
+
+        # === 2. DISTRIBUCIÓN ESTADÍSTICA DE ACTIVOS ===
+        elif seccion == "📊 Distribución Estadística":
             st.markdown("#### 📊 Distribución Estadística de Valores por Activo")
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            quantiles = metricas['quantiles']
-            
-            col1.metric(
-                "Valor Mínimo (Q25)", 
-                f"${quantiles['q25']:,.0f}",
-                help="25% de los activos valen menos que este monto"
-            )
-            col2.metric(
-                "Valor Mediano (Q50)", 
-                f"${quantiles['q50']:,.0f}",
-                help="Valor medio de los activos del portafolio"
-            )
-            col3.metric(
-                "Tercer Cuartil (Q75)", 
-                f"${quantiles['q75']:,.0f}",
-                help="75% de los activos valen menos que este monto"
-            )
-            col4.metric(
-                "Percentil 90", 
-                f"${quantiles['q90']:,.0f}",
-                help="90% de los activos valen menos que este monto"
-            )
-            col5.metric(
-                "Valor Máximo (Q95)", 
-                f"${quantiles['q95']:,.0f}",
-                help="Solo el 5% de los activos supera este valor"
-            )
-        
-        # Información de debug mejorada
-        with st.expander("🔍 Información de Debug - Estructura del Portafolio"):
-            st.markdown("**Campos disponibles en los activos:**")
-            if activos:
-                campos_encontrados = set()
-                for activo in activos[:3]:
-                    campos_encontrados.update(activo.keys())
-                    if 'titulo' in activo and isinstance(activo['titulo'], dict):
-                        titulo_campos = [f"titulo.{k}" for k in activo['titulo'].keys()]
-                        campos_encontrados.update(titulo_campos)
-                
-                st.code(sorted(list(campos_encontrados)))
-                
-                st.markdown("**Muestra de datos de activo:**")
-                st.json(activos[0] if activos else {})
-        
+            if metricas:
+                col1, col2, col3, col4, col5 = st.columns(5)
+                quantiles = metricas['quantiles']
+                col1.metric("Valor Mínimo (Q25)", f"${quantiles['q25']:,.0f}", help="25% de los activos valen menos que este monto")
+                col2.metric("Valor Mediano (Q50)", f"${quantiles['q50']:,.0f}", help="Valor medio de los activos del portafolio")
+                col3.metric("Tercer Cuartil (Q75)", f"${quantiles['q75']:,.0f}", help="75% de los activos valen menos que este monto")
+                col4.metric("Percentil 90", f"${quantiles['q90']:,.0f}", help="90% de los activos valen menos que este monto")
+                col5.metric("Valor Máximo (Q95)", f"${quantiles['q95']:,.0f}", help="Solo el 5% de los activos supera este valor")
+
+        # === 3. MÉTRICAS DE RIESGO ACTUALES ===
+        elif seccion == "⚠️ Análisis de Riesgo":
+            st.markdown("#### ⚠️ Análisis de Riesgo")
+            if metricas:
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Concentración del Portafolio", f"{metricas['concentracion']:.3f}", help="Índice de Herfindahl: 0=perfectamente diversificado, 1=completamente concentrado")
+                col2.metric("VaR 95% (Valor en Riesgo)", f"${metricas['var_95']:,.0f}", help="Valor mínimo del activo más pequeño en el 95% de los casos")
+                col3.metric("Volatilidad Estimada Anual", f"${metricas['riesgo_anual']:,.0f}", help="Riesgo anual estimado basado en 20% de volatilidad")
+                concentracion_status = "🟢 Diversificado" if metricas['concentracion'] < 0.25 else "🟡 Moderadamente Concentrado" if metricas['concentracion'] < 0.5 else "🔴 Altamente Concentrado"
+                col4.metric("Estado de Diversificación", concentracion_status)
+
+        # === 4. PROYECCIONES DE RENDIMIENTO ===
+        elif seccion == "📈 Proyecciones de Rendimiento":
+            st.markdown("#### 📈 Proyecciones de Rendimiento (Próximos 12 meses)")
+            if metricas:
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}", delta=f"{(metricas['retorno_esperado_anual']/valor_total*100):.1f}%", help="Retorno esperado promedio basado en 8% anual")
+                col2.metric("Escenario Optimista (95%)", f"${metricas['pl_percentil_95']:,.0f}", delta=f"+{(metricas['pl_percentil_95']/valor_total*100):.1f}%", help="Ganancia esperada en el mejor 5% de los casos")
+                col3.metric("Escenario Pesimista (5%)", f"${metricas['pl_percentil_5']:,.0f}", delta=f"{(metricas['pl_percentil_5']/valor_total*100):.1f}%", help="Pérdida máxima esperada en el peor 5% de los casos")
+
+        # === 5. PROBABILIDADES DE ESCENARIOS ===
+        elif seccion == "🎯 Probabilidades de Escenarios":
+            st.markdown("#### 🎯 Probabilidades de Escenarios")
+            if metricas:
+                col1, col2, col3, col4 = st.columns(4)
+                probs = metricas['probabilidades']
+                col1.metric("Probabilidad de Ganancia", f"{probs['ganancia']*100:.1f}%", help="Probabilidad de obtener rendimientos positivos")
+                col2.metric("Probabilidad de Pérdida", f"{probs['perdida']*100:.1f}%", help="Probabilidad de obtener rendimientos negativos")
+                col3.metric("Prob. Ganancia > 10%", f"{probs['ganancia_mayor_10']*100:.1f}%", help="Probabilidad de obtener más del 10% de ganancia")
+                col4.metric("Prob. Pérdida > 10%", f"{probs['perdida_mayor_10']*100:.1f}%", help="Probabilidad de perder más del 10%")
+
+        # === 6. DEBUG DE VALUACIONES ===
+        elif seccion == "🔍 Debug - Verificación de Valuaciones":
+            with st.expander("🔍 Debug - Verificación de Valuaciones", expanded=True):
+                st.write("**Valuaciones individuales por activo:**")
+                for i, activo_data in enumerate(datos_activos):
+                    st.write(f"{activo_data['Símbolo']}: ${activo_data['Valuación']:,.2f}")
+                st.write(f"**Suma total calculada: ${valor_total:,.2f}**")
+                if valor_total > 100000:
+                    st.warning("⚠️ El valor total parece ser muy alto. Verificando posibles errores de escala...")
+                    valor_corregido = valor_total / 10
+                    st.info(f"💡 Valor corregido (÷10): ${valor_corregido:,.2f}")
+                    if st.button("🔧 Usar valor corregido"):
+                        valor_total = valor_corregido
+                        for activo_data in datos_activos:
+                            activo_data['Valuación'] = activo_data['Valuación'] / 10
+                        st.success("✅ Valores corregidos aplicados")
+                        st.rerun()
+
         # Gráficos de distribución
         if valor_total > 0:
             # Gráfico de distribución por tipo
