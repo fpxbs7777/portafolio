@@ -1704,11 +1704,11 @@ class manager:
             if mean_returns is not None and cov_matrix is not None and df_precios is not None:
                 self.timeseries = df_precios
                 self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
-                self.cov_matrix = cov_matrix
-                self.mean_returns = mean_returns
-                self.data_loaded = True
-                return True
-            else:
+        """
+        if self.token_portador and self.fecha_desde and self.fecha_hasta:
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                self.token_portador, self.rics, self.fecha_desde, self.fecha_hasta
+            )
                 return False
 
         # Fallback al método original si no hay token
