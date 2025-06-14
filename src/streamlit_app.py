@@ -27,6 +27,15 @@ import seaborn as sns
 
 warnings.filterwarnings('ignore')
 
+# --- OPTIONAL: TensorFlow import with fallback ---
+try:
+    import tensorflow as tf
+    from tensorflow import keras
+    from tensorflow.keras import layers
+    TF_AVAILABLE = True
+except ImportError:
+    TF_AVAILABLE = False
+
 # Configuración de la página
 st.set_page_config(
     page_title="IOL Portfolio Analyzer",
@@ -1653,398 +1662,58 @@ def load_timeseries(ric, directory=None, data_source='iol', token_portador=None,
             print(f"Error cargando datos de Yahoo Finance para {ric}: {e}")
             return pd.DataFrame()
 
-def load_timeseries(ric, directory=None, data_source='iol', token_portador=None, fecha_desde=None, fecha_hasta=None):
+def red_neuronal_profunda_prediccion_precios(datos_precios, dias_prediccion=5, test_size=0.2):
     """
-    Carga series de tiempo desde diferentes fuentes: archivos CSV, API de IOL, o Yahoo Finance
+    Implementa una red neuronal profunda para predicción de precios usando TensorFlow/Keras
     """
-    if data_source == 'csv' and directory:
-        # Cargar desde archivo CSV
-        import os
-        path = os.path.join(directory, f"{ric}.csv")
-        print(f"Cargando datos desde {path}")
-        try:
-            raw_data = pd.read_csv(path)
-        except Exception as e:
-            print(f"Error al cargar el archivo {path}: {e}")
-            return pd.DataFrame()
-        
-        t = pd.DataFrame()
-        
-        if 'datetime' in raw_data.columns:
-            # Formato del archivo ^FCHI.csv
-            t['date'] = pd.to_datetime(raw_data['datetime'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        elif 'fechaHora' in raw_data.columns:
-            # Formato del archivo ALUA.csv
-            t['date'] = pd.to_datetime(raw_data['fechaHora'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['ultimoPrecio']
-        elif 'Date' in raw_data.columns and 'Close' in raw_data.columns:
-            # Formato del archivo con columnas 'Date' y 'Close'
-            t['date'] = pd.to_datetime(raw_data['Date'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        else:
-            print(f"Formato de archivo desconocido para {ric}. Columnas disponibles: {raw_data.columns}")
-            return pd.DataFrame()
-            
-    elif data_source == 'iol' and token_portador and fecha_desde and fecha_hasta:
-        # Cargar desde API de IOL
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d') if hasattr(fecha_desde, 'strftime') else str(fecha_desde)
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d') if hasattr(fecha_hasta, 'strftime') else str(fecha_hasta)
-        
-        # Determinar mercados según el tipo de instrumento
-        if ric.upper() == "ADCGLOA":
-            mercados = ['FCI']
-        elif ric.upper().startswith("AE") or ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O"):
-            mercados = ['bCBA']
-        elif ric.upper().endswith("48") or ric.upper().endswith("30") or ric.upper().endswith("29"):
-            mercados = ['bCBA']
-        elif ric.upper().startswith("MERV") or ric.upper().startswith("OPC"):
-            mercados = ['Opciones']
-        else:
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
-        
-        # Intentar obtener datos de cada mercado
-        for mercado in mercados:
-            try:
-                simbolo_consulta = ric
-                if mercado == 'bCBA' and (ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O") or ric.upper().startswith("AE")):
-                    clase_d = obtener_clase_d(ric, mercado, token_portador)
-                    if clase_d:
-                        simbolo_consulta = clase_d
-
-                    serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta,
-                        fecha_desde_str, fecha_hasta_str
-                    )
-
-                    if serie is not None and len(serie) > 10:
-                        serie_clean = serie.dropna()
-                        if len(serie_clean) > 10 and serie_clean.nunique() > 1 and serie_clean.std() > 0:
-                            t = pd.DataFrame()
-                            t['date'] = serie_clean.index
-                            t['close'] = serie_clean.values
-                            break
-            except Exception:
-                continue
-        
-        if 't' not in locals() or t.empty:
-            # Fallback a yfinance
-            try:
-                serie_yf = obtener_datos_alternativos_yfinance(ric, fecha_desde, fecha_hasta)
-                if serie_yf is not None and len(serie_yf) > 10:
-                    t = pd.DataFrame()
-                    t['date'] = serie_yf.index
-                    t['close'] = serie_yf.values
-            except Exception:
-                return pd.DataFrame()
+    if not TF_AVAILABLE:
+        st.error("TensorFlow no está disponible en el entorno. No se puede ejecutar la red neuronal profunda.")
+        return None
     
-    elif data_source == 'yfinance':
-        # Cargar desde Yahoo Finance
-        try:
-            import yfinance as yf
-            ticker = yf.Ticker(ric)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta)
-            if not data.empty:
-                t = pd.DataFrame()
-                t['date'] = data.index
-                t['close'] = data['Close'].values
-        except Exception as e:
-            print(f"Error cargando datos de Yahoo Finance para {ric}: {e}")
-            return pd.DataFrame()
-
-def load_timeseries(ric, directory=None, data_source='iol', token_portador=None, fecha_desde=None, fecha_hasta=None):
-    """
-    Carga series de tiempo desde diferentes fuentes: archivos CSV, API de IOL, o Yahoo Finance
-    """
-    if data_source == 'csv' and directory:
-        # Cargar desde archivo CSV
-        import os
-        path = os.path.join(directory, f"{ric}.csv")
-        print(f"Cargando datos desde {path}")
-        try:
-            raw_data = pd.read_csv(path)
-        except Exception as e:
-            print(f"Error al cargar el archivo {path}: {e}")
-            return pd.DataFrame()
+    try:
+        # Asegurarse de que los datos estén en el formato correcto
+        if not isinstance(datos_precios, pd.DataFrame) or datos_precios.empty:
+            st.error("Los datos de precios deben ser un DataFrame de pandas no vacío.")
+            return None
         
-        t = pd.DataFrame()
+        # Normalizar los datos
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        datos_normalizados = scaler.fit_transform(datos_precios[['close']])
         
-        if 'datetime' in raw_data.columns:
-            # Formato del archivo ^FCHI.csv
-            t['date'] = pd.to_datetime(raw_data['datetime'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        elif 'fechaHora' in raw_data.columns:
-            # Formato del archivo ALUA.csv
-            t['date'] = pd.to_datetime(raw_data['fechaHora'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['ultimoPrecio']
-        elif 'Date' in raw_data.columns and 'Close' in raw_data.columns:
-            # Formato del archivo con columnas 'Date' y 'Close'
-            t['date'] = pd.to_datetime(raw_data['Date'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        else:
-            print(f"Formato de archivo desconocido para {ric}. Columnas disponibles: {raw_data.columns}")
-            return pd.DataFrame()
-            
-    elif data_source == 'iol' and token_portador and fecha_desde and fecha_hasta:
-        # Cargar desde API de IOL
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d') if hasattr(fecha_desde, 'strftime') else str(fecha_desde)
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d') if hasattr(fecha_hasta, 'strftime') else str(fecha_hasta)
+        # Crear secuencias para la predicción
+        X, y = [], []
+        for i in range(len(datos_normalizados) - dias_prediccion):
+            X.append(datos_normalizados[i:i+dias_prediccion])
+            y.append(datos_normalizados[i+dias_prediccion])
         
-        # Determinar mercados según el tipo de instrumento
-        if ric.upper() == "ADCGLOA":
-            mercados = ['FCI']
-        elif ric.upper().startswith("AE") or ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O"):
-            mercados = ['bCBA']
-        elif ric.upper().endswith("48") or ric.upper().endswith("30") or ric.upper().endswith("29"):
-            mercados = ['bCBA']
-        elif ric.upper().startswith("MERV") or ric.upper().startswith("OPC"):
-            mercados = ['Opciones']
-        else:
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
+        X = np.array(X)
+        y = np.array(y)
         
-        # Intentar obtener datos de cada mercado
-        for mercado in mercados:
-            try:
-                simbolo_consulta = ric
-                if mercado == 'bCBA' and (ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O") or ric.upper().startswith("AE")):
-                    clase_d = obtener_clase_d(ric, mercado, token_portador)
-                    if clase_d:
-                        simbolo_consulta = clase_d
-
-                    serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta,
-                        fecha_desde_str, fecha_hasta_str
-                    )
-
-                    if serie is not None and len(serie) > 10:
-                        serie_clean = serie.dropna()
-                        if len(serie_clean) > 10 and serie_clean.nunique() > 1 and serie_clean.std() > 0:
-                            t = pd.DataFrame()
-                            t['date'] = serie_clean.index
-                            t['close'] = serie_clean.values
-                            break
-            except Exception:
-                continue
+        # Dividir en conjunto de entrenamiento y prueba
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
         
-        if 't' not in locals() or t.empty:
-            # Fallback a yfinance
-            try:
-                serie_yf = obtener_datos_alternativos_yfinance(ric, fecha_desde, fecha_hasta)
-                if serie_yf is not None and len(serie_yf) > 10:
-                    t = pd.DataFrame()
-                    t['date'] = serie_yf.index
-                    t['close'] = serie_yf.values
-            except Exception:
-                return pd.DataFrame()
-    
-    elif data_source == 'yfinance':
-        # Cargar desde Yahoo Finance
-        try:
-            import yfinance as yf
-            ticker = yf.Ticker(ric)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta)
-            if not data.empty:
-                t = pd.DataFrame()
-                t['date'] = data.index
-                t['close'] = data['Close'].values
-        except Exception as e:
-            print(f"Error cargando datos de Yahoo Finance para {ric}: {e}")
-            return pd.DataFrame()
-
-def load_timeseries(ric, directory=None, data_source='iol', token_portador=None, fecha_desde=None, fecha_hasta=None):
-    """
-    Carga series de tiempo desde diferentes fuentes: archivos CSV, API de IOL, o Yahoo Finance
-    """
-    if data_source == 'csv' and directory:
-        # Cargar desde archivo CSV
-        import os
-        path = os.path.join(directory, f"{ric}.csv")
-        print(f"Cargando datos desde {path}")
-        try:
-            raw_data = pd.read_csv(path)
-        except Exception as e:
-            print(f"Error al cargar el archivo {path}: {e}")
-            return pd.DataFrame()
+        # Definir la arquitectura de la red neuronal
+        model = keras.Sequential([
+            layers.Input(shape=(dias_prediccion, 1)),
+            layers.LSTM(50, return_sequences=True),
+            layers.LSTM(50, return_sequences=False),
+            layers.Dense(25),
+            layers.Dense(1)
+        ])
         
-        t = pd.DataFrame()
+        # Compilar el modelo
+        model.compile(optimizer='adam', loss='mean_squared_error')
         
-        if 'datetime' in raw_data.columns:
-            # Formato del archivo ^FCHI.csv
-            t['date'] = pd.to_datetime(raw_data['datetime'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        elif 'fechaHora' in raw_data.columns:
-            # Formato del archivo ALUA.csv
-            t['date'] = pd.to_datetime(raw_data['fechaHora'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['ultimoPrecio']
-        elif 'Date' in raw_data.columns and 'Close' in raw_data.columns:
-            # Formato del archivo con columnas 'Date' y 'Close'
-            t['date'] = pd.to_datetime(raw_data['Date'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        else:
-            print(f"Formato de archivo desconocido para {ric}. Columnas disponibles: {raw_data.columns}")
-            return pd.DataFrame()
-            
-    elif data_source == 'iol' and token_portador and fecha_desde and fecha_hasta:
-        # Cargar desde API de IOL
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d') if hasattr(fecha_desde, 'strftime') else str(fecha_desde)
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d') if hasattr(fecha_hasta, 'strftime') else str(fecha_hasta)
+        # Entrenar el modelo
+        model.fit(X_train, y_train, batch_size=1, epochs=10, verbose=1)
         
-        # Determinar mercados según el tipo de instrumento
-        if ric.upper() == "ADCGLOA":
-            mercados = ['FCI']
-        elif ric.upper().startswith("AE") or ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O"):
-            mercados = ['bCBA']
-        elif ric.upper().endswith("48") or ric.upper().endswith("30") or ric.upper().endswith("29"):
-            mercados = ['bCBA']
-        elif ric.upper().startswith("MERV") or ric.upper().startswith("OPC"):
-            mercados = ['Opciones']
-        else:
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
+        # Hacer predicciones
+        predicciones = model.predict(X_test)
         
-        # Intentar obtener datos de cada mercado
-        for mercado in mercados:
-            try:
-                simbolo_consulta = ric
-                if mercado == 'bCBA' and (ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O") or ric.upper().startswith("AE")):
-                    clase_d = obtener_clase_d(ric, mercado, token_portador)
-                    if clase_d:
-                        simbolo_consulta = clase_d
-
-                    serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta,
-                        fecha_desde_str, fecha_hasta_str
-                    )
-
-                    if serie is not None and len(serie) > 10:
-                        serie_clean = serie.dropna()
-                        if len(serie_clean) > 10 and serie_clean.nunique() > 1 and serie_clean.std() > 0:
-                            t = pd.DataFrame()
-                            t['date'] = serie_clean.index
-                            t['close'] = serie_clean.values
-                            break
-            except Exception:
-                continue
+        # Invertir la normalización
+        predicciones_invertidas = scaler.inverse_transform(predicciones)
         
-        if 't' not in locals() or t.empty:
-            # Fallback a yfinance
-            try:
-                serie_yf = obtener_datos_alternativos_yfinance(ric, fecha_desde, fecha_hasta)
-                if serie_yf is not None and len(serie_yf) > 10:
-                    t = pd.DataFrame()
-                    t['date'] = serie_yf.index
-                    t['close'] = serie_yf.values
-            except Exception:
-                return pd.DataFrame()
-    
-    elif data_source == 'yfinance':
-        # Cargar desde Yahoo Finance
-        try:
-            import yfinance as yf
-            ticker = yf.Ticker(ric)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta)
-            if not data.empty:
-                t = pd.DataFrame()
-                t['date'] = data.index
-                t['close'] = data['Close'].values
-        except Exception as e:
-            print(f"Error cargando datos de Yahoo Finance para {ric}: {e}")
-            return pd.DataFrame()
-
-def load_timeseries(ric, directory=None, data_source='iol', token_portador=None, fecha_desde=None, fecha_hasta=None):
-    """
-    Carga series de tiempo desde diferentes fuentes: archivos CSV, API de IOL, o Yahoo Finance
-    """
-    if data_source == 'csv' and directory:
-        # Cargar desde archivo CSV
-        import os
-        path = os.path.join(directory, f"{ric}.csv")
-        print(f"Cargando datos desde {path}")
-        try:
-            raw_data = pd.read_csv(path)
-        except Exception as e:
-            print(f"Error al cargar el archivo {path}: {e}")
-            return pd.DataFrame()
-        
-        t = pd.DataFrame()
-        
-        if 'datetime' in raw_data.columns:
-            # Formato del archivo ^FCHI.csv
-            t['date'] = pd.to_datetime(raw_data['datetime'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        elif 'fechaHora' in raw_data.columns:
-            # Formato del archivo ALUA.csv
-            t['date'] = pd.to_datetime(raw_data['fechaHora'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['ultimoPrecio']
-        elif 'Date' in raw_data.columns and 'Close' in raw_data.columns:
-            # Formato del archivo con columnas 'Date' y 'Close'
-            t['date'] = pd.to_datetime(raw_data['Date'], utc=True, errors='coerce').dt.normalize()
-            t['close'] = raw_data['Close']
-        else:
-            print(f"Formato de archivo desconocido para {ric}. Columnas disponibles: {raw_data.columns}")
-            return pd.DataFrame()
-            
-    elif data_source == 'iol' and token_portador and fecha_desde and fecha_hasta:
-        # Cargar desde API de IOL
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d') if hasattr(fecha_desde, 'strftime') else str(fecha_desde)
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d') if hasattr(fecha_hasta, 'strftime') else str(fecha_hasta)
-        
-        # Determinar mercados según el tipo de instrumento
-        if ric.upper() == "ADCGLOA":
-            mercados = ['FCI']
-        elif ric.upper().startswith("AE") or ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O"):
-            mercados = ['bCBA']
-        elif ric.upper().endswith("48") or ric.upper().endswith("30") or ric.upper().endswith("29"):
-            mercados = ['bCBA']
-        elif ric.upper().startswith("MERV") or ric.upper().startswith("OPC"):
-            mercados = ['Opciones']
-        else:
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
-        
-        # Intentar obtener datos de cada mercado
-        for mercado in mercados:
-            try:
-                simbolo_consulta = ric
-                if mercado == 'bCBA' and (ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O") or ric.upper().startswith("AE")):
-                    clase_d = obtener_clase_d(ric, mercado, token_portador)
-                    if clase_d:
-                        simbolo_consulta = clase_d
-
-                    serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta,
-                        fecha_desde_str, fecha_hasta_str
-                    )
-
-                    if serie is not None and len(serie) > 10:
-                        serie_clean = serie.dropna()
-                        if len(serie_clean) > 10 and serie_clean.nunique() > 1 and serie_clean.std() > 0:
-                            t = pd.DataFrame()
-                            t['date'] = serie_clean.index
-                            t['close'] = serie_clean.values
-                            break
-            except Exception:
-                continue
-        
-        if 't' not in locals() or t.empty:
-            # Fallback a yfinance
-            try:
-                serie_yf = obtener_datos_alternativos_yfinance(ric, fecha_desde, fecha_hasta)
-                if serie_yf is not None and len(serie_yf) > 10:
-                    t = pd.DataFrame()
-                    t['date'] = serie_yf.index
-                    t['close'] = serie_yf.values
-            except Exception:
-                return pd.DataFrame()
-    
-    elif data_source == 'yfinance':
-        # Cargar desde Yahoo Finance
-        try:
-            import yfinance as yf
-            ticker = yf.Ticker(ric)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta)
-            if not data.empty:
-                t = pd.DataFrame()
-                t['date'] = data.index
-                t['close'] = data['Close'].values
-        except Exception as e:
-            print(f"Error cargando datos de Yahoo Finance para {ric}: {e}")
-            return pd.DataFrame()
+        return predicciones_invertidas
+    except Exception as e:
+        st.error(f"Error en la red neuronal: {str(e)}")
+        return None
