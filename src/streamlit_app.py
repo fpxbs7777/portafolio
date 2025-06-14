@@ -10,6 +10,20 @@ import scipy.optimize as op
 from scipy import stats # Added for skewness, kurtosis, jarque_bera
 import random
 import warnings
+# --- NUEVAS IMPORTACIONES PARA MACHINE LEARNING ---
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge, Lasso
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.neural_network import MLPRegressor, MLPClassifier
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import mean_squared_error, r2_score, classification_report
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+from sklearn.svm import SVR, SVC
+from sklearn.cluster import KMeans
+import seaborn as sns
 
 warnings.filterwarnings('ignore')
 
@@ -1949,3 +1963,1194 @@ class manager:
         except Exception as e:
             st.error(f"❌ Error creando output del portafolio: {str(e)}")
             return None
+
+def calcular_metricas_avanzadas_ml(datos_retornos, ventana_volatilidad=30):
+    """
+    Calcula métricas avanzadas usando Machine Learning para análisis de riesgo
+    """
+    try:
+        if len(datos_retornos) < ventana_volatilidad:
+            return None
+        
+        # Convertir a DataFrame si es necesario
+        if isinstance(datos_retornos, pd.Series):
+            datos_retornos = datos_retornos.to_frame('retornos')
+        
+        # Calcular características técnicas
+        caracteristicas = {}
+        
+        for columna in datos_retornos.columns:
+            serie = datos_retornos[columna].dropna()
+            
+            if len(serie) < 10:
+                continue
+                
+            # Métricas básicas
+            caracteristicas[f'{columna}_media'] = serie.mean()
+            caracteristicas[f'{columna}_volatilidad'] = serie.std()
+            caracteristicas[f'{columna}_asimetria'] = serie.skew()
+            caracteristicas[f'{columna}_curtosis'] = serie.kurtosis()
+            
+            # Volatilidad rodante
+            vol_rodante = serie.rolling(window=min(ventana_volatilidad, len(serie))).std()
+            caracteristicas[f'{columna}_vol_max'] = vol_rodante.max()
+            caracteristicas[f'{columna}_vol_min'] = vol_rodante.min()
+            caracteristicas[f'{columna}_vol_tendencia'] = np.polyfit(range(len(vol_rodante.dropna())), vol_rodante.dropna(), 1)[0]
+            
+            # Métricas de riesgo
+            var_5 = np.percentile(serie, 5)
+            var_1 = np.percentile(serie, 1)
+            cvar_5 = serie[serie <= var_5].mean()
+            
+            caracteristicas[f'{columna}_var_5'] = var_5
+            caracteristicas[f'{columna}_var_1'] = var_1
+            caracteristicas[f'{columna}_cvar_5'] = cvar_5
+            
+            # Métricas de momentum
+            if len(serie) > 5:
+                momentum_5 = serie.rolling(5).mean().iloc[-1] - serie.rolling(5).mean().iloc[-5] if len(serie) >= 10 else 0
+                caracteristicas[f'{columna}_momentum_5'] = momentum_5
+            
+            # Drawdown máximo
+            acumulado = (1 + serie).cumprod()
+            peak = acumulado.expanding().max()
+            drawdown = (acumulado - peak) / peak
+            caracteristicas[f'{columna}_max_drawdown'] = drawdown.min()
+        
+        return caracteristicas
+        
+    except Exception as e:
+        st.error(f"Error calculando métricas ML: {str(e)}")
+        return None
+
+def modelo_regresion_lineal_portafolio(datos_precios, variable_objetivo='retorno_portafolio', test_size=0.3):
+    """
+    Implementa modelo de regresión lineal para predicción de retornos del portafolio
+    """
+    try:
+        st.markdown("#### 📈 Modelo de Regresión Lineal")
+        
+        if datos_precios is None or len(datos_precios) < 50:
+            st.warning("⚠️ Datos insuficientes para entrenamiento del modelo (mínimo 50 observaciones)")
+            return None
+        
+        # Calcular retornos
+        retornos = datos_precios.pct_change().dropna()
+        
+        if len(retornos.columns) < 2:
+            st.warning("⚠️ Se necesitan al menos 2 activos para el modelo")
+            return None
+        
+        # Preparar datos
+        # Variable objetivo: retorno promedio del portafolio
+        y = retornos.mean(axis=1).values
+        
+        # Variables explicativas: retornos individuales y características técnicas
+        X = retornos.values
+        
+        # Dividir datos
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+        
+        # Normalizar datos
+        scaler_X = StandardScaler()
+        X_train_scaled = scaler_X.fit_transform(X_train)
+        X_test_scaled = scaler_X.transform(X_test)
+        
+        # Entrenar modelos
+        modelos = {
+            'Regresión Lineal Simple': LinearRegression(),
+            'Ridge (L2)': Ridge(alpha=1.0),
+            'Lasso (L1)': Lasso(alpha=0.01),
+            'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42)
+        }
+        
+        resultados = {}
+        
+        for nombre, modelo in modelos.items():
+            # Entrenar
+            modelo.fit(X_train_scaled, y_train)
+            
+            # Predecir
+            y_pred_train = modelo.predict(X_train_scaled)
+            y_pred_test = modelo.predict(X_test_scaled)
+            
+            # Métricas
+            mse_train = mean_squared_error(y_train, y_pred_train)
+            mse_test = mean_squared_error(y_test, y_pred_test)
+            r2_train = r2_score(y_train, y_pred_train)
+            r2_test = r2_score(y_test, y_pred_test)
+            
+            resultados[nombre] = {
+                'modelo': modelo,
+                'mse_train': mse_train,
+                'mse_test': mse_test,
+                'r2_train': r2_train,
+                'r2_test': r2_test,
+                'y_pred_test': y_pred_test,
+                'y_test': y_test
+            }
+        
+        # Mostrar resultados
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📊 Métricas de Rendimiento**")
+            df_metricas = pd.DataFrame({
+                modelo: {
+                    'R² Entrenamiento': f"{res['r2_train']:.4f}",
+                    'R² Prueba': f"{res['r2_test']:.4f}",
+                    'MSE Entrenamiento': f"{res['mse_train']:.6f}",
+                    'MSE Prueba': f"{res['mse_test']:.6f}",
+                    'Sobreajuste': 'Sí' if res['r2_train'] - res['r2_test'] > 0.1 else 'No'
+                }
+                for modelo, res in resultados.items()
+            }).T
+            
+            st.dataframe(df_metricas)
+        
+        with col2:
+            # Gráfico de predicciones vs real
+            mejor_modelo = max(resultados.keys(), key=lambda x: resultados[x]['r2_test'])
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=resultados[mejor_modelo]['y_test'],
+                y=resultados[mejor_modelo]['y_pred_test'],
+                mode='markers',
+                name='Predicciones',
+                text=[f"Real: {real:.4f}<br>Pred: {pred:.4f}" 
+                      for real, pred in zip(resultados[mejor_modelo]['y_test'], 
+                                          resultados[mejor_modelo]['y_pred_test'])]
+            ))
+            
+            # Línea diagonal perfecta
+            min_val = min(min(resultados[mejor_modelo]['y_test']), 
+                         min(resultados[mejor_modelo]['y_pred_test']))
+            max_val = max(max(resultados[mejor_modelo]['y_test']), 
+                         max(resultados[mejor_modelo]['y_pred_test']))
+            
+            fig.add_trace(go.Scatter(
+                x=[min_val, max_val],
+                y=[min_val, max_val],
+                mode='lines',
+                name='Predicción Perfecta',
+                line=dict(dash='dash', color='red')
+            ))
+            
+            fig.update_layout(
+                title=f"Predicciones vs Real - {mejor_modelo}",
+                xaxis_title="Valor Real",
+                yaxis_title="Valor Predicho",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Interpretación del modelo
+        st.markdown("#### 🎯 Interpretación del Modelo")
+        
+        mejor_res = resultados[mejor_modelo]
+        r2_test = mejor_res['r2_test']
+        
+        if r2_test > 0.7:
+            st.success(f"✅ **Excelente ajuste**: El modelo {mejor_modelo} explica el {r2_test:.1%} de la variabilidad")
+        elif r2_test > 0.5:
+            st.info(f"ℹ️ **Buen ajuste**: El modelo {mejor_modelo} explica el {r2_test:.1%} de la variabilidad")
+        elif r2_test > 0.3:
+            st.warning(f"⚠️ **Ajuste moderado**: El modelo {mejor_modelo} explica el {r2_test:.1%} de la variabilidad")
+        else:
+            st.error(f"❌ **Ajuste deficiente**: El modelo solo explica el {r2_test:.1%} de la variabilidad")
+        
+        # Mostrar importancia de características para Random Forest
+        if mejor_modelo == 'Random Forest':
+            modelo_rf = resultados[mejor_modelo]['modelo']
+            importancias = modelo_rf.feature_importances_
+            
+            fig_imp = go.Figure(data=[go.Bar(
+                x=retornos.columns,
+                y=importancias,
+                text=[f"{imp:.3f}" for imp in importancias],
+                textposition='auto'
+            )])
+            
+            fig_imp.update_layout(
+                title="Importancia de Características - Random Forest",
+                xaxis_title="Activos",
+                yaxis_title="Importancia",
+                height=400
+            )
+            
+            st.plotly_chart(fig_imp, use_container_width=True)
+        
+        return resultados
+        
+    except Exception as e:
+        st.error(f"Error en modelo de regresión lineal: {str(e)}")
+        return None
+
+def modelo_clasificacion_señales_trading(datos_precios, horizonte_prediccion=5, test_size=0.3):
+    """
+    Implementa modelos de clasificación para generar señales de trading
+    """
+    try:
+        st.markdown("#### 🎯 Modelo de Clasificación - Señales de Trading")
+        
+        if datos_precios is None or len(datos_precios) < 100:
+            st.warning("⚠️ Datos insuficientes para modelo de clasificación (mínimo 100 observaciones)")
+            return None
+        
+        # Calcular retornos
+        retornos = datos_precios.pct_change().dropna()
+        
+        # Crear características técnicas
+        caracteristicas = pd.DataFrame(index=retornos.index)
+        
+        for col in retornos.columns:
+            serie = retornos[col]
+            
+            # Medias móviles de retornos
+            caracteristicas[f'{col}_ma_5'] = serie.rolling(5).mean()
+            caracteristicas[f'{col}_ma_10'] = serie.rolling(10).mean()
+            caracteristicas[f'{col}_ma_20'] = serie.rolling(20).mean()
+            
+            # Volatilidad rodante
+            caracteristicas[f'{col}_vol_5'] = serie.rolling(5).std()
+            caracteristicas[f'{col}_vol_10'] = serie.rolling(10).std()
+            
+            # Momentum
+            caracteristicas[f'{col}_momentum_3'] = serie.rolling(3).sum()
+            caracteristicas[f'{col}_momentum_5'] = serie.rolling(5).sum()
+            
+            # RSI simplificado
+            delta = serie.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            caracteristicas[f'{col}_rsi'] = 100 - (100 / (1 + rs))
+        
+        # Variable objetivo: clasificación de retornos futuros del portafolio
+        retorno_portafolio = retornos.mean(axis=1)
+        retorno_futuro = retorno_portafolio.shift(-horizonte_prediccion)
+        
+        # Clasificar en tres categorías basadas en cuantiles
+        quantiles = retorno_futuro.quantile([0.33, 0.67])
+        
+        def clasificar_retorno(ret):
+            if pd.isna(ret):
+                return np.nan
+            elif ret <= quantiles.iloc[0]:
+                return 0  # Bajo (Vender)
+            elif ret <= quantiles.iloc[1]:
+                return 1  # Medio (Mantener)
+            else:
+                return 2  # Alto (Comprar)
+        
+        y = retorno_futuro.apply(clasificar_retorno)
+        
+        # Preparar datos
+        datos_completos = pd.concat([caracteristicas, y.rename('target')], axis=1).dropna()
+        
+        if len(datos_completos) < 50:
+            st.warning("⚠️ Datos insuficientes después de crear características")
+            return None
+        
+        X = datos_completos.drop('target', axis=1).values
+        y = datos_completos['target'].values
+        
+        # Dividir datos
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, 
+                                                            random_state=42, stratify=y)
+        
+        # Normalizar características
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Entrenar modelos
+        modelos = {
+            'Regresión Logística': LogisticRegression(random_state=42, max_iter=1000),
+            'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
+            'SVM': SVC(kernel='rbf', random_state=42, probability=True),
+            'Red Neuronal': MLPClassifier(hidden_layer_sizes=(50, 25), random_state=42, max_iter=500)
+        }
+        
+        resultados_clf = {}
+        
+        for nombre, modelo in modelos.items():
+            try:
+                # Entrenar
+                modelo.fit(X_train_scaled, y_train)
+                
+                # Predecir
+                y_pred_train = modelo.predict(X_train_scaled)
+                y_pred_test = modelo.predict(X_test_scaled)
+                y_proba_test = modelo.predict_proba(X_test_scaled)
+                
+                # Métricas
+                acc_train = accuracy_score(y_train, y_pred_train)
+                acc_test = accuracy_score(y_test, y_pred_test)
+                precision = precision_score(y_test, y_pred_test, average='weighted', zero_division=0)
+                recall = recall_score(y_test, y_pred_test, average='weighted', zero_division=0)
+                f1 = f1_score(y_test, y_pred_test, average='weighted', zero_division=0)
+                
+                resultados_clf[nombre] = {
+                    'modelo': modelo,
+                    'acc_train': acc_train,
+                    'acc_test': acc_test,
+                    'precision': precision,
+                    'recall': recall,
+                    'f1': f1,
+                    'y_pred_test': y_pred_test,
+                    'y_proba_test': y_proba_test,
+                    'y_test': y_test
+                }
+                
+            except Exception as e:
+                st.warning(f"⚠️ Error entrenando {nombre}: {str(e)}")
+                continue
+        
+        if not resultados_clf:
+            st.error("❌ No se pudo entrenar ningún modelo de clasificación")
+            return None
+        
+        # Mostrar resultados
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📊 Métricas de Clasificación**")
+            df_metricas_clf = pd.DataFrame({
+                modelo: {
+                    'Precisión Entrenamiento': f"{res['acc_train']:.3f}",
+                    'Precisión Prueba': f"{res['acc_test']:.3f}",
+                    'Precision (Weighted)': f"{res['precision']:.3f}",
+                    'Recall (Weighted)': f"{res['recall']:.3f}",
+                    'F1-Score': f"{res['f1']:.3f}",
+                    'Sobreajuste': 'Sí' if res['acc_train'] - res['acc_test'] > 0.1 else 'No'
+                }
+                for modelo, res in resultados_clf.items()
+            }).T
+            
+            st.dataframe(df_metricas_clf)
+        
+        with col2:
+            # Matriz de confusión del mejor modelo
+            mejor_modelo_clf = max(resultados_clf.keys(), key=lambda x: resultados_clf[x]['f1'])
+            mejor_res_clf = resultados_clf[mejor_modelo_clf]
+            
+            from sklearn.metrics import confusion_matrix
+            cm = confusion_matrix(mejor_res_clf['y_test'], mejor_res_clf['y_pred_test'])
+            
+            # Crear heatmap de matriz de confusión
+            fig_cm = go.Figure(data=go.Heatmap(
+                z=cm,
+                x=['Vender (0)', 'Mantener (1)', 'Comprar (2)'],
+                y=['Vender (0)', 'Mantener (1)', 'Comprar (2)'],
+                colorscale='Blues',
+                text=cm,
+                texttemplate="%{text}",
+                textfont={"size": 12}
+            ))
+            
+            fig_cm.update_layout(
+                title=f"Matriz de Confusión - {mejor_modelo_clf}",
+                xaxis_title="Predicción",
+                yaxis_title="Real",
+                height=400
+            )
+            
+            st.plotly_chart(fig_cm, use_container_width=True)
+        
+        # Interpretación de señales
+        st.markdown("#### 📡 Interpretación de Señales de Trading")
+        
+        etiquetas = {0: 'Vender', 1: 'Mantener', 2: 'Comprar'}
+        
+        # Última predicción
+        if len(X_test_scaled) > 0:
+            ultima_caracteristica = X_test_scaled[-1].reshape(1, -1)
+            mejor_modelo_obj = resultados_clf[mejor_modelo_clf]['modelo']
+            
+            prediccion = mejor_modelo_obj.predict(ultima_caracteristica)[0]
+            probabilidades = mejor_modelo_obj.predict_proba(ultima_caracteristica)[0]
+            
+            col1, col2, col3 = st.columns(3)
+            
+            col1.metric(
+                "Señal Actual", 
+                etiquetas[prediccion],
+                help=f"Basado en modelo {mejor_modelo_clf}"
+            )
+            
+            # Mostrar probabilidades
+            for i, (etiqueta, prob) in enumerate(zip(etiquetas.values(), probabilidades)):
+                color = "🟢" if i == 2 else "🟡" if i == 1 else "🔴"
+                if i == 0:
+                    col1.write(f"{color} {etiqueta}: {prob:.1%}")
+                elif i == 1:
+                    col2.write(f"{color} {etiqueta}: {prob:.1%}")
+                else:
+                    col3.write(f"{color} {etiqueta}: {prob:.1%}")
+        
+        # Evaluación de performance
+        acc_test = mejor_res_clf['acc_test']
+        baseline_acc = 1/3  # Precisión aleatoria para 3 clases
+        
+        if acc_test > 0.6:
+            st.success(f"✅ **Excelente modelo**: Precisión del {acc_test:.1%} (vs {baseline_acc:.1%} aleatorio)")
+        elif acc_test > 0.45:
+            st.info(f"ℹ️ **Buen modelo**: Precisión del {acc_test:.1%} (vs {baseline_acc:.1%} aleatorio)")
+        elif acc_test > 0.35:
+            st.warning(f"⚠️ **Modelo moderado**: Precisión del {acc_test:.1%} (vs {baseline_acc:.1%} aleatorio)")
+        else:
+            st.error(f"❌ **Modelo deficiente**: Precisión del {acc_test:.1%} (apenas mejor que aleatorio)")
+        
+        return resultados_clf
+        
+    except Exception as e:
+        st.error(f"Error en modelo de clasificación: {str(e)}")
+        return None
+
+def red_neuronal_profunda_prediccion_precios(datos_precios, dias_prediccion=5, test_size=0.2):
+    """
+    Implementa una red neuronal profunda para predicción de precios usando TensorFlow/Keras
+    """
+    try:
+        st.markdown("#### 🧠 Red Neuronal Profunda - Predicción de Precios")
+        
+        if datos_precios is None or len(datos_precios) < 200:
+            st.warning("⚠️ Se requieren al menos 200 observaciones para entrenamiento de red neuronal")
+            return None
+        
+        # Seleccionar activo principal (el primero o el de mayor volumen de datos)
+        activo_principal = datos_precios.columns[0]
+        precios = datos_precios[activo_principal].dropna()
+        
+        if len(precios) < 100:
+            st.warning(f"⚠️ Datos insuficientes para {activo_principal}")
+            return None
+        
+        # Normalizar precios
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        precios_scaled = scaler.fit_transform(precios.values.reshape(-1, 1))
+        
+        # Crear secuencias para entrenamiento
+        def crear_secuencias(data, ventana=60):
+            X, y = [], []
+            for i in range(ventana, len(data)):
+                X.append(data[i-ventana:i, 0])
+                y.append(data[i, 0])
+            return np.array(X), np.array(y)
+        
+        ventana_tiempo = min(60, len(precios_scaled) // 4)
+        X, y = crear_secuencias(precios_scaled, ventana_tiempo)
+        
+        if len(X) < 50:
+            st.warning("⚠️ No hay suficientes secuencias para entrenamiento")
+            return None
+        
+        # Dividir datos
+        split_idx = int(len(X) * (1 - test_size))
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        # Reshape para LSTM
+        X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
+        X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
+        
+        # Construir modelo
+        modelo_lstm = keras.Sequential([
+            layers.LSTM(50, return_sequences=True, input_shape=(ventana_tiempo, 1)),
+            layers.Dropout(0.2),
+            layers.LSTM(50, return_sequences=True),
+            layers.Dropout(0.2),
+            layers.LSTM(50),
+            layers.Dropout(0.2),
+            layers.Dense(25),
+            layers.Dense(1)
+        ])
+        
+        modelo_lstm.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+        
+        # Entrenar modelo
+        with st.spinner("🧠 Entrenando red neuronal profunda..."):
+            history = modelo_lstm.fit(
+                X_train, y_train,
+                batch_size=32,
+                epochs=50,
+                validation_data=(X_test, y_test),
+                verbose=0
+            )
+        
+        # Hacer predicciones
+        predicciones_train = modelo_lstm.predict(X_train, verbose=0)
+        predicciones_test = modelo_lstm.predict(X_test, verbose=0)
+        
+        # Desnormalizar predicciones
+        predicciones_train = scaler.inverse_transform(predicciones_train)
+        predicciones_test = scaler.inverse_transform(predicciones_test)
+        y_train_real = scaler.inverse_transform(y_train.reshape(-1, 1))
+        y_test_real = scaler.inverse_transform(y_test.reshape(-1, 1))
+        
+        # Calcular métricas
+        mse_train = mean_squared_error(y_train_real, predicciones_train)
+        mse_test = mean_squared_error(y_test_real, predicciones_test)
+        r2_train = r2_score(y_train_real, predicciones_train)
+        r2_test = r2_score(y_test_real, predicciones_test)
+        
+        # Mostrar resultados
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📊 Métricas del Modelo LSTM**")
+            st.metric("R² Entrenamiento", f"{r2_train:.4f}")
+            st.metric("R² Prueba", f"{r2_test:.4f}")
+            st.metric("MSE Entrenamiento", f"{mse_train:.2f}")
+            st.metric("MSE Prueba", f"{mse_test:.2f}")
+            
+            if r2_test > 0.8:
+                st.success("✅ Excelente capacidad predictiva")
+            elif r2_test > 0.6:
+                st.info("ℹ️ Buena capacidad predictiva")
+            elif r2_test > 0.3:
+                st.warning("⚠️ Capacidad predictiva moderada")
+            else:
+                st.error("❌ Capacidad predictiva limitada")
+        
+        with col2:
+            # Gráfico de pérdida durante entrenamiento
+            fig_loss = go.Figure()
+            fig_loss.add_trace(go.Scatter(
+                y=history.history['loss'],
+                name='Pérdida Entrenamiento',
+                line=dict(color='blue')
+            ))
+            fig_loss.add_trace(go.Scatter(
+                y=history.history['val_loss'],
+                name='Pérdida Validación',
+                line=dict(color='red')
+            ))
+            
+            fig_loss.update_layout(
+                title="Evolución de la Pérdida",
+                xaxis_title="Época",
+                yaxis_title="Pérdida (MSE)",
+                height=300
+            )
+            
+            st.plotly_chart(fig_loss, use_container_width=True)
+        
+        # Gráfico de predicciones vs precios reales
+        fechas_test = precios.index[split_idx + ventana_tiempo:]
+        
+        fig_pred = go.Figure()
+        
+        # Precios reales
+        fig_pred.add_trace(go.Scatter(
+            x=fechas_test,
+            y=y_test_real.flatten(),
+            name='Precios Reales',
+            line=dict(color='blue')
+        ))
+        
+        # Predicciones
+        fig_pred.add_trace(go.Scatter(
+            x=fechas_test,
+            y=predicciones_test.flatten(),
+            name='Predicciones LSTM',
+            line=dict(color='red', dash='dash')
+        ))
+        
+        fig_pred.update_layout(
+            title=f"Predicciones vs Precios Reales - {activo_principal}",
+            xaxis_title="Fecha",
+            yaxis_title="Precio",
+            height=500
+        )
+        
+        st.plotly_chart(fig_pred, use_container_width=True)
+        
+        # Predicción futura
+        st.markdown("#### 🔮 Predicción Futura")
+        
+        # Usar últimos datos para predecir
+        ultimos_datos = precios_scaled[-ventana_tiempo:].reshape(1, ventana_tiempo, 1)
+        
+        predicciones_futuras = []
+        datos_temp = ultimos_datos.copy()
+        
+        for _ in range(dias_prediccion):
+            pred = modelo_lstm.predict(datos_temp, verbose=0)
+            predicciones_futuras.append(pred[0, 0])
+            
+            # Actualizar datos temporales para siguiente predicción
+            datos_temp = np.roll(datos_temp, -1, axis=1)
+            datos_temp[0, -1, 0] = pred[0, 0]
+        
+        # Desnormalizar predicciones futuras
+        predicciones_futuras = scaler.inverse_transform(np.array(predicciones_futuras).reshape(-1, 1))
+        
+        # Crear fechas futuras
+        ultima_fecha = precios.index[-1]
+        fechas_futuras = pd.date_range(start=ultima_fecha + timedelta(days=1), 
+                                     periods=dias_prediccion, freq='D')
+        
+        # Mostrar predicciones futuras
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🔮 Predicciones Futuras**")
+            precio_actual = precios.iloc[-1]
+            
+            for i, (fecha, precio_pred) in enumerate(zip(fechas_futuras, predicciones_futuras.flatten())):
+                cambio = (precio_pred - precio_actual) / precio_actual * 100
+                color = "🟢" if cambio > 0 else "🔴" if cambio < 0 else "🟡"
+                st.write(f"{color} {fecha.strftime('%Y-%m-%d')}: ${precio_pred:.2f} ({cambio:+.1f}%)")
+        
+        with col2:
+            # Gráfico de predicción futura
+            fig_futuro = go.Figure()
+            
+            # Últimos 30 días históricos
+            ultimos_30 = precios.tail(30)
+            fig_futuro.add_trace(go.Scatter(
+                x=ultimos_30.index,
+                y=ultimos_30.values,
+                name='Histórico',
+                line=dict(color='blue')
+            ))
+            
+            # Predicciones futuras
+            fig_futuro.add_trace(go.Scatter(
+                x=fechas_futuras,
+                y=predicciones_futuras.flatten(),
+                name='Predicción',
+                line=dict(color='red', dash='dash'),
+                marker=dict(size=8)
+            ))
+            
+            fig_futuro.update_layout(
+                title=f"Predicción Futura - {activo_principal}",
+                xaxis_title="Fecha",
+                yaxis_title="Precio",
+                height=400
+            )
+            
+            st.plotly_chart(fig_futuro, use_container_width=True)
+        
+        return {
+            'modelo': modelo_lstm,
+            'scaler': scaler,
+            'historia': history,
+            'metricas': {
+                'r2_train': r2_train,
+                'r2_test': r2_test,
+                'mse_train': mse_train,
+                'mse_test': mse_test
+            },
+            'predicciones_futuras': predicciones_futuras,
+            'fechas_futuras': fechas_futuras
+        }
+        
+    except Exception as e:
+        st.error(f"Error en red neuronal profunda: {str(e)}")
+        return None
+
+def analisis_clustering_activos(datos_retornos, n_clusters=3):
+    """
+    Implementa análisis de clustering para agrupar activos por comportamiento similar
+    """
+    try:
+        st.markdown("#### 🎯 Análisis de Clustering - Agrupación de Activos")
+        
+        if datos_retornos is None or len(datos_retornos.columns) < 3:
+            st.warning("⚠️ Se necesitan al menos 3 activos para clustering")
+            return None
+        
+        # Calcular características para clustering
+        caracteristicas = {}
+        
+        for activo in datos_retornos.columns:
+            serie = datos_retornos[activo].dropna()
+            
+            if len(serie) < 20:
+                continue
+            
+            caracteristicas[activo] = {
+                'retorno_medio': serie.mean(),
+                'volatilidad': serie.std(),
+                'asimetria': serie.skew(),
+                'curtosis': serie.kurtosis(),
+                'var_95': np.percentile(serie, 5),
+                'sharpe_ratio': serie.mean() / serie.std() if serie.std() > 0 else 0,
+                'max_drawdown': (serie.cumsum() - serie.cumsum().expanding().max()).min()
+            }
+        
+        if len(caracteristicas) < 3:
+            st.warning("⚠️ No hay suficientes activos con datos válidos")
+            return None
+        
+        # Crear DataFrame de características
+        df_features = pd.DataFrame(caracteristicas).T
+        
+        # Normalizar características
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(df_features.values)
+        
+        # Aplicar K-Means
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        clusters = kmeans.fit_predict(features_scaled)
+        
+        # Añadir clusters al DataFrame
+        df_features['Cluster'] = clusters
+        
+        # Mostrar resultados
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📊 Activos por Cluster**")
+            
+            for i in range(n_clusters):
+                activos_cluster = df_features[df_features['Cluster'] == i].index.tolist()
+                
+                with st.expander(f"🎯 Cluster {i+1} ({len(activos_cluster)} activos)"):
+                    for activo in activos_cluster:
+                        st.write(f"• {activo}")
+                    
+                    # Estadísticas del cluster
+                    cluster_data = df_features[df_features['Cluster'] == i]
+                    st.markdown("**Características promedio:**")
+                    st.write(f"Retorno: {cluster_data['retorno_medio'].mean():.4f}")
+                    st.write(f"Volatilidad: {cluster_data['volatilidad'].mean():.4f}")
+                    st.write(f"Sharpe Ratio: {cluster_data['sharpe_ratio'].mean():.3f}")
+        
+        with col2:
+            # Gráfico de dispersión 2D
+            fig_scatter = go.Figure()
+            
+            colores = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray']
+            
+            for i in range(n_clusters):
+                mask = clusters == i
+                fig_scatter.add_trace(go.Scatter(
+                    x=df_features.loc[mask, 'retorno_medio'],
+                    y=df_features.loc[mask, 'volatilidad'],
+                    mode='markers+text',
+                    text=df_features.index[mask],
+                    textposition='top center',
+                    name=f'Cluster {i+1}',
+                    marker=dict(color=colores[i % len(colores)], size=10)
+                ))
+            
+            fig_scatter.update_layout(
+                title="Clusters: Retorno vs Volatilidad",
+                xaxis_title="Retorno Medio",
+                yaxis_title="Volatilidad",
+                height=500
+            )
+            
+            st.plotly_chart(fig_scatter, use_container_width=True)
+        
+        # Análisis de correlaciones dentro de clusters
+        st.markdown("#### 🔗 Análisis de Correlaciones por Cluster")
+        
+        correlaciones_cluster = {}
+        
+        for i in range(n_clusters):
+            activos_cluster = df_features[df_features['Cluster'] == i].index.tolist()
+            
+            if len(activos_cluster) > 1:
+                corr_matrix = datos_retornos[activos_cluster].corr()
+                correlaciones_cluster[f'Cluster {i+1}'] = {
+                    'correlacion_promedio': corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)].mean(),
+                    'correlacion_min': corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)].min(),
+                    'correlacion_max': corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)].max()
+                }
+        
+        if correlaciones_cluster:
+            df_corr = pd.DataFrame(correlaciones_cluster).T
+            st.dataframe(df_corr.round(3))
+        
+        # Recomendaciones de diversificación
+        st.markdown("#### 💡 Recomendaciones de Diversificación")
+        
+        activos_por_cluster = []
+        for i in range(n_clusters):
+            activos_cluster = df_features[df_features['Cluster'] == i].index.tolist()
+            activos_por_cluster.append(activos_cluster)
+        
+        # Calcular diversificación actual
+        cluster_counts = [len(activos) for activos in activos_por_cluster]
+        diversificacion_score = 1 - (np.std(cluster_counts) / np.mean(cluster_counts)) if np.mean(cluster_counts) > 0 else 0
+        
+        if diversificacion_score > 0.8:
+            st.success("✅ **Excelente diversificación**: Los activos están bien distribuidos entre clusters")
+        elif diversificacion_score > 0.6:
+            st.info("ℹ️ **Buena diversificación**: La distribución entre clusters es razonable")
+        else:
+            st.warning("⚠️ **Diversificación mejorable**: Considere balancear más los activos entre clusters")
+        
+        # Sugerencias específicas
+        cluster_dominante = np.argmax(cluster_counts)
+        if cluster_counts[cluster_dominante] > len(datos_retornos.columns) * 0.6:
+            st.warning(f"⚠️ **Concentración alta**: El Cluster {cluster_dominante+1} tiene {cluster_counts[cluster_dominante]} activos ({cluster_counts[cluster_dominante]/len(datos_retornos.columns)*100:.1f}%)")
+            
+            otros_clusters = [i for i in range(n_clusters) if i != cluster_dominante]
+            st.info(f"💡 **Sugerencia**: Considere reducir exposición en Cluster {cluster_dominante+1} y aumentar en Clusters {[i+1 for i in otros_clusters]}")
+        
+        return {
+            'clusters': clusters,
+            'caracteristicas': df_features,
+            'modelo_kmeans': kmeans,
+            'scaler': scaler,
+            'correlaciones_cluster': correlaciones_cluster
+        }
+        
+    except Exception as e:
+        st.error(f"Error en análisis de clustering: {str(e)}")
+        return None
+
+def mostrar_analisis_machine_learning(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Función principal que integra todos los análisis de Machine Learning
+    """
+    st.markdown("### 🤖 Análisis de Machine Learning")
+    st.markdown("*Aplicando técnicas avanzadas de inteligencia artificial para optimización y predicción*")
+    
+    # Obtener lista de símbolos del portafolio
+    activos = portafolio.get('activos', [])
+    simbolos = []
+    
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo and simbolo not in simbolos:
+            simbolos.append(simbolo)
+    
+    if not simbolos:
+        st.warning("⚠️ No se encontraron símbolos válidos en el portafolio")
+        return
+    
+    if len(simbolos) < 2:
+        st.warning("⚠️ Se necesitan al menos 2 activos para análisis de ML")
+        return
+    
+    # Obtener datos históricos
+    with st.spinner("📊 Cargando datos históricos para análisis ML..."):
+        mean_returns, cov_matrix, datos_precios = get_historical_data_for_optimization(
+            token_acceso, simbolos, fecha_desde, fecha_hasta
+        )
+    
+    if datos_precios is None or len(datos_precios) < 30:
+        st.error("❌ No hay suficientes datos históricos para análisis ML")
+        return
+    
+    # Calcular retornos
+    retornos = datos_precios.pct_change().dropna()
+    
+    # Crear tabs para diferentes análisis ML
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📈 Regresión Lineal",
+        "🎯 Clasificación",
+        "🧠 Redes Neuronales",
+        "🎯 Clustering",
+        "📊 Métricas ML"
+    ])
+    
+    with tab1:
+        # Modelo de regresión lineal
+        resultados_regresion = modelo_regresion_lineal_portafolio(datos_precios)
+        
+        if resultados_regresion:
+            st.markdown("#### 💡 Interpretación del Análisis de Regresión")
+            st.markdown("""
+            **¿Qué nos dice este análisis?**
+            - **R²**: Mide qué porcentaje de la variabilidad de los retornos puede explicar el modelo
+            - **MSE**: Error cuadrático medio - valores más bajos indican mejor ajuste
+            - **Sobreajuste**: Cuando el modelo funciona mucho mejor en entrenamiento que en prueba
+            
+            **Aplicaciones prácticas:**
+            - Identificar qué activos son más predictivos del rendimiento del portafolio
+            - Detectar patrones lineales en los movimientos de precios
+            - Validar supuestos de correlación entre activos
+            """)
+    
+    with tab2:
+        # Modelo de clasificación para señales de trading
+        resultados_clasificacion = modelo_clasificacion_señales_trading(datos_precios)
+        
+        if resultados_clasificacion:
+            st.markdown("#### 💡 Interpretación de Señales de Trading")
+            st.markdown("""
+            **Metodología:**
+            - El modelo analiza características técnicas históricas
+            - Clasifica períodos futuros en: Vender (0), Mantener (1), Comprar (2)
+            - Usa horizonte de predicción de 5 días
+            
+            **Métricas clave:**
+            - **Precisión**: Porcentaje de predicciones correctas
+            - **F1-Score**: Balance entre precisión y recall
+            - **Matriz de Confusión**: Muestra tipos de errores del modelo
+            
+            **⚠️ Advertencia**: Este es un modelo educativo. No constituye asesoramiento financiero.
+            """)
+    
+    with tab3:
+        # Red neuronal profunda
+        if len(datos_precios) >= 200:
+            resultados_lstm = red_neuronal_profunda_prediccion_precios(datos_precios)
+            
+            if resultados_lstm:
+                st.markdown("#### 💡 Interpretación de la Red Neuronal LSTM")
+                st.markdown("""
+                **Tecnología LSTM (Long Short-Term Memory):**
+                - Especializada en análisis de secuencias temporales
+                - Puede "recordar" patrones de largo plazo en los precios
+                - Arquitectura profunda con múltiples capas y regularización
+                
+                **Interpretación de resultados:**
+                - **R² > 0.8**: Excelente capacidad predictiva
+                - **R² 0.6-0.8**: Buena capacidad predictiva  
+                - **R² < 0.6**: Capacidad predictiva limitada
+                
+                **Limitaciones:**
+                - Los mercados son inherentemente impredecibles
+                - El modelo se basa solo en datos históricos de precios
+                - Eventos fundamentales pueden cambiar radicalmente las tendencias
+                """)
+        else:
+            st.warning("⚠️ Se requieren al menos 200 observaciones para entrenamiento de LSTM")
+            st.info("💡 Intente ampliar el rango de fechas para obtener más datos históricos")
+    
+    with tab4:
+        # Análisis de clustering
+        if len(simbolos) >= 3:
+            n_clusters = st.slider(
+                "Número de clusters para agrupación", 
+                min_value=2, 
+                max_value=min(len(simbolos), 6), 
+                value=3
+            )
+            
+            resultados_clustering = analisis_clustering_activos(retornos, n_clusters)
+            
+            if resultados_clustering:
+                st.markdown("#### 💡 Interpretación del Análisis de Clustering")
+                st.markdown("""
+                **¿Qué es el clustering?**
+                - Agrupa activos con comportamiento similar
+                - Basado en retorno, volatilidad, asimetría y otras métricas
+                - Útil para identificar oportunidades de diversificación
+                
+                **Aplicaciones:**
+                - **Diversificación**: Seleccionar activos de diferentes clusters
+                - **Gestión de riesgo**: Evitar concentración en un solo cluster
+                - **Rebalanceo**: Mantener exposición balanceada entre grupos
+                
+                **Métricas:**
+                - **Correlación intra-cluster**: Alta correlación dentro del grupo
+                - **Diversificación**: Distribución equilibrada entre clusters
+                """)
+        else:
+            st.warning("⚠️ Se necesitan al menos 3 activos para clustering")
+    
+    with tab5:
+        # Métricas avanzadas ML
+        st.markdown("#### 📊 Métricas Avanzadas de Machine Learning")
+        
+        # Calcular métricas avanzadas
+        metricas_ml = calcular_metricas_avanzadas_ml(retornos)
+        
+        if metricas_ml:
+            # Organizar métricas por activo
+            activos_metricas = {}
+            for key, value in metricas_ml.items():
+                activo = key.split('_')[0]
+                metrica = '_'.join(key.split('_')[1:])
+                
+                if activo not in activos_metricas:
+                    activos_metricas[activo] = {}
+                activos_metricas[activo][metrica] = value
+            
+            # Mostrar tabla resumen
+            df_metricas_ml = pd.DataFrame(activos_metricas).T
+            
+            # Seleccionar métricas más importantes
+            columnas_importantes = [col for col in df_metricas_ml.columns 
+                                 if any(x in col for x in ['media', 'volatilidad', 'var_5', 'max_drawdown', 'sharpe'])]
+            
+            if columnas_importantes:
+                st.dataframe(df_metricas_ml[columnas_importantes].round(4))
+            
+            # Análisis de riesgo avanzado
+            st.markdown("#### ⚠️ Análisis de Riesgo Avanzado")
+            
+            riesgos_detectados = []
+            
+            for activo, metricas in activos_metricas.items():
+                # Detectar alta volatilidad
+                if 'volatilidad' in metricas and metricas['volatilidad'] > 0.05:
+                    riesgos_detectados.append(f"🔴 {activo}: Alta volatilidad ({metricas['volatilidad']:.3f})")
+                
+                # Detectar alto drawdown
+                if 'max_drawdown' in metricas and metricas['max_drawdown'] < -0.2:
+                    riesgos_detectados.append(f"🔴 {activo}: Drawdown significativo ({metricas['max_drawdown']:.3f})")
+                
+                # Detectar asimetría negativa severa
+                if 'asimetria' in metricas and metricas['asimetria'] < -1:
+                    riesgos_detectados.append(f"🟡 {activo}: Asimetría negativa ({metricas['asimetria']:.3f})")
+            
+            if riesgos_detectados:
+                st.markdown("**🚨 Riesgos Detectados:**")
+                for riesgo in riesgos_detectados:
+                    st.write(riesgo)
+            else:
+                st.success("✅ No se detectaron riesgos significativos en el análisis ML")
+        
+        # Recomendaciones finales
+        st.markdown("#### 🎯 Recomendaciones Basadas en ML")
+        
+        recomendaciones = [
+            "📊 **Diversificación**: Use los resultados de clustering para identificar activos complementarios",
+            "📈 **Rebalanceo**: Considere los resultados de regresión para ajustar pesos del portafolio",
+            "🎯 **Señales**: Use la clasificación como una herramienta adicional, no como única base para decisiones",
+            "🧠 **Predicciones**: Las redes neuronales pueden ayudar a identificar tendencias, pero siempre valide con análisis fundamental",
+            "⚠️ **Gestión de riesgo**: Monitoree las métricas avanzadas regularmente para detectar cambios en el perfil de riesgo"
+        ]
+        
+        for recomendacion in recomendaciones:
+            st.markdown(recomendacion)
+        
+        st.markdown("---")
+        st.markdown("**📚 Nota Educativa**: Todos los modelos de ML son herramientas de apoyo para el análisis. La toma de decisiones de inversión debe considerar múltiples factores incluyendo análisis fundamental, condiciones macroeconómicas y tolerancia al riesgo personal.")
+
+def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Mejorar la función de optimización con integración de ML
+    """
+    st.markdown("### 🎯 Optimización de Portafolio con Machine Learning")
+    
+    # Obtener símbolos del portafolio
+    activos = portafolio.get('activos', [])
+    simbolos = [activo.get('titulo', {}).get('simbolo', '') for activo in activos if activo.get('titulo')]
+    simbolos = list(filter(None, simbolos))  # Eliminar vacíos
+    
+    if len(simbolos) < 2:
+        st.warning("⚠️ Se necesitan al menos 2 activos en el portafolio para optimización")
+        return
+    
+    # Obtener datos históricos
+    with st.spinner("📊 Cargando datos históricos para optimización..."):
+        mean_returns, cov_matrix, datos_precios = get_historical_data_for_optimization(
+            token_acceso, simbolos, fecha_desde, fecha_hasta
+        )
+    
+    if datos_precios is None or len(datos_precios) < 30:
+        st.error("❌ No hay suficientes datos históricos para optimización")
+        return
+    
+    # Calcular retornos
+    retornos = datos_precios.pct_change().dropna()
+    
+    # Optimización básica
+    st.markdown("#### ⚙️ Optimización Básica")
+    
+    tipo_portafolio = st.selectbox(
+        "Seleccione el tipo de optimización",
+        options=[
+            "markowitz", 
+            "min-variance-l1", 
+            "min-variance-l2", 
+            "equi-weight"
+        ],
+        index=0
+    )
+    
+    if tipo_portafolio == "markowitz":
+        target_return = st.number_input(
+            "Retorno objetivo (anualizado)", 
+            value=0.0, 
+            format="%.2f",
+            help="Retorno esperado del portafolio en porcentaje"
+        ) / 100
+    else:
+        target_return = None
+    
+    if st.button("🔄 Ejecutar Optimización"):
+        with st.spinner("Ejecutando optimización..."):
+            if tipo_portafolio == "markowitz" and target_return is not None:
+                resultado_opt = optimize_portfolio(retornos, target_return=target_return)
+            else:
+                resultado_opt = optimize_portfolio(retornos)
+            
+            if resultado_opt is not None:
+                pesos = resultado_opt
+                
+                # Mostrar pesos optimizados
+                st.markdown("#### 📊 Pesos Optimizados")
+                for i, simbolo in enumerate(retornos.columns):
+                    st.write(f"• {simbolo}: {pesos[i]:.2%}")
+                
+                # Gráfico de pesos
+                fig_pesos = go.Figure(data=[go.Pie(
+                    labels=retornos.columns,
+                    values=pesos,
+                    textinfo='label+percent',
+                    hole=0.3
+                )])
+                fig_pesos.update_layout(title="Distribución de Pesos en el Portafolio Optimo")
+                st.plotly_chart(fig_pesos, use_container_width=True)
+                
+                # Análisis de riesgo con ML
+                st.markdown("#### 🤖 Análisis de Riesgo con Machine Learning")
+                
+                metricas_ml = calcular_metricas_avanzadas_ml(retornos)
+                
+                if metricas_ml:
+                    # Organizar métricas por activo
+                    activos_metricas = {}
+                    for key, value in metricas_ml.items():
+                        activo = key.split('_')[0]
+                        metrica = '_'.join(key.split('_')[1:])
+                        
+                        if activo not in activos_metricas:
+                            activos_metricas[activo] = {}
+                        activos_metricas[activo][metrica] = value
+                    
+                    # Mostrar tabla resumen
+                    df_metricas_ml = pd.DataFrame(activos_metricas).T
+                    
+                    # Seleccionar métricas más importantes
+                    columnas_importantes = [col for col in df_metricas_ml.columns 
+                                         if any(x in col for x in ['media', 'volatilidad', 'var_5', 'max_drawdown', 'sharpe'])]
+                    
+                    if columnas_importantes:
+                        st.dataframe(df_metricas_ml[columnas_importantes].round(4))
+                    
+                    # Análisis de riesgo avanzado
+                    st.markdown("#### ⚠️ Análisis de Riesgo Avanzado")
+                    
+                    riesgos_detectados = []
+                    
+                    for activo, metricas in activos_metricas.items():
+                        # Detectar alta volatilidad
+                        if 'volatilidad' in metricas and metricas['volatilidad'] > 0.05:
+                            riesgos_detectados.append(f"🔴 {activo}: Alta volatilidad ({metricas['volatilidad']:.3f})")
+                        
+                        # Detectar alto drawdown
+                        if 'max_drawdown' in metricas and metricas['max_drawdown'] < -0.2:
+                            riesgos_detectados.append(f"🔴 {activo}: Drawdown significativo ({metricas['max_drawdown']:.3f})")
+                        
+                        # Detectar asimetría negativa severa
+                        if 'asimetria' in metricas and metricas['asimetria'] < -1:
+                            riesgos_detectados.append(f"🟡 {activo}: Asimetría negativa ({metricas['asimetria']:.3f})")
+                    
+                    if riesgos_detectados:
+                        st.markdown("**🚨 Riesgos Detectados:**")
+                        for riesgo in riesgos_detectados:
+                            st.write(riesgo)
+                    else:
+                        st.success("✅ No se detectaron riesgos significativos en el análisis ML")
+        
+        # Integración de análisis ML en la optimización
+        if st.button("🤖 Analizar con Machine Learning"):
+            mostrar_analisis_machine_learning(portafolio, token_acceso, fecha_desde, fecha_hasta)
