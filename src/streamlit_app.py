@@ -1552,106 +1552,106 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
-# Clase PortfolioManager simplificada para compatibilidad
-class PortfolioManager:
-    """
-    Clase simplificada para manejo de portafolio y optimización
-    """
-    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
-        self.symbols = symbols
-        self.token = token
-        self.fecha_desde = fecha_desde
-        self.fecha_hasta = fecha_hasta
-        self.data_loaded = False
-        self.returns = None
-        self.prices = None
-    
-    def load_data(self):
-        """
-        Carga datos históricos para los símbolos del portafolio
-        """
-        try:
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
-            )
-            
-            if mean_returns is not None and cov_matrix is not None:
-                self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
-                self.prices = df_precios
-                self.mean_returns = mean_returns
-                self.cov_matrix = cov_matrix
-                self.data_loaded = True
-                return True
-            else:
-                return False
-                
-        except Exception as e:
-            st.error(f"Error cargando datos: {str(e)}")
-            return False
-    
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
-        """
-        Computa la optimización del portafolio
-        """
-        if not self.data_loaded or self.returns is None:
-            return None
-        
-        try:
-            # Optimización básica usando pesos iguales como fallback
-            n_assets = len(self.returns.columns)
-            
-            if strategy == 'equi-weight':
-                weights = np.array([1/n_assets] * n_assets)
-            else:
-                # Intentar optimización real
-                weights = optimize_portfolio(self.returns, target_return=target_return)
-            
-            # Crear objeto de resultado
-            portfolio_output = PortfolioOutput(
-                weights=weights,
-                asset_names=list(self.returns.columns),
-                returns=self.returns
-            )
-            
-            return portfolio_output
-            
-        except Exception as e:
-            st.error(f"Error en optimización: {str(e)}. Usando pesos iguales.")
-            return np.array([1/n_assets] * n_assets)
+# --- CLASES Y FUNCIONES COMPLETAS DE MACHINE LEARNING PARA FINANZAS CUANTITATIVAS ---
 
-class PortfolioOutput:
+def load_timeseries(ric, directory=None, data_source='iol', token_portador=None, fecha_desde=None, fecha_hasta=None):
     """
-    Clase para almacenar resultados de optimización de portafolio
+    Carga series de tiempo desde diferentes fuentes: archivos CSV, API de IOL, o Yahoo Finance
     """
-    def __init__(self, weights, asset_names, returns):
-        self.weights = weights
-        self.asset_names = asset_names
-        self.returns = returns
-        self.portfolio_returns = None
+    if data_source == 'csv' and directory:
+        # Cargar desde archivo CSV
+        import os
+        path = os.path.join(directory, f"{ric}.csv")
+        print(f"Cargando datos desde {path}")
+        try:
+            raw_data = pd.read_csv(path)
+        except Exception as e:
+            print(f"Error al cargar el archivo {path}: {e}")
+            return pd.DataFrame()
         
-        if returns is not None and len(weights) == len(returns.columns):
-            self.portfolio_returns = (returns * weights).sum(axis=1)
+        t = pd.DataFrame()
+        
+        if 'datetime' in raw_data.columns:
+            # Formato del archivo ^FCHI.csv
+            t['date'] = pd.to_datetime(raw_data['datetime'], utc=True, errors='coerce').dt.normalize()
+            t['close'] = raw_data['Close']
+        elif 'fechaHora' in raw_data.columns:
+            # Formato del archivo ALUA.csv
+            t['date'] = pd.to_datetime(raw_data['fechaHora'], utc=True, errors='coerce').dt.normalize()
+            t['close'] = raw_data['ultimoPrecio']
+        elif 'Date' in raw_data.columns and 'Close' in raw_data.columns:
+            # Formato del archivo con columnas 'Date' y 'Close'
+            t['date'] = pd.to_datetime(raw_data['Date'], utc=True, errors='coerce').dt.normalize()
+            t['close'] = raw_data['Close']
+        else:
+            print(f"Formato de archivo desconocido para {ric}. Columnas disponibles: {raw_data.columns}")
+            return pd.DataFrame()
+            
+    elif data_source == 'iol' and token_portador and fecha_desde and fecha_hasta:
+        # Cargar desde API de IOL
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d') if hasattr(fecha_desde, 'strftime') else str(fecha_desde)
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d') if hasattr(fecha_hasta, 'strftime') else str(fecha_hasta)
+        
+        # Determinar mercados según el tipo de instrumento
+        if ric.upper() == "ADCGLOA":
+            mercados = ['FCI']
+        elif ric.upper().startswith("AE") or ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O"):
+            mercados = ['bCBA']
+        elif ric.upper().endswith("48") or ric.upper().endswith("30") or ric.upper().endswith("29"):
+            mercados = ['bCBA']
+        elif ric.upper().startswith("MERV") or ric.upper().startswith("OPC"):
+            mercados = ['Opciones']
+        else:
+            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
+        
+        # Intentar obtener datos de cada mercado
+        for mercado in mercados:
+            try:
+                simbolo_consulta = ric
+                if mercado == 'bCBA' and (ric.upper().endswith("D") or ric.upper().endswith("C") or ric.upper().endswith("O") or ric.upper().startswith("AE")):
+                    clase_d = obtener_clase_d(ric, mercado, token_portador)
+                    if clase_d:
+                        simbolo_consulta = clase_d
+
+                serie = obtener_serie_historica_iol(
+                    token_portador, mercado, simbolo_consulta,
+                    fecha_desde_str, fecha_hasta_str
+                )
+
+                if serie is not None and len(serie) > 10:
+                    serie_clean = serie.dropna()
+                    if len(serie_clean) > 10 and serie_clean.nunique() > 1 and serie_clean.std() > 0:
+                        t = pd.DataFrame()
+                        t['date'] = serie_clean.index
+                        t['close'] = serie_clean.values
+                        break
+            except Exception:
+                continue
+        
+        if 't' not in locals() or t.empty:
+            # Fallback a yfinance
+            try:
+                serie_yf = obtener_datos_alternativos_yfinance(ric, fecha_desde, fecha_hasta)
+                if serie_yf is not None and len(serie_yf) > 10:
+                    t = pd.DataFrame()
+                    t['date'] = serie_yf.index
+                    t['close'] = serie_yf.values
+            except Exception:
+                return pd.DataFrame()
     
-    def get_metrics_dict(self):
-        """
-        Calcula y retorna métricas del portafolio
-        """
-        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
-            return {
-                'Mean Daily': 0,
-                'Volatility Daily': 0,
-                'Sharpe Ratio': 0,
-                'VaR 95%': 0
-            }
-        
-        mean_daily = self.portfolio_returns.mean()
-        vol_daily = self.portfolio_returns.std()
-        sharpe = mean_daily / vol_daily if vol_daily > 0 else 0
-        var_95 = np.percentile(self.portfolio_returns, 5)
-        
-        return {
-            'Mean Daily': mean_daily,
-            'Volatility Daily': vol_daily,
+    elif data_source == 'yfinance':
+        # Cargar desde Yahoo Finance
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(ric)
+            data = ticker.history(start=fecha_desde, end=fecha_hasta)
+            if not data.empty:
+                t = pd.DataFrame()
+                t['date'] = data.index
+                t['close'] = data['Close'].values
+        except Exception as e:
+            print(f"Error cargando datos de Yahoo Finance para {ric}: {e}")
+            return pd.DataFrame()
             'Sharpe Ratio': sharpe,
             'VaR 95%': var_95
         }
