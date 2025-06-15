@@ -1826,3 +1826,116 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Permite solo posiciones compradoras
         - Suma de pesos = 100%
         """)
+
+# Asegurar que main() se ejecute cuando se corre el script
+def main():
+    # Inicializar sesión de Streamlit
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=30)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+    
+    st.title("📊 IOL Portfolio Analyzer")
+    
+    # Sección de configuración
+    with st.expander("⚙️ Configuración", expanded=True):
+        # Autenticación
+        st.subheader("🔑 Autenticación")
+        usuario = st.text_input("Usuario", "")
+        contraseña = st.text_input("Contraseña", "", type="password")
+        
+        if st.button("🔑 Obtener Tokens"):
+            if usuario and contraseña:
+                with st.spinner("Obteniendo tokens..."):
+                    token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                    if token_acceso:
+                        st.session_state.token_acceso = token_acceso
+                        st.success("✅ Tokens obtenidos exitosamente")
+                    else:
+                        st.error("❌ No se pudieron obtener los tokens")
+            else:
+                st.warning("⚠️ Ingrese usuario y contraseña")
+        
+        # Selección de cliente
+        st.subheader("👥 Selección de Cliente")
+        if st.session_state.token_acceso:
+            clientes = obtener_lista_clientes(st.session_state.token_acceso)
+            if clientes:
+                st.session_state.cliente_seleccionado = st.selectbox(
+                    "Seleccione un cliente:",
+                    options=clientes,
+                    format_func=lambda x: f"{x['apellidoYNombre']} - {x['numeroCliente']} ({x['tipoCliente']})"
+                )
+            else:
+                st.warning("No se encontraron clientes asociados")
+        else:
+            st.info("Primero debe obtener los tokens de acceso")
+        
+        # Fechas de análisis
+        st.subheader("📅 Rango de Fechas")
+        fecha_desde = st.date_input("Desde", st.session_state.fecha_desde)
+        fecha_hasta = st.date_input("Hasta", st.session_state.fecha_hasta)
+        
+        if fecha_desde > fecha_hasta:
+            st.warning("⚠️ La fecha 'Desde' no puede ser mayor que la fecha 'Hasta'")
+        
+        # Botón de actualización
+        if st.button("🔄 Actualizar Análisis"):
+            if st.session_state.cliente_seleccionado:
+                with st.spinner("Actualizando análisis..."):
+                    # Obtener ID del cliente
+                    id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
+                    
+                    # Obtener portafolio
+                    portafolio = obtener_portafolio(st.session_state.token_acceso, id_cliente)
+                    if portafolio:
+                        mostrar_resumen_portafolio(portafolio)
+                    else:
+                        st.warning("No se pudo obtener el portafolio del cliente")
+            else:
+                st.warning("Seleccione un cliente para actualizar el análisis")
+    
+    # --- Secciones principales del análisis ---
+    if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+        cliente = st.session_state.cliente_seleccionado
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        
+        # Resumen del portafolio
+        st.subheader("📈 Resumen del Portafolio")
+        portafolio = obtener_portafolio(st.session_state.token_acceso, id_cliente)
+        if portafolio:
+            mostrar_resumen_portafolio(portafolio)
+        else:
+            st.warning("No se pudo obtener el portafolio del cliente")
+        
+        # Estado de cuenta
+        st.subheader("💰 Estado de Cuenta")
+        estado_cuenta = obtener_estado_cuenta(st.session_state.token_acceso, id_cliente)
+        if estado_cuenta:
+            mostrar_estado_cuenta(estado_cuenta)
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
+        
+        # Optimización de portafolio
+        st.subheader("🎯 Optimización de Portafolio")
+        if portafolio:
+            mostrar_optimizacion_portafolio(portafolio, st.session_state.token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+        else:
+            st.warning("No se pudo obtener el portafolio para optimización")
+        
+        # Análisis técnico (placeholder)
+        st.subheader("📊 Análisis Técnico")
+        st.info("🚧 Funcionalidad en desarrollo")
+        
+        # Cotizaciones y mercado
+        st.subheader("💱 Cotizaciones y Mercado")
+        mostrar_cotizaciones_mercado(st.session_state.token_acceso)
+    else:
+        st.info("Por favor, complete la autenticación y selección de cliente para continuar.")
+
+if __name__ == "__main__":
+    main()
