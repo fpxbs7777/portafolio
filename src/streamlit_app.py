@@ -1600,800 +1600,108 @@ def mostrar_portafolio():
     
     if portafolio:
         mostrar_resumen_portafolio(portafolio)
+
+        # --- INICIO: Agregar análisis avanzado por activo ---
+        st.markdown("### 🔬 Análisis Avanzado de Activos del Portafolio")
+        activos = portafolio.get('activos', [])
+        if activos:
+            fecha_fin = date.today()
+            fecha_inicio = fecha_fin - timedelta(days=365)
+            for activo in activos:
+                simbolo = activo.get('titulo', {}).get('simbolo', None)
+                if simbolo:
+                    with st.expander(f"Análisis avanzado: {simbolo}", expanded=False):
+                        analisis_avanzado_activo_portafolio(simbolo, fecha_inicio, fecha_fin)
+        else:
+            st.info("El portafolio no contiene activos para análisis avanzado.")
+        # --- FIN: Agregar análisis avanzado por activo ---
+
     else:
         st.error("❌ No se pudo obtener el portafolio del cliente")
 
-def mostrar_analisis():
+# === INICIO: Integración de análisis avanzado de activos en el portafolio ===
+
+def analisis_avanzado_activo_portafolio(simbolo, fecha_inicio, fecha_fin):
     """
-    Pantalla de análisis avanzado - COMPLETAMENTE IMPLEMENTADA
+    Análisis avanzado de un activo del portafolio usando ML, volumen, gráficos, etc.
     """
-    st.markdown("# 📊 Análisis Avanzado")
-    
-    if not st.session_state.cliente_seleccionado:
-        st.warning("⚠️ Seleccione un cliente para realizar análisis")
+    import yfinance as yf
+    import pandas as pd
+    import numpy as np
+    import plotly.graph_objects as go
+    import plotly.express as px
+    from plotly.subplots import make_subplots
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+    # Descargar datos
+    datos = yf.download(simbolo, start=fecha_inicio, end=fecha_fin)
+    if datos.empty:
+        st.warning(f"No se encontraron datos para {simbolo}")
         return
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Análisis Técnico", "🎯 Monte Carlo", "📉 Backtesting", "🔍 Fundamental"])
-    
-    with tab1:
-        st.markdown("### 📈 Análisis Técnico Avanzado")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            simbolo = st.text_input("🏷️ Símbolo", placeholder="Ej: GGAL, YPF")
-        with col2:
-            periodo = st.slider("📅 Período (días)", 30, 365, 180)
-        with col3:
-            mercado = st.selectbox("🏢 Mercado", ["bCBA", "bMAE", "MERV"])
-        
-        if st.button("🚀 Analizar Técnicamente") and simbolo:
-            with st.spinner("Calculando indicadores técnicos..."):
-                fecha_fin = date.today()
-                fecha_inicio = fecha_fin - timedelta(days=periodo)
-                
-                serie = obtener_serie_historica_iol(
-                    st.session_state.token_acceso,
-                    mercado,
-                    simbolo,
-                    fecha_inicio.strftime('%Y-%m-%d'),
-                    fecha_fin.strftime('%Y-%m-%d')
-                )
-                
-                if serie is not None and len(serie) > 50:
-                    df_indicadores = calcular_indicadores_tecnicos(serie)
-                    
-                    if df_indicadores is not None:
-                        # Mostrar métricas actuales
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        precio_actual = df_indicadores['precio'].iloc[-1]
-                        rsi_actual = df_indicadores['rsi'].iloc[-1]
-                        macd_actual = df_indicadores['macd'].iloc[-1]
-                        bb_pos = df_indicadores['bb_position'].iloc[-1]
-                        
-                        col1.metric("💰 Precio Actual", f"${precio_actual:.2f}")
-                        col2.metric("📊 RSI", f"{rsi_actual:.1f}")
-                        col3.metric("📈 MACD", f"{macd_actual:.3f}")
-                        col4.metric("🎯 Posición BB", f"{bb_pos:.2f}")
-                        
-                        # Gráfico técnico
-                        fig_tecnico = crear_grafico_analisis_tecnico(df_indicadores, simbolo)
-                        st.plotly_chart(fig_tecnico, use_container_width=True)
-                        
-                        # Interpretación
-                        with st.expander("🔍 Interpretación Técnica"):
-                            st.markdown(f"""
-                            **Análisis Técnico de {simbolo}:**
-                            
-                            **RSI ({rsi_actual:.1f}):** {'🔴 Sobrecomprado' if rsi_actual > 70 else '🟢 Sobreventa' if rsi_actual < 30 else '🟡 Neutral'}
-                            
-                            **MACD:** {'📈 Tendencia alcista' if macd_actual > 0 else '📉 Tendencia bajista'}
-                            
-                            **Bandas de Bollinger:** {'🔴 Cerca del límite superior' if bb_pos > 0.8 else '🟢 Cerca del límite inferior' if bb_pos < 0.2 else '🟡 Rango medio'}
-                            
-                            **Recomendaciones:**
-                            - Seguir de cerca los cruces de medias móviles
-                            - Monitorear divergencias en RSI y MACD
-                            - Usar las Bandas de Bollinger para niveles de soporte/resistencia
-                            """)
-                else:
-                    st.error("❌ No se pudieron obtener suficientes datos históricos")
-    
-    with tab2:
-        st.markdown("### 🎯 Simulación Monte Carlo")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            precio_inicial = st.number_input("💰 Precio Inicial", min_value=1.0, value=100.0)
-            rendimiento_anual = st.number_input("📈 Rendimiento Anual (%)", -50.0, 100.0, 10.0) / 100
-        with col2:
-            volatilidad_anual = st.number_input("📊 Volatilidad Anual (%)", 1.0, 100.0, 25.0) / 100
-            dias_simulacion = st.slider("📅 Días a Simular", 1, 365, 252)
-        
-        num_simulaciones = st.slider("🔢 Número de Simulaciones", 100, 5000, 1000)
-        
-        if st.button("🎲 Ejecutar Simulación Monte Carlo"):
-            with st.spinner("Ejecutando simulación..."):
-                simulaciones = simulacion_monte_carlo(
-                    precio_inicial, rendimiento_anual, volatilidad_anual, 
-                    dias_simulacion, num_simulaciones
-                )
-                
-                # Estadísticas finales
-                precios_finales = simulaciones[:, -1]
-                
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("📈 Precio Promedio Final", f"${np.mean(precios_finales):.2f}")
-                col2.metric("📊 Precio Mediano Final", f"${np.median(precios_finales):.2f}")
-                col3.metric("📉 Precio Mínimo", f"${np.min(precios_finales):.2f}")
-                col4.metric("📈 Precio Máximo", f"${np.max(precios_finales):.2f}")
-                
-                # Gráfico de simulaciones
-                fig_mc = go.Figure()
-                
-                # Mostrar solo algunas simulaciones para claridad
-                for i in range(min(50, num_simulaciones)):
-                    fig_mc.add_trace(go.Scatter(
-                        x=list(range(dias_simulacion)),
-                        y=simulaciones[i],
-                        mode='lines',
-                        line=dict(width=0.5, color='lightblue'),
-                        opacity=0.3,
-                        showlegend=False
-                    ))
-                
-                # Promedio
-                promedio_simulaciones = np.mean(simulaciones, axis=0)
-                fig_mc.add_trace(go.Scatter(
-                    x=list(range(dias_simulacion)),
-                    y=promedio_simulaciones,
-                    mode='lines',
-                    name='Promedio',
-                    line=dict(width=3, color='red')
-                ))
-                
-                fig_mc.update_layout(
-                    title="Simulación Monte Carlo de Precios",
-                    xaxis_title="Días",
-                    yaxis_title="Precio",
-                    height=400
-                )
-                
-                st.plotly_chart(fig_mc, use_container_width=True)
-                
-                # Histograma de precios finales
-                fig_hist = go.Figure(data=[go.Histogram(x=precios_finales, nbinsx=50)])
-                fig_hist.update_layout(
-                    title="Distribución de Precios Finales",
-                    xaxis_title="Precio Final",
-                    yaxis_title="Frecuencia",
-                    height=300
-                )
-                st.plotly_chart(fig_hist, use_container_width=True)
-    
-    with tab3:
-        st.markdown("### 📉 Backtesting de Estrategias")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            simbolo_bt = st.text_input("🏷️ Símbolo para BT", placeholder="Ej: GGAL, YPF")
-        with col2:
-            periodo_bt = st.slider("📅 Período BT (días)", 30, 365, 252)
-        with col3:
-            estrategia_bt = st.selectbox("📊 Estrategia", ["ma_crossover", "rsi"])
-        
-        if st.button("🔄 Ejecutar Backtesting") and simbolo_bt:
-            with st.spinner("Ejecutando backtesting..."):
-                fecha_fin = date.today()
-                fecha_inicio = fecha_fin - timedelta(days=periodo_bt)
-                
-                serie_bt = obtener_serie_historica_iol(
-                    st.session_state.token_acceso,
-                    "bCBA",
-                    simbolo_bt,
-                    fecha_inicio.strftime('%Y-%m-%d'),
-                    fecha_fin.strftime('%Y-%m-%d')
-                )
-                
-                if serie_bt is not None and len(serie_bt) > 50:
-                    resultados_bt = backtesting_estrategia_simple(serie_bt, estrategia_bt)
-                    
-                    # Mostrar métricas
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("🎯 Retorno Estrategia", f"{resultados_bt['retorno_estrategia']:.2%}")
-                    col2.metric("🏪 Retorno Buy & Hold", f"{resultados_bt['retorno_buy_hold']:.2%}")
-                    col3.metric("📊 Sharpe Estrategia", f"{resultados_bt['sharpe_estrategia']:.3f}")
-                    col4.metric("📊 Sharpe B&H", f"{resultados_bt['sharpe_buy_hold']:.3f}")
-                    
-                    # Gráfico de performance
-                    df_bt = resultados_bt['df']
-                    
-                    fig_bt = go.Figure()
-                    
-                    # Retornos acumulados
-                    ret_acum_estrategia = (1 + df_bt['retorno_estrategia'].fillna(0)).cumprod()
-                    ret_acum_bh = (1 + df_bt['retorno'].fillna(0)).cumprod()
-                    
-                    fig_bt.add_trace(go.Scatter(
-                        x=df_bt.index,
-                        y=ret_acum_estrategia,
-                        name='Estrategia',
-                        line=dict(color='blue')
-                    ))
-                    
-                    fig_bt.add_trace(go.Scatter(
-                        x=df_bt.index,
-                        y=ret_acum_bh,
-                        name='Buy & Hold',
-                        line=dict(color='red')
-                    ))
-                    
-                    fig_bt.update_layout(
-                        title=f"Backtesting: {estrategia_bt.upper()} vs Buy & Hold",
-                        xaxis_title="Fecha",
-                        yaxis_title="Retorno Acumulado",
-                        height=400
-                    )
-                    
-                    st.plotly_chart(fig_bt, use_container_width=True)
-                    st.success("✅ Backtesting completado")
-                else:
-                    st.error("❌ No se pudieron obtener datos suficientes para backtesting")
-    
-    with tab4:
-        st.markdown("### 🔍 Análisis Fundamental")
-        st.info("🚧 Próximamente: Análisis de ratios financieros, valoración por múltiplos, análisis de estados financieros")
 
-def panel_opciones_argentinas(token_acceso):
-    """
-    Panel para análisis de opciones argentinas - COMPLETAMENTE IMPLEMENTADO
-    """
-    st.markdown("### 🟢 Panel de Opciones Argentinas")
-    
-    tab1, tab2, tab3 = st.tabs(["📊 Valuación Black-Scholes", "📈 Análisis de Greeks", "🎯 Estrategias"])
-    
-    with tab1:
-        st.markdown("#### 💰 Calculadora Black-Scholes")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            S = st.number_input("💵 Precio del Subyacente", min_value=1.0, value=100.0)
-            K = st.number_input("🎯 Precio de Ejercicio", min_value=1.0, value=100.0)
-        
-        with col2:
-            T = st.number_input("⏰ Tiempo a Vencimiento (años)", min_value=0.01, max_value=5.0, value=0.25, step=0.01)
-            r = st.number_input("📈 Tasa Libre de Riesgo (%)", min_value=0.0, max_value=50.0, value=5.0) / 100
-        
-        with col3:
-            sigma = st.number_input("📊 Volatilidad Implícita (%)", min_value=1.0, max_value=200.0, value=25.0) / 100
-            option_type = st.selectbox("🔄 Tipo de Opción", ["call", "put"])
-        
-        if st.button("💰 Calcular Precio"):
-            precio_bs = calcular_black_scholes(S, K, T, r, sigma, option_type)
-            greeks = calcular_greeks(S, K, T, r, sigma, option_type)
-            
-            st.success(f"💰 **Precio {option_type.upper()}:** ${precio_bs:.4f}")
-            
-            # Mostrar Greeks
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Δ Delta", f"{greeks['delta']:.4f}")
-            col2.metric("Γ Gamma", f"{greeks['gamma']:.6f}")
-            col3.metric("Θ Theta", f"{greeks['theta']:.4f}")
-            col4.metric("ν Vega", f"{greeks['vega']:.4f}")
-            col5.metric("ρ Rho", f"{greeks['rho']:.4f}")
-            
-            # Gráfico de sensibilidad al precio
-            precios_subyacente = np.linspace(S * 0.5, S * 1.5, 50)
-            precios_opcion = [calcular_black_scholes(p, K, T, r, sigma, option_type) for p in precios_subyacente]
-            
-            fig_sens = go.Figure()
-            fig_sens.add_trace(go.Scatter(
-                x=precios_subyacente,
-                y=precios_opcion,
-                mode='lines',
-                name=f'Precio {option_type.upper()}'
-            ))
-            
-            # Punto actual
-            fig_sens.add_trace(go.Scatter(
-                x=[S],
-                y=[precio_bs],
-                mode='markers',
-                marker=dict(size=10, color='red'),
-                name='Precio Actual'
-            ))
-            
-            fig_sens.update_layout(
-                title=f"Sensibilidad del Precio de la Opción {option_type.upper()}",
-                xaxis_title="Precio del Subyacente",
-                yaxis_title="Precio de la Opción",
-                height=400
-            )
-            
-            st.plotly_chart(fig_sens, use_container_width=True)
-    
-    with tab2:
-        st.markdown("#### 📈 Análisis Detallado de Greeks")
-        
-        if 'greeks' in locals():
-            # Gráficos de sensibilidad
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Delta vs Precio del Subyacente
-                precios = np.linspace(S * 0.7, S * 1.3, 30)
-                deltas = [calcular_greeks(p, K, T, r, sigma, option_type)['delta'] for p in precios]
-                
-                fig_delta = go.Figure()
-                fig_delta.add_trace(go.Scatter(x=precios, y=deltas, mode='lines', name='Delta'))
-                fig_delta.update_layout(title="Delta vs Precio Subyacente", height=300)
-                st.plotly_chart(fig_delta, use_container_width=True)
-            
-            with col2:
-                # Gamma vs Precio del Subyacente
-                gammas = [calcular_greeks(p, K, T, r, sigma, option_type)['gamma'] for p in precios]
-                
-                fig_gamma = go.Figure()
-                fig_gamma.add_trace(go.Scatter(x=precios, y=gammas, mode='lines', name='Gamma', line=dict(color='green')))
-                fig_gamma.update_layout(title="Gamma vs Precio Subyacente", height=300)
-                st.plotly_chart(fig_gamma, use_container_width=True)
-            
-            # Interpretación de Greeks
-            with st.expander("📚 Interpretación de Greeks"):
-                st.markdown(f"""
-                **Delta ({greeks['delta']:.4f}):** {'La opción sube $1 por cada $1 que sube el subyacente' if greeks['delta'] > 0 else 'La opción baja $1 por cada $1 que sube el subyacente'}
-                
-                **Gamma ({greeks['gamma']:.6f}):** {'Acelera las ganancias si el precio sube' if greeks['gamma'] > 0 else 'Acelera las pérdidas si el precio baja'}
-                
-                **Theta ({greeks['theta']:.4f}):** La opción pierde ${abs(greeks['theta']):.4f} por día por el paso del tiempo
-                
-                **Vega ({greeks['vega']:.4f}):** La opción {'sube' if greeks['vega'] > 0 else 'baja'} ${abs(greeks['vega']):.4f} por cada 1% de aumento en volatilidad
-                
-                **Rho ({greeks['rho']:.4f}):** La opción {'sube' if greeks['rho'] > 0 else 'baja'} ${abs(greeks['rho']):.4f} por cada 1% de aumento en tasas
-                """)
-    
-    with tab3:
-        st.markdown("### 🎯 Análisis de Estrategias con Opciones")
-        
-        estrategia = st.selectbox("📋 Seleccionar Estrategia", [
-            "Long Call", "Long Put", "Covered Call", "Protective Put", 
-            "Bull Call Spread", "Bear Put Spread", "Long Straddle", "Long Strangle"
-        ])
-        
-        st.info(f"📊 Configurando estrategia: **{estrategia}**")
-        
-        if estrategia == "Long Call":
-            st.markdown("**Estrategia:** Compra de Call")
-            payoff_desc = "Ganancias ilimitadas si el precio sube por encima del strike + prima"
-        elif estrategia == "Covered Call":
-            st.markdown("**Estrategia:** Acción + Venta de Call")
-            payoff_desc = "Genera ingresos adicionales, limita ganancias al strike"
-        else:
-            payoff_desc = f"Análisis de {estrategia} próximamente"
-        
-        st.info(f"💡 **Descripción:** {payoff_desc}")
+    # Calcular indicadores técnicos básicos
+    datos['MA5'] = datos['Close'].rolling(window=5, min_periods=1).mean()
+    datos['MA20'] = datos['Close'].rolling(window=20, min_periods=1).mean()
+    datos['RSI'] = calcular_rsi(datos['Close'])
+    datos['MACD'] = datos['Close'].ewm(span=12, adjust=False).mean() - datos['Close'].ewm(span=26, adjust=False).mean()
+    datos['Signal'] = datos['MACD'].ewm(span=9, adjust=False).mean()
+    datos['Target'] = (datos['Close'].shift(-1) > datos['Close']).astype(int)
 
-def calcular_indicadores_tecnicos(serie_precios, ventana_corta=12, ventana_larga=26):
-    """
-    Calcula indicadores técnicos avanzados
-    """
-    if serie_precios is None or len(serie_precios) < ventana_larga:
-        return None
-    
-    df = pd.DataFrame({'precio': serie_precios})
-    
-    # Medias móviles
-    df['ma_5'] = df['precio'].rolling(window=5).mean()
-    df['ma_20'] = df['precio'].rolling(window=20).mean()
-    df['ma_50'] = df['precio'].rolling(window=50).mean()
-    
-    # MACD
-    exp1 = df['precio'].ewm(span=ventana_corta).mean()
-    exp2 = df['precio'].ewm(span=ventana_larga).mean()
-    df['macd'] = exp1 - exp2
-    df['signal'] = df['macd'].ewm(span=9).mean()
-    df['histogram'] = df['macd'] - df['signal']
-    
-    # RSI
-    delta = df['precio'].diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-    rs = avg_gain / avg_loss
-    df['rsi'] = 100 - (100 / (1 + rs))
-    
-    # Bandas de Bollinger
-    df['bb_mid'] = df['precio'].rolling(window=20).mean()
-    std = df['precio'].rolling(window=20).std()
-    df['bb_upper'] = df['bb_mid'] + (std * 2)
-    df['bb_lower'] = df['bb_mid'] - (std * 2)
-    df['bb_width'] = df['bb_upper'] - df['bb_lower']
-    df['bb_position'] = (df['precio'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-    
-    # Estocástico
-    low_14 = df['precio'].rolling(window=14).min()
-    high_14 = df['precio'].rolling(window=14).max()
-    df['stoch_k'] = 100 * ((df['precio'] - low_14) / (high_14 - low_14))
-    df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
-    
-    return df
-
-def crear_grafico_analisis_tecnico(df_indicadores, simbolo):
-    """
-    Crea gráfico completo de análisis técnico
-    """
-    fig = make_subplots(
-        rows=4, cols=1,
-        shared_xaxes=True,
-        subplot_titles=('Precio y Medias Móviles', 'MACD', 'RSI', 'Estocástico'),
-        vertical_spacing=0.08,
-        row_heights=[0.5, 0.2, 0.15, 0.15]
-    )
-    
-    # Precio y medias móviles
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['precio'], 
-                            name='Precio', line=dict(color='black', width=2)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['ma_5'], 
-                            name='MA(5)', line=dict(color='blue', width=1)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['ma_20'], 
-                            name='MA(20)', line=dict(color='orange', width=1)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['ma_50'], 
-                            name='MA(50)', line=dict(color='red', width=1)), row=1, col=1)
-    
-    # Bandas de Bollinger
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['bb_upper'], 
-                            name='BB Superior', line=dict(color='gray', dash='dash'), opacity=0.5), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['bb_lower'], 
-                            name='BB Inferior', line=dict(color='gray', dash='dash'), opacity=0.5), row=1, col=1)
-    
-    # MACD
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['macd'], 
-                            name='MACD', line=dict(color='blue')), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['signal'], 
-                            name='Signal', line=dict(color='red')), row=2, col=1)
-    fig.add_trace(go.Bar(x=df_indicadores.index, y=df_indicadores['histogram'], 
-                        name='Histogram', marker_color='green', opacity=0.7), row=2, col=1)
-    
-    # RSI
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['rsi'], 
-                            name='RSI', line=dict(color='purple')), row=3, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=3, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=3, col=1)
-    
-    # Estocástico
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['stoch_k'], 
-                            name='%K', line=dict(color='blue')), row=4, col=1)
-    fig.add_trace(go.Scatter(x=df_indicadores.index, y=df_indicadores['stoch_d'], 
-                            name='%D', line=dict(color='red')), row=4, col=1)
-    fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=4, col=1)
-    fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=4, col=1)
-    
-    fig.update_layout(
-        title=f"Análisis Técnico - {simbolo}",
-        height=800,
-        showlegend=True,
-        template="plotly_white"
-    )
-    
-    return fig
-
-def calcular_black_scholes(S, K, T, r, sigma, option_type='call'):
-    """
-    Calcula el precio de una opción usando Black-Scholes
-    """
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    
-    if option_type == 'call':
-        price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-    else:  # put
-        price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-    
-    return price
-
-def calcular_greeks(S, K, T, r, sigma, option_type='call'):
-    """
-    Calcula las griegas de una opción
-    """
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    
-    # Delta
-    if option_type == 'call':
-        delta = norm.cdf(d1)
-    else:
-        delta = -norm.cdf(-d1)
-    
-    # Gamma
-    gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
-    
-    # Theta
-    if option_type == 'call':
-        theta = (-(S * norm.pdf(d1) * sigma) / (2 * np.sqrt(T)) - 
-                r * K * np.exp(-r * T) * norm.cdf(d2)) / 365
-    else:
-        theta = (-(S * norm.pdf(d1) * sigma) / (2 * np.sqrt(T)) + 
-                r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
-    
-    # Vega
-    vega = S * norm.pdf(d1) * np.sqrt(T) / 100
-    
-    # Rho
-    if option_type == 'call':
-        rho = K * T * np.exp(-r * T) * norm.cdf(d2) / 100
-    else:
-        rho = -K * T * np.exp(-r * T) * norm.cdf(-d2) / 100
-    
-    return {
-        'delta': delta,
-        'gamma': gamma,
-        'theta': theta,
-        'vega': vega,
-        'rho': rho
-    }
-
-def simulacion_monte_carlo(precio_inicial, rendimiento, volatilidad, dias, simulaciones=1000):
-    """
-    Realiza simulación Monte Carlo de precios
-    """
-    dt = 1/252  # Fracción del año
-    precios = np.zeros((simulaciones, dias))
-    
-    for i in range(simulaciones):
-        precio = precio_inicial
-        for j in range(dias):
-            shock = np.random.normal(0, 1)
-            precio = precio * np.exp((rendimiento - 0.5 * volatilidad**2) * dt + volatilidad * np.sqrt(dt) * shock)
-            precios[i, j] = precio
-    
-    return precios
-
-def backtesting_estrategia_simple(precios, estrategia='ma_crossover'):
-    """
-    Backtesting básico de estrategias
-    """
-    df = pd.DataFrame({'precio': precios})
-    df['retorno'] = df['precio'].pct_change()
-    
-    if estrategia == 'ma_crossover':
-        # Estrategia de cruce de medias móviles
-        df['ma_corta'] = df['precio'].rolling(window=5).mean()
-        df['ma_larga'] = df['precio'].rolling(window=20).mean()
-        
-        # Señales
-        df['señal'] = 0
-        df.loc[df['ma_corta'] > df['ma_larga'], 'señal'] = 1
-        df.loc[df['ma_corta'] <= df['ma_larga'], 'señal'] = -1
-        
-        # Retornos de la estrategia
-        df['retorno_estrategia'] = df['señal'].shift(1) * df['retorno']
-        
-    elif estrategia == 'rsi':
-        # Estrategia RSI
-        delta = df['precio'].diff()
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(window=14).mean()
-        avg_loss = loss.rolling(window=14).mean()
-        rs = avg_gain / avg_loss
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        df['señal'] = 0
-        df.loc[df['rsi'] < 30, 'señal'] = 1  # Sobreventa - Comprar
-        df.loc[df['rsi'] > 70, 'señal'] = -1  # Sobrecompra - Vender
-        
-        df['retorno_estrategia'] = df['señal'].shift(1) * df['retorno']
-    
-    # Métricas de performance
-    retorno_total_estrategia = (1 + df['retorno_estrategia'].fillna(0)).cumprod().iloc[-1] - 1
-    retorno_total_buy_hold = (1 + df['retorno'].fillna(0)).cumprod().iloc[-1] - 1
-    
-    volatilidad_estrategia = df['retorno_estrategia'].std() * np.sqrt(252)
-    volatilidad_buy_hold = df['retorno'].std() * np.sqrt(252)
-    
-    sharpe_estrategia = retorno_total_estrategia / volatilidad_estrategia if volatilidad_estrategia > 0 else 0
-    sharpe_buy_hold = retorno_total_buy_hold / volatilidad_buy_hold if volatilidad_buy_hold > 0 else 0
-    
-    return {
-        'df': df,
-        'retorno_estrategia': retorno_total_estrategia,
-        'retorno_buy_hold': retorno_total_buy_hold,
-        'volatilidad_estrategia': volatilidad_estrategia,
-        'volatilidad_buy_hold': volatilidad_buy_hold,
-        'sharpe_estrategia': sharpe_estrategia,
-        'sharpe_buy_hold': sharpe_buy_hold
-    }
-
-def mostrar_optimizacion():
-    """
-    Pantalla de optimización de portafolio
-    """
-    st.markdown("# 🎯 Optimización de Portafolio")
-    
-    if not st.session_state.cliente_seleccionado:
-        st.warning("⚠️ Seleccione un cliente para optimizar su portafolio")
+    # Limpiar datos para ML
+    caracteristicas_ml = ['MA5', 'MA20', 'RSI', 'MACD', 'Signal']
+    datos_ml = datos[caracteristicas_ml + ['Target']].dropna()
+    if datos_ml.empty:
+        st.info("No hay suficientes datos para análisis ML.")
         return
-    
-    st.info("🚧 Módulo de optimización en desarrollo")
-    
-    tab1, tab2, tab3 = st.tabs(["🔄 Rebalanceo", "📊 Eficiencia", "🎯 Estrategias"])
-    
-    with tab1:
-        st.markdown("### 🔄 Rebalanceo de Cartera")
-        st.info("Próximamente: Rebalanceo automático basado en objetivos")
-    
-    with tab2:
-        st.markdown("### 📊 Frontera Eficiente")
-        st.info("Próximamente: Análisis de frontera eficiente de Markowitz")
-    
-    with tab3:
-        st.markdown("### 🎯 Estrategias de Asignación")
-        st.info("Próximamente: Estrategias de asignación de activos")
 
-def mostrar_operaciones():
-    """
-    Pantalla de análisis de operaciones
-    """
-    st.markdown("# 📈 Análisis de Operaciones")
-    
-    if not st.session_state.cliente_seleccionado:
-        st.warning("⚠️ Seleccione un cliente para ver sus operaciones")
-        return
-    
-    cliente = st.session_state.cliente_seleccionado
-    id_cliente = cliente.get('id')
-    
-    # Filtros
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        estado_filtro = st.selectbox("Estado", ["Todas", "Pendientes", "Ejecutadas", "Canceladas"])
-    
-    with col2:
-        fecha_desde = st.date_input("Fecha Desde", value=date.today() - timedelta(days=30))
-    
-    with col3:
-        fecha_hasta = st.date_input("Fecha Hasta", value=date.today())
-    
-    if st.button("🔍 Buscar Operaciones"):
-        with st.spinner("Obteniendo operaciones..."):
-            operaciones = obtener_operaciones(
-                st.session_state.token_acceso,
-                id_cliente,
-                estado=estado_filtro,
-                fecha_desde=fecha_desde.strftime('%Y-%m-%d'),
-                fecha_hasta=fecha_hasta.strftime('%Y-%m-%d')
-            )
-            
-            if operaciones:
-                st.success(f"✅ Se encontraron {len(operaciones)} operaciones")
-                
-                # Mostrar tabla de operaciones
-                operaciones_data = []
-                for op in operaciones:
-                    operaciones_data.append({
-                        'Número': op.get('numero', 'N/A'),
-                        'Fecha': op.get('fechaOrden', 'N/A'),
-                        'Símbolo': op.get('simbolo', 'N/A'),
-                        'Tipo': op.get('tipo', 'N/A'),
-                        'Cantidad': op.get('cantidad', 0),
-                        'Precio': op.get('precio', 0),
-                        'Estado': op.get('estado', 'N/A')
-                    })
-                
-                df_operaciones = pd.DataFrame(operaciones_data)
-                st.dataframe(df_operaciones, use_container_width=True)
-            else:
-                st.info("ℹ️ No se encontraron operaciones con los criterios especificados")
+    X = datos_ml[caracteristicas_ml]
+    y = datos_ml['Target']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False, random_state=42)
+    modelo = RandomForestClassifier(n_estimators=100, random_state=42)
+    modelo.fit(X_train, y_train)
+    y_pred = modelo.predict(X_test)
+    precision = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    precision_score_val = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
 
-def mostrar_volumen():
-    """
-    Pantalla de análisis de volumen
-    """
-    st.markdown("# 📉 Análisis de Volumen")
-    
-    if not st.session_state.cliente_seleccionado:
-        st.warning("⚠️ Seleccione un cliente para realizar análisis de volumen")
-        return
-    
-    # Configuración del análisis
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        simbolo_volumen = st.text_input("🏷️ Símbolo", placeholder="Ej: GGAL, YPF")
-    
-    with col2:
-        periodo_volumen = st.slider("📅 Período (días)", 30, 365, 90)
-    
-    with col3:
-        pais_volumen = st.selectbox("🌍 País", ["Argentina", "Estados Unidos"])
-    
-    if st.button("📊 Analizar Volumen") and simbolo_volumen:
-        fecha_fin = date.today()
-        fecha_inicio = fecha_fin - timedelta(days=periodo_volumen)
-        
-        analizar_volumen_por_simbolo(
-            st.session_state.token_acceso,
-            simbolo_volumen,
-            fecha_inicio,
-            fecha_fin,
-            pais_volumen
-        )
+    # Gráfico simple de precios y medias móviles
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=datos.index, y=datos['Close'], name='Precio', line=dict(color='blue')))
+    fig.add_trace(go.Scatter(x=datos.index, y=datos['MA5'], name='MA5', line=dict(color='orange')))
+    fig.add_trace(go.Scatter(x=datos.index, y=datos['MA20'], name='MA20', line=dict(color='green')))
+    fig.update_layout(title=f"Precio y Medias Móviles - {simbolo}", height=300)
 
-def mostrar_opciones():
-    """
-    Pantalla de análisis de opciones
-    """
-    panel_opciones_argentinas(st.session_state.token_acceso)
+    # Mostrar resultados
+    st.plotly_chart(fig, use_container_width=True)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Precisión ML", f"{precision:.2%}")
+    col2.metric("F1", f"{f1:.2f}")
+    col3.metric("Precisión", f"{precision_score_val:.2f}")
+    col4.metric("Recall", f"{recall:.2f}")
 
-def mostrar_configuracion():
-    """
-    Pantalla de configuración
-    """
-    st.markdown("# ⚙️ Configuración")
-    
-    tab1, tab2, tab3 = st.tabs(["👤 Usuario", "🔧 Preferencias", "ℹ️ Información"])
-    
-    with tab1:
-        st.markdown("### 👤 Información del Usuario")
-        if st.session_state.usuario:
-            st.info(f"**Usuario conectado:** {st.session_state.usuario}")
-            st.info(f"**Clientes disponibles:** {len(st.session_state.clientes)}")
-            
-            if st.button("🔓 Cerrar Sesión"):
-                # Limpiar session state
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                init_session_state()
-                st.rerun()
-    
-    with tab2:
-        st.markdown("### 🔧 Preferencias")
-        st.info("Próximamente: Configuración de preferencias de análisis")
-    
-    with tab3:
-        st.markdown("### ℹ️ Información de la Aplicación")
-        st.markdown("""
-        **IOL Portfolio Analyzer v1.0**
-        
-        Una aplicación completa para análisis de portafolios conectada con la API de InvertirOnline.
-        
-        **Funcionalidades:**
-        - ✅ Dashboard completo
-        - ✅ Análisis de portafolio
-        - ✅ Análisis técnico avanzado
-        - ✅ Simulaciones Monte Carlo
-        - ✅ Backtesting de estrategias
-        - ✅ Análisis de volumen
-        - ✅ Calculadora de opciones
-        - ✅ Seguimiento de operaciones
-        
-        **Desarrollado con:**
-        - Streamlit
-        - Plotly
-        - Pandas
-        - NumPy
-        - SciPy
-        """)
+    # Importancia de características
+    importancia = pd.DataFrame({
+        'Característica': caracteristicas_ml,
+        'Importancia': modelo.feature_importances_
+    }).sort_values('Importancia', ascending=False)
+    st.bar_chart(importancia.set_index('Característica'))
 
-def main():
-    """
-    Función principal de la aplicación
-    """
-    # Inicializar session state
-    init_session_state()
-    
-    # Verificar autenticación
-    if not st.session_state.authenticated:
-        mostrar_login()
-        return
-    
-    # Mostrar sidebar con navegación
-    mostrar_selector_cliente()
-    mostrar_navegacion()
-    
-    # Mostrar página actual
-    if st.session_state.current_page == "main" or st.session_state.current_page == "dashboard":
-        mostrar_dashboard()
-    elif st.session_state.current_page == "portafolio":
-        mostrar_portafolio()
-    elif st.session_state.current_page == "analisis":
-        mostrar_analisis()
-    elif st.session_state.current_page == "optimizacion":
-        mostrar_optimizacion()
-    elif st.session_state.current_page == "operaciones":
-        mostrar_operaciones()
-    elif st.session_state.current_page == "volumen":
-        mostrar_volumen()
-    elif st.session_state.current_page == "opciones":
-        mostrar_opciones()
-    elif st.session_state.current_page == "configuracion":
-        mostrar_configuracion()
-    else:
-        mostrar_dashboard()
+    # Predicción para el próximo día
+    ultimos_datos = datos_ml.iloc[[-1]][caracteristicas_ml]
+    prediccion = modelo.predict(ultimos_datos)[0]
+    probas = modelo.predict_proba(ultimos_datos)[0]
+    st.info(f"Predicción próxima jornada: {'🟢 SUBIDA' if prediccion == 1 else '🔴 BAJADA'} (confianza: {max(probas):.2%})")
 
-# Ejecutar la aplicación
-if __name__ == "__main__":
-    main()
+def calcular_rsi(precios, ventana=14):
+    delta = precios.diff()
+    ganancia = delta.where(delta > 0, 0)
+    perdida = -delta.where(delta < 0, 0)
+    ganancia_promedio = ganancia.rolling(ventana, min_periods=1).mean()
+    perdida_promedio = perdida.rolling(ventana, min_periods=1).mean()
+    rs = ganancia_promedio / perdida_promedio.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+# === FIN: Integración de análisis avanzado de activos en el portafolio ===
