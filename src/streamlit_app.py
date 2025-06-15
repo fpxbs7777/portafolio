@@ -320,28 +320,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     except Exception:
         return None
 
-def obtener_clase_d(simbolo, mercado, bearer_token):
-    """
-    Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
-    """
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Clases"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
-    }
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            clases = response.json()
-            for clase in clases:
-                if clase.get('simbolo', '').endswith('D'):
-                    return clase['simbolo']
-            return None
-        else:
-            return None
-    except Exception:
-        return None
-
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta, precios_portafolio=None):
     """
     Si precios_portafolio es provisto, usarlo directamente para la optimización.
@@ -371,11 +349,11 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         for idx, simbolo in enumerate(simbolos):
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
             
-            # Primero intentar con mercados principales directamente
+            # Intentar con mercados principales directamente
             mercados_directos = ['bCBA', 'nYSE', 'nASDAQ']
             serie_obtenida = False
             
-            # Intentar primero sin buscar clase D
+            # Intentar directamente con el símbolo en cada mercado
             for mercado in mercados_directos:
                 try:
                     serie = obtener_serie_historica_iol(
@@ -393,28 +371,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     detalles_errores[f"{simbolo}_{mercado}"] = str(e)
                     continue
             
-            # Si no se obtuvo serie, intentar con clase D para bonos
-            if not serie_obtenida:
-                for mercado in mercados_directos:
-                    try:
-                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
-                        if clase_d:
-                            serie = obtener_serie_historica_iol(
-                                token_portador, mercado, clase_d, 
-                                fecha_desde_str, fecha_hasta_str
-                            )
-                            
-                            if serie is not None and len(serie) > 10:
-                                if serie.nunique() > 1:
-                                    df_precios[simbolo] = serie
-                                    simbolos_exitosos.append(simbolo)
-                                    serie_obtenida = True
-                                    break
-                    except Exception as e:
-                        detalles_errores[f"{simbolo}_{mercado}_claseD"] = str(e)
-                        continue
-            
-            # Si aún no se obtuvo, intentar con yfinance
+            # Si no se obtuvo desde IOL, intentar con yfinance
             if not serie_obtenida:
                 try:
                     serie_yf = obtener_datos_alternativos_yfinance(
