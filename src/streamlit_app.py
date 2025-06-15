@@ -1705,3 +1705,35 @@ def calcular_rsi(precios, ventana=14):
     return 100 - (100 / (1 + rs))
 
 # === FIN: Integración de análisis avanzado de activos en el portafolio ===
+
+def main():
+    """
+    Función principal de la aplicación
+    """
+    init_session_state()
+    if not st.session_state.authenticated:
+        mostrar_login()
+        return
+    mostrar_selector_cliente()
+    mostrar_navegacion()
+    if st.session_state.current_page == "main" or st.session_state.current_page == "dashboard":
+        mostrar_dashboard()
+    elif st.session_state.current_page == "portafolio":
+        mostrar_portafolio()
+    elif st.session_state.current_page == "analisis":
+        mostrar_analisis()
+    elif st.session_state.current_page == "optimizacion":
+        mostrar_optimizacion()
+    elif st.session_state.current_page == "operaciones":
+        mostrar_operaciones()
+    elif st.session_state.current_page == "volumen":
+        mostrar_volumen()
+    elif st.session_state.current_page == "opciones":
+        mostrar_opciones()
+    elif st.session_state.current_page == "configuracion":
+        mostrar_configuracion()
+    else:
+        mostrar_dashboard()
+
+if __name__ == "__main__":
+    main()
