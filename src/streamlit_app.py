@@ -1781,7 +1781,7 @@ def main():
                                 st.session_state.token_acceso = token_acceso
                                 st.session_state.refresh_token = refresh_token
                                 st.success("✅ Conexión exitosa!")
-                                st.experimental_rerun()
+                                st.rerun()  # Cambiar a st.rerun() para máxima compatibilidad
                             else:
                                 st.error("❌ Error en la autenticación")
                     else:
@@ -1841,7 +1841,7 @@ def main():
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
                         st.session_state.clientes = nuevos_clientes
                         st.success("✅ Lista de clientes actualizada")
-                        st.experimental_rerun()
+                        st.rerun()  # Cambiar a st.rerun() para máxima compatibilidad
             
             else:
                 st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
