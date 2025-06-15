@@ -1213,12 +1213,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Optimización"
+        "🔄 Optimización",
+        "🧪 Universo Aleatorio"
     ])
 
     with tab1:
@@ -1243,6 +1244,9 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+    
+    with tab6:
+        mostrar_optimizacion_universo_aleatorio(st.session_state.token_acceso)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
