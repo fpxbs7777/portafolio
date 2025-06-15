@@ -633,6 +633,259 @@ def obtener_clase_d(simbolo, mercado, bearer_token):
     except Exception:
         return None
 
+def portfolio_variance(x, mtx_var_covar):
+    """Calcula la varianza del portafolio"""
+    variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
+    return variance
+
+# --- Enhanced Portfolio Management Classes ---
+class manager:
+    def __init__(self, rics, notional, data):
+        self.rics = rics
+        self.notional = notional
+        self.data = data
+        self.timeseries = None
+        self.returns = None
+        self.cov_matrix = None
+        self.mean_returns = None
+        self.risk_free_rate = 0.40  # Tasa libre de riesgo anual
+
+    def load_intraday_timeseries(self, ticker):
+        return self.data[ticker]
+
+    def synchronise_timeseries(self):
+        dic_timeseries = {}
+        for ric in self.rics:
+            dic_timeseries[ric] = self.load_intraday_timeseries(ric)
+        self.timeseries = dic_timeseries
+
+    def compute_covariance(self):
+        self.synchronise_timeseries()
+        # Calcular retornos logarítmicos
+        returns_matrix = {}
+        for ric in self.rics:
+            prices = self.timeseries[ric]
+            returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        
+        # Convertir a DataFrame para alinear fechas
+        self.returns = pd.DataFrame(returns_matrix)
+        
+        # Calcular matriz de covarianza y retornos medios
+        self.cov_matrix = self.returns.cov() * 252  # Anualizar
+        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        
+        return self.cov_matrix, self.mean_returns
+
+    def compute_portfolio(self, portfolio_type=None, target_return=None):
+        if self.cov_matrix is None:
+            self.compute_covariance()
+            
+        n_assets = len(self.rics)
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        if portfolio_type == 'min-variance-l1':
+            # Minimizar varianza con restricción L1
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
+            ]
+            
+        elif portfolio_type == 'min-variance-l2':
+            # Minimizar varianza con restricción L2
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
+            ]
+            
+        elif portfolio_type == 'equi-weight':
+            # Pesos iguales
+            weights = np.ones(n_assets) / n_assets
+            return self._create_output(weights)
+            
+        elif portfolio_type == 'long-only':
+            # Optimización long-only estándar
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
+        elif portfolio_type == 'markowitz':
+            if target_return is not None:
+                # Optimización con retorno objetivo
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                ]
+            else:
+                # Maximizar Sharpe Ratio
+                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                def neg_sharpe_ratio(weights):
+                    port_ret = np.sum(self.mean_returns * weights)
+                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                    if port_vol == 0:
+                        return np.inf
+                    return -(port_ret - self.risk_free_rate) / port_vol
+                
+                result = optimize.minimize(
+                    neg_sharpe_ratio, 
+                    x0=np.ones(n_assets)/n_assets,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints
+                )
+                return self._create_output(result.x)
+        
+        # Optimización general de varianza mínima
+        result = optimize.minimize(
+            lambda x: portfolio_variance(x, self.cov_matrix),
+            x0=np.ones(n_assets)/n_assets,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+        
+        return self._create_output(result.x)
+
+    def _create_output(self, weights):
+        """Crea un objeto output con los pesos optimizados"""
+        port_ret = np.sum(self.mean_returns * weights)
+        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+        
+        # Calcular retornos del portafolio
+        portfolio_returns = self.returns.dot(weights)
+        
+        # Crear objeto output
+        port_output = output(portfolio_returns, self.notional)
+        port_output.weights = weights
+        port_output.dataframe_allocation = pd.DataFrame({
+            'rics': self.rics,
+            'weights': weights,
+            'volatilities': np.sqrt(np.diag(self.cov_matrix)),
+            'returns': self.mean_returns
+        })
+        
+        return port_output
+
+class output:
+    def __init__(self, returns, notional):
+        self.returns = returns
+        self.notional = notional
+        self.mean_daily = np.mean(returns)
+        self.volatility_daily = np.std(returns)
+        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
+        self.var_95 = np.percentile(returns, 5)
+        self.skewness = stats.skew(returns)
+        self.kurtosis = stats.kurtosis(returns)
+        self.jb_stat, self.p_value = stats.jarque_bera(returns)
+        self.is_normal = self.p_value > 0.05
+        self.decimals = 4
+        self.str_title = 'Portfolio Returns'
+        self.volatility_annual = self.volatility_daily * np.sqrt(252)
+        self.return_annual = self.mean_daily * 252
+        
+        # Placeholders que serán actualizados por el manager
+        self.weights = None
+        self.dataframe_allocation = None
+
+    def get_metrics_dict(self):
+        """Retorna métricas del portafolio en formato diccionario"""
+        return {
+            'Mean Daily': self.mean_daily,
+            'Volatility Daily': self.volatility_daily,
+            'Sharpe Ratio': self.sharpe_ratio,
+            'VaR 95%': self.var_95,
+            'Skewness': self.skewness,
+            'Kurtosis': self.kurtosis,
+            'JB Statistic': self.jb_stat,
+            'P-Value': self.p_value,
+            'Is Normal': self.is_normal,
+            'Annual Return': self.return_annual,
+            'Annual Volatility': self.volatility_annual
+        }
+
+    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
+        """Crea un histograma de retornos usando Plotly para Streamlit"""
+        if self.returns is None or len(self.returns) == 0:
+            # Crear gráfico vacío
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        
+        fig = go.Figure(data=[go.Histogram(
+            x=self.returns,
+            nbinsx=30,
+            name="Retornos del Portafolio"
+        )])
+        
+        # Agregar líneas de métricas importantes
+        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
+                     annotation_text=f"Media: {self.mean_daily:.4f}")
+        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
+                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
+        
+        fig.update_layout(
+            title=f"{title}",
+            xaxis_title="Retorno",
+            yaxis_title="Frecuencia",
+            showlegend=False
+        )
+        
+        return fig
+
+def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
+    """Computa la frontera eficiente y portafolios especiales"""
+    # special portfolios    
+    label1 = 'min-variance-l1'
+    label2 = 'min-variance-l2'
+    label3 = 'equi-weight'
+    label4 = 'long-only'
+    label5 = 'markowitz-none'
+    label6 = 'markowitz-target'
+    
+    # compute covariance matrix
+    port_mgr = manager(rics, notional, data)
+    port_mgr.compute_covariance()
+    
+    # compute vectors of returns and volatilities for Markowitz portfolios
+    min_returns = np.min(port_mgr.mean_returns)
+    max_returns = np.max(port_mgr.mean_returns)
+    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
+    volatilities = []
+    valid_returns = []
+    
+    for ret in returns:
+        try:
+            port = port_mgr.compute_portfolio('markowitz', ret)
+            volatilities.append(port.volatility_annual)
+            valid_returns.append(ret)
+        except:
+            continue
+    
+    # compute special portfolios
+    portfolios = {}
+    try:
+        portfolios[label1] = port_mgr.compute_portfolio(label1)
+    except:
+        portfolios[label1] = None
+        
+    try:
+        portfolios[label2] = port_mgr.compute_portfolio(label2)
+    except:
+        portfolios[label2] = None
+        
+    portfolios[label3] = port_mgr.compute_portfolio(label3)
+    portfolios[label4] = port_mgr.compute_portfolio(label4)
+    portfolios[label5] = port_mgr.compute_portfolio('markowitz')
+    
+    try:
+        portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
+    except:
+        portfolios[label6] = None
+    
+    return portfolios, valid_returns, volatilities
+
 # --- Portfolio Optimization Functions ---
 def calculate_portfolio_metrics(returns, weights):
     """
@@ -1628,6 +1881,12 @@ class PortfolioOutput:
             name="Retornos del Portafolio"
         )])
         
+        # Agregar líneas de métricas importantes
+        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
+                     annotation_text=f"Media: {self.mean_daily:.4f}")
+        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
+                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
+        
         fig.update_layout(
             title=f"{title}",
             xaxis_title="Retorno",
@@ -1637,6 +1896,59 @@ class PortfolioOutput:
         
         return fig
 
+def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
+    """Computa la frontera eficiente y portafolios especiales"""
+    # special portfolios    
+    label1 = 'min-variance-l1'
+    label2 = 'min-variance-l2'
+    label3 = 'equi-weight'
+    label4 = 'long-only'
+    label5 = 'markowitz-none'
+    label6 = 'markowitz-target'
+    
+    # compute covariance matrix
+    port_mgr = manager(rics, notional, data)
+    port_mgr.compute_covariance()
+    
+    # compute vectors of returns and volatilities for Markowitz portfolios
+    min_returns = np.min(port_mgr.mean_returns)
+    max_returns = np.max(port_mgr.mean_returns)
+    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
+    volatilities = []
+    valid_returns = []
+    
+    for ret in returns:
+        try:
+            port = port_mgr.compute_portfolio('markowitz', ret)
+            volatilities.append(port.volatility_annual)
+            valid_returns.append(ret)
+        except:
+            continue
+    
+    # compute special portfolios
+    portfolios = {}
+    try:
+        portfolios[label1] = port_mgr.compute_portfolio(label1)
+    except:
+        portfolios[label1] = None
+        
+    try:
+        portfolios[label2] = port_mgr.compute_portfolio(label2)
+    except:
+        portfolios[label2] = None
+        
+    portfolios[label3] = port_mgr.compute_portfolio(label3)
+    portfolios[label4] = port_mgr.compute_portfolio(label4)
+    portfolios[label5] = port_mgr.compute_portfolio('markowitz')
+    
+    try:
+        portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
+    except:
+        portfolios[label6] = None
+    
+    return portfolios, valid_returns, volatilities
+
+# --- Main Application Logic ---
 def main():
     """
     Función principal de la aplicación Streamlit
@@ -1866,6 +2178,6 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Estrategia simple de diversificación
         - No considera correlaciones históricas
         """)
-# Asegurar que main() se ejecute cuando se corre el script
+
 if __name__ == "__main__":
     main()
