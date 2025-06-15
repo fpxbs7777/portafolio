@@ -10,6 +10,7 @@ import scipy.optimize as op
 from scipy import stats # Added for skewness, kurtosis, jarque_bera
 import random
 import warnings
+import streamlit.components.v1 as components
 
 warnings.filterwarnings('ignore')
 
@@ -1114,17 +1115,17 @@ def mostrar_analisis_portafolio():
     token_acceso = st.session_state.token_acceso
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
-    
+
     if not cliente:
         st.error("No hay cliente seleccionado")
         return
-    
+
     # Obtener ID del cliente
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-    
+
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
-    
+
     # Crear tabs para diferentes análisis
     tab1, tab2, tab3, tab4 = st.tabs([
         "📈 Resumen", 
@@ -1132,7 +1133,7 @@ def mostrar_analisis_portafolio():
         "📊 Análisis Técnico",
         "💱 Cotizaciones"
     ])
-    
+
     with tab1:
         # Obtener portafolio
         with st.spinner("Cargando portafolio..."):
@@ -1164,29 +1165,98 @@ def mostrar_analisis_portafolio():
                         st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
 
     with tab3:
-        # Análisis técnico
         st.markdown("### 📊 Análisis Técnico")
-        st.info("🚧 Funcionalidad en desarrollo")
-        
-        # Placeholder para análisis técnico futuro
+        st.info("Herramientas avanzadas de análisis técnico y dibujo disponibles abajo.")
+
+        # Selección de símbolo para análisis técnico
         if 'portafolio' not in locals():
             portafolio = obtener_portafolio(token_acceso, id_cliente)
-        
+
         if portafolio:
             activos = portafolio.get('activos', [])
             if activos:
                 simbolos = [activo.get('titulo', {}).get('simbolo', '') for activo in activos]
                 simbolos = [s for s in simbolos if s]
-                
+
                 if simbolos:
                     simbolo_seleccionado = st.selectbox(
                         "Seleccione un activo para análisis técnico:",
                         options=simbolos
                     )
-                    
                     if simbolo_seleccionado:
-                        st.info(f"Análisis técnico para {simbolo_seleccionado} estará disponible próximamente")
-    
+                        st.markdown("#### Gráfico interactivo con indicadores y herramientas de dibujo")
+                        # Incrustar TradingView Chart Widget con herramientas de análisis técnico y dibujo
+                        tv_widget = f"""
+                        <div id="tradingview_{simbolo_seleccionado}" style="height:600px"></div>
+                        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                        <script type="text/javascript">
+                        new TradingView.widget({{
+                          "container_id": "tradingview_{simbolo_seleccionado}",
+                          "width": "100%",
+                          "height": 600,
+                          "symbol": "{simbolo_seleccionado}",
+                          "interval": "D",
+                          "timezone": "America/Argentina/Buenos_Aires",
+                          "theme": "light",
+                          "style": "1",
+                          "locale": "es",
+                          "toolbar_bg": "#f4f7f9",
+                          "enable_publishing": false,
+                          "allow_symbol_change": true,
+                          "hide_side_toolbar": false,
+                          "studies": [
+                            "MACD@tv-basicstudies",
+                            "RSI@tv-basicstudies",
+                            "BollingerBands@tv-basicstudies",
+                            "StochasticRSI@tv-basicstudies",
+                            "Volume@tv-basicstudies",
+                            "Moving Average@tv-basicstudies",
+                            "IchimokuCloud@tv-basicstudies",
+                            "ParabolicSAR@tv-basicstudies",
+                            "ATR@tv-basicstudies"
+                          ],
+                          "drawings_access": {{
+                            "type": "white",
+                            "tools": [
+                              {{"name": "Trend Line"}},
+                              {{"name": "Horizontal Line"}},
+                              {{"name": "Fibonacci Retracement"}},
+                              {{"name": "Pitchfork"}},
+                              {{"name": "Brush"}},
+                              {{"name": "Rectangle"}},
+                              {{"name": "Ellipse"}},
+                              {{"name": "Arrow"}},
+                              {{"name": "Text"}},
+                              {{"name": "Price Label"}}
+                            ]
+                          }},
+                          "enabled_features": [
+                            "study_templates",
+                            "header_chart_type",
+                            "header_indicators",
+                            "header_compare",
+                            "header_undo_redo",
+                            "header_screenshot",
+                            "header_fullscreen_button",
+                            "header_settings",
+                            "header_symbol_search",
+                            "header_interval_dialog_button",
+                            "header_resolutions",
+                            "header_drawing_tools",
+                            "header_save_chart_template",
+                            "header_load_chart_template"
+                          ],
+                          "disabled_features": [
+                            "use_localstorage_for_settings",
+                            "left_toolbar",
+                            "header_widget_dom_node"
+                          ]
+                        }});
+                        </script>
+                        """
+                        components.html(tv_widget, height=650)
+                        st.info("Puede agregar indicadores técnicos, cambiar intervalos y usar herramientas de dibujo directamente en el gráfico.")
+
     with tab4:
         # Cotizaciones y mercado
         mostrar_cotizaciones_mercado(token_acceso)
