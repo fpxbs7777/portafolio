@@ -1056,250 +1056,81 @@ def mostrar_resumen_portafolio(portafolio):
     
     if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
-        
-        # Calcular métricas comprehensivas del portafolio
         metricas = calcular_metricas_portafolio(datos_activos, valor_total)
-        
-        # === 1. INFORMACIÓN BÁSICA DEL PORTAFOLIO ===
-        st.markdown("#### 📊 Información General")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de Activos", len(datos_activos))
-        col2.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        col3.metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        
-        # Mostrar el valor total con formato correcto y verificación
-        valor_display = f"${valor_total:,.2f}"
-        if valor_total > 500000:  # Si parece demasiado alto
-            st.warning("⚠️ Verificar: el valor total parece alto")
-        col4.metric("Valor Total del Portafolio", valor_display)
-        
-        # === 2. MÉTRICAS DE RIESGO ACTUALES ===
-        if metricas:
-            st.markdown("#### ⚠️ Análisis de Riesgo")
+
+        # --- Agrupar métricas en pestañas ---
+        tab_info, tab_risk, tab_proj, tab_prob, tab_dist = st.tabs([
+            "📊 General", "⚠️ Riesgo", "📈 Proyección 12M", "🎯 Probabilidades", "📊 Distribución"
+        ])
+
+        with tab_info:
+            st.markdown("#### 📊 Información General")
             col1, col2, col3, col4 = st.columns(4)
-            
-            col1.metric(
-                "Concentración del Portafolio", 
-                f"{metricas['concentracion']:.3f}",
-                help="Índice de Herfindahl: 0=perfectamente diversificado, 1=completamente concentrado"
-            )
-            col2.metric(
-                "VaR 95% (Valor en Riesgo)", 
-                f"${metricas['var_95']:,.0f}",
-                help="Valor mínimo del activo más pequeño en el 95% de los casos"
-            )
-            col3.metric(
-                "Volatilidad Estimada Anual", 
-                f"${metricas['riesgo_anual']:,.0f}",
-                help="Riesgo anual estimado basado en 20% de volatilidad"
-            )
-            
-            # Indicador visual de concentración
-            concentracion_status = "🟢 Diversificado" if metricas['concentracion'] < 0.25 else "🟡 Moderadamente Concentrado" if metricas['concentracion'] < 0.5 else "🔴 Altamente Concentrado"
-            col4.metric("Estado de Diversificación", concentracion_status)
-        
-        # === 3. PROYECCIONES DE RENDIMIENTO ===
-        if metricas:
-            st.markdown("#### 📈 Proyecciones de Rendimiento (Próximos 12 meses)")
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric(
-                "Retorno Esperado", 
-                f"${metricas['retorno_esperado_anual']:,.0f}",
-                delta=f"{(metricas['retorno_esperado_anual']/valor_total*100):.1f}%",
-                help="Retorno esperado promedio basado en 8% anual"
-            )
-            col2.metric(
-                "Escenario Optimista (95%)", 
-                f"${metricas['pl_percentil_95']:,.0f}",
-                delta=f"+{(metricas['pl_percentil_95']/valor_total*100):.1f}%",
-                help="Ganancia esperada en el mejor 5% de los casos"
-            )
-            col3.metric(
-                "Escenario Pesimista (5%)", 
-                f"${metricas['pl_percentil_5']:,.0f}",
-                delta=f"{(metricas['pl_percentil_5']/valor_total*100):.1f}%",
-                help="Pérdida máxima esperada en el peor 5% de los casos"
-            )
-        
-        # === 4. PROBABILIDADES DE ESCENARIOS ===
-        if metricas:
-            st.markdown("#### 🎯 Probabilidades de Escenarios")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            probs = metricas['probabilidades']
-            
-            col1.metric(
-                "Probabilidad de Ganancia", 
-                f"{probs['ganancia']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos positivos"
-            )
-            col2.metric(
-                "Probabilidad de Pérdida", 
-                f"{probs['perdida']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos negativos"
-            )
-            col3.metric(
-                "Prob. Ganancia > 10%", 
-                f"{probs['ganancia_mayor_10']*100:.1f}%",
-                help="Probabilidad de obtener más del 10% de ganancia"
-            )
-            col4.metric(
-                "Prob. Pérdida > 10%", 
-                f"{probs['perdida_mayor_10']*100:.1f}%",
-                help="Probabilidad de perder más del 10%"
-            )
-        
-        # === 5. DISTRIBUCIÓN DETALLADA DE ACTIVOS ===
-        if metricas:
-            st.markdown("#### 📊 Distribución Estadística de Valores por Activo")
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            quantiles = metricas['quantiles']
-            
-            col1.metric(
-                "Valor Mínimo (Q25)", 
-                f"${quantiles['q25']:,.0f}",
-                help="25% de los activos valen menos que este monto"
-            )
-            col2.metric(
-                "Valor Mediano (Q50)", 
-                f"${quantiles['q50']:,.0f}",
-                help="Valor medio de los activos del portafolio"
-            )
-            col3.metric(
-                "Tercer Cuartil (Q75)", 
-                f"${quantiles['q75']:,.0f}",
-                help="75% de los activos valen menos que este monto"
-            )
-            col4.metric(
-                "Percentil 90", 
-                f"${quantiles['q90']:,.0f}",
-                help="90% de los activos valen menos que este monto"
-            )
-            col5.metric(
-                "Valor Máximo (Q95)", 
-                f"${quantiles['q95']:,.0f}",
-                help="Solo el 5% de los activos supera este valor"
-            )
-        
-        # Información de debug mejorada
-        with st.expander("🔍 Información de Debug - Estructura del Portafolio"):
-            st.markdown("**Campos disponibles en los activos:**")
-            if activos:
-                campos_encontrados = set()
-                for activo in activos[:3]:
-                    campos_encontrados.update(activo.keys())
-                    if 'titulo' in activo and isinstance(activo['titulo'], dict):
-                        titulo_campos = [f"titulo.{k}" for k in activo['titulo'].keys()]
-                        campos_encontrados.update(titulo_campos)
+            col1.metric("Total de Activos", len(datos_activos))
+            col2.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+            col3.metric("Tipos de Activos", df_activos['Tipo'].nunique())
+            valor_display = f"${valor_total:,.2f}"
+            col4.metric("Valor Total", valor_display)
+
+        with tab_risk:
+            if metricas:
+                st.markdown("#### ⚠️ Análisis de Riesgo")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Concentración", f"{metricas['concentracion']:.3f}")
+                c2.metric("VaR 95%", f"${metricas['var_95']:,.0f}")
+                c3.metric("Volatilidad Anual", f"${metricas['riesgo_anual']:,.0f}")
+                status = ("🟢 Diversificado" if metricas['concentracion'] < 0.25 
+                          else "🟡 Moderado" if metricas['concentracion'] < 0.5 
+                          else "🔴 Concentrado")
+                c4.metric("Estado Diversificación", status)
+
+        with tab_proj:
+            if metricas:
+                st.markdown("#### 📈 Proyección 12 Meses")
+                p1, p2, p3 = st.columns(3)
+                p1.metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}",
+                          delta=f"{metricas['retorno_esperado_anual']/valor_total*100:.1f}%")
+                p2.metric("Escenario Optimista (95%)", f"${metricas['pl_percentil_95']:,.0f}",
+                          delta=f"+{metricas['pl_percentil_95']/valor_total*100:.1f}%")
+                p3.metric("Escenario Pesimista (5%)", f"${metricas['pl_percentil_5']:,.0f}",
+                          delta=f"{metricas['pl_percentil_5']/valor_total*100:.1f}%")
+
+        with tab_prob:
+            if metricas:
+                st.markdown("#### 🎯 Probabilidades de Escenario")
+                b1, b2, b3, b4 = st.columns(4)
+                probs = metricas['probabilidades']
+                b1.metric("Prob. Ganancia", f"{probs['ganancia']*100:.1f}%")
+                b2.metric("Prob. Pérdida", f"{probs['perdida']*100:.1f}%")
+                b3.metric("Prob. Gan >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+                b4.metric("Prob. Perd >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+
+        with tab_dist:
+            if valor_total > 0:
+                st.markdown("#### 📊 Distribución Estadística de Valores por Activo")
                 
-                st.code(sorted(list(campos_encontrados)))
-                
-                st.markdown("**Muestra de datos de activo:**")
-                st.json(activos[0] if activos else {})
-        
-        # Gráficos de distribución
-        if valor_total > 0:
-            # Gráfico de distribución por tipo
-            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-                tipo_stats = df_activos.groupby('Tipo').agg({
-                    'Valuación': ['sum', 'count', 'mean']
-                }).round(2)
-                tipo_stats.columns = ['Valor_Total', 'Cantidad', 'Valor_Promedio']
-                tipo_stats = tipo_stats.reset_index()
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Pie chart por valor
-                    fig_pie = go.Figure(data=[go.Pie(
-                        labels=tipo_stats['Tipo'],
-                        values=tipo_stats['Valor_Total'],
-                        textinfo='label+percent+value',
-                        texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
-                    )])
-                    fig_pie.update_layout(title="Distribución por Valor", height=400)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                
-                with col2:
-                    # Bar chart por tipo
-                    fig_bar = go.Figure(data=[go.Bar(
-                        x=tipo_stats['Tipo'],
-                        y=tipo_stats['Valor_Total'],
-                        text=[f"${val:,.0f}" for val in tipo_stats['Valor_Total']],
-                        textposition='auto'
-                    )])
-                    fig_bar.update_layout(
-                        title="Valor por Tipo de Activo",
-                        xaxis_title="Tipo",
-                        yaxis_title="Valor ($)",
-                        height=400
-                    )
-                    st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Histograma de valores individuales
-            if len(datos_activos) > 1:
+                # Pie chart por valor
+                tipo_stats = df_activos.groupby('Tipo').agg({'Valuación':['sum']}).reset_index()
+                fig_pie = go.Figure(data=[go.Pie(
+                    labels=tipo_stats['Tipo'],
+                    values=tipo_stats['Valuación']['sum'],
+                    textinfo='label+percent'
+                )])
+                st.plotly_chart(fig_pie, use_container_width=True)
+                # Histograma de valores individuales
                 valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                if valores_activos:
-                    fig_hist = go.Figure(data=[go.Histogram(
-                        x=valores_activos,
-                        nbinsx=min(20, len(valores_activos))
-                    )])
-                    fig_hist.update_layout(
-                        title="Distribución de Valores por Activo",
-                        xaxis_title="Valor ($)",
-                        yaxis_title="Frecuencia",
-                        height=400
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
-        
-        # Tabla de activos mejorada
-        st.markdown("#### 📋 Detalle de Activos")
-        
-        df_display = df_activos.copy()
-        df_display['Valuación Formateada'] = df_display['Valuación'].apply(
-            lambda x: f"${x:,.2f}" if x > 0 else "No disponible"
-        )
-        df_display['Peso (%)'] = (df_display['Valuación'] / valor_total * 100).round(2) if valor_total > 0 else 0
-        
-        # Reordenar columnas
-        columns_order = ['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación Formateada', 'Peso (%)']
-        df_display_final = df_display[columns_order]
-        df_display_final = df_display_final.rename(columns={'Valuación Formateada': 'Valuación'})
-        
-        # Ordenar por valuación descendente
-        df_display_final = df_display_final.sort_values('Peso (%)', ascending=False)
-        
-        st.dataframe(df_display_final, use_container_width=True)
-        
-        # === ALERTAS Y RECOMENDACIONES ===
-        st.markdown("#### 💡 Análisis y Recomendaciones")
-        
-        if metricas:
-            # Análisis de concentración
-            if metricas['concentracion'] > 0.5:
-                st.warning("⚠️ **Portafolio Altamente Concentrado**: Su portafolio tiene un alto nivel de concentración. Considere diversificar para reducir el riesgo.")
-            elif metricas['concentracion'] > 0.25:
-                st.info("ℹ️ **Concentración Moderada**: Su portafolio está moderadamente concentrado. La diversificación adicional podría reducir el riesgo.")
-            else:
-                st.success("✅ **Buena Diversificación**: Su portafolio muestra un buen nivel de diversificación.")
-            
-            # Análisis de riesgo-retorno
-            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
-            if ratio_riesgo_retorno > 0.5:
-                st.success("✅ **Buen Balance Riesgo-Retorno**: La relación entre retorno esperado y riesgo es favorable.")
-            else:
-                st.warning("⚠️ **Revisar Balance Riesgo-Retorno**: El riesgo podría ser alto en relación al retorno esperado.")
-        
-        if valor_total == 0:
-            st.error("❌ **Problema de Valuación**: No se pudieron obtener valuaciones válidas para los activos.")
-            
-            if st.button("🔄 Intentar obtener cotizaciones actuales"):
-                with st.spinner("Obteniendo cotizaciones actuales..."):
-                    st.info("Funcionalidad de cotizaciones actuales en desarrollo...")
-    else:
-        st.warning("No se pudieron procesar los datos de los activos")
+                fig_hist = go.Figure(data=[go.Histogram(
+                    x=valores_activos, nbinsx=min(20, len(valores_activos))
+                )])
+                st.plotly_chart(fig_hist, use_container_width=True)
+
+    # ...existing code restante...
+def mostrar_estado_cuenta(estado_cuenta):
+    """
+    Muestra el estado de cuenta del cliente.
+    """
+    st.markdown("### 💰 Estado de Cuenta")
+    st.json(estado_cuenta)
 
 def mostrar_analisis_portafolio():
     """
@@ -2076,11 +1907,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# --- Add this placeholder before its first use or near other "mostrar_" functions ---
-def mostrar_estado_cuenta(estado_cuenta):
-    """
-    Muestra el estado de cuenta del cliente.
-    """
-    st.markdown("### 💰 Estado de Cuenta")
-    st.json(estado_cuenta)
