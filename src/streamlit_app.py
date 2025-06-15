@@ -343,7 +343,20 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
     except Exception:
         return None
 
-def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta, precios_portafolio=None):
+    """
+    Si precios_portafolio es provisto, usarlo directamente para la optimización.
+    Si no, intentar obtener las series como antes.
+    """
+    if precios_portafolio is not None and not precios_portafolio.empty:
+        df_precios = precios_portafolio.copy()
+        returns = df_precios.pct_change().dropna()
+        if returns.empty or len(returns.columns) < 2:
+            return None, None, None
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        return mean_returns, cov_matrix, df_precios
+
     try:
         df_precios = pd.DataFrame()
         simbolos_exitosos = []
@@ -614,7 +627,7 @@ def calcular_metricas_portafolio(activos_data, valor_total):
         return None
 
 class PortfolioManager:
-    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
+    def __init__(self, symbols, token, fecha_desde, fecha_hasta, precios_portafolio=None):
         self.symbols = symbols
         self.token = token
         self.fecha_desde = fecha_desde
@@ -622,13 +635,13 @@ class PortfolioManager:
         self.data_loaded = False
         self.returns = None
         self.prices = None
-    
+        self.precios_portafolio = precios_portafolio
+
     def load_data(self):
         try:
             mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
+                self.token, self.symbols, self.fecha_desde, self.fecha_hasta, precios_portafolio=self.precios_portafolio
             )
-            
             if mean_returns is not None and cov_matrix is not None:
                 self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
                 self.prices = df_precios
@@ -1036,12 +1049,22 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if not simbolos:
         st.warning("No se encontraron símbolos válidos")
         return
-    
+
+    # Obtener precios históricos para los activos del portafolio (los mismos que para el análisis estadístico)
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
-    
+
+    # Usar la función get_historical_data_for_optimization para obtener los precios y retornos
+    mean_returns, cov_matrix, precios_portafolio = get_historical_data_for_optimization(
+        token_acceso, simbolos, fecha_desde, fecha_hasta
+    )
+
+    if precios_portafolio is None or precios_portafolio.empty:
+        st.error("No se pudieron cargar los datos históricos para la optimización")
+        return
+
     st.info(f"Analizando {len(simbolos)} activos desde {fecha_desde} hasta {fecha_hasta}")
-    
+
     strategy = st.radio("Estrategia de Optimización", 
                        ["Pesos Iguales", "Markowitz (Mínima Varianza)", "Markowitz (Retorno Objetivo)"],
                        horizontal=True)
@@ -1053,7 +1076,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     
     if st.button("🔄 Optimizar Portafolio", type="primary"):
         with st.spinner("Optimizando portafolio..."):
-            pm = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+            # Pasar los precios ya obtenidos para evitar duplicidad y asegurar consistencia
+            pm = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta, precios_portafolio=precios_portafolio)
             if pm.load_data():
                 portfolio_output = pm.compute_portfolio(
                     strategy='markowitz' if "Markowitz" in strategy else 'equi-weight',
