@@ -1865,10 +1865,16 @@ def main():
         if st.session_state.token_acceso:
             clientes = obtener_lista_clientes(st.session_state.token_acceso)
             if clientes:
+                # Manejo robusto de claves faltantes en los clientes
+                def cliente_format(x):
+                    apellidoYNombre = x.get('apellidoYNombre', x.get('nombre', ''))
+                    numeroCliente = x.get('numeroCliente', x.get('id', ''))
+                    tipoCliente = x.get('tipoCliente', '')
+                    return f"{apellidoYNombre} - {numeroCliente} ({tipoCliente})"
                 st.session_state.cliente_seleccionado = st.selectbox(
                     "Seleccione un cliente:",
                     options=clientes,
-                    format_func=lambda x: f"{x['apellidoYNombre']} - {x['numeroCliente']} ({x['tipoCliente']})"
+                    format_func=cliente_format
                 )
             else:
                 st.warning("No se encontraron clientes asociados")
