@@ -390,8 +390,8 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     
                     if serie is not None and len(serie) > 10:
                         if serie.nunique() > 1:
-                            df_precios[simbolo_consulta] = serie
-                            simbolos_exitosos.append(simbolo_consulta)
+                            df_precios[simbolo] = serie  # <-- siempre usar el símbolo original como columna
+                            simbolos_exitosos.append(simbolo)
                             serie_obtenida = True
                             break
                 except Exception as e:
@@ -422,30 +422,29 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         if simbolos_fallidos:
             st.warning(f"⚠️ No se pudieron obtener datos para {len(simbolos_fallidos)} activos")
         
-        if len(simbolos_exitosos) < 2:
+        # --- Cambios aquí: permitir avanzar si hay al menos 2 columnas con datos ---
+        if len(df_precios.columns) < 2:
             return None, None, None
         
+        # Alinear fechas y limpiar nulos
         try:
-            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
-            df_precios_interpolated = df_precios.interpolate(method='time')
-            
-            if not df_precios_filled.dropna().empty:
-                df_precios = df_precios_filled.dropna()
-            elif not df_precios_interpolated.dropna().empty:
-                df_precios = df_precios_interpolated.dropna()
-            else:
-                df_precios = df_precios.dropna()
-        except Exception as e:
+            df_precios = df_precios.sort_index()
+            df_precios = df_precios.fillna(method='ffill').fillna(method='bfill')
+            df_precios = df_precios.interpolate(method='time')
+            df_precios = df_precios.dropna()
+        except Exception:
             df_precios = df_precios.dropna()
         
-        if df_precios.empty:
+        if df_precios.empty or len(df_precios.columns) < 2:
             return None, None, None
         
         returns = df_precios.pct_change().dropna()
         
-        if returns.empty or len(returns) < 30:
+        # --- Cambios aquí: permitir avanzar si hay retornos para al menos 2 activos y 10 días ---
+        if returns.empty or len(returns.columns) < 2 or len(returns) < 10:
             return None, None, None
         
+        # Eliminar columnas con retornos constantes
         if (returns.std() == 0).any():
             columnas_constantes = returns.columns[returns.std() == 0].tolist()
             returns = returns.drop(columns=columnas_constantes)
@@ -463,59 +462,39 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         return None, None, None
 
 def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
-    mercados_mapping = {
-        'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
-        'NASDAQ': 'nASDAQ',
-        'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'
-    }
-    
-    mercado_correcto = mercados_mapping.get(mercado, mercado)
-    
-    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}',
-        'Content-Type': 'application/json'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
-    except Exception:
-        return None
-
-def obtener_clase_d(simbolo, mercado, bearer_token):
-    mercados_mapping = {
-        'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
-        'NASDAQ': 'nASDAQ',
-        'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'
-    }
-    
-    mercado_correcto = mercados_mapping.get(mercado, mercado)
-    
-    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {bearer_token}'
     }
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            clases = response.json()
-            for clase in clases:
-                if clase.get('simbolo', '').endswith('D'):
-                    return clase['simbolo']
-            return None
-        else:
-            return None
-    except Exception:
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error en la solicitud de serie histórica para {simbolo} en {mercado}: {response.status_code}")
+        print(response.text)
+        return None
+
+def obtener_clase_d(simbolo, mercado, bearer_token):
+    """
+    Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Clases"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        clases = response.json()
+        for clase in clases:
+            if clase.get('simbolo', '').endswith('D'):
+                return clase['simbolo']
+        print(f"No se encontró clase 'D' para {simbolo} en {mercado}.")
+        return None
+    else:
+        print(f"Error al buscar clases para {simbolo} en {mercado}: {response.status_code}")
+        print(response.text)
         return None
 
 # --- Funciones de Optimización de Portafolio ---
@@ -1412,3 +1391,31 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # --- Ejemplo de uso manual para obtener series históricas y clases D ---
+    import getpass
+
+    username = input("Ingrese su nombre de usuario: ")
+    password = getpass.getpass("Ingrese su contraseña: ")
+
+    token, refresh_token = obtener_tokens(username, password)
+    if token and refresh_token:
+        tickers_especificos = ['AL30', 'AL30D']
+        mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
+        fecha_desde = '2021-01-01'
+        fecha_hasta = '2025-04-01'
+        ajustada = 'SinAjustar'
+
+        for simbolo in tickers_especificos:
+            for mercado in mercados:
+                clase_d = obtener_clase_d(simbolo, mercado, token)
+                if clase_d:
+                    serie_historica = obtener_serie_historica(clase_d, mercado, fecha_desde, fecha_hasta, ajustada, token)
+                    if serie_historica:
+                        df = pd.DataFrame(serie_historica)
+                        print(f"Serie histórica para {clase_d} en {mercado}:")
+                        print(df)
+                else:
+                    print(f"No se pudo obtener la clase 'D' para {simbolo} en {mercado}.")
+    else:
+        print('Error al obtener los tokens')
