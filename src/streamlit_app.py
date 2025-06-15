@@ -1749,3 +1749,70 @@ def main():
             with col1:
                 fecha_desde = st.date_input(
                     "Fecha desde:",
+                    value=st.session_state.fecha_desde
+                )
+            with col2:
+                fecha_hasta = st.date_input(
+                    "Fecha hasta:",
+                    value=st.session_state.fecha_hasta
+                )
+            
+            if st.button("📊 Actualizar análisis"):
+                st.session_state.fecha_desde = fecha_desde
+                st.session_state.fecha_hasta = fecha_hasta
+                st.info("🔄 Actualizando datos y análisis del portafolio...")
+                st.experimental_rerun()
+        
+        # Selección de cliente
+        st.markdown("#### 👥 Selección de Cliente")
+        
+        if st.session_state.clientes is None or len(st.session_state.clientes) == 0:
+            st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
+        else:
+            cliente_nombres = [f"{c['apellidoYNombre']} (ID: {c['numeroCliente']})" for c in st.session_state.clientes]
+            cliente_seleccionado = st.selectbox(
+                "Seleccione un cliente",
+                options=cliente_nombres,
+                format_func=lambda x: x
+            )
+            
+            if cliente_seleccionado:
+                # Obtener datos del cliente seleccionado
+                cliente_data = next((c for c in st.session_state.clientes if f"{c['apellidoYNombre']} (ID: {c['numeroCliente']})" == cliente_seleccionado), None)
+                
+                if cliente_data:
+                    st.session_state.cliente_seleccionado = cliente_data
+                    st.success(f"Cliente seleccionado: {cliente_data['apellidoYNombre']}")
+                else:
+                    st.warning("Cliente no encontrado")
+        
+        # Botón de prueba de conexión y obtención de clientes
+        if st.button("🔄 Probar conexión y obtener clientes"):
+            with st.spinner("Probando conexión y obteniendo clientes..."):
+                # Intentar obtener nuevos tokens y lista de clientes
+                token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                
+                if token_acceso:
+                    st.session_state.token_acceso = token_acceso
+                    st.session_state.refresh_token = refresh_token
+                    
+                    # Obtener lista de clientes
+                    clientes = obtener_lista_clientes(token_acceso)
+                    st.session_state.clientes = clientes
+                    
+                    if clientes and len(clientes) > 0:
+                        st.success(f"Conexión exitosa! Se encontraron {len(clientes)} clientes.")
+                        
+                        # Seleccionar automáticamente el primer cliente
+                        st.session_state.cliente_seleccionado = clientes[0]
+                    else:
+                        st.warning("Conexión exitosa, pero no se encontraron clientes.")
+                else:
+                    st.error("Error en la autenticación")
+    
+    # --- ANÁLISIS DEL PORTAFOLIO ---
+    if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+        mostrar_analisis_portafolio()
+
+if __name__ == "__main__":
+    main()
