@@ -1825,3 +1825,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# --- Add this placeholder before its first use or near other "mostrar_" functions ---
+def mostrar_estado_cuenta(estado_cuenta):
+    """
+    Muestra el estado de cuenta del cliente.
+    """
+    st.markdown("### 💰 Estado de Cuenta")
+    st.json(estado_cuenta)
