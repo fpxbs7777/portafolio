@@ -487,6 +487,211 @@ def obtener_clase_d(simbolo, mercado, bearer_token):
     except Exception:
         return None
 
+def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
+    try:
+        # Mapeo de símbolos argentinos comunes
+        mapeo_simbolos = {
+            'GGAL': 'GGAL.BA',
+            'YPFD': 'YPF',
+            'PAMP': 'PAM',
+            'ALUA': 'ALUA.BA',
+            'MIRG': 'MIRG.BA',
+            'COME': 'COME.BA',
+            'BYMA': 'BYMA.BA',
+            'CRES': 'CRES.BA',
+            'AL30': 'AL30.BA',
+            'GD30': 'GD30.BA'
+        }
+        
+        # Intentar con mapeo específico primero
+        if simbolo in mapeo_simbolos:
+            try:
+                ticker = yf.Ticker(mapeo_simbolos[simbolo])
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty and len(data) > 10:
+                    return data['Close']
+            except:
+                pass
+        
+        # Intentar con sufijos argentinos
+        sufijos_ar = ['.BA', '.AR']
+        for sufijo in sufijos_ar:
+            try:
+                ticker = yf.Ticker(simbolo + sufijo)
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty and len(data) > 10:
+                    return data['Close']
+            except:
+                continue
+        
+        # Intentar sin sufijo (para CEDEARs y otros)
+        try:
+            ticker = yf.Ticker(simbolo)
+            data = ticker.history(start=fecha_desde, end=fecha_hasta)
+            if not data.empty and len(data) > 10:
+                return data['Close']
+        except:
+            pass
+            
+        return None
+    except Exception:
+        return None
+
+def operar_vender(token_portador, mercado, simbolo, cantidad, precio, validez, tipo_orden="precioLimite", plazo="t1"):
+    """
+    Realiza una operación de venta
+    """
+    url = "https://api.invertironline.com/api/v2/operar/Vender"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    
+    # Mapear mercados a formato correcto
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFX': 'rOFEX'
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    payload = {
+        'mercado': mercado_correcto,
+        'simbolo': simbolo,
+        'cantidad': str(cantidad),
+        'precio': str(precio),
+        'validez': validez,
+        'tipoOrden': tipo_orden,
+        'plazo': plazo
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=payload, timeout=15)
+        if response.status_code == 201:
+            return response.json()
+        else:
+            return None
+    except Exception:
+        return None
+
+def operar_comprar(token_portador, mercado, simbolo, cantidad, precio, validez, tipo_orden="precioLimite", plazo="t1"):
+    """
+    Realiza una operación de compra
+    """
+    url = "https://api.invertironline.com/api/v2/operar/Comprar"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    
+    # Mapear mercados a formato correcto
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFX': 'rOFEX'
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    payload = {
+        'mercado': mercado_correcto,
+        'simbolo': simbolo,
+        'cantidad': str(cantidad),
+        'precio': str(precio),
+        'validez': validez,
+        'tipoOrden': tipo_orden,
+        'plazo': plazo
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=payload, timeout=15)
+        if response.status_code == 201:
+            return response.json()
+        else:
+            return None
+    except Exception:
+        return None
+
+def mostrar_operatoria_activo(token_acceso, simbolo, mercado_sugerido="BCBA"):
+    """
+    Muestra interfaz para operar (comprar/vender) un activo específico
+    """
+    st.subheader(f"🔄 Operatoria - {simbolo}")
+    
+    with st.expander(f"Operar {simbolo}", expanded=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📈 Comprar")
+            with st.form(f"comprar_{simbolo}"):
+                mercado_compra = st.selectbox("Mercado", ["BCBA", "NYSE", "NASDAQ", "ROFX"], 
+                                            index=0 if mercado_sugerido == "BCBA" else 1,
+                                            key=f"mercado_compra_{simbolo}")
+                cantidad_compra = st.number_input("Cantidad", min_value=1, value=100, key=f"cantidad_compra_{simbolo}")
+                precio_compra = st.number_input("Precio", min_value=0.01, value=10.0, step=0.01, key=f"precio_compra_{simbolo}")
+                
+                col_fecha, col_hora = st.columns(2)
+                with col_fecha:
+                    fecha_validez = st.date_input("Fecha validez", value=date.today() + timedelta(days=1), key=f"fecha_compra_{simbolo}")
+                with col_hora:
+                    hora_validez = st.time_input("Hora validez", value=datetime.now().time(), key=f"hora_compra_{simbolo}")
+                
+                tipo_orden_compra = st.selectbox("Tipo de orden", ["precioLimite", "mercado"], key=f"tipo_compra_{simbolo}")
+                plazo_compra = st.selectbox("Plazo", ["t0", "t1", "t2"], index=1, key=f"plazo_compra_{simbolo}")
+                
+                if st.form_submit_button("🛒 Comprar", type="primary"):
+                    validez_dt = datetime.combine(fecha_validez, hora_validez)
+                    validez_str = validez_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    
+                    with st.spinner("Procesando orden de compra..."):
+                        resultado = operar_comprar(
+                            token_acceso, mercado_compra, simbolo, 
+                            cantidad_compra, precio_compra, validez_str, 
+                            tipo_orden_compra, plazo_compra
+                        )
+                    
+                    if resultado:
+                        st.success(f"✅ Orden de compra enviada. Número de operación: {resultado.get('numeroOperacion', 'N/A')}")
+                    else:
+                        st.error("❌ Error al enviar orden de compra")
+        
+        with col2:
+            st.markdown("#### 📉 Vender")
+            with st.form(f"vender_{simbolo}"):
+                mercado_venta = st.selectbox("Mercado", ["BCBA", "NYSE", "NASDAQ", "ROFX"], 
+                                           index=0 if mercado_sugerido == "BCBA" else 1,
+                                           key=f"mercado_venta_{simbolo}")
+                cantidad_venta = st.number_input("Cantidad", min_value=1, value=100, key=f"cantidad_venta_{simbolo}")
+                precio_venta = st.number_input("Precio", min_value=0.01, value=10.0, step=0.01, key=f"precio_venta_{simbolo}")
+                
+                col_fecha, col_hora = st.columns(2)
+                with col_fecha:
+                    fecha_validez = st.date_input("Fecha validez", value=date.today() + timedelta(days=1), key=f"fecha_venta_{simbolo}")
+                with col_hora:
+                    hora_validez = st.time_input("Hora validez", value=datetime.now().time(), key=f"hora_venta_{simbolo}")
+                
+                tipo_orden_venta = st.selectbox("Tipo de orden", ["precioLimite", "mercado"], key=f"tipo_venta_{simbolo}")
+                plazo_venta = st.selectbox("Plazo", ["t0", "t1", "t2"], index=1, key=f"plazo_venta_{simbolo}")
+                
+                if st.form_submit_button("💰 Vender", type="secondary"):
+                    validez_dt = datetime.combine(fecha_validez, hora_validez)
+                    validez_str = validez_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    
+                    with st.spinner("Procesando orden de venta..."):
+                        resultado = operar_vender(
+                            token_acceso, mercado_venta, simbolo, 
+                            cantidad_venta, precio_venta, validez_str, 
+                            tipo_orden_venta, plazo_venta
+                        )
+                    
+                    if resultado:
+                        st.success(f"✅ Orden de venta enviada. Número de operación: {resultado.get('numeroOperacion', 'N/A')}")
+                    else:
+                        st.error("❌ Error al enviar orden de venta")
+
 # --- Funciones de Optimización de Portafolio ---
 def optimize_portfolio(returns, target_return=None):
     n_assets = returns.shape[1]
@@ -878,7 +1083,7 @@ def mostrar_resumen_portafolio(portafolio):
                     )
                     st.plotly_chart(fig_hist, use_container_width=True)
         
-        # Tabla de activos
+        # Tabla de activos con botones de operatoria
         st.subheader("📋 Detalle de Activos")
         df_display = df_activos.copy()
         df_display['Valuación'] = df_display['Valuación'].apply(
@@ -888,6 +1093,27 @@ def mostrar_resumen_portafolio(portafolio):
         df_display = df_display.sort_values('Peso (%)', ascending=False)
         
         st.dataframe(df_display, use_container_width=True, height=400)
+        
+        # Sección de operatoria
+        st.subheader("🔄 Operatoria de Activos")
+        simbolos_unicos = df_activos['Símbolo'].unique()
+        
+        if len(simbolos_unicos) > 0:
+            simbolo_seleccionado = st.selectbox(
+                "Seleccione un activo para operar:",
+                options=simbolos_unicos,
+                key="operatoria_simbolo"
+            )
+            
+            if simbolo_seleccionado and simbolo_seleccionado != 'N/A':
+                # Determinar mercado sugerido basado en el símbolo
+                mercado_sugerido = "BCBA"
+                if simbolo_seleccionado in ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META']:
+                    mercado_sugerido = "NASDAQ"
+                elif simbolo_seleccionado in ['YPF', 'PAM']:
+                    mercado_sugerido = "NYSE"
+                
+                mostrar_operatoria_activo(st.session_state.token_acceso, simbolo_seleccionado, mercado_sugerido)
         
         # Recomendaciones
         st.subheader("💡 Recomendaciones")
@@ -993,6 +1219,19 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     st.dataframe(df_tasas.head(10))
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
+    
+    # Sección de operatoria general
+    with st.expander("🔄 Operatoria General", expanded=False):
+        st.markdown("#### Operar cualquier activo")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            simbolo_operar = st.text_input("Símbolo del activo", placeholder="Ej: GGAL, AL30, AAPL")
+        with col2:
+            mercado_operar = st.selectbox("Mercado", ["BCBA", "NYSE", "NASDAQ", "ROFX"])
+        
+        if simbolo_operar:
+            mostrar_operatoria_activo(token_acceso, simbolo_operar, mercado_operar)
 
 def obtener_test_inversor(token_portador):
     """
