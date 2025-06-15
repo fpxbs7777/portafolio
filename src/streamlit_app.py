@@ -1147,8 +1147,6 @@ def mostrar_resumen_portafolio(portafolio):
             if st.button("🔄 Intentar obtener cotizaciones actuales"):
                 with st.spinner("Obteniendo cotizaciones actuales..."):
                     st.info("Funcionalidad de cotizaciones actuales en desarrollo...")
-    else:
-        st.warning("No se pudieron procesar los datos de los activos")
 
 def mostrar_analisis_portafolio():
     """
@@ -1871,5 +1869,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
         - Permite solo posiciones compradoras
         - Suma de pesos = 100%
         """)
-    if __name__ == "__main__":
-        main()
+
+# Asegurar que main() se ejecute cuando se corre el script
+if __name__ == "__main__":
+    main()
