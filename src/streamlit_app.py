@@ -1769,7 +1769,10 @@ def main():
         if st.session_state.clientes is None or len(st.session_state.clientes) == 0:
             st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
         else:
-            cliente_nombres = [f"{c['apellidoYNombre']} (ID: {c['numeroCliente']})" for c in st.session_state.clientes]
+            cliente_nombres = [
+                f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} (ID: {c.get('numeroCliente', c.get('id', 'N/A'))})"
+                for c in st.session_state.clientes
+            ]
             cliente_seleccionado = st.selectbox(
                 "Seleccione un cliente",
                 options=cliente_nombres,
@@ -1778,11 +1781,17 @@ def main():
             
             if cliente_seleccionado:
                 # Obtener datos del cliente seleccionado
-                cliente_data = next((c for c in st.session_state.clientes if f"{c['apellidoYNombre']} (ID: {c['numeroCliente']})" == cliente_seleccionado), None)
+                cliente_data = next(
+                    (
+                        c for c in st.session_state.clientes
+                        if f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} (ID: {c.get('numeroCliente', c.get('id', 'N/A'))})" == cliente_seleccionado
+                    ),
+                    None
+                )
                 
                 if cliente_data:
                     st.session_state.cliente_seleccionado = cliente_data
-                    st.success(f"Cliente seleccionado: {cliente_data['apellidoYNombre']}")
+                    st.success(f"Cliente seleccionado: {cliente_data.get('apellidoYNombre', cliente_data.get('nombre', 'Cliente'))}")
                 else:
                     st.warning("Cliente no encontrado")
         
