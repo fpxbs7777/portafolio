@@ -264,15 +264,23 @@ def parse_datetime_flexible(datetime_string):
     except Exception:
         return None
 
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    # Manejar casos especiales para FCI y Opciones
-    if mercado == "Opciones":
-        url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    elif mercado == "FCI":
-        url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    else:
-        # Para mercados regulares: bCBA, nYSE, nASDAQ, rOFEX
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    # Mapear mercados a formato correcto de API según documentación
+    mercados_mapping = {
+        'bCBA': 'BCBA',
+        'nYSE': 'NYSE', 
+        'nASDAQ': 'NASDAQ',
+        'rOFEX': 'ROFX',
+        'BCBA': 'BCBA',
+        'NYSE': 'NYSE',
+        'NASDAQ': 'NASDAQ',
+        'ROFEX': 'ROFX'
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    # Construir URL según documentación: /api/v2/:mercado/Titulos/:simbolo/Cotizacion/seriehistorica/:fechaDesde/:fechaHasta/:ajustada
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     
     headers = {
         'Accept': 'application/json',
@@ -349,8 +357,8 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         for idx, simbolo in enumerate(simbolos):
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
             
-            # Intentar con mercados principales directamente
-            mercados_directos = ['bCBA', 'nYSE', 'nASDAQ']
+            # Intentar con mercados principales usando códigos correctos
+            mercados_directos = ['BCBA', 'NYSE', 'NASDAQ']
             serie_obtenida = False
             
             # Intentar directamente con el símbolo en cada mercado
@@ -442,86 +450,41 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         st.error(f"Error general en get_historical_data_for_optimization: {str(e)}")
         return None, None, None
 
-def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
-    try:
-        # Mapeo de símbolos argentinos comunes
-        mapeo_simbolos = {
-            'GGAL': 'GGAL.BA',
-            'YPFD': 'YPF',
-            'PAMP': 'PAM',
-            'ALUA': 'ALUA.BA',
-            'MIRG': 'MIRG.BA',
-            'COME': 'COME.BA',
-            'BYMA': 'BYMA.BA',
-            'CRES': 'CRES.BA',
-            'AL30': 'AL30.BA',
-            'GD30': 'GD30.BA'
-        }
-        
-        # Intentar con mapeo específico primero
-        if simbolo in mapeo_simbolos:
-            try:
-                ticker = yf.Ticker(mapeo_simbolos[simbolo])
-                data = ticker.history(start=fecha_desde, end=fecha_hasta)
-                if not data.empty and len(data) > 10:
-                    return data['Close']
-            except:
-                pass
-        
-        # Intentar con sufijos argentinos
-        sufijos_ar = ['.BA', '.AR']
-        for sufijo in sufijos_ar:
-            try:
-                ticker = yf.Ticker(simbolo + sufijo)
-                data = ticker.history(start=fecha_desde, end=fecha_hasta)
-                if not data.empty and len(data) > 10:
-                    return data['Close']
-            except:
-                continue
-        
-        # Intentar sin sufijo (para CEDEARs y otros)
-        try:
-            ticker = yf.Ticker(simbolo)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta)
-            if not data.empty and len(data) > 10:
-                return data['Close']
-        except:
-            pass
-            
-        return None
-    except Exception:
-        return None
-
-def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
-    # Mapear mercados a formato correcto de API
+def obtener_clase_d(simbolo, mercado, bearer_token):
+    """
+    Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
+    Solo para uso en cotización MEP del dólar.
+    """
+    # Mapear mercados a formato correcto
     mercados_mapping = {
-        'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
-        'NASDAQ': 'nASDAQ',
-        'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'
+        'bCBA': 'BCBA',
+        'nYSE': 'NYSE', 
+        'nASDAQ': 'NASDAQ',
+        'rOFEX': 'ROFX',
+        'BCBA': 'BCBA',
+        'NYSE': 'NYSE',
+        'NASDAQ': 'NASDAQ',
+        'ROFEX': 'ROFX'
     }
     
     mercado_correcto = mercados_mapping.get(mercado, mercado)
     
-    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
     headers = {
         'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}',
-        'Content-Type': 'application/json'
+        'Authorization': f'Bearer {bearer_token}'
     }
-    
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"Error en la solicitud de serie histórica para {simbolo} en {mercado}: {response.status_code}")
-            if response.status_code != 404:  # No mostrar error para símbolos no encontrados
-                print(response.text)
+            clases = response.json()
+            for clase in clases:
+                if clase.get('simbolo', '').endswith('D'):
+                    return clase['simbolo']
             return None
-    except Exception as e:
-        print(f"Excepción al obtener serie histórica para {simbolo}: {str(e)}")
+        else:
+            return None
+    except Exception:
         return None
 
 # --- Funciones de Optimización de Portafolio ---
