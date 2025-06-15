@@ -1699,3 +1699,6 @@ def main():
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
         st.error("🔄 Por favor, recargue la página e intente nuevamente")
+
+if __name__ == "__main__":
+    main()
