@@ -476,7 +476,8 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
     url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
+        'Authorization': f'Bearer {bearer_token}',
+        'Content-Type': 'application/json'
     }
     
     try:
