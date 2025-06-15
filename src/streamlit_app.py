@@ -265,13 +265,7 @@ def parse_datetime_flexible(datetime_string):
         return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    if mercado == "Opciones":
-        url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    elif mercado == "FCI":
-        url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    else:
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}',
@@ -1390,6 +1384,7 @@ def main():
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
 if __name__ == "__main__":
+    # --- Streamlit app main ---
     main()
 
     # --- Ejemplo de uso manual para obtener series históricas y clases D ---
@@ -1398,20 +1393,28 @@ if __name__ == "__main__":
     username = input("Ingrese su nombre de usuario: ")
     password = getpass.getpass("Ingrese su contraseña: ")
 
-    token, refresh_token = obtener_tokens(username, password)
-    if token and refresh_token:
-        tickers_especificos = ['AL30', 'AL30D']
+    bearer_token, refresh_token = obtener_tokens(username, password)
+    if bearer_token and refresh_token:
+        # Lista de símbolos específicos
+        tickers_especificos = ['AL30', 'AL30D']  # Ejemplo de tickers
+
+        # Mercados disponibles
         mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
+
+        # Fechas para la serie histórica
         fecha_desde = '2021-01-01'
         fecha_hasta = '2025-04-01'
         ajustada = 'SinAjustar'
 
         for simbolo in tickers_especificos:
             for mercado in mercados:
-                clase_d = obtener_clase_d(simbolo, mercado, token)
+                # Buscar la clase 'D' automáticamente
+                clase_d = obtener_clase_d(simbolo, mercado, bearer_token)
                 if clase_d:
-                    serie_historica = obtener_serie_historica(clase_d, mercado, fecha_desde, fecha_hasta, ajustada, token)
+                    # Obtener serie histórica para la clase 'D'
+                    serie_historica = obtener_serie_historica(clase_d, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token)
                     if serie_historica:
+                        # Crear un DataFrame para la serie histórica y mostrarlo
                         df = pd.DataFrame(serie_historica)
                         print(f"Serie histórica para {clase_d} en {mercado}:")
                         print(df)
