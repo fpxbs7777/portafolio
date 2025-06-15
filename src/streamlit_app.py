@@ -998,6 +998,183 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
+def obtener_test_inversor(token_portador):
+    """
+    Obtiene las preguntas del test del inversor
+    """
+    url = 'https://api.invertironline.com/api/v2/asesores/test-inversor'
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        return None
+
+def enviar_respuestas_test_inversor(token_portador, id_cliente, respuestas):
+    """
+    Envía las respuestas del test del inversor para un cliente específico
+    """
+    url = f'https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente}'
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    try:
+        response = requests.post(url, headers=headers, json=respuestas, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        return None
+
+def generar_universo_aleatorio_basado_perfil(perfil_sugerido, num_activos=10):
+    """
+    Genera un universo de activos aleatorio basado en el perfil del inversor
+    """
+    # Mapeo de perfiles a tipos de activos
+    activos_por_perfil = {
+        'conservador': {
+            'bonos': ['AL30', 'GD30', 'AE38', 'AL35', 'GD35', 'TX26', 'TX28'],
+            'plazo_fijo': ['PF30', 'PF60', 'PF90'],
+            'fci_renta_fija': ['FIMA', 'COHEN', 'MEGAINVER'],
+            'cauciones': ['CAUCION']
+        },
+        'moderado': {
+            'bonos': ['AL30', 'GD30', 'AE38', 'AL35', 'GD35'],
+            'acciones_blue_chip': ['GGAL', 'YPFD', 'PAMP', 'ALUA', 'MIRG'],
+            'cedears': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'],
+            'fci_mixtos': ['MEGAINVER', 'COHEN', 'FIMA']
+        },
+        'agresivo': {
+            'acciones_merval': ['GGAL', 'YPFD', 'PAMP', 'ALUA', 'MIRG', 'COME', 'BYMA', 'CRES'],
+            'cedears_tech': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META'],
+            'acciones_small_cap': ['AUSO', 'CTIO', 'FERR', 'GCLA'],
+            'fci_renta_variable': ['MEGAINVER', 'COHEN']
+        }
+    }
+    
+    # Determinar perfil basado en el nombre del perfil sugerido
+    perfil_nombre = perfil_sugerido.get('nombre', '').lower()
+    
+    if 'conservador' in perfil_nombre or 'bajo' in perfil_nombre:
+        perfil_key = 'conservador'
+    elif 'agresivo' in perfil_nombre or 'alto' in perfil_nombre:
+        perfil_key = 'agresivo'
+    else:
+        perfil_key = 'moderado'
+    
+    # Obtener activos del perfil
+    activos_perfil = activos_por_perfil.get(perfil_key, activos_por_perfil['moderado'])
+    
+    # Combinar todos los activos disponibles
+    todos_activos = []
+    for categoria, activos in activos_perfil.items():
+        todos_activos.extend(activos)
+    
+    # Seleccionar activos aleatorios
+    import random
+    random.seed(42)  # Para reproducibilidad
+    activos_seleccionados = random.sample(todos_activos, min(num_activos, len(todos_activos)))
+    
+    return activos_seleccionados, perfil_key
+
+def mostrar_test_inversor_simplificado(token_acceso, id_cliente):
+    """
+    Muestra una versión simplificada del test del inversor para generar un perfil
+    """
+    st.subheader("🧪 Test del Inversor Simplificado")
+    st.info("Complete este test para generar un universo de activos personalizado")
+    
+    # Preguntas simplificadas
+    with st.form("test_inversor_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            edad = st.selectbox("Edad", [
+                "18-30 años", "31-45 años", "46-60 años", "60+ años"
+            ])
+            
+            objetivo = st.selectbox("Objetivo de inversión", [
+                "Preservar capital", "Crecimiento moderado", "Crecimiento agresivo", "Especulación"
+            ])
+            
+            plazo = st.selectbox("Plazo de inversión", [
+                "Menos de 1 año", "1-3 años", "3-5 años", "Más de 5 años"
+            ])
+        
+        with col2:
+            experiencia = st.selectbox("Experiencia en inversiones", [
+                "Principiante", "Intermedio", "Avanzado", "Experto"
+            ])
+            
+            tolerancia_riesgo = st.selectbox("Tolerancia al riesgo", [
+                "Muy baja", "Baja", "Media", "Alta", "Muy alta"
+            ])
+            
+            porcentaje_patrimonio = st.selectbox("% del patrimonio a invertir", [
+                "Menos del 10%", "10-25%", "25-50%", "Más del 50%"
+            ])
+        
+        if st.form_submit_button("🎯 Generar Perfil y Universo"):
+            # Mapear respuestas a IDs (simulados)
+            respuestas = {
+                "enviarEmailCliente": False,
+                "instrumentosInvertidosAnteriormente": [1, 2] if experiencia in ["Avanzado", "Experto"] else [1],
+                "nivelesConocimientoInstrumentos": [2] if experiencia in ["Avanzado", "Experto"] else [1],
+                "idPlazoElegido": {"Menos de 1 año": 1, "1-3 años": 2, "3-5 años": 3, "Más de 5 años": 4}[plazo],
+                "idEdadElegida": {"18-30 años": 1, "31-45 años": 2, "46-60 años": 3, "60+ años": 4}[edad],
+                "idObjetivoInversionElegida": {"Preservar capital": 1, "Crecimiento moderado": 2, "Crecimiento agresivo": 3, "Especulación": 4}[objetivo],
+                "idPolizaElegida": 1,
+                "idCapacidadAhorroElegida": {"Menos del 10%": 1, "10-25%": 2, "25-50%": 3, "Más del 50%": 4}[porcentaje_patrimonio],
+                "idPorcentajePatrimonioDedicado": {"Menos del 10%": 1, "10-25%": 2, "25-50%": 3, "Más del 50%": 4}[porcentaje_patrimonio]
+            }
+            
+            # Intentar enviar el test (si no funciona, usar perfil simulado)
+            resultado_test = enviar_respuestas_test_inversor(token_acceso, id_cliente, respuestas)
+            
+            if resultado_test and resultado_test.get('ok'):
+                perfil_sugerido = resultado_test.get('perfilSugerido', {})
+                st.success(f"✅ Perfil generado: {perfil_sugerido.get('nombre', 'N/A')}")
+                st.write(f"**Detalle:** {perfil_sugerido.get('detalle', 'N/A')}")
+                
+                if perfil_sugerido.get('perfilComposiciones'):
+                    st.write("**Composición sugerida:**")
+                    for comp in perfil_sugerido['perfilComposiciones']:
+                        st.write(f"- {comp.get('nombre', 'N/A')}: {comp.get('porcentaje', 0)}%")
+            else:
+                # Perfil simulado basado en las respuestas
+                if tolerancia_riesgo in ["Muy baja", "Baja"]:
+                    perfil_sugerido = {"nombre": "Conservador", "detalle": "Perfil orientado a la preservación del capital"}
+                elif tolerancia_riesgo in ["Muy alta", "Alta"]:
+                    perfil_sugerido = {"nombre": "Agresivo", "detalle": "Perfil orientado al crecimiento del capital"}
+                else:
+                    perfil_sugerido = {"nombre": "Moderado", "detalle": "Perfil balanceado entre riesgo y retorno"}
+                
+                st.success(f"✅ Perfil simulado generado: {perfil_sugerido['nombre']}")
+                st.write(f"**Detalle:** {perfil_sugerido['detalle']}")
+            
+            # Generar universo de activos
+            activos_universo, tipo_perfil = generar_universo_aleatorio_basado_perfil(perfil_sugerido)
+            
+            st.session_state.universo_activos = activos_universo
+            st.session_state.perfil_inversor = perfil_sugerido
+            
+            st.success(f"🎯 Universo de {len(activos_universo)} activos generado para perfil {tipo_perfil}")
+            st.write("**Activos seleccionados:**", ", ".join(activos_universo))
+            
+            return activos_universo, perfil_sugerido
+    
+    return None, None
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
@@ -1024,34 +1201,50 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         st.warning("No se encontraron símbolos válidos")
         return
 
-    # Obtener precios históricos para los activos del portafolio (los mismos que para el análisis estadístico)
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
 
-    # Usar la función get_historical_data_for_optimization para obtener los precios y retornos
-    mean_returns, cov_matrix, precios_portafolio = get_historical_data_for_optimization(
-        token_acceso, simbolos, fecha_desde, fecha_hasta
-    )
+    st.info(f"📊 Portafolio actual: {len(simbolos)} activos desde {fecha_desde} hasta {fecha_hasta}")
 
-    if precios_portafolio is None or precios_portafolio.empty:
-        st.error("No se pudieron cargar los datos históricos para la optimización")
-        return
-
-    st.info(f"Analizando {len(simbolos)} activos desde {fecha_desde} hasta {fecha_hasta}")
-
+    # Estrategias de optimización expandidas
     strategy = st.radio("Estrategia de Optimización", 
-                       ["Pesos Iguales", "Markowitz (Mínima Varianza)", "Markowitz (Retorno Objetivo)"],
+                       ["Pesos Iguales", "Markowitz (Mínima Varianza)", "Markowitz (Retorno Objetivo)", "Universo Aleatorio"],
                        horizontal=True)
     
     target_return = None
+    activos_a_optimizar = simbolos
+    
     if "Retorno Objetivo" in strategy:
         target_return = st.slider("Retorno Diario Objetivo", 0.0001, 0.01, 0.001, 0.0001,
                                 help="Retorno diario esperado que desea alcanzar")
     
+    elif "Universo Aleatorio" in strategy:
+        st.markdown("#### 🎲 Optimización con Universo Aleatorio")
+        st.info("Esta estrategia genera un universo de activos basado en el perfil del inversor")
+        
+        # Mostrar test del inversor
+        activos_universo, perfil = mostrar_test_inversor_simplificado(token_acceso, id_cliente)
+        
+        if 'universo_activos' in st.session_state:
+            activos_a_optimizar = st.session_state.universo_activos
+            st.success(f"✅ Usando universo de {len(activos_a_optimizar)} activos: {', '.join(activos_a_optimizar[:5])}{'...' if len(activos_a_optimizar) > 5 else ''}")
+        else:
+            st.warning("⚠️ Complete el test del inversor para generar el universo de activos")
+            return
+    
     if st.button("🔄 Optimizar Portafolio", type="primary"):
         with st.spinner("Optimizando portafolio..."):
+            # Obtener datos históricos para los activos seleccionados
+            mean_returns, cov_matrix, precios_portafolio = get_historical_data_for_optimization(
+                token_acceso, activos_a_optimizar, fecha_desde, fecha_hasta
+            )
+
+            if precios_portafolio is None or precios_portafolio.empty:
+                st.error("No se pudieron cargar los datos históricos para la optimización")
+                return
+
             # Pasar los precios ya obtenidos para evitar duplicidad y asegurar consistencia
-            pm = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta, precios_portafolio=precios_portafolio)
+            pm = PortfolioManager(activos_a_optimizar, token_acceso, fecha_desde, fecha_hasta, precios_portafolio=precios_portafolio)
             if pm.load_data():
                 portfolio_output = pm.compute_portfolio(
                     strategy='markowitz' if "Markowitz" in strategy else 'equi-weight',
@@ -1060,6 +1253,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 
                 if portfolio_output:
                     st.success("✅ Portafolio optimizado con éxito")
+                    
+                    # Mostrar información del universo si es aleatorio
+                    if "Universo Aleatorio" in strategy and 'perfil_inversor' in st.session_state:
+                        st.info(f"🎯 Perfil del inversor: {st.session_state.perfil_inversor.get('nombre', 'N/A')}")
                     
                     # Mostrar pesos optimizados
                     st.subheader("Pesos Optimizados")
@@ -1186,14 +1383,13 @@ def mostrar_analisis_portafolio():
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
-    # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    # Crear tabs sin "Universo Aleatorio" como tab independiente
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Optimización",
-        "🧪 Universo Aleatorio"
+        "🔄 Optimización"
     ])
 
     with tab1:
@@ -1218,9 +1414,6 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
-    
-    with tab6:
-        mostrar_optimizacion_universo_aleatorio(st.session_state.token_acceso)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
