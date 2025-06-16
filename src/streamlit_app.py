@@ -265,48 +265,12 @@ def parse_datetime_flexible(datetime_string):
         return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    """
-    Función mejorada para obtener series históricas de diferentes tipos de activos
-    Soporta: Acciones, Bonos, CEDEARs, FCIs, Opciones, Futuros, etc.
-    """
-    # Mapeo de mercados y tipos de activos
-    mercados_mapping = {
-        'BCBA': 'bCBA',
-        'MERVAL': 'bCBA',
-        'NYSE': 'nYSE', 
-        'NASDAQ': 'nASDAQ',
-        'ROFEX': 'rOFEX',
-        'bCBA': 'bCBA',
-        'nYSE': 'nYSE',
-        'nASDAQ': 'nASDAQ',
-        'rOFEX': 'rOFEX'
-    }
-    
-    mercado_normalizado = mercados_mapping.get(mercado.upper(), mercado)
-    
-    # Diferentes endpoints según el tipo de activo
-    endpoints = [
-        # Endpoint estándar para acciones y bonos
-        f"https://api.invertironline.com/api/v2/{mercado_normalizado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        
-        # Endpoint para FCIs
-        f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        
-        # Endpoint para Opciones
-        f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        
-        # Endpoint para Futuros en ROFEX
-        f"https://api.invertironline.com/api/v2/rOFEX/Futuros/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        
-        # Endpoint alternativo para títulos públicos
-        f"https://api.invertironline.com/api/v2/bCBA/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        
-        # Endpoint para obligaciones negociables
-        f"https://api.invertironline.com/api/v2/bCBA/ObligacionesNegociables/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        
-        # Endpoint para CEDEARs
-        f"https://api.invertironline.com/api/v2/bCBA/Cedears/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-    ]
+    if mercado == "Opciones":
+        url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    elif mercado == "FCI":
+        url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    else:
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     
     headers = {
         'Accept': 'application/json',
@@ -314,137 +278,80 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         'Content-Type': 'application/json'
     }
     
-    # Intentar con cada endpoint
-    for url in endpoints:
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if not data:
+                return None
             
-            if response.status_code == 200:
-                data = response.json()
-                if not data:
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    precio = item.get('ultimoPrecio')
+                    
+                    if not precio or precio == 0:
+                        precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                    
+                    fecha_str = item.get('fechaHora')
+                    
+                    if precio is not None and precio > 0 and fecha_str:
+                        fecha_parsed = parse_datetime_flexible(fecha_str)
+                        if fecha_parsed is not None:
+                            precios.append(precio)
+                            fechas.append(fecha_parsed)
+                except Exception:
                     continue
-                
-                precios = []
-                fechas = []
-                
-                for item in data:
-                    try:
-                        # Buscar precio en diferentes campos
-                        precio = None
-                        campos_precio = [
-                            'ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre',
-                            'cierreAnterior', 'precioPromedio', 'apertura', 'valorCuotaparte',
-                            'precioVentaActual', 'precioCompraActual', 'cotizacion'
-                        ]
-                        
-                        for campo in campos_precio:
-                            if campo in item and item[campo] is not None:
-                                try:
-                                    precio_candidato = float(item[campo])
-                                    if precio_candidato > 0:
-                                        precio = precio_candidato
-                                        break
-                                except (ValueError, TypeError):
-                                    continue
-                        
-                        # Buscar fecha en diferentes campos
-                        fecha_str = None
-                        campos_fecha = ['fechaHora', 'fecha', 'date', 'timestamp']
-                        
-                        for campo in campos_fecha:
-                            if campo in item and item[campo] is not None:
-                                fecha_str = item[campo]
-                                break
-                        
-                        if precio is not None and precio > 0 and fecha_str:
-                            fecha_parsed = parse_datetime_flexible(fecha_str)
-                            if fecha_parsed is not None:
-                                precios.append(precio)
-                                fechas.append(fecha_parsed)
-                    except Exception:
-                        continue
-                
-                if precios and fechas and len(precios) > 10:
-                    serie = pd.Series(precios, index=fechas)
-                    serie = serie.sort_index()
-                    # Eliminar duplicados manteniendo el último valor
-                    serie = serie[~serie.index.duplicated(keep='last')]
-                    
-                    # Validar que la serie tenga variación
-                    if serie.nunique() > 1:
-                        return serie
-                    
-        except Exception as e:
-            continue
-    
-    return None
+            
+            if precios and fechas:
+                serie = pd.Series(precios, index=fechas)
+                serie = serie.sort_index()
+                serie = serie[~serie.index.duplicated(keep='last')]
+                return serie
+            else:
+                return None
+        else:
+            return None
+    except Exception:
+        return None
 
-def detectar_tipo_activo(simbolo, token_portador):
-    """
-    Detecta automáticamente el tipo de activo y mercado apropiado
-    """
-    # Patrones comunes para diferentes tipos de activos
-    if simbolo.endswith('D'):
-        return 'bono_clase_d', 'bCBA'
-    elif simbolo.startswith('AL') or simbolo.startswith('GD') or simbolo.startswith('AE'):
-        return 'bono', 'bCBA'
-    elif len(simbolo) <= 4 and simbolo.isupper():
-        return 'accion', 'bCBA'
-    elif '.' in simbolo:
-        return 'cedear', 'bCBA'
-    elif simbolo.startswith('FCI'):
-        return 'fci', 'FCI'
-    elif 'C' in simbolo and len(simbolo) > 4:
-        return 'opcion', 'Opciones'
-    else:
-        return 'unknown', 'bCBA'
-
-def obtener_datos_con_deteccion_automatica(token_portador, simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene datos históricos con detección automática del tipo de activo
-    """
-    fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
-    fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
-    
-    # Detectar tipo de activo
-    tipo_activo, mercado_sugerido = detectar_tipo_activo(simbolo, token_portador)
-    
-    # Lista de mercados a probar en orden de prioridad
-    mercados_a_probar = [mercado_sugerido, 'bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
-    
-    # Intentar con diferentes mercados
-    for mercado in mercados_a_probar:
-        # Primero intentar con el símbolo original
-        serie = obtener_serie_historica_iol(
-            token_portador, mercado, simbolo, 
-            fecha_desde_str, fecha_hasta_str
-        )
+def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
+    try:
+        sufijos_ar = ['.BA', '.AR']
         
-        if serie is not None:
-            return serie
+        for sufijo in sufijos_ar:
+            try:
+                ticker = yf.Ticker(simbolo + sufijo)
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty and len(data) > 10:
+                    return data['Close']
+            except:
+                continue
         
-        # Si es un bono, intentar buscar la clase D automáticamente
-        if tipo_activo in ['bono', 'unknown'] and mercado == 'bCBA':
-            clase_d = obtener_clase_d(simbolo, mercado, token_portador)
-            if clase_d and clase_d != simbolo:
-                serie = obtener_serie_historica_iol(
-                    token_portador, mercado, clase_d,
-                    fecha_desde_str, fecha_hasta_str
-                )
-                if serie is not None:
-                    return serie
-    
-    return None
+        try:
+            ticker = yf.Ticker(simbolo)
+            data = ticker.history(start=fecha_desde, end=fecha_hasta)
+            if not data.empty and len(data) > 10:
+                return data['Close']
+        except:
+            pass
+            
+        return None
+    except Exception:
+        return None
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
-    """
-    Función mejorada para obtener datos históricos para optimización
-    """
     try:
         df_precios = pd.DataFrame()
         simbolos_exitosos = []
         simbolos_fallidos = []
         detalles_errores = {}
+        
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
         
         progress_bar = st.progress(0)
         total_simbolos = len(simbolos)
@@ -452,176 +359,132 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         for idx, simbolo in enumerate(simbolos):
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
             
-            # Intentar obtener datos con detección automática
-            serie = obtener_datos_con_deteccion_automatica(
-                token_portador, simbolo, fecha_desde, fecha_hasta
-            )
+            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
+            serie_obtenida = False
             
-            if serie is not None and len(serie) > 10:
-                if serie.nunique() > 1:  # Verificar que hay variación en los precios
-                    df_precios[simbolo] = serie
-                    simbolos_exitosos.append(simbolo)
+            for mercado in mercados:
+                try:
+                    simbolo_consulta = simbolo
+                    if mercado not in ['Opciones', 'FCI']:
+                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
+                        if clase_d:
+                            simbolo_consulta = clase_d
+                    
+                    serie = obtener_serie_historica_iol(
+                        token_portador, mercado, simbolo_consulta, 
+                        fecha_desde_str, fecha_hasta_str
+                    )
+                    
+                    if serie is not None and len(serie) > 10:
+                        if serie.nunique() > 1:
+                            df_precios[simbolo_consulta] = serie
+                            simbolos_exitosos.append(simbolo_consulta)
+                            serie_obtenida = True
+                            break
+                except Exception as e:
+                    detalles_errores[f"{simbolo}_{mercado}"] = str(e)
                     continue
             
-            # Si no funciona, intentar con yfinance como fallback
-            try:
-                serie_yf = obtener_datos_alternativos_yfinance(
-                    simbolo, fecha_desde, fecha_hasta
-                )
-                if serie_yf is not None and len(serie_yf) > 10:
-                    if serie_yf.nunique() > 1:
-                        df_precios[simbolo] = serie_yf
-                        simbolos_exitosos.append(simbolo)
-                        continue
-            except Exception as e:
-                detalles_errores[f"{simbolo}_yfinance"] = str(e)
+            if not serie_obtenida:
+                try:
+                    serie_yf = obtener_datos_alternativos_yfinance(
+                        simbolo, fecha_desde, fecha_hasta
+                    )
+                    if serie_yf is not None and len(serie_yf) > 10:
+                        if serie_yf.nunique() > 1:
+                            df_precios[simbolo] = serie_yf
+                            simbolos_exitosos.append(simbolo)
+                            serie_obtenida = True
+                except Exception as e:
+                    detalles_errores[f"{simbolo}_yfinance"] = str(e)
             
-            # Si llegamos aquí, no se pudieron obtener datos
-            simbolos_fallidos.append(simbolo)
-            detalles_errores[simbolo] = "No se pudieron obtener datos de ninguna fuente"
+            if not serie_obtenida:
+                simbolos_fallidos.append(simbolo)
         
         progress_bar.empty()
         
-        # Mostrar resultados
         if simbolos_exitosos:
-            st.success(f"✅ Datos obtenidos para {len(simbolos_exitosos)} activos: {', '.join(simbolos_exitosos[:5])}{'...' if len(simbolos_exitosos) > 5 else ''}")
+            st.success(f"✅ Datos obtenidos para {len(simbolos_exitosos)} activos")
         
         if simbolos_fallidos:
-            st.warning(f"⚠️ No se pudieron obtener datos para {len(simbolos_fallidos)} activos: {', '.join(simbolos_fallidos[:3])}{'...' if len(simbolos_fallidos) > 3 else ''}")
-            
-            # Mostrar detalles en un expander
-            with st.expander("Ver detalles de errores"):
-                for simbolo in simbolos_fallidos:
-                    st.text(f"{simbolo}: {detalles_errores.get(simbolo, 'Error desconocido')}")
+            st.warning(f"⚠️ No se pudieron obtener datos para {len(simbolos_fallidos)} activos")
         
         if len(simbolos_exitosos) < 2:
-            st.error("Se necesitan al menos 2 activos con datos válidos para realizar la optimización")
             return None, None, None
         
-        # Procesamiento de datos
         try:
-            # Alinear fechas y manejar valores faltantes
-            df_precios = df_precios.sort_index()
-            
-            # Rellenar valores faltantes with diferentes métodos
             df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            df_precios_interpolated = df_precios.interpolate(method='time')
             
-            # Si aún hay NaN, usar interpolación
-            if df_precios_filled.isna().any().any():
-                df_precios_filled = df_precios_filled.interpolate(method='time')
-            
-            # Como último recurso, eliminar filas con NaN
-            df_precios_clean = df_precios_filled.dropna()
-            
-            if df_precios_clean.empty:
-                st.error("No hay datos suficientes después del procesamiento")
-                return None, None, None
-            
-            # Calcular retornos
-            returns = df_precios_clean.pct_change().dropna()
-            
-            if returns.empty or len(returns) < 30:
-                st.error("No hay suficientes retornos para el análisis (mínimo 30 observaciones)")
-                return None, None, None
-            
-            # Eliminar activos con varianza cero
-            varianzas_cero = (returns.std() == 0)
-            if varianzas_cero.any():
-                columnas_constantes = returns.columns[varianzas_cero].tolist()
-                st.warning(f"Eliminando activos con precios constantes: {columnas_constantes}")
-                returns = returns.drop(columns=columnas_constantes)
-                df_precios_clean = df_precios_clean.drop(columns=columnas_constantes)
-            
-            if len(returns.columns) < 2:
-                st.error("Se necesitan al menos 2 activos con variación de precios")
-                return None, None, None
-            
-            mean_returns = returns.mean()
-            cov_matrix = returns.cov()
-            
-            # Validar matriz de covarianza
-            if np.any(np.isnan(cov_matrix.values)) or np.any(np.isinf(cov_matrix.values)):
-                st.error("La matriz de covarianza contiene valores inválidos")
-                return None, None, None
-            
-            return mean_returns, cov_matrix, df_precios_clean
-            
+            if not df_precios_filled.dropna().empty:
+                df_precios = df_precios_filled.dropna()
+            elif not df_precios_interpolated.dropna().empty:
+                df_precios = df_precios_interpolated.dropna()
+            else:
+                df_precios = df_precios.dropna()
         except Exception as e:
-            st.error(f"Error en el procesamiento de datos: {str(e)}")
+            df_precios = df_precios.dropna()
+        
+        if df_precios.empty:
             return None, None, None
+        
+        returns = df_precios.pct_change().dropna()
+        
+        if returns.empty or len(returns) < 30:
+            return None, None, None
+        
+        if (returns.std() == 0).any():
+            columnas_constantes = returns.columns[returns.std() == 0].tolist()
+            returns = returns.drop(columns=columnas_constantes)
+            df_precios = df_precios.drop(columns=columnas_constantes)
+        
+        if len(returns.columns) < 2:
+            return None, None, None
+        
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        
+        return mean_returns, cov_matrix, df_precios
         
     except Exception as e:
-        st.error(f"Error general en la obtención de datos: {str(e)}")
         return None, None, None
 
-def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
-    """
-    Función mejorada para obtener datos de yfinance con más sufijos argentinos
-    """
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFEX': 'rOFEX',
+        'Merval': 'bCBA'
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
     try:
-        # Sufijos para activos argentinos
-        sufijos_ar = ['.BA', '.AR', '.BUE']
-        
-        # Primero intentar con sufijos argentinos
-        for sufijo in sufijos_ar:
-            try:
-                ticker = yf.Ticker(simbolo + sufijo)
-                data = ticker.history(start=fecha_desde, end=fecha_hasta, auto_adjust=True, prepost=True)
-                if not data.empty and len(data) > 10:
-                    return data['Close']
-            except:
-                continue
-        
-        # Luego intentar sin sufijo
-        try:
-            ticker = yf.Ticker(simbolo)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta, auto_adjust=True, prepost=True)
-            if not data.empty and len(data) > 10:
-                return data['Close']
-        except:
-            pass
-        
-        # Intentar con variaciones del símbolo
-        variaciones = [
-            simbolo.replace('D', ''),  # Quitar D de bonos
-            simbolo + 'D',             # Agregar D a bonos
-            simbolo.upper(),           # Mayúsculas
-            simbolo.lower()            # Minúsculas
-        ]
-        
-        for variacion in variaciones:
-            if variacion != simbolo:  # No repetir el símbolo original
-                for sufijo in sufijos_ar:
-                    try:
-                        ticker = yf.Ticker(variacion + sufijo)
-                        data = ticker.history(start=fecha_desde, end=fecha_hasta, auto_adjust=True, prepost=True)
-                        if not data.empty and len(data) > 10:
-                            return data['Close']
-                    except:
-                        continue
-            
-        return None
-        
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
     except Exception:
         return None
 
 def obtener_clase_d(simbolo, mercado, bearer_token):
-    """
-    Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
-    """
     mercados_mapping = {
         'BCBA': 'bCBA',
-        'MERVAL': 'bCBA',
         'NYSE': 'nYSE', 
         'NASDAQ': 'nASDAQ',
         'ROFEX': 'rOFEX',
-        'bCBA': 'bCBA',
-        'nYSE': 'nYSE',
-        'nASDAQ': 'nASDAQ',
-        'rOFEX': 'rOFEX'
+        'Merval': 'bCBA'
     }
     
-    mercado_correcto = mercados_mapping.get(mercado.upper(), mercado)
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
     
     url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
     headers = {
@@ -1005,6 +868,89 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         portfolios[label6] = None
     
     return portfolios, valid_returns, volatilities
+
+class PortfolioManager:
+    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
+        self.symbols = symbols
+        self.token = token
+        self.fecha_desde = fecha_desde
+        self.fecha_hasta = fecha_hasta
+        self.data_loaded = False
+        self.returns = None
+        self.prices = None
+        self.notional = 100000  # Valor nominal por defecto
+        self.manager = None
+    
+    def load_data(self):
+        try:
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
+            )
+            
+            if mean_returns is not None and cov_matrix is not None and df_precios is not None:
+                self.returns = df_precios.pct_change().dropna()
+                self.prices = df_precios
+                self.mean_returns = mean_returns
+                self.cov_matrix = cov_matrix
+                self.data_loaded = True
+                
+                # Crear manager para optimización avanzada
+                self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
+                
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            return False
+    
+    def compute_portfolio(self, strategy='markowitz', target_return=None):
+        if not self.data_loaded or self.returns is None:
+            return None
+        
+        try:
+            if self.manager:
+                # Usar el manager avanzado
+                portfolio_output = self.manager.compute_portfolio(strategy, target_return)
+                return portfolio_output
+            else:
+                # Fallback a optimización básica
+                n_assets = len(self.returns.columns)
+                
+                if strategy == 'equi-weight':
+                    weights = np.array([1/n_assets] * n_assets)
+                else:
+                    weights = optimize_portfolio(self.returns, target_return=target_return)
+                
+                # Crear objeto de resultado básico
+                portfolio_returns = (self.returns * weights).sum(axis=1)
+                portfolio_output = output(portfolio_returns, self.notional)
+                portfolio_output.weights = weights
+                portfolio_output.dataframe_allocation = pd.DataFrame({
+                    'rics': list(self.returns.columns),
+                    'weights': weights,
+                    'volatilities': self.returns.std().values,
+                    'returns': self.returns.mean().values
+                })
+                
+                return portfolio_output
+            
+        except Exception as e:
+            return None
+
+    def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
+        """Computa la frontera eficiente"""
+        if not self.data_loaded or not self.manager:
+            return None, None, None
+        
+        try:
+            portfolios, returns, volatilities = compute_efficient_frontier(
+                self.symbols, self.notional, target_return, include_min_variance, 
+                self.prices.to_dict('series')
+            )
+            return portfolios, returns, volatilities
+        except Exception as e:
+            return None, None, None
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio):
@@ -1799,7 +1745,7 @@ def main():
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
                         <h3>⚖️ Gestión de Riesgo</h3>
-                        <p>Identifique concentraciones y optimice el riesgo</p>
+                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
                     </div>
                 </div>
             </div>
