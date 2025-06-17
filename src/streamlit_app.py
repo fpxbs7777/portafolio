@@ -1097,7 +1097,7 @@ def main():
                 
                 if st.form_submit_button("🚀 Conectar"):
                     if usuario and contraseña:
-                                               with st.spinner("Conectando con IOL..."):
+                        with st.spinner("Conectando con IOL..."):
                             token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
                             
                             if token_acceso:
