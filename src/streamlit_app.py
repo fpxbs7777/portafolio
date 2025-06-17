@@ -1173,3 +1173,14 @@ def mostrar_estadisticas_detalladas_portafolio(activos_data, df_precios):
             
             **Pesos del Portafolio:**
             """)
+            
+            # Mostrar pesos como tabla
+            pesos_df = pd.DataFrame({
+                'Activo': list(pesos.keys()),
+                'Peso': [f"{p:.2%}" for p in pesos.values()]
+            })
+            st.dataframe(pesos_df)
+            
+    except Exception as e:
+        st.error(f"Error en análisis estadístico: {str(e)}")
+        st.exception(e)
