@@ -1298,3 +1298,587 @@ class PortfolioManager:
         except Exception as e:
             st.error(f"Error en optimización: {str(e)}")
             return None
+
+def obtener_clase_d(simbolo, mercado, bearer_token):
+    """
+    Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
+    Devuelve el símbolo de la clase 'D' si existe, si no, devuelve None.
+    """
+    # Mapear nombres de mercados a los correctos de IOL
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFEX': 'rOFEX',
+        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            clases = response.json()
+            for clase in clases:
+                if clase.get('simbolo', '').endswith('D'):
+                    return clase['simbolo']
+            return None
+        else:
+            return None
+    except Exception:
+        return None
+
+def calcular_metricas_portafolio(activos_data, valor_total):
+    """
+    Calcula métricas comprehensivas del portafolio incluyendo P&L, quantiles y probabilidades
+    """
+    try:
+        # Calcular estadísticas básicas
+        valores = [activo['Valuación'] for activo in activos_data if activo['Valuación'] > 0]
+        
+        if not valores:
+            return None
+        
+        # Convertir a numpy array para cálculos
+        valores_array = np.array(valores)
+        
+        # Estadísticas básicas
+        media = np.mean(valores_array)
+        mediana = np.median(valores_array)
+        std_dev = np.std(valores_array)
+        var_95 = np.percentile(valores_array, 5)  # VaR al 5%
+        var_99 = np.percentile(valores_array, 1)  # VaR al 1%
+        
+        # Quantiles
+        q25 = np.percentile(valores_array, 25)
+        q50 = np.percentile(valores_array, 50)  # Mediana
+        q75 = np.percentile(valores_array, 75)
+        q90 = np.percentile(valores_array, 90)
+        q95 = np.percentile(valores_array, 95)
+        
+        # Calcular concentración del portafolio
+        pesos = valores_array / valor_total
+        concentracion = np.sum(pesos ** 2)  # Índice de Herfindahl
+        
+        # Simular retornos esperados (usando distribución normal)
+        # Asumiendo retorno anual promedio del 8% con volatilidad del 20%
+        retorno_esperado_anual = 0.08
+        volatilidad_anual = 0.20
+        
+        # Calcular métricas en términos monetarios
+        retorno_esperado_pesos = valor_total * retorno_esperado_anual
+        riesgo_anual_pesos = valor_total * volatilidad_anual
+        
+        # Simulación Monte Carlo simple para P&L esperado
+        np.random.seed(42)
+        num_simulaciones = 1000
+        retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
+        pl_simulado = valor_total * retornos_simulados
+        
+        # Probabilidades
+        prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
+        prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
+        prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
+        prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
+        
+        return {
+            'valor_total': valor_total,
+            'media_activo': media,
+            'mediana_activo': mediana,
+            'std_dev_activo': std_dev,
+            'var_95': var_95,
+            'var_99': var_99,
+            'quantiles': {
+                'q25': q25,
+                'q50': q50,
+                'q75': q75,
+                'q90': q90,
+                'q95': q95
+            },
+            'concentracion': concentracion,
+            'retorno_esperado_anual': retorno_esperado_pesos,
+            'riesgo_anual': riesgo_anual_pesos,
+            'pl_esperado_min': np.min(pl_simulado),
+            'pl_esperado_max': np.max(pl_simulado),
+            'pl_esperado_medio': np.mean(pl_simulado),
+            'pl_percentil_5': np.percentile(pl_simulado, 5),
+            'pl_percentil_95': np.percentile(pl_simulado, 95),
+            'probabilidades': {
+                'ganancia': prob_ganancia,
+                'perdida': prob_perdida,
+                'perdida_mayor_10': prob_perdida_mayor_10,
+                'ganancia_mayor_10': prob_ganancia_mayor_10
+            }
+        }
+    except Exception as e:
+        st.error(f"Error calculando métricas del portafolio: {str(e)}")
+        return None
+
+def mostrar_resumen_portafolio(portafolio):
+    """
+    Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas
+    """
+    st.markdown("### 📈 Resumen del Portafolio")
+    
+    activos = portafolio.get('activos', [])
+    
+    # Preparar datos para análisis con mejor extracción de valuación
+    datos_activos = []
+    valor_total = 0
+    
+    for activo in activos:
+        try:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            descripcion = titulo.get('descripcion', 'Sin descripción')
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            
+            # Mejorar extracción de valuación con más campos posibles
+            valuacion = 0
+            
+            # Campos de valuación en orden de preferencia (más específicos primero)
+            campos_valuacion = [
+                'valuacionEnMonedaOriginal',
+                'valuacionActual',
+                'valorNominalEnMonedaOriginal', 
+                'valorNominal',
+                'valuacionDolar',
+                'valuacion',
+                'valorActual',
+                'montoInvertido',
+                'valorMercado',
+                'valorTotal',
+                'importe'
+            ]
+            
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:  # Solo usar valores positivos
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Si no se encuentra valuación directa, intentar calcular
+            if valuacion == 0 and cantidad:
+                # Buscar precio unitario
+                precio_unitario = 0
+                campos_precio = [
+                    'precioPromedio',
+                    'precioCompra',
+                    'precioActual',
+                    'precio',
+                    'precioUnitario',
+                    'ultimoPrecio',
+                    'cotizacion'
+                ]
+                
+                # Buscar en activo
+                for campo in campos_precio:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            precio = float(activo[campo])
+                            if precio > 0:
+                                precio_unitario = precio
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                # Buscar en título si no se encontró en activo
+                if precio_unitario == 0:
+                    for campo in campos_precio:
+                        if campo in titulo and titulo[campo] is not None:
+                            try:
+                                precio = float(titulo[campo])
+                                if precio > 0:
+                                    precio_unitario = precio
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                
+                # Calcular valuación si encontramos precio
+                if precio_unitario > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        valuacion = cantidad_num * precio_unitario
+                    except (ValueError, TypeError):
+                        pass
+            
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+                'Datos_Raw': activo  # Para debug
+            })
+            
+            valor_total += valuacion;
+            
+        except Exception as e:
+            st.warning(f"Error procesando activo: {str(e)}")
+            continue
+    
+    if datos_activos:
+        df_activos = pd.DataFrame(datos_activos)
+        
+        # Calcular métricas comprehensivas del portafolio
+        metricas = calcular_metricas_portafolio(datos_activos, valor_total)
+        
+        # === 1. INFORMACIÓN BÁSICA DEL PORTAFOLIO ===
+        st.markdown("#### 📊 Información General")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total de Activos", len(datos_activos))
+        col2.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+        col3.metric("Tipos de Activos", df_activos['Tipo'].nunique())
+        
+        # Mostrar el valor total con formato correcto y verificación
+        valor_display = f"${valor_total:,.2f}"
+        if valor_total > 500000:  # Si parece demasiado alto
+            st.warning("⚠️ Verificar: el valor total parece alto")
+        col4.metric("Valor Total del Portafolio", valor_display)
+        
+        # Gráficos de distribución
+        if valor_total > 0 and 'Tipo' in df_activos.columns:
+            tipo_stats = df_activos.groupby('Tipo').agg({
+                'Valuación': ['sum', 'count', 'mean']
+            }).round(2)
+            tipo_stats.columns = ['Valor_Total', 'Cantidad', 'Valor_Promedio']
+            tipo_stats = tipo_stats.reset_index()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Pie chart por valor
+                fig_pie = go.Figure(data=[go.Pie(
+                    labels=tipo_stats['Tipo'],
+                    values=tipo_stats['Valor_Total'],
+                    textinfo='label+percent+value',
+                    texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+                )])
+                fig_pie.update_layout(title="Distribución por Valor", height=400)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with col2:
+                # Bar chart por tipo
+                fig_bar = go.Figure(data=[go.Bar(
+                    x=tipo_stats['Tipo'],
+                    y=tipo_stats['Valor_Total'],
+                    text=[f"${val:,.0f}" for val in tipo_stats['Valor_Total']],
+                    textposition='auto'
+                )])
+                fig_bar.update_layout(
+                    title="Valor por Tipo de Activo",
+                    xaxis_title="Tipo",
+                    yaxis_title="Valor ($)",
+                    height=400
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+        
+        # Tabla de activos
+        st.markdown("#### 📋 Detalle de Activos")
+        
+        df_display = df_activos.copy()
+        df_display['Valuación Formateada'] = df_display['Valuación'].apply(
+            lambda x: f"${x:,.2f}" if x > 0 else "No disponible"
+        )
+        df_display['Peso (%)'] = (df_display['Valuación'] / valor_total * 100).round(2) if valor_total > 0 else 0
+        
+        # Reordenar columnas
+        columns_order = ['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación Formateada', 'Peso (%)']
+        df_display_final = df_display[columns_order]
+        df_display_final = df_display_final.rename(columns={'Valuación Formateada': 'Valuación'})
+        
+        # Ordenar por valuación descendente
+        df_display_final = df_display_final.sort_values('Peso (%)', ascending=False)
+        
+        st.dataframe(df_display_final, use_container_width=True)
+    else:
+        st.warning("No se pudieron procesar los datos de los activos")
+
+def mostrar_estado_cuenta(estado_cuenta):
+    """
+    Muestra el estado de cuenta del cliente con parsing mejorado según la estructura de la API
+    """
+    st.markdown("### 💰 Estado de Cuenta")
+    
+    if not estado_cuenta:
+        st.warning("No hay datos de estado de cuenta disponibles")
+        return
+    
+    # Mostrar información general
+    st.markdown("#### 📋 Información General")
+    
+    # Extraer información según la estructura documentada de la API
+    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+    cuentas = estado_cuenta.get('cuentas', [])
+    
+    # Calcular totales agregados
+    total_disponible = 0
+    total_comprometido = 0
+    total_saldo = 0
+    total_titulos_valorizados = 0
+    total_general = 0
+    
+    for cuenta in cuentas:
+        disponible = float(cuenta.get('disponible', 0))
+        comprometido = float(cuenta.get('comprometido', 0))
+        saldo = float(cuenta.get('saldo', 0))
+        titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
+        total_cuenta = float(cuenta.get('total', 0))
+        
+        total_disponible += disponible
+        total_comprometido += comprometido
+        total_saldo += saldo
+        total_titulos_valorizados += titulos_valorizados
+        total_general += total_cuenta
+    
+    # Mostrar métricas principales
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total General", f"${total_general:,.2f}")
+    col2.metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
+    col3.metric("Disponible Total", f"${total_disponible:,.2f}")
+    col4.metric("Títulos Valorizados", f"${total_titulos_valorizados:,.2f}")
+
+def mostrar_cotizaciones_mercado(token_acceso):
+    """
+    Muestra cotizaciones y datos de mercado
+    """
+    st.markdown("### 💱 Cotizaciones y Mercado")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 💰 Cotización MEP")
+        
+        # Formulario para consultar MEP
+        with st.form("mep_form"):
+            simbolo_mep = st.text_input("Símbolo para MEP", value="AL30", help="Ej: AL30, GD30, etc.")
+            id_plazo_compra = st.number_input("ID Plazo Compra", value=1, min_value=1)
+            id_plazo_venta = st.number_input("ID Plazo Venta", value=1, min_value=1)
+            
+            if st.form_submit_button("Consultar MEP"):
+                if simbolo_mep:
+                    with st.spinner("Consultando cotización MEP..."):
+                        cotizacion_mep = obtener_cotizacion_mep(
+                            token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
+                        )
+                    
+                    if cotizacion_mep:
+                        st.success("✅ Cotización MEP obtenida")
+                        
+                        # Mostrar datos de MEP
+                        if isinstance(cotizacion_mep, dict):
+                            # Extraer precio si está disponible
+                            precio_mep = cotizacion_mep.get('precio', cotizacion_mep.get('cotizacion', 'N/A'))
+                            
+                            col_mep1, col_mep2 = st.columns(2)
+                            col_mep1.metric("Símbolo", simbolo_mep)
+                            col_mep2.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
+                        
+                        with st.expander("Ver detalles MEP"):
+                            st.json(cotizacion_mep)
+                    else:
+                        st.error("❌ No se pudo obtener la cotización MEP")
+    
+    with col2:
+        st.markdown("#### 🏦 Tasas de Caución")
+        
+        if st.button("🔄 Actualizar Tasas de Caución"):
+            with st.spinner("Consultando tasas de caución..."):
+                tasas_caucion = obtener_tasas_caucion(token_acceso)
+            
+            if tasas_caucion:
+                st.success("✅ Tasas de caución obtenidas")
+                
+                # Mostrar tasas si es una lista
+                if isinstance(tasas_caucion, list) and tasas_caucion:
+                    df_tasas = pd.DataFrame(tasas_caucion)
+                    
+                    # Mostrar solo columnas relevantes si están disponibles
+                    columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
+                    columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
+                    
+                    if columnas_disponibles:
+                        st.dataframe(df_tasas[columnas_disponibles].head(10))
+                    else:
+                        st.dataframe(df_tasas.head(10))
+                
+                with st.expander("Ver datos completos de caución"):
+                    st.json(tasas_caucion)
+            else:
+                st.error("❌ No se pudieron obtener las tasas de caución")
+
+def mostrar_analisis_portafolio():
+    """
+    Función principal para mostrar el análisis del portafolio del cliente seleccionado
+    """
+    cliente = st.session_state.cliente_seleccionado
+    token_acceso = st.session_state.token_acceso
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
+
+    if not cliente:
+        st.error("No hay cliente seleccionado")
+        return
+
+    # Obtener ID del cliente
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+
+    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+
+    # Crear tabs para diferentes análisis
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📈 Resumen", 
+        "💰 Estado de Cuenta", 
+        "🎯 Optimización", 
+        "📊 Análisis Técnico",
+        "💱 Cotizaciones"
+    ])
+
+    with tab1:
+        # Obtener portafolio
+        with st.spinner("Cargando portafolio..."):
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if portafolio:
+            mostrar_resumen_portafolio(portafolio)
+        else:
+            st.warning("No se pudo obtener el portafolio del cliente")
+
+    with tab2:
+        # Mostrar estado de cuenta - intentar primero con ID cliente, luego sin ID
+        with st.spinner("Cargando estado de cuenta..."):
+            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        
+        if estado_cuenta:
+            mostrar_estado_cuenta(estado_cuenta)
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
+            
+            # Ofrecer alternativa
+            st.markdown("#### 🔄 Intentar con endpoint alternativo")
+            if st.button("🚀 Probar endpoint directo"):
+                with st.spinner("Probando endpoint directo..."):
+                    estado_cuenta_directo = obtener_estado_cuenta(token_acceso, None)
+                    if estado_cuenta_directo:
+                        mostrar_estado_cuenta(estado_cuenta_directo)
+                    else:
+                        st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
+
+    with tab3:
+        # Optimización de portafolio
+        if 'portafolio' not in locals():
+            with st.spinner("Cargando portafolio para optimización..."):
+                portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if portafolio:
+            mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        else:
+            st.warning("No se pudo obtener el portafolio para optimización")
+
+    with tab4:
+        st.markdown("### 📊 Análisis Técnico")
+        st.info("Herramientas avanzadas de análisis técnico y dibujo disponibles abajo.")
+
+        # Selección de símbolo para análisis técnico
+        if 'portafolio' not in locals():
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+
+        if portafolio:
+            activos = portafolio.get('activos', [])
+            if activos:
+                simbolos = [activo.get('titulo', {}).get('simbolo', '') for activo in activos]
+                simbolos = [s for s in simbolos if s]
+
+                if simbolos:
+                    simbolo_seleccionado = st.selectbox(
+                        "Seleccione un activo para análisis técnico:",
+                        options=simbolos
+                    )
+                    if simbolo_seleccionado:
+                        st.markdown("#### Gráfico interactivo con indicadores y herramientas de dibujo")
+                        # Incrustar TradingView Chart Widget con herramientas de análisis técnico y dibujo
+                        tv_widget = f"""
+                        <div id="tradingview_{simbolo_seleccionado}" style="height:600px"></div>
+                        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                        <script type="text/javascript">
+                        new TradingView.widget({{
+                          "container_id": "tradingview_{simbolo_seleccionado}",
+                          "width": "100%",
+                          "height": 600,
+                          "symbol": "{simbolo_seleccionado}",
+                          "interval": "D",
+                          "timezone": "America/Argentina/Buenos_Aires",
+                          "theme": "light",
+                          "style": "1",
+                          "locale": "es",
+                          "toolbar_bg": "#f4f7f9",
+                          "enable_publishing": false,
+                          "allow_symbol_change": true,
+                          "hide_side_toolbar": false,
+                          "studies": [
+                            "MACD@tv-basicstudies",
+                            "RSI@tv-basicstudies",
+                            "BollingerBands@tv-basicstudies",
+                            "StochasticRSI@tv-basicstudies",
+                            "Volume@tv-basicstudies",
+                            "Moving Average@tv-basicstudies",
+                            "IchimokuCloud@tv-basicstudies",
+                            "ParabolicSAR@tv-basicstudies",
+                            "ATR@tv-basicstudies"
+                          ],
+                          "drawings_access": {{
+                            "type": "white",
+                            "tools": [
+                              {{"name": "Trend Line"}},
+                              {{"name": "Horizontal Line"}},
+                              {{"name": "Fibonacci Retracement"}},
+                              {{"name": "Pitchfork"}},
+                              {{"name": "Brush"}},
+                              {{"name": "Rectangle"}},
+                              {{"name": "Ellipse"}},
+                              {{"name": "Arrow"}},
+                              {{"name": "Text"}},
+                              {{"name": "Price Label"}}
+                            ]
+                          }},
+                          "enabled_features": [
+                            "study_templates",
+                            "header_chart_type",
+                            "header_indicators",
+                            "header_compare",
+                            "header_undo_redo",
+                            "header_screenshot",
+                            "header_fullscreen_button",
+                            "header_settings",
+                            "header_symbol_search",
+                            "header_interval_dialog_button",
+                            "header_resolutions",
+                            "header_drawing_tools",
+                            "header_save_chart_template",
+                            "header_load_chart_template"
+                          ],
+                          "disabled_features": [
+                            "use_localstorage_for_settings",
+                            "left_toolbar",
+                            "header_widget_dom_node"
+                          ]
+                        }});
+                        </script>
+                        """
+                        components.html(tv_widget, height=650)
+                        st.info("Puede agregar indicadores técnicos, cambiar intervalos y usar herramientas de dibujo directamente en el gráfico.")
+
+    with tab5:
+        # Cotizaciones y mercado
+        mostrar_cotizaciones_mercado(token_acceso)
