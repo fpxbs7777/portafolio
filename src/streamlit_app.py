@@ -856,5 +856,9 @@ def main():
         st.error(f"❌ Error en la aplicación: {str(e)}")
         st.error("🔄 Por favor, recargue la página e intente nuevamente")
 
+# Agrega la función faltante mostrar_analisis_portafolio (stub mínima para evitar el error)
+def mostrar_analisis_portafolio():
+    st.info("Funcionalidad de análisis de portafolio en desarrollo. Pronto disponible.")
+
 if __name__ == "__main__":
     main()
