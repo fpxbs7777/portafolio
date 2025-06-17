@@ -884,19 +884,30 @@ def mostrar_resumen_portafolio(portafolio):
             st.markdown("#### ⚠️ Análisis de Riesgo")
             col1, col2, col3, col4 = st.columns(4)
             
+            # Mostrar concentración con interpretación en porcentaje
+            concentracion_pct = metricas['concentracion'] * 100
             col1.metric(
                 "Concentración del Portafolio", 
                 f"{metricas['concentracion']:.3f}",
+                f"{concentracion_pct:.1f}%",  # Añadir porcentaje como delta
                 help="Índice de Herfindahl: 0=perfectamente diversificado, 1=completamente concentrado"
             )
+            
+            # Mostrar VaR como porcentaje del portafolio total
+            var_pct = (metricas['var_95'] / valor_total * 100) if valor_total > 0 else 0
             col2.metric(
                 "VaR 95% (Valor en Riesgo)", 
                 f"${metricas['var_95']:,.0f}",
+                f"{var_pct:.2f}% del total",  # Mostrar como % del total
                 help="Valor mínimo del activo más pequeño en el 95% de los casos"
             )
+            
+            # Mostrar volatilidad estimada como porcentaje
+            volatilidad_pct = (metricas['riesgo_anual'] / valor_total * 100) if valor_total > 0 else 0
             col3.metric(
                 "Volatilidad Estimada Anual", 
                 f"${metricas['riesgo_anual']:,.0f}",
+                f"{volatilidad_pct:.2f}% del total",  # Mostrar como % del total
                 help="Riesgo anual estimado basado en 20% de volatilidad"
             )
             
@@ -909,22 +920,31 @@ def mostrar_resumen_portafolio(portafolio):
             st.markdown("#### 📈 Proyecciones de Rendimiento (Próximos 12 meses)")
             
             col1, col2, col3 = st.columns(3)
+            
+            # Calcular retorno esperado en % para delta
+            retorno_pct = (metricas['retorno_esperado_anual'] / valor_total * 100) if valor_total > 0 else 0
             col1.metric(
                 "Retorno Esperado", 
                 f"${metricas['retorno_esperado_anual']:,.0f}",
-                delta=f"{(metricas['retorno_esperado_anual']/valor_total*100):.1f}%",
+                f"{retorno_pct:.1f}% anual",  # Clarificar que es % anual
                 help="Retorno esperado promedio basado en 8% anual"
             )
+            
+            # Mostrar escenario optimista en porcentaje más claro
+            optimista_pct = (metricas['pl_percentil_95'] / valor_total * 100) if valor_total > 0 else 0
             col2.metric(
                 "Escenario Optimista (95%)", 
                 f"${metricas['pl_percentil_95']:,.0f}",
-                delta=f"+{(metricas['pl_percentil_95']/valor_total*100):.1f}%",
+                f"+{optimista_pct:.1f}% del capital",  # Clarificar que es % del capital
                 help="Ganancia esperada en el mejor 5% de los casos"
             )
+            
+            # Mostrar escenario pesimista en porcentaje más claro
+            pesimista_pct = (metricas['pl_percentil_5'] / valor_total * 100) if valor_total > 0 else 0
             col3.metric(
                 "Escenario Pesimista (5%)", 
                 f"${metricas['pl_percentil_5']:,.0f}",
-                delta=f"{(metricas['pl_percentil_5']/valor_total*100):.1f}%",
+                f"{pesimista_pct:.1f}% del capital",  # Clarificar que es % del capital
                 help="Pérdida máxima esperada en el peor 5% de los casos"
             )
         
@@ -935,14 +955,17 @@ def mostrar_resumen_portafolio(portafolio):
             col1, col2, col3, col4 = st.columns(4)
             probs = metricas['probabilidades']
             
+            # Mostrar probabilidades con formato mejorado de porcentaje
             col1.metric(
                 "Probabilidad de Ganancia", 
                 f"{probs['ganancia']*100:.1f}%",
+                f"{probs['ganancia']*100-50:.1f}% vs. neutral",  # Comparar con 50% (neutral)
                 help="Probabilidad de obtener rendimientos positivos"
             )
             col2.metric(
                 "Probabilidad de Pérdida", 
                 f"{probs['perdida']*100:.1f}%",
+                f"{probs['perdida']*100-50:.1f}% vs. neutral",  # Comparar con 50% (neutral)
                 help="Probabilidad de obtener rendimientos negativos"
             )
             col3.metric(
@@ -963,29 +986,44 @@ def mostrar_resumen_portafolio(portafolio):
             col1, col2, col3, col4, col5 = st.columns(5)
             quantiles = metricas['quantiles']
             
+            # Mostrar quantiles con porcentajes del valor total
+            q25_pct = (quantiles['q25'] / valor_total * 100) if valor_total > 0 else 0
             col1.metric(
                 "Valor Mínimo (Q25)", 
                 f"${quantiles['q25']:,.0f}",
+                f"{q25_pct:.1f}% del total",
                 help="25% de los activos valen menos que este monto"
             )
+            
+            q50_pct = (quantiles['q50'] / valor_total * 100) if valor_total > 0 else 0
             col2.metric(
                 "Valor Mediano (Q50)", 
                 f"${quantiles['q50']:,.0f}",
+                f"{q50_pct:.1f}% del total",
                 help="Valor medio de los activos del portafolio"
             )
+            
+            q75_pct = (quantiles['q75'] / valor_total * 100) if valor_total > 0 else 0
             col3.metric(
                 "Tercer Cuartil (Q75)", 
                 f"${quantiles['q75']:,.0f}",
+                f"{q75_pct:.1f}% del total",
                 help="75% de los activos valen menos que este monto"
             )
+            
+            q90_pct = (quantiles['q90'] / valor_total * 100) if valor_total > 0 else 0
             col4.metric(
                 "Percentil 90", 
                 f"${quantiles['q90']:,.0f}",
+                f"{q90_pct:.1f}% del total",
                 help="90% de los activos valen menos que este monto"
             )
+            
+            q95_pct = (quantiles['q95'] / valor_total * 100) if valor_total > 0 else 0
             col5.metric(
                 "Valor Máximo (Q95)", 
                 f"${quantiles['q95']:,.0f}",
+                f"{q95_pct:.1f}% del total",
                 help="Solo el 5% de los activos supera este valor"
             )
         
@@ -1013,6 +1051,11 @@ def mostrar_resumen_portafolio(portafolio):
                     'Valuación': ['sum', 'count', 'mean']
                 }).round(2)
                 tipo_stats.columns = ['Valor_Total', 'Cantidad', 'Valor_Promedio']
+                
+                # Calcular porcentajes para mostrar en tabla
+                tipo_stats['Porcentaje_Valor'] = (tipo_stats['Valor_Total'] / tipo_stats['Valor_Total'].sum() * 100).round(2)
+                tipo_stats['Porcentaje_Cantidad'] = (tipo_stats['Cantidad'] / tipo_stats['Cantidad'].sum() * 100).round(2)
+                
                 tipo_stats = tipo_stats.reset_index()
                 
                 col1, col2 = st.columns(2)
@@ -1029,20 +1072,46 @@ def mostrar_resumen_portafolio(portafolio):
                     st.plotly_chart(fig_pie, use_container_width=True)
                 
                 with col2:
-                    # Bar chart por tipo
-                    fig_bar = go.Figure(data=[go.Bar(
+                    # Bar chart por tipo con porcentajes
+                    fig_bar = go.Figure()
+                    
+                    # Barras de valor
+                    fig_bar.add_trace(go.Bar(
                         x=tipo_stats['Tipo'],
                         y=tipo_stats['Valor_Total'],
-                        text=[f"${val:,.0f}" for val in tipo_stats['Valor_Total']],
-                        textposition='auto'
-                    )])
+                        text=[f"${val:,.0f}<br>({pct}%)" for val, pct in zip(tipo_stats['Valor_Total'], tipo_stats['Porcentaje_Valor'])],
+                        textposition='auto',
+                        name='Valor ($)'
+                    ))
+                    
                     fig_bar.update_layout(
                         title="Valor por Tipo de Activo",
                         xaxis_title="Tipo",
                         yaxis_title="Valor ($)",
-                        height=400
+                        height=400,
+                        hovermode='x unified'
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
+                
+                # Mostrar tabla con porcentajes
+                st.markdown("##### 📊 Distribución por Tipo de Activo (con porcentajes)")
+                df_tipo_display = tipo_stats.copy()
+                df_tipo_display['Valor_Total'] = df_tipo_display['Valor_Total'].apply(lambda x: f"${x:,.2f}")
+                df_tipo_display['Valor_Promedio'] = df_tipo_display['Valor_Promedio'].apply(lambda x: f"${x:,.2f}")
+                df_tipo_display['Porcentaje_Valor'] = df_tipo_display['Porcentaje_Valor'].apply(lambda x: f"{x:.2f}%")
+                df_tipo_display['Porcentaje_Cantidad'] = df_tipo_display['Porcentaje_Cantidad'].apply(lambda x: f"{x:.2f}%")
+                
+                # Renombrar columnas para mejor visualización
+                df_tipo_display = df_tipo_display.rename(columns={
+                    'Tipo': 'Tipo de Activo',
+                    'Valor_Total': 'Valor Total',
+                    'Cantidad': 'Cantidad de Activos',
+                    'Valor_Promedio': 'Valor Promedio',
+                    'Porcentaje_Valor': '% del Valor Total',
+                    'Porcentaje_Cantidad': '% de la Cantidad Total'
+                })
+                
+                st.dataframe(df_tipo_display, use_container_width=True)
             
             # Histograma de valores individuales
             if len(datos_activos) > 1:
@@ -1323,13 +1392,38 @@ def mostrar_estado_cuenta(estado_cuenta):
     def pct(val):
         return f"{(val/total_general*100):.2f}%" if total_general else "0.00%"
     col1.metric("Total General", f"${total_general:,.2f}", help="Suma total de todas las cuentas")
-    col2.metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}", help="Total expresado en pesos argentinos según la API")
+    col2.metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}", 
+                delta=f"{(total_en_pesos/total_general*100):.2f}% del total" if total_general > 0 and total_en_pesos > 0 else None,
+                help="Total expresado en pesos argentinos según la API")
     col3.metric("Disponible Total", f"${total_disponible:,.2f}", pct(total_disponible))
     col4.metric("Títulos Valorizados", f"${total_titulos_valorizados:,.2f}", pct(total_titulos_valorizados))
     
     # Mostrar información por moneda
     if cuentas_por_moneda:
         st.markdown("#### 💱 Distribución por Moneda")
+        
+        # Crear gráfico de pastel para distribución por moneda
+        labels_moneda = []
+        values_moneda = []
+        for moneda, datos in cuentas_por_moneda.items():
+            nombre_moneda = {
+                'peso_Argentino': 'Pesos Argentinos',
+                'dolar_Estadounidense': 'Dólares Estadounidenses',
+                'euro': 'Euros'
+            }.get(moneda, moneda)
+            labels_moneda.append(nombre_moneda)
+            values_moneda.append(datos['total'])
+        
+        # Crear gráfico de distribución por moneda
+        fig_moneda = go.Figure(data=[go.Pie(
+            labels=labels_moneda,
+            values=values_moneda,
+            textinfo='label+percent+value',
+            texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+        )])
+        fig_moneda.update_layout(title="Distribución del Capital por Moneda", height=350)
+        st.plotly_chart(fig_moneda, use_container_width=True)
+        
         for moneda, datos in cuentas_por_moneda.items():
             nombre_moneda = {
                 'peso_Argentino': 'Pesos Argentinos',
@@ -1338,56 +1432,85 @@ def mostrar_estado_cuenta(estado_cuenta):
             }.get(moneda, moneda)
             with st.expander(f"💰 {nombre_moneda} ({len(datos['cuentas'])} cuenta(s))"):
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Disponible", f"${datos['disponible']:,.2f}", pct(datos['disponible']))
-                col2.metric("Comprometido", f"${datos['comprometido']:,.2f}", pct(datos['comprometido']))
-                col3.metric("Saldo", f"${datos['saldo']:,.2f}", pct(datos['saldo']))
-                col4.metric("Total", f"${datos['total']:,.2f}", pct(datos['total']))
+                
+                # Calcular porcentajes respecto al total general
+                pct_disponible = (datos['disponible']/total_general*100) if total_general > 0 else 0
+                pct_comprometido = (datos['comprometido']/total_general*100) if total_general > 0 else 0
+                pct_saldo = (datos['saldo']/total_general*100) if total_general > 0 else 0
+                pct_total = (datos['total']/total_general*100) if total_general > 0 else 0
+                
+                col1.metric("Disponible", f"${datos['disponible']:,.2f}", f"{pct_disponible:.2f}% del total")
+                col2.metric("Comprometido", f"${datos['comprometido']:,.2f}", f"{pct_comprometido:.2f}% del total")
+                col3.metric("Saldo", f"${datos['saldo']:,.2f}", f"{pct_saldo:.2f}% del total")
+                col4.metric("Total", f"${datos['total']:,.2f}", f"{pct_total:.2f}% del total")
+                
                 if datos['titulos_valorizados'] > 0:
-                    st.metric("Títulos Valorizados", f"${datos['titulos_valorizados']:,.2f}", pct(datos['titulos_valorizados']))
-    
-    # Mostrar detalles de cuentas
-    if cuentas:
-        st.markdown("#### 📊 Detalle de Cuentas")
-        datos_cuentas = []
-        for cuenta in cuentas:
-            total_cuenta = float(cuenta.get('total', 0))
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': float(cuenta.get('disponible', 0)),
-                'Comprometido': float(cuenta.get('comprometido', 0)),
-                'Saldo': float(cuenta.get('saldo', 0)),
-                'Títulos Valorizados': float(cuenta.get('titulosValorizados', 0)),
-                'Total': total_cuenta,
-                'Estado': cuenta.get('estado', 'N/A').title(),
-                '% del Total': (total_cuenta/total_general*100) if total_general else 0
-            })
-        if datos_cuentas:
-            df_cuentas = pd.DataFrame(datos_cuentas)
-            columnas_orden = [
-                'Número', 'Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo',
-                'Títulos Valorizados', 'Total', '% del Total', 'Estado'
-            ]
-            df_cuentas = df_cuentas[columnas_orden]
-            for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
-                df_cuentas[col] = df_cuentas[col].apply(lambda x: f"${x:,.2f}")
-            df_cuentas['% del Total'] = df_cuentas['% del Total'].apply(lambda x: f"{x:.2f}%")
-            st.dataframe(df_cuentas, use_container_width=True)
+                    pct_titulos = (datos['titulos_valorizados']/total_general*100) if total_general > 0 else 0
+                    st.metric("Títulos Valorizados", f"${datos['titulos_valorizados']:,.2f}", f"{pct_titulos:.2f}% del total")
+                
+                # Mostrar gráfico de composición de la moneda
+                composicion_labels = ["Disponible", "Comprometido", "Títulos Valorizados"]
+                composicion_values = [datos['disponible'], datos['comprometido'], datos['titulos_valorizados']]
+                
+                # Filtrar valores cero
+                filtro = [i for i, v in enumerate(composicion_values) if v > 0]
+                if filtro:
+                    composicion_labels = [composicion_labels[i] for i in filtro]
+                    composicion_values = [composicion_values[i] for i in filtro]
+                    
+                    fig_composicion = go.Figure(data=[go.Pie(
+                        labels=composicion_labels,
+                        values=composicion_values,
+                        textinfo='label+percent',
+                        hole=.3
+                    )])
+                    fig_composicion.update_layout(
+                        title=f"Composición de {nombre_moneda}",
+                        height=300
+                    )
+                    st.plotly_chart(fig_composicion, use_container_width=True)
     
     # Mostrar estadísticas si están disponibles
     if estadisticas:
         st.markdown("#### 📈 Estadísticas")
         datos_estadisticas = []
+        
+        # Calcular totales para porcentajes
+        total_cantidad = sum(stat.get('cantidad', 0) for stat in estadisticas)
+        total_volumen = sum(stat.get('volumen', 0) for stat in estadisticas)
+        
         for stat in estadisticas:
+            cantidad = stat.get('cantidad', 0)
+            volumen = stat.get('volumen', 0)
+            
+            # Calcular porcentajes
+            pct_cantidad = (cantidad / total_cantidad * 100) if total_cantidad > 0 else 0
+            pct_volumen = (volumen / total_volumen * 100) if total_volumen > 0 else 0
+            
             datos_estadisticas.append({
                 'Descripción': stat.get('descripcion', 'N/A'),
-                'Cantidad': stat.get('cantidad', 0),
-                'Volumen': f"${stat.get('volumen', 0):,.2f}"
+                'Cantidad': cantidad,
+                'Cantidad (%)': f"{pct_cantidad:.2f}%",
+                'Volumen': f"${volumen:,.2f}",
+                'Volumen (%)': f"{pct_volumen:.2f}%"
             })
+        
         if datos_estadisticas:
             df_estadisticas = pd.DataFrame(datos_estadisticas)
             st.dataframe(df_estadisticas, use_container_width=True)
+            
+            # Gráfico de distribución de volumen
+            if len(datos_estadisticas) > 1 and total_volumen > 0:
+                fig_vol = go.Figure(data=[go.Pie(
+                    labels=[item['Descripción'] for item in datos_estadisticas],
+                    values=[stat.get('volumen', 0) for stat in estadisticas],
+                    textinfo='label+percent',
+                )])
+                fig_vol.update_layout(
+                    title="Distribución de Volumen por Tipo",
+                    height=350
+                )
+                st.plotly_chart(fig_vol, use_container_width=True)
     
     # Información de debug
     with st.expander("🔍 Información de Debug - Estructura del Estado de Cuenta"):
@@ -1507,6 +1630,7 @@ class PortfolioManager:
     """
     Clase simplificada para manejo de portafolio y optimización
     """
+
     def __init__(self, symbols, token, fecha_desde, fecha_hasta):
         self.symbols = symbols
         self.token = token
