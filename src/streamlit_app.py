@@ -1076,6 +1076,408 @@ def mostrar_analisis_portafolio():
         # Cotizaciones y mercado
         mostrar_cotizaciones_mercado(token_acceso)
 
-# Asegurar que main() esté al final y se ejecute
-if __name__ == "__main__":
-    main()
+def detectar_tipo_activo(simbolo, activos_portafolio):
+    """
+    Detecta el tipo de activo automáticamente usando la data del portafolio.
+    """
+    for activo in activos_portafolio:
+        titulo = activo.get('titulo', {})
+        if titulo.get('simbolo', '') == simbolo:
+            return titulo.get('tipo', '').upper()
+    return None
+
+def obtener_mercado_para_tipo(tipo):
+    """
+    Mapea el tipo de activo al mercado/endpoint correcto de IOL.
+    """
+    if not tipo:
+        return 'bCBA'  # Default
+    tipo = tipo.upper()
+    if 'FCI' in tipo:
+        return 'FCI'
+    if 'OPCION' in tipo:
+        return 'Opciones'
+    if 'BONO' in tipo or 'OBLIGACION' in tipo:
+        return 'bCBA'
+    if 'ACCION' in tipo:
+        return 'bCBA'
+    if 'CEDEAR' in tipo:
+        return 'bCBA'
+    return 'bCBA'
+
+def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta, activos_portafolio=None):
+    """
+    Obtiene datos históricos para optimización de portafolio detectando tipo de activo automáticamente.
+    """
+    try:
+        df_precios = pd.DataFrame()
+        simbolos_exitosos = []
+        simbolos_fallidos = []
+        detalles_errores = {}
+
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
+
+        st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
+
+        progress_bar = st.progress(0)
+        total_simbolos = len(simbolos)
+
+        for idx, simbolo in enumerate(simbolos):
+            progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
+            
+            # Detectar tipo automáticamente
+            tipo = None
+            if activos_portafolio:
+                tipo = detectar_tipo_activo(simbolo, activos_portafolio)
+                
+            mercado = obtener_mercado_para_tipo(tipo)
+            serie_obtenida = False
+
+            try:
+                # Buscar clase D si es bono
+                simbolo_consulta = simbolo
+                if tipo and ('BONO' in tipo.upper() or 'OBLIGACION' in tipo.upper()):
+                    clase_d = obtener_clase_d(simbolo, mercado, token_portador)
+                    if clase_d:
+                        simbolo_consulta = clase_d
+                        
+                serie = obtener_serie_historica_iol(
+                    token_portador, mercado, simbolo_consulta,
+                    fecha_desde_str, fecha_hasta_str
+                )
+                
+                if serie is not None and len(serie) > 10 and serie.nunique() > 1:
+                    df_precios[simbolo_consulta] = serie
+                    simbolos_exitosos.append(simbolo_consulta)
+                    serie_obtenida = True
+                    st.success(f"✅ {simbolo_consulta} ({mercado}, tipo: {tipo or 'N/A'}): {len(serie)} puntos de datos")
+                    
+            except Exception as e:
+                detalles_errores[f"{simbolo}_{mercado}"] = str(e)
+
+            if not serie_obtenida:
+                # Intentar con otros mercados como fallback
+                mercados_fallback = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX']
+                for mercado_fb in mercados_fallback:
+                    if mercado_fb != mercado:
+                        try:
+                            serie = obtener_serie_historica_iol(
+                                token_portador, mercado_fb, simbolo,
+                                fecha_desde_str, fecha_hasta_str
+                            )
+                            if serie is not None and len(serie) > 10 and serie.nunique() > 1:
+                                df_precios[simbolo] = serie
+                                simbolos_exitosos.append(simbolo)
+                                serie_obtenida = True
+                                st.success(f"✅ {simbolo} ({mercado_fb}): {len(serie)} puntos de datos")
+                                break
+                        except Exception:
+                            continue
+
+            if not serie_obtenida:
+                try:
+                    serie_yf = obtener_datos_alternativos_yfinance(
+                        simbolo, fecha_desde, fecha_hasta
+                    )
+                    if serie_yf is not None and len(serie_yf) > 10 and serie_yf.nunique() > 1:
+                        df_precios[simbolo] = serie_yf
+                        simbolos_exitosos.append(simbolo)
+                        st.info(f"ℹ️ {simbolo} (Yahoo Finance): {len(serie_yf)} puntos de datos")
+                        serie_obtenida = True
+                except Exception as e:
+                    detalles_errores[f"{simbolo}_yfinance"] = str(e)
+
+            if not serie_obtenida:
+                simbolos_fallidos.append(simbolo)
+                st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+
+        progress_bar.empty()
+        
+        # Continuar si tenemos al menos 2 activos
+        if len(simbolos_exitosos) < 2:
+            st.error("❌ Se necesitan al menos 2 activos con datos históricos válidos para el análisis.")
+            return None, None, None
+        
+        if len(simbolos_exitosos) < len(simbolos):
+            st.info(f"ℹ️ Continuando análisis con {len(simbolos_exitosos)} de {len(simbolos)} activos disponibles.")
+        
+        # Alinear datos por fechas comunes
+        st.info(f"📊 Alineando datos de {len(df_precios.columns)} activos...")
+        
+        if df_precios.empty:
+            st.error("❌ DataFrame de precios está vacío")
+            return None, None, None
+        
+        try:
+            df_precios = df_precios.fillna(method='ffill').fillna(method='bfill').dropna()
+        except Exception as e:
+            st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
+            df_precios = df_precios.dropna()
+        
+        if df_precios.empty:
+            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            return None, None, None
+        
+        st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
+        
+        # Calcular retornos
+        returns = df_precios.pct_change().dropna()
+        
+        if returns.empty or len(returns) < 30:
+            st.error("❌ No hay suficientes datos para calcular retornos válidos (mínimo 30 observaciones)")
+            return None, None, None
+        
+        # Calcular métricas finales
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        
+        return mean_returns, cov_matrix, df_precios
+        
+    except Exception as e:
+        st.error(f"❌ Error crítico obteniendo datos históricos: {str(e)}")
+        return None, None, None
+
+def optimize_portfolio(returns, target_return=None):
+    """
+    Optimización Markowitz: mínima varianza o máxima Sharpe.
+    """
+    n = returns.shape[1]
+    mean_returns = returns.mean()
+    cov_matrix = returns.cov()
+    bounds = tuple((0, 1) for _ in range(n))
+    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+
+    def portfolio_volatility(weights):
+        return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+
+    if target_return is not None:
+        def constraint_return(weights):
+            return np.dot(weights, mean_returns) - target_return
+        constraints = (constraints, {'type': 'eq', 'fun': constraint_return})
+
+    result = op.minimize(portfolio_volatility, n * [1. / n, ], bounds=bounds, constraints=constraints)
+    if result.success:
+        return result.x
+    else:
+        # fallback: pesos iguales
+        return np.array([1 / n] * n)
+
+def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Muestra la optimización del portafolio usando datos históricos con estrategias extendidas
+    """
+    st.markdown("### 🎯 Optimización de Portafolio")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para optimizar")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if len(simbolos) < 2:
+        st.warning("Se necesitan al menos 2 activos para optimización")
+        return
+    
+    st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
+    
+    # Configuración de optimización
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        estrategia = st.selectbox(
+            "Estrategia de Optimización:",
+            options=['markowitz', 'equi-weight'],
+            format_func=lambda x: {
+                'markowitz': 'Optimización de Markowitz',
+                'equi-weight': 'Pesos Iguales'
+            }[x]
+        )
+    
+    with col2:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+            help="Solo aplica para estrategia Markowitz"
+        )
+    
+    if st.button("🚀 Ejecutar Optimización"):
+        with st.spinner("Ejecutando optimización..."):
+            try:
+                # Crear manager de portafolio
+                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta, activos)
+                
+                # Cargar datos
+                if manager_inst.load_data():
+                    # Computar optimización
+                    use_target = target_return if estrategia == 'markowitz' else None
+                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+                    
+                    if portfolio_result:
+                        st.success("✅ Optimización completada")
+                        
+                        # Mostrar resultados
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("#### 📊 Pesos Optimizados")
+                            if hasattr(portfolio_result, 'weights') and portfolio_result.weights is not None:
+                                weights_df = pd.DataFrame({
+                                    'Activo': simbolos,
+                                    'Peso (%)': portfolio_result.weights * 100
+                                })
+                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                                st.dataframe(weights_df, use_container_width=True)
+                        
+                        with col2:
+                            st.markdown("#### 📈 Métricas del Portafolio")
+                            metricas = portfolio_result.get_metrics_dict()
+                            
+                            st.metric("Retorno Diario", f"{metricas['Mean Daily']:.4f}")
+                            st.metric("Volatilidad Diaria", f"{metricas['Volatility Daily']:.4f}")
+                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                        
+                        # Gráfico de pesos
+                        if hasattr(portfolio_result, 'weights') and portfolio_result.weights is not None:
+                            st.markdown("#### 🥧 Distribución de Pesos")
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=simbolos,
+                                values=portfolio_result.weights,
+                                textinfo='label+percent',
+                            )])
+                            fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        
+                    else:
+                        st.error("❌ Error en la optimización")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+
+def main():
+    """
+    Función principal de la aplicación Streamlit
+    """
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    
+    # Inicializar session state
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'refresh_token' not in st.session_state:
+        st.session_state.refresh_token = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=365)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+    
+    # Sidebar para autenticación y configuración
+    with st.sidebar:
+        st.header("🔐 Autenticación IOL")
+        
+        if st.session_state.token_acceso is None:
+            # Formulario de login
+            with st.form("login_form"):
+                st.markdown("#### Ingrese sus credenciales de IOL")
+                usuario = st.text_input("Usuario", placeholder="su_usuario")
+                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+                
+                if st.form_submit_button("🚀 Conectar"):
+                    if usuario and contraseña:
+                        with st.spinner("Conectando con IOL..."):
+                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            
+                            if token_acceso:
+                                st.session_state.token_acceso = token_acceso
+                                st.session_state.refresh_token = refresh_token
+                                st.success("✅ Conexión exitosa!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error en la autenticación")
+                    else:
+                        st.warning("⚠️ Complete todos los campos")
+        else:
+            # Usuario conectado
+            st.success("✅ Conectado a IOL")
+            
+            # Configuración de fechas
+            st.markdown("#### 📅 Configuración de Fechas")
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_desde = st.date_input(
+                    "Fecha desde:",
+                    value=st.session_state.fecha_desde,
+                    max_value=date.today()
+                )
+            with col2:
+                fecha_hasta = st.date_input(
+                    "Fecha hasta:",
+                    value=st.session_state.fecha_hasta,
+                    max_value=date.today()
+                )
+            
+            st.session_state.fecha_desde = fecha_desde
+            st.session_state.fecha_hasta = fecha_hasta
+            
+            # Obtener lista de clientes
+            if not st.session_state.clientes:
+                with st.spinner("Cargando clientes..."):
+                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    st.session_state.clientes = clientes
+            
+            clientes = st.session_state.clientes
+            
+            if clientes:
+                st.info(f"👥 {len(clientes)} clientes disponibles")
+                
+                # Seleccionar cliente
+                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                
+                cliente_seleccionado = st.selectbox(
+                    "Seleccione un cliente:",
+                    options=cliente_ids,
+                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
+                )
+                
+                # Guardar cliente seleccionado en session state
+                st.session_state.cliente_seleccionado = next(
+                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                    None
+                )
+                
+                if st.button("🔄 Actualizar lista de clientes"):
+                    with st.spinner("Actualizando clientes..."):
+                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        st.session_state.clientes = nuevos_clientes
+                        st.success("✅ Lista de clientes actualizada")
+                        st.rerun()
+            
+            else:
+                st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
+    
+    # Contenido principal
+    try:
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            mostrar_analisis_portafolio()
+        elif st.session_state.token_acceso:
+            st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
+        else:
+            st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
+    except Exception as e:
+        st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.error("🔄 Por favor, recargue la página e intente nuevamente")
