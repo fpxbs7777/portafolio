@@ -1289,23 +1289,19 @@ def mostrar_estado_cuenta(estado_cuenta):
     cuentas_por_moneda = {}
     
     for cuenta in cuentas:
-        # Extraer valores de cada cuenta
         disponible = float(cuenta.get('disponible', 0))
         comprometido = float(cuenta.get('comprometido', 0))
         saldo = float(cuenta.get('saldo', 0))
         titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
         total_cuenta = float(cuenta.get('total', 0))
         moneda = cuenta.get('moneda', 'peso_Argentino')
-        tipo = cuenta.get('tipo', 'N/A')
         
-        # Sumar totales
         total_disponible += disponible
         total_comprometido += comprometido
         total_saldo += saldo
         total_titulos_valorizados += titulos_valorizados
         total_general += total_cuenta
         
-        # Agrupar por moneda
         if moneda not in cuentas_por_moneda:
             cuentas_por_moneda[moneda] = {
                 'disponible': 0,
@@ -1315,7 +1311,6 @@ def mostrar_estado_cuenta(estado_cuenta):
                 'total': 0,
                 'cuentas': []
             }
-        
         cuentas_por_moneda[moneda]['disponible'] += disponible
         cuentas_por_moneda[moneda]['comprometido'] += comprometido
         cuentas_por_moneda[moneda]['saldo'] += saldo
@@ -1327,59 +1322,32 @@ def mostrar_estado_cuenta(estado_cuenta):
     col1, col2, col3, col4 = st.columns(4)
     def pct(val):
         return f"{(val/total_general*100):.2f}%" if total_general else "0.00%"
-    
-    col1.metric(
-        "Total General", 
-        f"${total_general:,.2f}",
-        help="Suma total de todas las cuentas"
-    )
-    
-    col2.metric(
-        "Total en Pesos", 
-        f"AR$ {total_en_pesos:,.2f}",
-        help="Total expresado en pesos argentinos según la API"
-    )
-    
-    col3.metric(
-        "Disponible Total", 
-        f"${total_disponible:,.2f} ({pct(total_disponible)})",
-        help="Total disponible para operar"
-    )
-    
-    col4.metric(
-        "Títulos Valorizados", 
-        f"${total_titulos_valorizados:,.2f} ({pct(total_titulos_valorizados)})",
-        help="Valor total de títulos en cartera"
-    )
+    col1.metric("Total General", f"${total_general:,.2f}", help="Suma total de todas las cuentas")
+    col2.metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}", help="Total expresado en pesos argentinos según la API")
+    col3.metric("Disponible Total", f"${total_disponible:,.2f}", pct(total_disponible))
+    col4.metric("Títulos Valorizados", f"${total_titulos_valorizados:,.2f}", pct(total_titulos_valorizados))
     
     # Mostrar información por moneda
     if cuentas_por_moneda:
         st.markdown("#### 💱 Distribución por Moneda")
-        
         for moneda, datos in cuentas_por_moneda.items():
-            # Convertir nombre de moneda a formato legible
             nombre_moneda = {
                 'peso_Argentino': 'Pesos Argentinos',
                 'dolar_Estadounidense': 'Dólares Estadounidenses',
                 'euro': 'Euros'
             }.get(moneda, moneda)
-            
             with st.expander(f"💰 {nombre_moneda} ({len(datos['cuentas'])} cuenta(s))"):
                 col1, col2, col3, col4 = st.columns(4)
-                
                 col1.metric("Disponible", f"${datos['disponible']:,.2f}", pct(datos['disponible']))
                 col2.metric("Comprometido", f"${datos['comprometido']:,.2f}", pct(datos['comprometido']))
                 col3.metric("Saldo", f"${datos['saldo']:,.2f}", pct(datos['saldo']))
                 col4.metric("Total", f"${datos['total']:,.2f}", pct(datos['total']))
-                # Mostrar títulos valorizados si existen
                 if datos['titulos_valorizados'] > 0:
                     st.metric("Títulos Valorizados", f"${datos['titulos_valorizados']:,.2f}", pct(datos['titulos_valorizados']))
     
     # Mostrar detalles de cuentas
     if cuentas:
         st.markdown("#### 📊 Detalle de Cuentas")
-        
-        # Crear DataFrame con información de cuentas
         datos_cuentas = []
         for cuenta in cuentas:
             total_cuenta = float(cuenta.get('total', 0))
@@ -1395,16 +1363,13 @@ def mostrar_estado_cuenta(estado_cuenta):
                 'Estado': cuenta.get('estado', 'N/A').title(),
                 '% del Total': (total_cuenta/total_general*100) if total_general else 0
             })
-        
         if datos_cuentas:
             df_cuentas = pd.DataFrame(datos_cuentas)
-            # Reordenar columnas de forma coherente
             columnas_orden = [
                 'Número', 'Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo',
                 'Títulos Valorizados', 'Total', '% del Total', 'Estado'
             ]
             df_cuentas = df_cuentas[columnas_orden]
-            # Formatear valores monetarios y porcentaje
             for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
                 df_cuentas[col] = df_cuentas[col].apply(lambda x: f"${x:,.2f}")
             df_cuentas['% del Total'] = df_cuentas['% del Total'].apply(lambda x: f"{x:.2f}%")
@@ -1413,7 +1378,6 @@ def mostrar_estado_cuenta(estado_cuenta):
     # Mostrar estadísticas si están disponibles
     if estadisticas:
         st.markdown("#### 📈 Estadísticas")
-        
         datos_estadisticas = []
         for stat in estadisticas:
             datos_estadisticas.append({
@@ -1421,7 +1385,6 @@ def mostrar_estado_cuenta(estado_cuenta):
                 'Cantidad': stat.get('cantidad', 0),
                 'Volumen': f"${stat.get('volumen', 0):,.2f}"
             })
-        
         if datos_estadisticas:
             df_estadisticas = pd.DataFrame(datos_estadisticas)
             st.dataframe(df_estadisticas, use_container_width=True)
@@ -1741,6 +1704,7 @@ def main():
                 )
             
             st.session_state.fecha_desde = fecha_desde
+
             st.session_state.fecha_hasta = fecha_hasta
             
             # Obtener lista de clientes
