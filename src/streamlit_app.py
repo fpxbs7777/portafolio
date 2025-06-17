@@ -1184,3 +1184,213 @@ def mostrar_estadisticas_detalladas_portafolio(activos_data, df_precios):
     except Exception as e:
         st.error(f"Error en análisis estadístico: {str(e)}")
         st.exception(e)
+
+# Función para crear la interfaz principal
+def crear_interfaz_principal():
+    """
+    Crea la interfaz principal de la aplicación
+    """
+    # Título y descripción
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("""
+    Esta aplicación te permite analizar tu portafolio de inversiones de InvertirOnline (IOL).
+    Podrás visualizar estadísticas, distribución de activos y métricas de riesgo.
+    """)
+    
+    # Separador visual
+    st.markdown("---")
+    
+    # Sección de login
+    st.header("🔐 Acceso a InvertirOnline")
+    
+    # Usar columnas para organizar la interfaz
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        with st.form("login_form"):
+            st.markdown("#### Ingresa tus credenciales de IOL")
+            usuario = st.text_input("Usuario", key="usuario")
+            contraseña = st.text_input("Contraseña", type="password", key="password")
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                submit_button = st.form_submit_button("Iniciar Sesión")
+            with col_btn2:
+                demo_button = st.form_submit_button("Modo Demo")
+    
+    with col2:
+        st.info("""
+        ℹ️ **Información**
+        
+        Esta aplicación es segura y no almacena tus credenciales.
+        Las credenciales se utilizan únicamente para acceder a la API de IOL.
+        
+        Si prefieres no usar tus credenciales, puedes usar el modo demo.
+        """)
+    
+    # Acciones cuando se presiona el botón de inicio de sesión
+    if submit_button and usuario and contraseña:
+        with st.spinner("Conectando con InvertirOnline..."):
+            token_acceso, token_refresh = obtener_tokens(usuario, contraseña)
+            
+            if token_acceso:
+                st.session_state['token_acceso'] = token_acceso
+                st.session_state['token_refresh'] = token_refresh
+                st.session_state['logged_in'] = True
+                
+                # Mostrar mensaje de éxito y recargar
+                st.success("✅ Sesión iniciada correctamente")
+                st.experimental_rerun()
+            else:
+                st.error("❌ Error al iniciar sesión. Verifica tus credenciales.")
+    
+    # Modo demo
+    if demo_button:
+        st.session_state['demo_mode'] = True
+        st.success("✅ Modo demo activado")
+        st.experimental_rerun()
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("Desarrollado con ❤️ para la comunidad de inversores")
+
+# Función para cargar datos reales en modo demo
+def cargar_datos_demo():
+    """
+    Carga datos reales de ejemplo utilizando la API pública de Yahoo Finance
+    """
+    st.markdown("### 🎮 Modo Demo Activado")
+    st.info("Estás usando el modo demo con datos reales obtenidos de Yahoo Finance.")
+    
+    # Definir símbolos de demostración (empresas importantes del mercado)
+    simbolos_demo = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA"]
+    
+    with st.spinner("Obteniendo datos reales de mercado..."):
+        # Obtener datos históricos recientes
+        end_date = pd.Timestamp.today()
+        start_date = end_date - pd.Timedelta(days=365)
+        
+        # Obtener datos de precios usando yfinance
+        try:
+            datos_yf = yf.download(
+                simbolos_demo,
+                start=start_date,
+                end=end_date,
+                progress=False
+            )
+            
+            # Usar precios de cierre
+            df_precios_reales = datos_yf['Close']
+            
+            # Calcular la valuación actual basada en el último precio disponible
+            precios_actuales = df_precios_reales.iloc[-1]
+            
+            # Definir cantidades para crear un portafolio diversificado
+            cantidades = {
+                "AAPL": 10,
+                "MSFT": 8,
+                "GOOGL": 2,
+                "AMZN": 5,
+                "META": 7,
+                "TSLA": 6,
+                "NVDA": 4
+            }
+            
+            # Crear el portafolio de activos con datos reales
+            activos_reales = []
+            for simbolo in simbolos_demo:
+                if simbolo in precios_actuales and not pd.isna(precios_actuales[simbolo]):
+                    precio = precios_actuales[simbolo]
+                    cantidad = cantidades.get(simbolo, 1)  # Usar 1 si no está definido
+                    valuacion = precio * cantidad
+                    
+                    activo = {
+                        "Símbolo": simbolo,
+                        "Tipo": "Acción",
+                        "Cantidad": cantidad,
+                        "Precio": precio,
+                        "Valuación": valuacion
+                    }
+                    
+                    activos_reales.append(activo)
+        
+        except Exception as e:
+            st.error(f"Error obteniendo datos reales: {str(e)}")
+            # Crear datos mínimos en caso de error
+            activos_reales = []
+            df_precios_reales = pd.DataFrame()
+            
+            # Notificar al usuario
+            st.warning("No se pudieron obtener datos reales. Verifica tu conexión a internet.")
+            return
+    
+    # Verificar que tenemos datos
+    if not activos_reales or df_precios_reales.empty:
+        st.error("No se pudieron obtener datos reales para el demo.")
+        return
+    
+    # Tabs para diferentes visualizaciones
+    tab1, tab2, tab3 = st.tabs(["📝 Resumen", "📈 Gráficos", "🧮 Estadísticas"])
+    
+    with tab1:
+        # Resumen del portafolio
+        st.markdown("#### Resumen del Portafolio")
+        df_activos = pd.DataFrame(activos_reales)
+        st.dataframe(df_activos, use_container_width=True)
+        
+        # Valor total y distribución
+        valor_total = sum(activo["Valuación"] for activo in activos_reales)
+        st.metric("Valor Total del Portafolio", f"${valor_total:,.2f}")
+        
+        # Métricas básicas
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Cantidad de Activos", len(activos_reales))
+        col2.metric("Promedio por Activo", f"${valor_total/len(activos_reales):,.2f}")
+        
+        # Encontrar el activo con mayor valuación
+        max_activo = max(activos_reales, key=lambda x: x["Valuación"])
+        col3.metric("Mayor Exposición", f"{max_activo['Símbolo']}")
+    
+    with tab2:
+        # Gráficos
+        st.markdown("#### Distribución del Portafolio")
+        
+        # Gráfico de torta
+        fig = go.Figure(data=[go.Pie(
+            labels=[activo["Símbolo"] for activo in activos_reales],
+            values=[activo["Valuación"] for activo in activos_reales],
+            hole=.3
+        )])
+        fig.update_layout(title_text="Distribución por Activo")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Gráfico de rendimiento histórico
+        st.markdown("#### Rendimiento Histórico")
+        # Normalizar precios (base 100)
+        df_norm = df_precios_reales.div(df_precios_reales.iloc[0]) * 100
+        
+        fig_hist = go.Figure()
+        for col in df_norm.columns:
+            fig_hist.add_trace(go.Scatter(
+                x=df_norm.index,
+                y=df_norm[col],
+                name=col
+            ))
+        
+        fig_hist.update_layout(
+            title="Rendimiento Histórico (Base 100)",
+            xaxis_title="Fecha",
+            yaxis_title="Valor (Base 100)"
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+    
+    with tab3:
+        # Estadísticas reales
+        st.markdown("#### Estadísticas del Portafolio")
+        
+        # Mostrar estadísticas detalladas con datos reales
+        mostrar_estadisticas_detalladas_portafolio(activos_reales, df_precios_reales)
+
+# Ejecutar la aplicación automáticamente
+if __name__ == "__main__":
+    main()
