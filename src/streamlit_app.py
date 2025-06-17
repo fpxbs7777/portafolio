@@ -1664,6 +1664,7 @@ class PortfolioManager:
                 self.prices = df_precios
                 self.mean_returns = mean_returns
                 self.cov_matrix = cov_matrix
+
                 self.data_loaded = True
                 return True
             else:
@@ -1769,6 +1770,115 @@ class PortfolioOutput:
         )
         
         return fig
+
+# === INTEGRACIÓN DE NUEVAS FUNCIONES Y CLASES DE PORTFOLIO ===
+
+# Importar solo si no están ya importados
+import importlib
+import os
+
+# Definición de la clase OutputPortfolio (renombrada para evitar conflicto)
+class OutputPortfolio:
+    def __init__(self, returns):
+        self.returns = returns
+        self.mean_daily = np.mean(returns)
+        self.volatility_daily = np.std(returns)
+        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
+        self.var_95 = np.percentile(returns, 5)
+        self.skewness = stats.skew(returns)
+        self.kurtosis = stats.kurtosis(returns)
+        self.jb_stat, self.p_value = stats.jarque_bera(returns)
+        self.is_normal = self.p_value > 0.05
+        self.decimals = 4
+
+    def plot_histogram(self, portfolio_name):
+        str_title = f'{portfolio_name} Portfolio Returns\n' + \
+                    'mean_daily=' + str(np.round(self.mean_daily, self.decimals)) + ' | ' + \
+                    'volatility_daily=' + str(np.round(self.volatility_daily, self.decimals)) + '\n' + \
+                    'sharpe_ratio=' + str(np.round(self.sharpe_ratio, self.decimals)) + ' | ' + \
+                    'var_95=' + str(np.round(self.var_95, self.decimals)) + '\n' + \
+                    'skewness=' + str(np.round(self.skewness, self.decimals)) + ' | ' + \
+                    'kurtosis=' + str(np.round(self.kurtosis, self.decimals)) + '\n' + \
+                    'JB stat=' + str(np.round(self.jb_stat, self.decimals)) + ' | ' + \
+                    'p-value=' + str(np.round(self.p_value, self.decimals)) + '\n' + \
+                    'is_normal=' + str(self.is_normal)
+        fig, ax = plt.subplots()
+        ax.hist(self.returns, bins=100)
+        ax.set_title(str_title)
+        ax.set_xlabel('Return')
+        ax.set_ylabel('Frequency')
+        st.pyplot(fig)
+
+# Definición de la clase PortfolioManagerDemo (renombrada para evitar conflicto)
+class PortfolioManagerDemo:
+    def __init__(self, rics, notional, directory):
+        self.rics = rics
+        self.notional = notional
+        self.directory = directory
+        self.data = self.load_data()
+
+    def load_data(self):
+        data = {}
+        for ric in self.rics:
+            file_path = os.path.join(self.directory, f'{ric}_intraday_{datetime.datetime.now().strftime("%Y%m%d")}.csv')
+            if os.path.exists(file_path):
+                data[ric] = pd.read_csv(file_path)
+            else:
+                # Solo mostrar advertencia en Streamlit si hay archivos faltantes
+                st.warning(f'Archivo no encontrado: {file_path}')
+        return data
+
+    def compute_covariance(self):
+        # Implementar la lógica para computar la matriz de varianza-covarianza
+        st.info("Función compute_covariance aún no implementada (demo).")
+        return None
+
+    def compute_portfolio(self, strategy, target_return=None):
+        # Implementar la lógica para computar el portafolio
+        # Aquí se devuelve un objeto de la clase OutputPortfolio con datos de ejemplo
+        returns = np.random.normal(0, 1, 100)  # Datos de ejemplo
+        return OutputPortfolio(returns)
+
+# === FUNCIÓN DE DEMOSTRACIÓN PARA STREAMLIT ===
+
+def demo_portfolio_manager():
+    st.header("Demo: Portfolio Manager (Clases integradas)")
+
+    # Inputs de ejemplo
+    notional = 15  # en millones USD
+    universe = ["GGAL", "YPF", "PAMP", "BMA", "SUPV", "CEPU", "TXAR", "ALUA", "BYMA", "LOMA"]
+    sample_size = min(5, len(universe))
+    rics = random.sample(universe, sample_size)
+
+    # Selección de directorio (usando directorio actual como ejemplo)
+    directory = os.getcwd()
+
+    st.write(f"Universe: {universe}")
+    st.write(f"Sampled RICs: {rics}")
+    st.write(f"Directory: {directory}")
+
+    # Inicializar la instancia de la clase
+    port_mgr = PortfolioManagerDemo(rics, notional, directory)
+
+    # Computar correlación y matriz de varianza-covarianza
+    port_mgr.compute_covariance()
+
+    # Computar los portafolios deseados: clase de salida = OutputPortfolio
+    port_min_variance_l1 = port_mgr.compute_portfolio('min-variance-l1')
+    port_min_variance_l2 = port_mgr.compute_portfolio('min-variance-l2')
+    port_long_only = port_mgr.compute_portfolio('long-only')
+    port_equi_weight = port_mgr.compute_portfolio('equi-weight')
+    port_markowitz = port_mgr.compute_portfolio('markowitz', target_return=None)
+
+    # Graficar los histogramas de retornos para el portafolio deseado
+    st.subheader("Histogramas de retornos simulados")
+    port_min_variance_l1.plot_histogram('Min Variance L1')
+    port_min_variance_l2.plot_histogram('Min Variance L2')
+    port_long_only.plot_histogram('Long Only')
+    port_equi_weight.plot_histogram('Equi Weight')
+    port_markowitz.plot_histogram('Markowitz')
+
+# === INTEGRAR DEMO EN LA APP PRINCIPAL (opcional, bajo botón) ===
 
 def main():
     """
