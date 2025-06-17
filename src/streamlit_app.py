@@ -1665,6 +1665,7 @@ class PortfolioManager:
                 self.mean_returns = mean_returns
                 self.cov_matrix = cov_matrix
 
+
                 self.data_loaded = True
                 return True
             else:
@@ -1988,17 +1989,32 @@ def main():
             else:
                 st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
     
-    # Contenido principal con manejo de errores mejorado
-    try:
-        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
-            mostrar_analisis_portafolio()
-        elif st.session_state.token_acceso:
-            st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
-        else:
-            st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
-    except Exception as e:
-        st.error(f"❌ Error en la aplicación: {str(e)}")
-        st.error("🔄 Por favor, recargue la página e intente nuevamente")
+    # Nuevo menú principal con pestañas, incluyendo Optimización
+    tabs = st.tabs([
+        "🏠 Inicio",
+        "🧮 Optimización",
+        "📊 Análisis de Portafolio"
+    ])
+
+    with tabs[0]:
+        st.markdown("## Bienvenido a IOL Portfolio Analyzer")
+        st.info("Utilice las pestañas para navegar entre las funciones principales de la aplicación.")
+
+    with tabs[1]:
+        demo_portfolio_manager()
+
+    with tabs[2]:
+        # Contenido principal con manejo de errores mejorado
+        try:
+            if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                mostrar_analisis_portafolio()
+            elif st.session_state.token_acceso:
+                st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
+            else:
+                st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
+        except Exception as e:
+            st.error(f"❌ Error en la aplicación: {str(e)}")
+            st.error("🔄 Por favor, recargue la página e intente nuevamente")
 
 if __name__ == "__main__":
     main()
