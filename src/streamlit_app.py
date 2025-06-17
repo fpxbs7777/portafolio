@@ -1391,6 +1391,27 @@ def cargar_datos_demo():
         # Mostrar estadísticas detalladas con datos reales
         mostrar_estadisticas_detalladas_portafolio(activos_reales, df_precios_reales)
 
+def main():
+    # Inicializar variables de sesión si no existen
+    if 'logged_in' not in st.session_state:
+        st.session_state['logged_in'] = False
+    if 'demo_mode' not in st.session_state:
+        st.session_state['demo_mode'] = False
+    if 'token_acceso' not in st.session_state:
+        st.session_state['token_acceso'] = None
+
+    # Lógica principal de la aplicación
+    if st.session_state['logged_in'] and st.session_state['token_acceso']:
+        st.success("Autenticado con IOL")
+        # Aquí puedes agregar el dashboard real con datos de IOL
+    elif st.session_state['demo_mode']:
+        cargar_datos_demo()
+        if st.sidebar.button("Salir del Modo Demo"):
+            st.session_state['demo_mode'] = False
+            st.experimental_rerun()
+    else:
+        crear_interfaz_principal()
+
 # Ejecutar la aplicación automáticamente
 if __name__ == "__main__":
     main()
