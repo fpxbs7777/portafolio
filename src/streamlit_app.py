@@ -1144,6 +1144,421 @@ def mostrar_resumen_portafolio(portafolio):
     else:
         st.warning("No se pudieron procesar los datos de los activos")
 
+def obtener_test_inversor(token_portador):
+    """
+    Obtiene el test del inversor desde la API de IOL
+    """
+    url = 'https://api.invertironline.com/api/v2/asesores/test-inversor'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al obtener test del inversor: {respuesta.status_code}")
+            st.error(f"Respuesta: {respuesta.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión al obtener test del inversor: {str(e)}")
+        return None
+
+def enviar_respuestas_test_inversor(token_portador, id_cliente, respuestas):
+    """
+    Envía las respuestas del test del inversor para un cliente específico
+    """
+    url = f'https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente}'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.post(url, headers=encabezados, json=respuestas, timeout=15)
+        
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al enviar respuestas del test: {respuesta.status_code}")
+            st.error(f"Respuesta: {respuesta.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión al enviar test del inversor: {str(e)}")
+        return None
+
+def analizar_perfil_portafolio(portafolio):
+    """
+    Analiza la composición actual del portafolio y determina a qué perfil de inversor corresponde.
+    
+    Perfiles:
+    - Conservador: Mayoría en instrumentos de renta fija, money market, cauciones (>70%)
+    - Moderado: Equilibrio entre renta fija/variable (40-60% en cada tipo)
+    - Agresivo: Mayor concentración en renta variable y alto riesgo (>60%)
+    - Especulativo: Alta concentración en opciones, derivados, acciones volátiles (>30%)
+    """
+    if not portafolio or 'activos' not in portafolio:
+        return None
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        return None
+    
+    # Inicializar contadores por tipo de instrumento
+    total_valuacion = 0
+    instrumentos = {
+        'renta_fija': 0,  # Bonos, Letes, Obligaciones Negociables
+        'money_market': 0,  # FCI Money Market, Cauciones, Plazos Fijos
+        'renta_variable_local': 0,  # Acciones locales
+        'renta_variable_exterior': 0,  # Acciones exterior
+        'derivados': 0,  # Opciones, Futuros
+        'fci_renta_mixta': 0,  # FCI de renta mixta
+        'fci_renta_variable': 0,  # FCI de renta variable
+        'etf': 0,  # ETFs
+        'otros': 0  # Otros instrumentos no categorizados
+    }
+    
+    # Mapeo de tipos IOL a nuestras categorías
+    mapeo_tipos = {
+        'BONO': 'renta_fija',
+        'LETE': 'renta_fija',
+        'ON': 'renta_fija',
+        'LECAP': 'renta_fija',
+        'CAUCION': 'money_market',
+        'PLAZO_FIJO': 'money_market',
+        'FCI_MONEY_MARKET': 'money_market',
+        'ACCION': 'renta_variable_local',
+        'ACCION_EXTERIOR': 'renta_variable_exterior',
+        'CEDEAR': 'renta_variable_exterior',
+        'ADR': 'renta_variable_exterior',
+        'OPCION': 'derivados',
+        'FUTURO': 'derivados',
+        'OPCIONES': 'derivados',
+        'FUTUROS': 'derivados',
+        'FCI_RENTA_MIXTA': 'fci_renta_mixta',
+        'FCI_RENTA_VARIABLE': 'fci_renta_variable',
+        'ETF': 'etf'
+    }
+    
+    # Analizar cada activo
+    for activo in activos:
+        # Extraer datos relevantes
+        titulo = activo.get('titulo', {})
+        tipo = titulo.get('tipo', 'OTRO')
+        
+        # Obtener valuación con mejor extracción
+        valuacion = 0
+        campos_valuacion = [
+            'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal', 
+            'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido',
+            'valorMercado', 'valorTotal', 'importe'
+        ]
+        
+        for campo in campos_valuacion:
+            if campo in activo and activo[campo] is not None:
+                try:
+                    val = float(activo[campo])
+                    if val > 0:
+                        valuacion = val
+                        break
+                except (ValueError, TypeError):
+                    continue
+        
+        if valuacion <= 0:
+            continue
+        
+        # Actualizar contadores
+        total_valuacion += valuacion
+        categoria = mapeo_tipos.get(tipo.upper(), 'otros')
+        instrumentos[categoria] += valuacion
+    
+    # Si no hay valuación total, no podemos determinar el perfil
+    if total_valuacion <= 0:
+        return {
+            'perfil': 'Indeterminado',
+            'confianza': 0,
+            'detalle': 'No se pudo determinar el perfil por falta de datos de valuación',
+            'composicion': {}
+        }
+    
+    # Calcular porcentajes
+    composicion = {}
+    for categoria, valor in instrumentos.items():
+        composicion[categoria] = (valor / total_valuacion) * 100
+    
+    # Agrupar para determinar perfil
+    conservador = composicion.get('renta_fija', 0) + composicion.get('money_market', 0)
+    moderado = composicion.get('fci_renta_mixta', 0) + composicion.get('etf', 0) * 0.5
+    agresivo = (composicion.get('renta_variable_local', 0) + 
+                composicion.get('renta_variable_exterior', 0) + 
+                composicion.get('fci_renta_variable', 0) + 
+                composicion.get('etf', 0) * 0.5)
+    especulativo = composicion.get('derivados', 0)
+    
+    # Determinar perfil
+    perfil = 'Indeterminado'
+    confianza = 0
+    detalle = ''
+    
+    if conservador >= 70:
+        perfil = 'Conservador'
+        confianza = min(100, conservador)
+        detalle = (f"Su portafolio está compuesto principalmente por instrumentos de bajo riesgo "
+                   f"({conservador:.1f}% en renta fija y money market), lo que corresponde a un "
+                   f"perfil Conservador que prioriza la preservación del capital.")
+    elif agresivo >= 60:
+        perfil = 'Agresivo'
+        confianza = min(100, agresivo)
+        detalle = (f"Su portafolio tiene una alta concentración en renta variable "
+                   f"({agresivo:.1f}%), lo que corresponde a un perfil Agresivo "
+                   f"orientado al crecimiento de capital a largo plazo con mayor tolerancia al riesgo.")
+    elif especulativo >= 30:
+        perfil = 'Especulativo'
+        confianza = min(100, especulativo * 2)
+        detalle = (f"Su portafolio contiene una proporción significativa de instrumentos derivados "
+                   f"({especulativo:.1f}%), lo que indica un perfil Especulativo con alta "
+                   f"tolerancia al riesgo y enfoque en el corto plazo.")
+    elif conservador >= 40 and agresivo >= 30:
+        perfil = 'Moderado'
+        confianza = min(100, 50 + abs(conservador - agresivo))
+        detalle = (f"Su portafolio muestra un equilibrio entre instrumentos conservadores "
+                   f"({conservador:.1f}%) y de mayor riesgo ({agresivo:.1f}%), "
+                   f"correspondiente a un perfil Moderado que busca un balance entre "
+                   f"crecimiento y seguridad.")
+    else:
+        # Caso por defecto: asignar al perfil con mayor porcentaje
+        perfiles = {
+            'Conservador': conservador,
+            'Moderado': moderado,
+            'Agresivo': agresivo,
+            'Especulativo': especulativo
+        }
+        perfil = max(perfiles.items(), key=lambda x: x[1])[0]
+        confianza = 50  # Confianza media al ser un caso no claro
+        detalle = (f"Su portafolio no se ajusta claramente a un perfil específico, "
+                   f"pero muestra mayor inclinación hacia un perfil {perfil}.")
+    
+    # Generar resultado
+    return {
+        'perfil': perfil,
+        'confianza': confianza,
+        'detalle': detalle,
+        'composicion': composicion
+    }
+
+def mostrar_resultados_test(resultado):
+    """
+    Muestra los resultados del test del inversor
+    """
+    st.markdown("### 📊 Resultados del Test del Inversor")
+    
+    if 'perfilSugerido' in resultado:
+        perfil = resultado['perfilSugerido']
+        
+        st.markdown(f"#### 🏆 Perfil Sugerido: {perfil['nombre']}")
+        st.markdown(f"**Descripción:**\n{perfil['detalle']}")
+        
+        # Mostrar composición recomendada
+        if 'perfilComposiciones' in perfil and perfil['perfilComposiciones']:
+            st.markdown("#### 📈 Composición Recomendada:")
+            
+            # Crear datos para el gráfico
+            labels = []
+            values = []
+            
+            for composicion in perfil['perfilComposiciones']:
+                labels.append(composicion['nombre'])
+                values.append(composicion['porcentaje'])
+            
+            # Crear gráfico de pie
+            fig = go.Figure(data=[go.Pie(
+                labels=labels,
+                values=values,
+                textinfo='label+percent',
+                hole=.3
+            )])
+            
+            fig.update_layout(
+                title="Asignación de Activos Recomendada",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar tabla con porcentajes
+            comp_data = []
+            for composicion in perfil['perfilComposiciones']:
+                comp_data.append({
+                    'Tipo de Activo': composicion['nombre'],
+                    'Porcentaje Recomendado': f"{composicion['porcentaje']}%"
+                })
+            
+            if comp_data:
+                st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
+    
+    # Mostrar mensajes
+    if 'messages' in resultado and resultado['messages']:
+        st.markdown("#### 💡 Recomendaciones Personalizadas:")
+        
+        for msg in resultado['messages']:
+            st.info(f"**{msg['title']}**\n\n{msg['description']}")
+
+def mostrar_analisis_perfil_actual():
+    """
+    Muestra el análisis del perfil basado en la composición actual del portafolio
+    """
+    token_acceso = st.session_state.token_acceso
+    cliente = st.session_state.cliente_seleccionado
+    
+    if not cliente:
+        return
+    
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    
+    st.markdown("### 🔍 Análisis de Perfil según Portafolio Actual")
+    st.markdown("Este análisis se basa en la composición actual de su portafolio.")
+    
+    # Obtener portafolio
+    with st.spinner("Analizando portafolio actual..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if not portafolio:
+            st.warning("⚠️ No se pudo obtener el portafolio actual para análisis")
+            return
+        
+        perfil_analisis = analizar_perfil_portafolio(portafolio)
+        
+        if not perfil_analisis:
+            st.warning("⚠️ No se pudo determinar el perfil según el portafolio actual")
+            return
+    
+    # Mostrar resultado del análisis
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Perfil Detectado", perfil_analisis['perfil'])
+    
+    with col2:
+        confianza = perfil_analisis['confianza']
+        color = "green" if confianza > 75 else "orange" if confianza > 50 else "red"
+        st.markdown(f"**Nivel de Confianza:**\n"
+                    f"<div style='width:100%;background-color:#f0f0f0;height:20px;border-radius:10px;'>"
+                    f"<div style='width:{confianza}%;background-color:{color};height:20px;border-radius:10px;'></div>"
+                    f"</div>"
+                    f"<p style='text-align:center;'>{confianza:.1f}%</p>", unsafe_allow_html=True)
+    
+    with col3:
+        if 'resultado_test' in st.session_state and 'perfilSugerido' in st.session_state.resultado_test:
+            perfil_sugerido = st.session_state.resultado_test['perfilSugerido']['nombre']
+            if perfil_sugerido == perfil_analisis['perfil']:
+                st.success(f"✅ Coincide con el perfil sugerido")
+            else:
+                st.warning(f"⚠️ Difiere del perfil sugerido ({perfil_sugerido})")
+    
+    # Mostrar detalle del análisis
+    st.markdown(f"**Análisis:**\n{perfil_analisis['detalle']}")
+    
+    # Mostrar gráfico de composición actual
+    if 'composicion' in perfil_analisis and perfil_analisis['composicion']:
+        composicion = perfil_analisis['composicion']
+        
+        # Filtrar categorías con valor 0
+        composicion_filtrada = {k: v for k, v in composicion.items() if v > 0}
+        
+        if composicion_filtrada:
+            # Crear datos para el gráfico
+            labels = []
+            values = []
+            
+            # Mapeo para nombres más amigables
+            mapeo_nombres = {
+                'renta_fija': 'Renta Fija',
+                'money_market': 'Money Market',
+                'renta_variable_local': 'Renta Variable Local',
+                'renta_variable_exterior': 'Renta Variable Exterior',
+                'derivados': 'Derivados/Opciones',
+                'fci_renta_mixta': 'FCI Renta Mixta',
+                'fci_renta_variable': 'FCI Renta Variable',
+                'etf': 'ETFs',
+                'otros': 'Otros Instrumentos'
+            }
+            
+            for categoria, porcentaje in composicion_filtrada.items():
+                nombre_amigable = mapeo_nombres.get(categoria, categoria)
+                labels.append(nombre_amigable)
+                values.append(porcentaje)
+            
+            # Crear gráfico de pie
+            fig = go.Figure(data=[go.Pie(
+                labels=labels,
+                values=values,
+                textinfo='label+percent',
+                hole=.3
+            )])
+            
+            fig.update_layout(
+                title="Composición Actual del Portafolio",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar tabla con porcentajes
+            comp_data = []
+            for categoria, porcentaje in composicion_filtrada.items():
+                nombre_amigable = mapeo_nombres.get(categoria, categoria)
+                comp_data.append({
+                    'Tipo de Activo': nombre_amigable,
+                    'Porcentaje Actual': f"{porcentaje:.2f}%"
+                })
+            
+            if comp_data:
+                # Ordenar por porcentaje descendente
+                comp_data = sorted(comp_data, key=lambda x: float(x['Porcentaje Actual'].replace('%', '')), reverse=True)
+                st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
+    
+    # Ofrecer recomendaciones basadas en el perfil detectado
+    st.markdown("#### 💡 Recomendaciones para su Perfil")
+    
+    perfil = perfil_analisis['perfil']
+    
+    if perfil == 'Conservador':
+        st.markdown("""
+        - ✅ **Mantener predominancia** de instrumentos de renta fija de buena calidad crediticia
+        - ✅ **Considerar** FCI Money Market para gestionar la liquidez
+        - ✅ **Explorar** bonos corporativos de empresas sólidas
+        - ⚠️ **Limitar exposición** a renta variable volátil
+        - ⚠️ **Evitar** derivados y opciones
+        """)
+    elif perfil == 'Moderado':
+        st.markdown("""
+        - ✅ **Mantener balance** entre renta fija y variable
+        - ✅ **Considerar** aumentar exposición a ETFs diversificados
+        - ✅ **Explorar** FCI de renta mixta para delegar gestión
+        - ✅ **Incorporar** acciones de baja volatilidad y buena historia de dividendos
+        - ⚠️ **Limitar** instrumentos especulativos o de alto riesgo
+        """)
+    elif perfil == 'Agresivo':
+        st.markdown("""
+        - ✅ **Mantener exposición** significativa a renta variable
+        - ✅ **Considerar** diversificación geográfica en mercados desarrollados y emergentes
+        - ✅ **Explorar** sectores de alto crecimiento
+        - ✅ **Incorporar** estrategias de inversión en valor y crecimiento
+        - ⚠️ **Gestionar riesgos** con stop-loss y toma de ganancias sistemática
+        """)
+    elif perfil == 'Especulativo':
+        st.markdown("""
+        - ✅ **Mantener disciplina** en la gestión de posiciones de alto riesgo
+        - ✅ **Considerar** estrategias de opciones más sofisticadas (spreads, collars)
+        - ✅ **Definir** tamaño máximo para posiciones especulativas
+        - ✅ **Establecer** protocolos claros de gestión de riesgo y toma de ganancias
+        - ⚠️ **Reservar capital** para oportunidades y mantener colchón de seguridad
+        """)
+    else:
+        st.markdown("""
+        - ✅ **Definir claramente** sus objetivos de inversión
+        - ✅ **Consultar** con un asesor financiero para ajustar su estrategia
+        - ✅ **Considerar** realizar el test del inversor para obtener un perfil más preciso
+        - ✅ **Revisar** su horizonte temporal y tolerancia al riesgo
+        """)
+
 def mostrar_test_inversor():
     """
     Muestra el test del inversor y procesa las respuestas
@@ -1613,296 +2028,126 @@ def mostrar_estado_cuenta(estado_cuenta):
             st.info(f"💡 **Oportunidad de inversión**: Tiene {porcentaje_invertido:.1f}% invertido. Considere revisar oportunidades de inversión.")
         else:
             st.success(f"✅ **Buena distribución**: Tiene {porcentaje_invertido:.1f}% de su capital invertido.")
-
-def mostrar_analisis_portafolio():
-    """
-    Función principal para mostrar el análisis del portafolio del cliente seleccionado
-    """
-    cliente = st.session_state.cliente_seleccionado
-    token_acceso = st.session_state.token_acceso
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
-
-    if not cliente:
-        st.error("No hay cliente seleccionado")
-        return
-
-    # Obtener ID del cliente
-    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-
-    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
-
-    # Crear tabs para diferentes análisis
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Resumen", 
-        "💰 Estado de Cuenta", 
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🧠 Test del Inversor"
-    ])
-
-    with tab1:
-        # Obtener portafolio
-        with st.spinner("Cargando portafolio..."):
-            portafolio = obtener_portafolio(token_acceso, id_cliente)
-        
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente")
-    
-    with tab2:
-        # Mostrar estado de cuenta - intentar primero con ID cliente, luego sin ID
-        with st.spinner("Cargando estado de cuenta..."):
-            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
             
-            # Ofrecer alternativa
-            st.markdown("#### 🔄 Intentar con endpoint alternativo")
-            if st.button("🚀 Probar endpoint directo"):
-                with st.spinner("Probando endpoint directo..."):
-                    estado_cuenta_directo = obtener_estado_cuenta(token_acceso, None)
-                    if estado_cuenta_directo:
-                        mostrar_estado_cuenta(estado_cuenta_directo)
-                    else:
-                        st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
-
-    with tab3:
-        st.markdown("### 📊 Análisis Técnico")
-        st.info("Herramientas avanzadas de análisis técnico y dibujo disponibles abajo.")
-
-        # Selección de símbolo para análisis técnico
-        if 'portafolio' not in locals():
-            portafolio = obtener_portafolio(token_acceso, id_cliente)
-
-        if portafolio:
-            activos = portafolio.get('activos', [])
-            if activos:
-                simbolos = [activo.get('titulo', {}).get('simbolo', '') for activo in activos]
-                simbolos = [s for s in simbolos if s]
-
-                if simbolos:
-                    simbolo_seleccionado = st.selectbox(
-                        "Seleccione un activo para análisis técnico:",
-                        options=simbolos
-                    )
-                    if simbolo_seleccionado:
-                        st.markdown("#### Gráfico interactivo con indicadores y herramientas de dibujo")
-                        # Incrustar TradingView Chart Widget con herramientas de análisis técnico y dibujo
-                        tv_widget = f"""
-                        <div id="tradingview_{simbolo_seleccionado}" style="height:600px"></div>
-                        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-                        <script type="text/javascript">
-                        new TradingView.widget({{
-                          "container_id": "tradingview_{simbolo_seleccionado}",
-                          "width": "100%",
-                          "height": 600,
-                          "symbol": "{simbolo_seleccionado}",
-                          "interval": "D",
-                          "timezone": "America/Argentina/Buenos_Aires",
-                          "theme": "light",
-                          "style": "1",
-                          "locale": "es",
-                          "toolbar_bg": "#f4f7f9",
-                          "enable_publishing": false,
-                          "allow_symbol_change": true,
-                          "hide_side_toolbar": false,
-                          "studies": [
-                            "MACD@tv-basicstudies",
-                            "RSI@tv-basicstudies",
-                            "BollingerBands@tv-basicstudies",
-                            "StochasticRSI@tv-basicstudies",
-                            "Volume@tv-basicstudies",
-                            "Moving Average@tv-basicstudies",
-                            "IchimokuCloud@tv-basicstudies",
-                            "ParabolicSAR@tv-basicstudies",
-                            "ATR@tv-basicstudies"
-                          ],
-                          "drawings_access": {{
-                            "type": "white",
-                            "tools": [
-                              {{"name": "Trend Line"}},
-                              {{"name": "Horizontal Line"}},
-                              {{"name": "Fibonacci Retracement"}},
-                              {{"name": "Pitchfork"}},
-                              {{"name": "Brush"}},
-                              {{"name": "Rectangle"}},
-                              {{"name": "Ellipse"}},
-                              {{"name": "Arrow"}},
-                              {{"name": "Text"}},
-                              {{"name": "Price Label"}}
-                            ]
-                          }},
-                          "enabled_features": [
-                            "study_templates",
-                            "header_chart_type",
-                            "header_indicators",
-                            "header_compare",
-                            "header_undo_redo",
-                            "header_screenshot",
-                            "header_fullscreen_button",
-                            "header_settings",
-                            "header_symbol_search",
-                            "header_interval_dialog_button",
-                            "header_resolutions",
-                            "header_drawing_tools",
-                            "header_save_chart_template",
-                            "header_load_chart_template"
-                          ],
-                          "disabled_features": [
-                            "use_localstorage_for_settings",
-                            "left_toolbar",
-                            "header_widget_dom_node"
-                          ]
-                        }});
-                        </script>
-                        """
-                        components.html(tv_widget, height=650)
-                        st.info("Puede agregar indicadores técnicos, cambiar intervalos y usar herramientas de dibujo directamente en el gráfico.")
-
-    with tab4:
-        # Cotizaciones y mercado
-        mostrar_cotizaciones_mercado(token_acceso)
-    
-    with tab5:
-        # Test del inversor
-        mostrar_test_inversor()
-
-# Clases para mantener compatibilidad
-class PortfolioManager:
+def main():
     """
-    Clase simplificada para manejo de portafolio y optimización
+    Función principal de la aplicación Streamlit
     """
-    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
-        self.symbols = symbols
-        self.token = token
-        self.fecha_desde = fecha_desde
-        self.fecha_hasta = fecha_hasta
-        self.data_loaded = False
-        self.returns = None
-        self.prices = None
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
     
-    def load_data(self):
-        """
-        Carga datos históricos para los símbolos del portafolio
-        """
-        try:
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
-            )
-            
-            if mean_returns is not None and cov_matrix is not None:
-                self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
-                self.prices = df_precios
-                self.mean_returns = mean_returns
-                self.cov_matrix = cov_matrix
-                self.data_loaded = True
-                return True
-            else:
-                return False
+    # Inicializar session state
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'refresh_token' not in st.session_state:
+        st.session_state.refresh_token = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    # Add missing date parameters
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=365)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+    
+    # Sidebar para autenticación y configuración
+    with st.sidebar:
+        st.header("🔐 Autenticación IOL")
+        
+        if st.session_state.token_acceso is None:
+            # Formulario de login
+            with st.form("login_form"):
+                st.markdown("#### Ingrese sus credenciales de IOL")
+                usuario = st.text_input("Usuario", placeholder="su_usuario")
+                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
                 
-        except Exception as e:
-            st.error(f"Error cargando datos: {str(e)}")
-            return False
-    
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
-        """
-        Computa la optimización del portafolio
-        """
-        if not self.data_loaded or self.returns is None:
-            return None
-        
-        try:
-            # Optimización básica usando pesos iguales como fallback
-            n_assets = len(self.returns.columns)
+                if st.form_submit_button("🚀 Conectar"):
+                    if usuario and contraseña:
+                        with st.spinner("Conectando con IOL..."):
+                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            
+                            if token_acceso:
+                                st.session_state.token_acceso = token_acceso
+                                st.session_state.refresh_token = refresh_token
+                                st.success("✅ Conexión exitosa!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error en la autenticación")
+                    else:
+                        st.warning("⚠️ Complete todos los campos")
+        else:
+            # Usuario conectado
+            st.success("✅ Conectado a IOL")
             
-            if strategy == 'equi-weight':
-                weights = np.array([1/n_assets] * n_assets)
+            # Configuración de fechas
+            st.markdown("#### 📅 Configuración de Fechas")
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_desde = st.date_input(
+                    "Fecha desde:",
+                    value=st.session_state.fecha_desde,
+                    max_value=date.today()
+                )
+            with col2:
+                fecha_hasta = st.date_input(
+                    "Fecha hasta:",
+                    value=st.session_state.fecha_hasta,
+                    max_value=date.today()
+                )
+            
+            st.session_state.fecha_desde = fecha_desde
+            st.session_state.fecha_hasta = fecha_hasta
+            
+            # Obtener lista de clientes
+            if not st.session_state.clientes:
+                with st.spinner("Cargando clientes..."):
+                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    st.session_state.clientes = clientes
+            
+            clientes = st.session_state.clientes
+            
+            if clientes:
+                st.info(f"👥 {len(clientes)} clientes disponibles")
+                
+                # Seleccionar cliente
+                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                
+                cliente_seleccionado = st.selectbox(
+                    "Seleccione un cliente:",
+                    options=cliente_ids,
+                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente Desconocido"
+                )
+                
+                # Guardar cliente seleccionado en session state
+                st.session_state.cliente_seleccionado = next(
+                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                    None
+                )
+                
+                if st.button("🔄 Actualizar lista de clientes"):
+                    with st.spinner("Actualizando clientes..."):
+                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        st.session_state.clientes = nuevos_clientes
+                        st.success("✅ Lista de clientes actualizada")
+                        st.rerun()
+            
             else:
-                # Intentar optimización real
-                weights = np.array([1/n_assets] * n_assets)  # Simplificado para evitar error
-            
-            # Crear objeto de resultado
-            portfolio_output = PortfolioOutput(
-                weights=weights,
-                asset_names=list(self.returns.columns),
-                returns=self.returns
-            )
-            
-            return portfolio_output
-            
-        except Exception as e:
-            st.error(f"Error en optimización: {str(e)}")
-            return None
+                st.warning("No se encontraron clientes. Verifique su conexión y permisos.")
+    
+    # Contenido principal con manejo de errores mejorado
+    try:
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            mostrar_analisis_portafolio()
+        elif st.session_state.token_acceso:
+            st.info("👆 Seleccione un cliente en la barra lateral para comenzar el análisis")
+        else:
+            st.info("👆 Ingrese sus credenciales de IOL en la barra lateral para comenzar")
+    except Exception as e:
+        st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.error("🔄 Por favor, recargue la página e intente nuevamente")
 
-class PortfolioOutput:
-    """
-    Clase para almacenar resultados de optimización de portafolio
-    """
-    def __init__(self, weights, asset_names, returns):
-        self.weights = weights
-        self.asset_names = asset_names
-        self.returns = returns
-        self.portfolio_returns = None
-        
-        if returns is not None and len(weights) == len(returns.columns):
-            self.portfolio_returns = (returns * weights).sum(axis=1)
-    
-    def get_metrics_dict(self):
-        """
-        Calcula y retorna métricas del portafolio
-        """
-        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
-            return {
-                'Mean Daily': 0,
-                'Volatility Daily': 0,
-                'Sharpe Ratio': 0,
-                'VaR 95%': 0
-            }
-        
-        mean_daily = self.portfolio_returns.mean()
-        vol_daily = self.portfolio_returns.std()
-        sharpe = mean_daily / vol_daily if vol_daily > 0 else 0
-        var_95 = np.percentile(self.portfolio_returns, 5)
-        
-        return {
-            'Mean Daily': mean_daily,
-            'Volatility Daily': vol_daily,
-            'Sharpe Ratio': sharpe,
-            'VaR 95%': var_95
-        }
-    
-    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
-        """
-        Crea un histograma de retornos usando Plotly para Streamlit
-        """
-        if self.portfolio_returns is None or len(self.portfolio_returns) == 0:
-            # Crear gráfico vacío
-            fig = go.Figure()
-            fig.add_annotation(
-                text="No hay datos suficientes para mostrar",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
-            )
-            fig.update_layout(title=title)
-            return fig
-        
-        fig = go.Figure(data=[go.Histogram(
-            x=self.portfolio_returns,
-            nbinsx=30,
-            name="Retornos del Portafolio"
-        )])
-        
-        fig.update_layout(
-            title=f"{title}",
-            xaxis_title="Retorno",
-            yaxis_title="Frecuencia",
-            showlegend=False
-        )
-        
-        return fig
+# Asegurarse de llamar a la función principal al final del script
+if __name__ == "__main__":
+    main()
