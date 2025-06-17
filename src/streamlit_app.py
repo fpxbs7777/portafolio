@@ -1632,3 +1632,6 @@ class PortfolioOutput:
             uniformtext_mode='hide'
         )
         return fig
+
+if __name__ == "__main__":
+    main()
