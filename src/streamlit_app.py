@@ -1232,24 +1232,21 @@ def crear_interfaz_principal():
     if submit_button and usuario and contraseña:
         with st.spinner("Conectando con InvertirOnline..."):
             token_acceso, token_refresh = obtener_tokens(usuario, contraseña)
-            
             if token_acceso:
                 st.session_state['token_acceso'] = token_acceso
                 st.session_state['token_refresh'] = token_refresh
                 st.session_state['logged_in'] = True
-                
-                # Mostrar mensaje de éxito y recargar
                 st.success("✅ Sesión iniciada correctamente")
-                st.experimental_rerun()
+                st.stop()  # Usar st.stop() en vez de st.experimental_rerun()
             else:
                 st.error("❌ Error al iniciar sesión. Verifica tus credenciales.")
-    
+
     # Modo demo
     if demo_button:
         st.session_state['demo_mode'] = True
         st.success("✅ Modo demo activado")
-        st.experimental_rerun()
-    
+        st.stop()  # Usar st.stop() en vez de st.experimental_rerun()
+
     # Footer
     st.markdown("---")
     st.markdown("Desarrollado con ❤️ para la comunidad de inversores")
@@ -1301,7 +1298,7 @@ def cargar_datos_demo():
             for simbolo in simbolos_demo:
                 if simbolo in precios_actuales and not pd.isna(precios_actuales[simbolo]):
                     precio = precios_actuales[simbolo]
-                    cantidad = cantidades.get(simbolo, 1)  # Usar 1 si no está definido
+                    cantidad = cantidades.get(simbolo, 1) # Usar 1 si no está definido
                     valuacion = precio * cantidad
                     
                     activo = {
