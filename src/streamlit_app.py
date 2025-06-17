@@ -2151,3 +2151,22 @@ def main():
 # Asegurarse de llamar a la función principal al final del script
 if __name__ == "__main__":
     main()
+
+def mostrar_analisis_portafolio():
+    """
+    Obtiene el portafolio del cliente seleccionado y muestra el resumen.
+    """
+    token_acceso = st.session_state.token_acceso
+    cliente = st.session_state.cliente_seleccionado
+
+    if not cliente:
+        st.warning("No hay cliente seleccionado.")
+        return
+
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    with st.spinner("Obteniendo portafolio..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if portafolio:
+            mostrar_resumen_portafolio(portafolio)
+        else:
+            st.error("No se pudo obtener el portafolio del cliente seleccionado.")
