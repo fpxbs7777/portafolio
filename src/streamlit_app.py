@@ -729,9 +729,65 @@ def calcular_metricas_portafolio(activos_data, valor_total):
         st.error(f"Error calculando métricas del portafolio: {str(e)}")
         return None
 
+def calcular_estadisticas_portafolio(df_precios):
+    """
+    Calcula estadísticas agregadas del portafolio usando los retornos históricos de los activos.
+    Devuelve un diccionario con las métricas principales.
+    """
+    try:
+        if df_precios is None or df_precios.empty or len(df_precios.columns) < 2:
+            return None
+
+        retornos = df_precios.pct_change().dropna()
+        vector = retornos.mean(axis=1).values  # Retorno promedio diario del portafolio
+        factor = 252  # Días hábiles
+
+        media_anual = np.mean(vector) * factor
+        volatilidad_anual = np.std(vector) * np.sqrt(factor)
+        ratio_sharpe = media_anual / volatilidad_anual if volatilidad_anual > 0 else 0.0
+        var_95 = np.percentile(vector, 5)
+        sesgo = stats.skew(vector)
+        curtosis = stats.kurtosis(vector)
+        jb_stat = len(vector) / 6 * (sesgo**2 + (1 / 4) * curtosis**2)
+        p_valor = 1 - stats.chi2.cdf(jb_stat, df=2)
+        es_normal = p_valor > 0.05
+
+        # Mejor ajuste de distribución
+        distribuciones = {
+            'norm': 'Normal',
+            't': 't de Student',
+            'uniform': 'Uniforme',
+            'expon': 'Exponencial',
+            'chi2': 'Chi-cuadrado'
+        }
+        resultados = {}
+        for codigo_dist, nombre_dist in distribuciones.items():
+            objeto_dist = getattr(stats, codigo_dist)
+            parametros = objeto_dist.fit(vector)
+            ks_stat, p_valor_ks = stats.kstest(vector, codigo_dist, args=parametros)
+            resultados[codigo_dist] = {'KS Statistic': ks_stat, 'P-Value': p_valor_ks, 'Params': parametros, 'Name': nombre_dist}
+        codigo_mejor_ajuste = max(resultados, key=lambda x: resultados[x]['P-Value'])
+        nombre_mejor_ajuste = resultados[codigo_mejor_ajuste]['Name']
+
+        return {
+            'media_anual': media_anual,
+            'volatilidad_anual': volatilidad_anual,
+            'ratio_sharpe': ratio_sharpe,
+            'var_95': var_95,
+            'sesgo': sesgo,
+            'curtosis': curtosis,
+            'jb_stat': jb_stat,
+            'p_valor': p_valor,
+            'es_normal': es_normal,
+            'mejor_ajuste': nombre_mejor_ajuste
+        }
+    except Exception as e:
+        return None
+
 def mostrar_resumen_portafolio(portafolio):
     """
-    Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas
+    Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas,
+    incluyendo estadísticas agregadas de retornos históricos del portafolio.
     """
     st.markdown("### 📈 Resumen del Portafolio")
     
@@ -1104,8 +1160,6 @@ def mostrar_resumen_portafolio(portafolio):
             if st.button("🔄 Intentar obtener cotizaciones actuales"):
                 with st.spinner("Obteniendo cotizaciones actuales..."):
                     st.info("Funcionalidad de cotizaciones actuales en desarrollo...")
-    else:
-        st.warning("No se pudieron procesar los datos de los activos")
 
 def mostrar_analisis_portafolio():
     """
@@ -1126,11 +1180,11 @@ def mostrar_analisis_portafolio():
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
 
-    # Crear tabs para diferentes análisis
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # Reordenar tabs: Resumen, Análisis Técnico, Estado de Cuenta, Cotizaciones
+    tab1, tab3, tab2, tab4 = st.tabs([
         "📈 Resumen", 
-        "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
+        "💰 Estado de Cuenta", 
         "💱 Cotizaciones"
     ])
 
@@ -1144,26 +1198,6 @@ def mostrar_analisis_portafolio():
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
-    with tab2:
-        # Mostrar estado de cuenta - intentar primero con ID cliente, luego sin ID
-        with st.spinner("Cargando estado de cuenta..."):
-            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
-            
-            # Ofrecer alternativa
-            st.markdown("#### 🔄 Intentar con endpoint alternativo")
-            if st.button("🚀 Probar endpoint directo"):
-                with st.spinner("Probando endpoint directo..."):
-                    estado_cuenta_directo = obtener_estado_cuenta(token_acceso, None)
-                    if estado_cuenta_directo:
-                        mostrar_estado_cuenta(estado_cuenta_directo)
-                    else:
-                        st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
-
     with tab3:
         st.markdown("### 📊 Análisis Técnico")
         st.info("Herramientas avanzadas de análisis técnico y dibujo disponibles abajo.")
@@ -1256,6 +1290,26 @@ def mostrar_analisis_portafolio():
                         """
                         components.html(tv_widget, height=650)
                         st.info("Puede agregar indicadores técnicos, cambiar intervalos y usar herramientas de dibujo directamente en el gráfico.")
+
+    with tab2:
+        # Mostrar estado de cuenta - intentar primero con ID cliente, luego sin ID
+        with st.spinner("Cargando estado de cuenta..."):
+            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        
+        if estado_cuenta:
+            mostrar_estado_cuenta(estado_cuenta)
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
+            
+            # Ofrecer alternativa
+            st.markdown("#### 🔄 Intentar con endpoint alternativo")
+            if st.button("🚀 Probar endpoint directo"):
+                with st.spinner("Probando endpoint directo..."):
+                    estado_cuenta_directo = obtener_estado_cuenta(token_acceso, None)
+                    if estado_cuenta_directo:
+                        mostrar_estado_cuenta(estado_cuenta_directo)
+                    else:
+                        st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
 
     with tab4:
         # Cotizaciones y mercado
