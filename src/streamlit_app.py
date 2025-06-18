@@ -97,27 +97,42 @@ def optimizar_pesos_por_perfil(activos, perfil='moderado'):
             portafolio_optimizado.append(activo)
     return portafolio_optimizado
 
-# --- Main Streamlit App ---
+# --- Configuración inicial ---
+st.set_page_config(
+    page_title="IOL Portfolio Analyzer",
+    page_icon="📊",
+    layout="wide"
+)
+
 def main():
     st.title("IOL Portfolio Analyzer")
     
-    # Authentication
-    bearer_token = st.session_state.get('bearer_token')
-    if not bearer_token:
+    # Verificar si ya estamos autenticados
+    if 'bearer_token' not in st.session_state:
+        mostrar_login()
+        return
+    
+    # Resto de la aplicación
+    mostrar_contenido_principal()
+
+def mostrar_login():
+    """Muestra el formulario de login"""
+    with st.form("login_form"):
         usuario = st.text_input("Usuario IOL")
         contraseña = st.text_input("Contraseña", type="password")
-        if st.button("Iniciar sesión"):
+        
+        if st.form_submit_button("Iniciar sesión"):
             bearer_token, refresh_token = obtener_tokens(usuario, contraseña)
             if bearer_token:
                 st.session_state.bearer_token = bearer_token
                 st.session_state.refresh_token = refresh_token
-                st.success("Autenticación exitosa")
+                st.rerun()  # Recargar la app
             else:
                 st.error("Error en autenticación")
-        return
-    
+
+def mostrar_contenido_principal():
     # Client selection
-    clientes = obtener_lista_clientes(bearer_token)
+    clientes = obtener_lista_clientes(st.session_state.bearer_token)
     if not clientes:
         st.warning("No se encontraron clientes")
         return
@@ -126,7 +141,7 @@ def main():
     id_cliente = next(c['id'] for c in clientes if c['nombre'] == cliente_seleccionado)
     
     # Get portfolio
-    portafolio = obtener_portafolio(bearer_token, id_cliente)
+    portafolio = obtener_portafolio(st.session_state.bearer_token, id_cliente)
     if not portafolio:
         st.warning("No se encontró portafolio")
         return
@@ -137,7 +152,7 @@ def main():
     for activo in portafolio.get('activos', []):
         simbolo = activo.get('simbolo')
         if simbolo:
-            tipo = detectar_tipo_activo_iol(simbolo, bearer_token)
+            tipo = detectar_tipo_activo_iol(simbolo, st.session_state.bearer_token)
             activo['tipo_detectado'] = tipo
             activos_con_tipo.append(activo)
     
