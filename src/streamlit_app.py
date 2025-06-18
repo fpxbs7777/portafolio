@@ -597,7 +597,14 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        data = response.json()
+        # Verificar que la respuesta sea JSON válido
+        try:
+            data = response.json()
+        except json.JSONDecodeError as e:
+            print(f"Error decodificando JSON para {simbolo}: {str(e)}")
+            print(f"Respuesta recibida: {response.text[:200]}")
+            return None
+            
         if not data:
             print(f"No hay datos para {simbolo} en {mercado}")
             return None
@@ -1801,6 +1808,56 @@ class PortfolioOutput:
         )
         
         return fig
+
+def obtener_detalles_mep(bearer_token):
+    """
+    Obtiene el tipo de cambio MEP (Dólar MEP) a partir de los bonos AL30.
+    
+    Returns:
+        dict: Un diccionario con el tipo de cambio MEP y detalles.
+    """
+    # Obtener el último precio de AL30D en pesos (mercado BCBA)
+    url_al30d = "https://api.invertironline.com/api/v2/BCBA/Titulos/AL30D/Cotizacion/ultima"
+    # Obtener el último precio de AL30 en dólares (mercado NYSE)
+    url_al30 = "https://api.invertironline.com/api/v2/NYSE/Titulos/AL30/Cotizacion/ultima"
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        # Obtener AL30D
+        response_al30d = requests.get(url_al30d, headers=headers, timeout=10)
+        response_al30d.raise_for_status()
+        al30d_data = response_al30d.json()
+        precio_al30d_ars = al30d_data['ultimoPrecio']
+        
+        # Obtener AL30
+        response_al30 = requests.get(url_al30, headers=headers, timeout=10)
+        response_al30.raise_for_status()
+        al30_data = response_al30.json()
+        precio_al30_usd = al30d_data['ultimoPrecio']
+        
+        # Calcular MEP
+        mep_rate = precio_al30d_ars / precio_al30_usd
+        
+        return {
+            "mep_rate": mep_rate,
+            "precio_al30d_ars": precio_al30d_ars,
+            "precio_al30_usd": precio_al30_usd,
+            "fecha_actualizacion": datetime.now().isoformat()
+        }
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Error obteniendo detalles MEP: {str(e)}")
+        return {"error": str(e)}
+    except KeyError as e:
+        print(f"Error en la respuesta de la API: {str(e)}")
+        return {"error": "La respuesta de la API no tiene el formato esperado"}
+    except Exception as e:
+        print(f"Error inesperado: {str(e)}")
+        return {"error": str(e)}
 
 def main():
     """
