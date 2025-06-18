@@ -11,6 +11,7 @@ from scipy import stats # Added for skewness, kurtosis, jarque_bera
 import random
 import warnings
 import streamlit.components.v1 as components
+import opciones  # Import our options analysis module
 
 warnings.filterwarnings('ignore')
 
@@ -878,308 +879,25 @@ def mostrar_resumen_portafolio(portafolio):
     
     # Mostrar información de debug para verificar el cálculo
     with st.expander("🔍 Debug - Verificación de Valuaciones"):
-        st.write("**Valuaciones individuales por activo:**")
-        for i, activo_data in enumerate(datos_activos):
-            st.write(f"{activo_data['Símbolo']}: ${activo_data['Valuación']:,.2f}")
-        st.write(f"**Suma total calculada: ${valor_total:,.2f}**")
+        col1, col2 = st.columns(2)
         
-        # Verificar si el valor parece estar en una escala incorrecta
-        if valor_total > 100000:
-            st.warning("⚠️ El valor total parece ser muy alto. Verificando posibles errores de escala...")
-            # Intentar detectar si los valores están multiplicados por 10
-            valor_corregido = valor_total / 10
-            st.info(f"💡 Valor corregido (÷10): ${valor_corregido:,.2f}")
+        with col1:
+            st.markdown("**Valuaciones individuales por activo:**")
+            for i, activo_data in enumerate(datos_activos):
+                st.write(f"{activo_data['Símbolo']}: ${activo_data['Valuación']:,.2f}")
+            st.write(f"**Suma total calculada: ${valor_total:,.2f}**")
             
-            # Preguntar al usuario si quiere usar el valor corregido
-            if st.button("🔧 Usar valor corregido"):
-                valor_total = valor_corregido
-                # Corregir también las valuaciones individuales
-                for activo_data in datos_activos:
-                    activo_data['Valuación'] = activo_data['Valuación'] / 10
-                st.success("✅ Valores corregidos aplicados")
-                st.rerun()
-    
-    if datos_activos:
-        df_activos = pd.DataFrame(datos_activos)
-        
-        # Calcular métricas comprehensivas del portafolio
-        metricas = calcular_metricas_portafolio(datos_activos, valor_total)
-        
-        # === 1. INFORMACIÓN BÁSICA DEL PORTAFOLIO ===
-        st.markdown("#### 📊 Información General")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de Activos", len(datos_activos))
-        col2.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        col3.metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        
-        # Mostrar el valor total con formato correcto y verificación
-        valor_display = f"${valor_total:,.2f}"
-        if valor_total > 500000:  # Si parece demasiado alto
-            st.warning("⚠️ Verificar: el valor total parece alto")
-        col4.metric("Valor Total del Portafolio", valor_display)
-        
-        # === 2. MÉTRICAS DE RIESGO ACTUALES ===
-        if metricas:
-            st.markdown("#### ⚠️ Análisis de Riesgo")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            # Añadir porcentajes a las métricas de concentración
-            concentracion_pct = metricas['concentracion'] * 100
-            col1.metric(
-                "Concentración del Portafolio", 
-                f"{metricas['concentracion']:.3f} ({concentracion_pct:.1f}%)",
-                help="Índice de Herfindahl: 0=perfectamente diversificado, 1=completamente concentrado"
-            )
-            
-            # Mostrar VaR en valor absoluto y porcentaje
-            var_pct = abs(metricas['var_95'] / valor_total * 100) if valor_total > 0 else 0
-            col2.metric(
-                "VaR 95% (Valor en Riesgo)", 
-                f"${metricas['var_95']:,.0f} ({var_pct:.1f}%)",
-                help="Valor mínimo del activo más pequeño en el 95% de los casos"
-            )
-            
-            # Mostrar volatilidad en valor absoluto y porcentaje
-            volatilidad_pct = metricas['riesgo_anual'] / valor_total * 100 if valor_total > 0 else 0
-            col3.metric(
-                "Volatilidad Estimada Anual", 
-                f"${metricas['riesgo_anual']:,.0f} ({volatilidad_pct:.1f}%)",
-                help="Riesgo anual estimado basado en 20% de volatilidad"
-            )
-            
-            # Indicador visual de concentración
-            concentracion_status = "🟢 Diversificado" if metricas['concentracion'] < 0.25 else "🟡 Moderadamente Concentrado" if metricas['concentracion'] < 0.5 else "🔴 Altamente Concentrado"
-            col4.metric("Estado de Diversificación", concentracion_status)
-        
-        # === 3. PROYECCIONES DE RENDIMIENTO ===
-        if metricas:
-            st.markdown("#### 📈 Proyecciones de Rendimiento (Próximos 12 meses)")
-            
-            col1, col2, col3 = st.columns(3)
-            # Mejorar visualización con porcentajes más destacados
-            retorno_pct = metricas['retorno_esperado_anual']/valor_total*100 if valor_total > 0 else 0
-            col1.metric(
-                "Retorno Esperado", 
-                f"${metricas['retorno_esperado_anual']:,.0f} ({retorno_pct:.1f}%)",
-                delta=f"{retorno_pct:.1f}%",
-                help="Retorno esperado promedio basado en 8% anual"
-            )
-            
-            escenario_opt_pct = metricas['pl_percentil_95']/valor_total*100 if valor_total > 0 else 0
-            col2.metric(
-                "Escenario Optimista (95%)", 
-                f"${metricas['pl_percentil_95']:,.0f} ({escenario_opt_pct:.1f}%)",
-                delta=f"+{escenario_opt_pct:.1f}%",
-                help="Ganancia esperada en el mejor 5% de los casos"
-            )
-            
-            escenario_pes_pct = metricas['pl_percentil_5']/valor_total*100 if valor_total > 0 else 0
-            col3.metric(
-                "Escenario Pesimista (5%)", 
-                f"${metricas['pl_percentil_5']:,.0f} ({escenario_pes_pct:.1f}%)",
-                delta=f"{escenario_pes_pct:.1f}%",
-                help="Pérdida máxima esperada en el peor 5% de los casos"
-            )
-        
-        # === 4. PROBABILIDADES DE ESCENARIOS ===
-        if metricas:
-            st.markdown("#### 🎯 Probabilidades de Escenarios")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            probs = metricas['probabilidades']
-            
-            col1.metric(
-                "Probabilidad de Ganancia", 
-                f"{probs['ganancia']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos positivos"
-            )
-            col2.metric(
-                "Probabilidad de Pérdida", 
-                f"{probs['perdida']*100:.1f}%",
-                help="Probabilidad de obtener rendimientos negativos"
-            )
-            col3.metric(
-                "Prob. Ganancia > 10%", 
-                f"{probs['ganancia_mayor_10']*100:.1f}%",
-                help="Probabilidad de obtener más del 10% de ganancia"
-            )
-            col4.metric(
-                "Prob. Pérdida > 10%", 
-                f"{probs['perdida_mayor_10']*100:.1f}%",
-                help="Probabilidad de perder más del 10%"
-            )
-        
-        # === 5. DISTRIBUCIÓN DETALLADA DE ACTIVOS ===
-        if metricas:
-            st.markdown("#### 📊 Distribución Estadística de Valores por Activo")
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            quantiles = metricas['quantiles']
-            
-            # Añadir porcentajes a los quantiles
-            q25_pct = quantiles['q25'] / valor_total * 100 if valor_total > 0 else 0
-            col1.metric(
-                "Valor Mínimo (Q25)", 
-                f"${quantiles['q25']:,.0f} ({q25_pct:.1f}%)",
-                help="25% de los activos valen menos que este monto"
-            )
-            
-            q50_pct = quantiles['q50'] / valor_total * 100 if valor_total > 0 else 0
-            col2.metric(
-                "Valor Mediano (Q50)", 
-                f"${quantiles['q50']:,.0f} ({q50_pct:.1f}%)",
-                help="Valor medio de los activos del portafolio"
-            )
-            
-            q75_pct = quantiles['q75'] / valor_total * 100 if valor_total > 0 else 0
-            col3.metric(
-                "Tercer Cuartil (Q75)", 
-                f"${quantiles['q75']:,.0f} ({q75_pct:.1f}%)",
-                help="75% de los activos valen menos que este monto"
-            )
-            
-            q90_pct = quantiles['q90'] / valor_total * 100 if valor_total > 0 else 0
-            col4.metric(
-                "Percentil 90", 
-                f"${quantiles['q90']:,.0f} ({q90_pct:.1f}%)",
-                help="90% de los activos valen menos que este monto"
-            )
-            
-            q95_pct = quantiles['q95'] / valor_total * 100 if valor_total > 0 else 0
-            col5.metric(
-                "Valor Máximo (Q95)", 
-                f"${quantiles['q95']:,.0f} ({q95_pct:.1f}%)",
-                help="Solo el 5% de los activos supera este valor"
-            )
-        
-        # Información de debug mejorada
-        with st.expander("🔍 Información de Debug - Estructura del Portafolio"):
-            st.markdown("**Campos disponibles en los activos:**")
-            if activos:
-                campos_encontrados = set()
-                for activo in activos[:3]:
-                    campos_encontrados.update(activo.keys())
-                    if 'titulo' in activo and isinstance(activo['titulo'], dict):
-                        titulo_campos = [f"titulo.{k}" for k in activo['titulo'].keys()]
-                        campos_encontrados.update(titulo_campos)
+            # Verificar si el valor parece estar en una escala incorrecta
+            if valor_total > 100000:
+                st.warning("⚠️ El valor total parece ser muy alto. Verificando posibles errores de escala...")
+                # Intentar detectar si los valores están multiplicados por 10
+                valor_corregido = valor_total / 10
+                st.info(f"💡 Valor corregido (÷10): ${valor_corregido:,.2f}")
                 
-                st.code(sorted(list(campos_encontrados)))
-                
-                st.markdown("**Muestra de datos de activo:**")
-                st.json(activos[0] if activos else {})
-        
-        # Gráficos de distribución
-        if valor_total > 0:
-            # Gráfico de distribución por tipo
-            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-                tipo_stats = df_activos.groupby('Tipo').agg({
-                    'Valuación': ['sum', 'count', 'mean']
-                }).round(2)
-                tipo_stats.columns = ['Valor_Total', 'Cantidad', 'Valor_Promedio']
-                tipo_stats = tipo_stats.reset_index()
-                
-                # Añadir porcentaje al valor total por tipo
-                tipo_stats['Porcentaje'] = (tipo_stats['Valor_Total'] / valor_total * 100).round(2)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Pie chart por valor
-                    fig_pie = go.Figure(data=[go.Pie(
-                        labels=tipo_stats['Tipo'],
-                        values=tipo_stats['Valor_Total'],
-                        textinfo='label+percent+value',
-                        texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
-                    )])
-                    fig_pie.update_layout(title="Distribución por Valor", height=400)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                
-                with col2:
-                    # Bar chart por tipo con porcentajes
-                    fig_bar = go.Figure(data=[go.Bar(
-                        x=tipo_stats['Tipo'],
-                        y=tipo_stats['Valor_Total'],
-                        text=[f"${val:,.0f}<br>({pct:.1f}%)" for val, pct in zip(tipo_stats['Valor_Total'], tipo_stats['Porcentaje'])],
-                        textposition='auto'
-                    )])
-                    fig_bar.update_layout(
-                        title="Valor por Tipo de Activo",
-                        xaxis_title="Tipo",
-                        yaxis_title="Valor ($)",
-                        height=400
-                    )
-                    st.plotly_chart(fig_bar, use_container_width=True)
-                
-                # Mostrar tabla con porcentajes
-                st.markdown("#### 📊 Distribución por Tipo de Activo")
-                tipo_display = tipo_stats.copy()
-                tipo_display['Valor_Total'] = tipo_display['Valor_Total'].apply(lambda x: f"${x:,.2f}")
-                tipo_display['Porcentaje'] = tipo_display['Porcentaje'].apply(lambda x: f"{x:.2f}%")
-                st.dataframe(tipo_display[['Tipo', 'Cantidad', 'Valor_Total', 'Porcentaje']], use_container_width=True)
-            
-            # Histograma de valores individuales
-            if len(datos_activos) > 1:
-                valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                if valores_activos:
-                    fig_hist = go.Figure(data=[go.Histogram(
-                        x=valores_activos,
-                        nbinsx=min(20, len(valores_activos))
-                    )])
-                    fig_hist.update_layout(
-                        title="Distribución de Valores por Activo",
-                        xaxis_title="Valor ($)",
-                        yaxis_title="Frecuencia",
-                        height=400
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
-        
-        # Tabla de activos mejorada
-        st.markdown("#### 📋 Detalle de Activos")
-        
-        df_display = df_activos.copy()
-        df_display['Valuación Formateada'] = df_display['Valuación'].apply(
-            lambda x: f"${x:,.2f}" if x > 0 else "No disponible"
-        )
-        df_display['Peso (%)'] = (df_display['Valuación'] / valor_total * 100).round(2) if valor_total > 0 else 0
-        
-        # Reordenar columnas
-        columns_order = ['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación Formateada', 'Peso (%)']
-        df_display_final = df_display[columns_order]
-        df_display_final = df_display_final.rename(columns={'Valuación Formateada': 'Valuación'})
-        
-        # Ordenar por valuación descendente
-        df_display_final = df_display_final.sort_values('Peso (%)', ascending=False)
-        
-        # Formatear el peso como string con símbolo de porcentaje
-        df_display_final['Peso (%)'] = df_display_final['Peso (%)'].apply(lambda x: f"{x:.2f}%")
-        
-        st.dataframe(df_display_final, use_container_width=True)
-        
-        # === ALERTAS Y RECOMENDACIONES ===
-        st.markdown("#### 💡 Análisis y Recomendaciones")
-        
-        if metricas:
-            # Análisis de concentración
-            if metricas['concentracion'] > 0.5:
-                st.warning("⚠️ **Portafolio Altamente Concentrado**: Su portafolio tiene un alto nivel de concentración. Considere diversificar para reducir el riesgo.")
-            elif metricas['concentracion'] > 0.25:
-                st.info("ℹ️ **Concentración Moderada**: Su portafolio está moderadamente concentrado. La diversificación adicional podría reducir el riesgo.")
-            else:
-                st.success("✅ **Buena Diversificación**: Su portafolio muestra un buen nivel de diversificación.")
-            
-            # Análisis de riesgo-retorno
-            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
-            if ratio_riesgo_retorno > 0.5:
-                st.success("✅ **Buen Balance Riesgo-Retorno**: La relación entre retorno esperado y riesgo es favorable.")
-            else:
-                st.warning("⚠️ **Revisar Balance Riesgo-Retorno**: El riesgo podría ser alto en relación al retorno esperado.")
-        
-        if valor_total == 0:
-            st.error("❌ **Problema de Valuación**: No se pudieron obtener valuaciones válidas para los activos.")
-            
-            if st.button("🔄 Intentar obtener cotizaciones actuales"):
-                with st.spinner("Obteniendo cotizaciones actuales..."):
-                    st.info("Funcionalidad de cotizaciones actuales en desarrollo...")
+                # Preguntar al usuario si quiere usar el valor corregido
+                if st.button("🔄 Intentar obtener cotizaciones actuales"):
+                    with st.spinner("Obteniendo cotizaciones actuales..."):
+                        st.info("Funcionalidad de cotizaciones actuales en desarrollo...")
     else:
         st.warning("No se pudieron procesar los datos de los activos")
 
@@ -1203,11 +921,12 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
 
     # Crear tabs para diferentes análisis
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
-        "💱 Cotizaciones"
+        "💱 Cotizaciones",
+        "📈 Optimización"
     ])
 
     with tab1:
@@ -1239,7 +958,7 @@ def mostrar_analisis_portafolio():
                         mostrar_estado_cuenta(estado_cuenta_directo)
                     else:
                         st.error("❌ No se pudo obtener el estado de cuenta con ningún método")
-
+    
     with tab3:
         st.markdown("### 📊 Análisis Técnico")
         st.info("Herramientas avanzadas de análisis técnico y dibujo disponibles abajo.")
@@ -1332,10 +1051,133 @@ def mostrar_analisis_portafolio():
                         """
                         components.html(tv_widget, height=650)
                         st.info("Puede agregar indicadores técnicos, cambiar intervalos y usar herramientas de dibujo directamente en el gráfico.")
-
+    
     with tab4:
         # Cotizaciones y mercado
         mostrar_cotizaciones_mercado(token_acceso)
+    
+    with tab5:
+        class PortfolioManager:
+            """
+            Clase simplificada para manejo de portafolio y optimización
+            """
+            def __init__(self, symbols, token, fecha_desde, fecha_hasta):
+                self.symbols = symbols
+                self.token = token
+                self.fecha_desde = fecha_desde
+                self.fecha_hasta = fecha_hasta
+                self.data_loaded = False
+                self.returns = None
+                self.prices = None
+            
+            def load_data(self):
+                """
+                Carga datos históricos para los símbolos del portafolio
+                """
+                try:
+                    mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                        self.token, self.symbols, self.fecha_desde, self.fecha_hasta
+                    )
+                    
+                    if mean_returns is not None and cov_matrix is not None:
+                        self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
+                        self.prices = df_precios
+                        self.mean_returns = mean_returns
+                        self.cov_matrix = cov_matrix
+                        self.data_loaded = True
+                        return True
+                    else:
+                        return False
+                        
+                except Exception as e:
+                    st.error(f"Error cargando datos: {str(e)}")
+                    return False
+            
+            def portfolio_contains_options(self):
+                """Check if portfolio contains options"""
+                for ticker in self.symbols:
+                    if len(ticker) > 4 and ticker[-1] in ['C', 'P'] and ticker[-5:-1].isdigit():
+                        return True
+                return False
+
+            def get_options_positions(self):
+                """Parse options positions from portfolio"""
+                options_positions = {}
+                for ticker, position in zip(self.symbols, self.prices):
+                    if len(ticker) > 4 and ticker[-1] in ['C', 'P'] and ticker[-5:-1].isdigit():
+                        underlying = ticker[:-9]
+                        expiration_str = ticker[-9:-3]
+                        strike = float(ticker[-3:-1])
+                        option_type = 'call' if ticker[-1] == 'C' else 'put'
+                        expiration = f"20{expiration_str[:2]}-{expiration_str[2:4]}-{expiration_str[4:6]}"
+                        
+                        options_positions[ticker] = {
+                            'underlying': underlying,
+                            'strike': strike,
+                            'expiration': expiration,
+                            'option_type': option_type,
+                            'quantity': position
+                        }
+                return options_positions
+
+        class PortfolioWithOptions:
+            """Handles portfolios containing options"""
+            def __init__(self, options_positions):
+                self.options_positions = options_positions
+                
+            def run_monte_carlo_simulations(self, num_simulations=10000):
+                """Run Monte Carlo simulations for all options in portfolio"""
+                results = {}
+                for ticker, position in self.options_positions.items():
+                    results[ticker] = opciones.monte_carlo_simulation(
+                        position['underlying'], position['strike'], position['expiration'], 
+                        position['option_type'], num_simulations
+                    )
+                return results
+
+            def calculate_scenario_probabilities(self, simulation_results):
+                """Calculate portfolio-wide scenario probabilities"""
+                # Aggregate probabilities across all options
+                total_gain = np.mean([r['prob_gain'] for r in simulation_results.values()])
+                total_loss = np.mean([r['prob_loss'] for r in simulation_results.values()])
+                total_gain_10 = np.mean([r['prob_gain_10'] for r in simulation_results.values()])
+                total_loss_10 = np.mean([r['prob_loss_10'] for r in simulation_results.values()])
+                
+                return {
+                    'prob_gain': total_gain,
+                    'prob_loss': total_loss,
+                    'prob_gain_10': total_gain_10,
+                    'prob_loss_10': total_loss_10
+                }
+
+        portfolio_manager = PortfolioManager(
+            ['AL30', 'GGAL', 'YPFD'], 
+            token_acceso, 
+            fecha_desde, 
+            fecha_hasta
+        )
+        
+        if portfolio_manager.load_data():
+            if portfolio_manager.portfolio_contains_options():
+                st.subheader("Análisis de Opciones con Simulación Monte Carlo")
+                
+                options_portfolio = PortfolioWithOptions(portfolio_manager.get_options_positions())
+                simulation_results = options_portfolio.run_monte_carlo_simulations()
+                scenario_probs = options_portfolio.calculate_scenario_probabilities(simulation_results)
+                
+                col1, col2 = st.columns(2)
+                col1.metric("Probabilidad de Ganancia", f"{scenario_probs['prob_gain']:.2%}")
+                col2.metric("Probabilidad de Pérdida", f"{scenario_probs['prob_loss']:.2%}")
+                col1.metric("Probabilidad de Ganancia >10%", f"{scenario_probs['prob_gain_10']:.2%}")
+                col2.metric("Probabilidad de Pérdida >10%", f"{scenario_probs['prob_loss_10']:.2%}")
+                
+                # Show distribution of payoffs
+                fig = go.Figure(data=[go.Histogram(
+                    x=np.concatenate([r['payoffs'] for r in simulation_results.values()]), 
+                    nbinsx=50
+                )])
+                fig.update_layout(title="Distribución de Pagos de Opciones")
+                st.plotly_chart(fig)
 
 def mostrar_estado_cuenta(estado_cuenta):
     """
@@ -1413,6 +1255,7 @@ def mostrar_estado_cuenta(estado_cuenta):
     
     # Añadir métricas adicionales con porcentajes
     col1, col2 = st.columns(2)
+    
     if total_general > 0:
         disponible_pct = total_disponible/total_general*100
         invertido_pct = total_titulos_valorizados/total_general*100
@@ -1593,114 +1436,6 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     st.json(tasas_caucion)
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
-
-class PortfolioManager:
-    """
-    Clase simplificada para manejo de portafolio y optimización
-    """
-    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
-        self.symbols = symbols
-        self.token = token
-        self.fecha_desde = fecha_desde
-        self.fecha_hasta = fecha_hasta
-        self.data_loaded = False
-        self.returns = None
-        self.prices = None
-    
-    def load_data(self):
-        """
-        Carga datos históricos para los símbolos del portafolio
-        """
-        try:
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
-            )
-            
-            if mean_returns is not None and cov_matrix is not None:
-                self.returns = df_precios.pct_change().dropna() if df_precios is not None else None
-                self.prices = df_precios
-                self.mean_returns = mean_returns
-                self.cov_matrix = cov_matrix
-                self.data_loaded = True
-                return True
-            else:
-                return False
-                
-        except Exception as e:
-            st.error(f"Error cargando datos: {str(e)}")
-            return False
-    
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
-        """
-        Computa la optimización del portafolio
-        """
-        if not self.data_loaded or self.returns is None:
-            return None
-        
-        try:
-            # Optimización básica usando pesos iguales como fallback
-            n_assets = len(self.returns.columns)
-            
-            if strategy == 'equi-weight':
-                weights = np.array([1/n_assets] * n_assets)
-            elif strategy == 'min-variance-l2':
-                # Minima varianza con regularización L2
-                def objective(w):
-                    port_var = np.dot(w, np.dot(self.cov_matrix, w))
-                    reg = 0.01 * np.sum(w**2)  # Regularización L2
-                    return port_var + reg
-                
-                # Constraints: sum(w)=1, w>=0 (long-only)
-                constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
-                bounds = [(0, 1) for _ in range(n_assets)]
-                
-                # Initial guess: equal weights
-                w0 = np.ones(n_assets) / n_assets
-                
-                # Optimize
-                result = op.minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=constraints)
-                
-                if result.success:
-                    weights = result.x
-                    # Calcular los retornos del portafolio in-sample
-                    portfolio_returns = self.returns.dot(weights)
-                    return PortfolioOutput(portfolio_returns)
-                else:
-                    print(f"Optimización fallida: {result.message}")
-                    return None
-            elif strategy == 'markowitz':
-                if target_return is None:
-                    print("Markowitz requiere un retorno objetivo")
-                    return None
-                    
-                # Minimizar la varianza dado un retorno objetivo
-                def objective(w):
-                    return np.dot(w, np.dot(self.cov_matrix, w))
-                    
-                constraints = (
-                    {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
-                    {'type': 'eq', 'fun': lambda w: np.dot(w, self.mean_returns) - target_return}
-                )
-                bounds = [(0, 1) for _ in range(n_assets)]
-                
-                w0 = np.ones(n_assets) / n_assets
-                
-                result = op.minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=constraints)
-                
-                if result.success:
-                    weights = result.x
-                    portfolio_returns = self.returns.dot(weights)
-                    return PortfolioOutput(portfolio_returns)
-                else:
-                    print(f"Optimización de Markowitz fallida: {result.message}")
-                    return None
-            else:
-                print(f"Estrategia {strategy} no implementada aún")
-                return None
-            
-        except Exception as e:
-            st.error(f"Error en optimización: {str(e)}")
-            return None
 
 class PortfolioOutput:
     """
