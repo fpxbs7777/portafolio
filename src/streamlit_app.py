@@ -1594,7 +1594,6 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
-# Clase PortfolioManager simplificada para compatibilidad
 class PortfolioManager:
     """
     Clase simplificada para manejo de portafolio y optimización
@@ -1762,8 +1761,7 @@ class PortfolioOutput:
         fig.update_layout(
             title=f"{title}",
             xaxis_title="Retorno",
-            yaxis_title="Frecuencia",
-            showlegend=False
+            yaxis_title="Frecuencia"
         )
         
         return fig
