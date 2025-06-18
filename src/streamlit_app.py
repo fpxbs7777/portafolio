@@ -1458,95 +1458,14 @@ def mostrar_estado_cuenta(estado_cuenta):
         if monedas_data:
             df_monedas = pd.DataFrame(monedas_data)
             
-            # Formatear columnas para visualización
-            for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
-                df_monedas[f'{col} ($)'] = df_monedas[col].apply(lambda x: f"${x:,.2f}")
-                if total_general > 0:
-                    df_monedas[f'{col} (%)'] = (df_monedas[col]/total_general*100).apply(lambda x: f"{x:.2f}%")
-                else:
-                    df_monedas[f'{col} (%)'] = "0.00%"
+            # Mostrar solo columnas relevantes si están disponibles
+            columnas_relevantes = ['Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total', '% del Total']
+            columnas_disponibles = [col for col in columnas_relevantes if col in df_monedas.columns]
             
-            # Formatear porcentaje del total
-            df_monedas['% del Total'] = df_monedas['% del Total'].apply(lambda x: f"{x:.2f}%")
-            
-            # Ordenar por total descendente
-            df_monedas = df_monedas.sort_values('Total', ascending=False)
-            
-            # Seleccionar columnas para visualización
-            cols_display = ['Moneda', 'Disponible ($)', 'Disponible (%)', 
-                          'Títulos Valorizados ($)', 'Títulos Valorizados (%)',
-                          'Total ($)', '% del Total', 'Cuentas']
-            
-            st.dataframe(df_monedas[cols_display], use_container_width=True)
-        
-        # Detalle expandible por moneda
-        for moneda, datos in cuentas_por_moneda.items():
-            nombre_moneda = {
-                'peso_Argentino': 'Pesos Argentinos',
-                'dolar_Estadounidense': 'Dólares Estadounidenses',
-                'euro': 'Euros'
-            }.get(moneda, moneda)
-            with st.expander(f"💰 {nombre_moneda} ({len(datos['cuentas'])} cuenta(s))"):
-                col1, col2, col3, col4 = st.columns(4)
-                
-                # Mostrar valores con porcentajes
-                col1.metric(
-                    "Disponible", 
-                    mostrar_valor_pct(datos['disponible'], total_general),
-                    help="Efectivo disponible para operar"
-                )
-                col2.metric(
-                    "Comprometido", 
-                    mostrar_valor_pct(datos['comprometido'], total_general),
-                    help="Fondos comprometidos en operaciones pendientes"
-                )
-                col3.metric(
-                    "Saldo", 
-                    mostrar_valor_pct(datos['saldo'], total_general),
-                    help="Saldo total de la cuenta"
-                )
-                col4.metric(
-                    "Total", 
-                    mostrar_valor_pct(datos['total'], total_general),
-                    help="Valor total incluyendo efectivo y títulos"
-                )
-                
-                if datos['titulos_valorizados'] > 0:
-                    st.metric(
-                        "Títulos Valorizados", 
-                        mostrar_valor_pct(datos['titulos_valorizados'], total_general),
-                        help="Valor total de los títulos en cartera"
-                    )
-                
-                # Añadir gráfico de distribución
-                if datos['total'] > 0:
-                    values = [
-                        datos['disponible'], 
-                        datos['comprometido'],
-                        datos['titulos_valorizados']
-                    ]
-                    labels = ['Disponible', 'Comprometido', 'Títulos Valorizados']
-                    
-                    # Eliminar valores cero
-                    filtered_values = []
-                    filtered_labels = []
-                    for val, lbl in zip(values, labels):
-                        if val > 0:
-                            filtered_values.append(val)
-                            filtered_labels.append(lbl)
-                    
-                    if filtered_values:
-                        fig = go.Figure(data=[go.Pie(
-                            labels=filtered_labels,
-                            values=filtered_values,
-                            textinfo='label+percent+value',
-                            texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
-                        )])
-                        fig.update_layout(
-                            title=f"Distribución de {nombre_moneda}",
-                            height=300
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
+            if columnas_disponibles:
+                st.dataframe(df_monedas[columnas_disponibles], use_container_width=True)
+            else:
+                st.dataframe(df_monedas, use_container_width=True)
     
     # Mostrar estadísticas si están disponibles
     if estadisticas:
@@ -1725,18 +1644,60 @@ class PortfolioManager:
             
             if strategy == 'equi-weight':
                 weights = np.array([1/n_assets] * n_assets)
+            elif strategy == 'min-variance-l2':
+                # Minima varianza con regularización L2
+                def objective(w):
+                    port_var = np.dot(w, np.dot(self.cov_matrix, w))
+                    reg = 0.01 * np.sum(w**2)  # Regularización L2
+                    return port_var + reg
+                
+                # Constraints: sum(w)=1, w>=0 (long-only)
+                constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
+                bounds = [(0, 1) for _ in range(n_assets)]
+                
+                # Initial guess: equal weights
+                w0 = np.ones(n_assets) / n_assets
+                
+                # Optimize
+                result = op.minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=constraints)
+                
+                if result.success:
+                    weights = result.x
+                    # Calcular los retornos del portafolio in-sample
+                    portfolio_returns = self.returns.dot(weights)
+                    return PortfolioOutput(portfolio_returns)
+                else:
+                    print(f"Optimización fallida: {result.message}")
+                    return None
+            elif strategy == 'markowitz':
+                if target_return is None:
+                    print("Markowitz requiere un retorno objetivo")
+                    return None
+                    
+                # Minimizar la varianza dado un retorno objetivo
+                def objective(w):
+                    return np.dot(w, np.dot(self.cov_matrix, w))
+                    
+                constraints = (
+                    {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+                    {'type': 'eq', 'fun': lambda w: np.dot(w, self.mean_returns) - target_return}
+                )
+                bounds = [(0, 1) for _ in range(n_assets)]
+                
+                w0 = np.ones(n_assets) / n_assets
+                
+                result = op.minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=constraints)
+                
+                if result.success:
+                    weights = result.x
+                    portfolio_returns = self.returns.dot(weights)
+                    return PortfolioOutput(portfolio_returns)
+                else:
+                    print(f"Optimización de Markowitz fallida: {result.message}")
+                    return None
             else:
-                # Intentar optimización real
-                weights = optimize_portfolio(self.returns, target_return=target_return)
-            
-            # Crear objeto de resultado
-            portfolio_output = PortfolioOutput(
-                weights=weights,
-                asset_names=list(self.returns.columns),
-                returns=self.returns
-            )
-            
-            return portfolio_output
+                print(f"Estrategia {strategy} no implementada aún")
+                return None
             
         except Exception as e:
             st.error(f"Error en optimización: {str(e)}")
@@ -1746,15 +1707,13 @@ class PortfolioOutput:
     """
     Clase para almacenar resultados de optimización de portafolio
     """
-    def __init__(self, weights, asset_names, returns):
-        self.weights = weights
-        self.asset_names = asset_names
+    def __init__(self, returns):
         self.returns = returns
         self.portfolio_returns = None
         
-        if returns is not None and len(weights) == len(returns.columns):
-            self.portfolio_returns = (returns * weights).sum(axis=1)
-    
+        if returns is not None and len(returns) > 0:
+            self.portfolio_returns = returns
+        
     def get_metrics_dict(self):
         """
         Calcula y retorna métricas del portafolio
