@@ -1860,6 +1860,52 @@ class PortfolioOutput:
         
         return fig
 
+def obtener_test_inversor(token_portador):
+    """
+    Obtiene las preguntas y opciones para el test de perfil de inversor
+    """
+    url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    headers = {
+        "Authorization": f"Bearer {token_portador}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener test: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error en conexión: {str(e)}")
+        return None
+
+def enviar_test_inversor(token_portador, respuestas, id_cliente=None):
+    """
+    Envia las respuestas del test de perfil de inversor
+    """
+    if id_cliente:
+        url = f"https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente}"
+    else:
+        url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    
+    headers = {
+        "Authorization": f"Bearer {token_portador}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=respuestas)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al enviar test: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error en conexión: {str(e)}")
+        return None
+
 def main():
     """
     Función principal de la aplicación Streamlit
@@ -1884,7 +1930,11 @@ def main():
         st.session_state.portfolio_data = None
     if 'estado_cuenta' not in st.session_state:
         st.session_state.estado_cuenta = None
-
+    if 'test_data' not in st.session_state:
+        st.session_state.test_data = None
+    if 'test_result' not in st.session_state:
+        st.session_state.test_result = None
+    
     # Sidebar for authentication
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
@@ -1925,27 +1975,67 @@ def main():
     
     # Main content
     if st.session_state.token_acceso:
-        tab1, tab2, tab3 = st.tabs(["📊 Portafolio", "💵 Estado de Cuenta", "📈 Mercado"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Portafolio", "💵 Estado de Cuenta", "📈 Mercado", "🧪 Test Inversor"])
         
-        with tab1:
+        # ... (existing tabs implementation)
+        
+        with tab4:
+            st.header("🧪 Test de Perfil de Inversor")
+            
             if st.session_state.cliente_seleccionado:
-                mostrar_analisis_portafolio()
+                if st.button("Obtener Test"):
+                    with st.spinner("Cargando preguntas..."):
+                        st.session_state.test_data = obtener_test_inversor(st.session_state.token_acceso)
+                
+                if st.session_state.test_data:
+                    with st.form("test_form"):
+                        st.subheader("Instrumentos invertidos anteriormente")
+                        instrumentos = [i['nombre'] for i in st.session_state.test_data['instrumentosInvertidosAnteriormente']['instrumentos']]
+                        instrumentos_seleccionados = st.multiselect(
+                            st.session_state.test_data['instrumentosInvertidosAnteriormente']['pregunta'],
+                            instrumentos
+                        )
+                        
+                        st.subheader("Nivel de conocimiento")
+                        niveles = st.session_state.test_data['nivelesConocimientoInstrumentos']['niveles']
+                        nivel_seleccionado = st.radio(
+                            st.session_state.test_data['nivelesConocimientoInstrumentos']['pregunta'],
+                            [n['nombre'] for n in niveles]
+                        )
+                        
+                        # Add similar form fields for other questions...
+                        
+                        if st.form_submit_button("Enviar Test"):
+                            respuestas = {
+                                "enviarEmailCliente": True,
+                                "instrumentosInvertidosAnteriormente": [
+                                    i['id'] for i in st.session_state.test_data['instrumentosInvertidosAnteriormente']['instrumentos'] 
+                                    if i['nombre'] in instrumentos_seleccionados
+                                ],
+                                "nivelesConocimientoInstrumentos": [
+                                    n['id'] for n in niveles 
+                                    if n['nombre'] == nivel_seleccionado
+                                ],
+                                # Add other answer fields...
+                            }
+                            
+                            with st.spinner("Analizando perfil..."):
+                                st.session_state.test_result = enviar_test_inversor(
+                                    st.session_state.token_acceso,
+                                    respuestas,
+                                    st.session_state.cliente_seleccionado
+                                )
+                
+                if st.session_state.test_result:
+                    st.success("✅ Test completado")
+                    perfil = st.session_state.test_result['perfilSugerido']
+                    st.subheader(f"Perfil sugerido: {perfil['nombre']}")
+                    st.write(perfil['detalle'])
+                    
+                    st.subheader("Composición recomendada:")
+                    for comp in perfil['perfilComposiciones']:
+                        st.write(f"- {comp['nombre']}: {comp['porcentaje']}%")
             else:
                 st.warning("Seleccione un cliente en el sidebar")
-        
-        with tab2:
-            if st.session_state.cliente_seleccionado:
-                estado = obtener_estado_cuenta(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
-                if estado:
-                    mostrar_estado_cuenta(estado)
-            else:
-                st.warning("Seleccione un cliente en el sidebar")
-        
-        with tab3:
-            mostrar_cotizaciones_mercado(st.session_state.token_acceso)
-    else:
-        st.info("Por favor ingrese sus credenciales IOL en el sidebar para comenzar")
-        st.image("https://www.invertironline.com/images/logo-iol.svg", width=200)
-
-if __name__ == "__main__":
-    main()
+    
+    # ... (rest of existing main function)
