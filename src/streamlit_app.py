@@ -512,9 +512,9 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         return mean_returns, cov_matrix, df_precios
     
-    st.error("❌ No se pudieron cargar los datos históricos")
-    return None, None, None
-    
+    try:
+        st.error("❌ No se pudieron cargar los datos históricos")
+        return None, None, None
     except Exception as e:
         st.error(f"Error inesperado al procesar los datos: {str(e)}")
         return None, None, None
