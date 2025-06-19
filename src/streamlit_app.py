@@ -271,14 +271,85 @@ def parse_datetime_flexible(datetime_string):
     except Exception:
         return None
 
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    if mercado == "Opciones":
-        url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    elif mercado == "FCI":
-        url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    else:
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+    """
+    Devuelve el endpoint correcto según el tipo de activo
+    """
+    base_url = "https://api.invertironline.com/api/v2"
     
+    # Mapeo de mercados a sus respectivos endpoints
+    endpoints = {
+        'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'FCI': f"{base_url}/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
+        'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
+        'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+    }
+    
+    # Intentar determinar automáticamente el tipo de activo si no se especifica
+    if mercado not in endpoints:
+        if simbolo.endswith(('.BA', '.AR')):
+            return endpoints.get('Cedears')
+        elif any(ext in simbolo.upper() for ext in ['AL', 'GD', 'AY24', 'GD30', 'AL30']):
+            return endpoints.get('Bonos')
+        else:
+            # Por defecto, asumimos que es un título regular
+            return f"{base_url}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    
+    return endpoints.get(mercado)
+
+def procesar_respuesta_historico(data, tipo_activo):
+    """
+    Procesa la respuesta de la API según el tipo de activo
+    """
+    if not data:
+        return None
+    
+    try:
+        # Para series históricas estándar
+        if isinstance(data, list):
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes estructuras de respuesta
+                    if isinstance(item, dict):
+                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
+                        if not precio or precio == 0:
+                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                        
+                        fecha_str = item.get('fechaHora') or item.get('fecha')
+                        
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = parse_datetime_flexible(fecha_str)
+                            if fecha_parsed is not None:
+                                precios.append(float(precio))
+                                fechas.append(fecha_parsed)
+                except (ValueError, AttributeError) as e:
+                    continue
+            
+            if precios and fechas:
+                serie = pd.Series(precios, index=fechas, name='precio')
+                serie = serie[~serie.index.duplicated(keep='last')]
+                return serie.sort_index()
+        
+        # Para respuestas que son un solo valor (ej: MEP)
+        elif isinstance(data, (int, float)):
+            return pd.Series([float(data)], index=[pd.Timestamp.now()], name='precio')
+            
+    except Exception as e:
+        st.error(f"Error al procesar datos históricos: {str(e)}")
+    
+    return None
+
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+    """
+    Obtiene series históricas para diferentes tipos de activos
+    """
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}',
@@ -286,43 +357,28 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     }
     
     try:
+        # Obtener el endpoint correcto según el tipo de activo
+        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+        
+        if not url:
+            st.warning(f"No se pudo determinar el endpoint para el mercado: {mercado}")
+            return None
+            
+        # Realizar la petición
         response = requests.get(url, headers=headers, timeout=30)
         
         if response.status_code == 200:
             data = response.json()
-            if not data:
-                return None
-            
-            precios = []
-            fechas = []
-            
-            for item in data:
-                try:
-                    precio = item.get('ultimoPrecio')
-                    
-                    if not precio or precio == 0:
-                        precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                    
-                    fecha_str = item.get('fechaHora')
-                    
-                    if precio is not None and precio > 0 and fecha_str:
-                        fecha_parsed = parse_datetime_flexible(fecha_str)
-                        if fecha_parsed is not None:
-                            precios.append(precio)
-                            fechas.append(fecha_parsed)
-                except Exception:
-                    continue
-            
-            if precios and fechas:
-                serie = pd.Series(precios, index=fechas)
-                serie = serie.sort_index()
-                serie = serie[~serie.index.duplicated(keep='last')]
-                return serie
-            else:
-                return None
+            return procesar_respuesta_historico(data, mercado)
         else:
+            st.warning(f"Error en la respuesta del servidor: {response.status_code} - {response.text}")
             return None
-    except Exception:
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado: {str(e)}")
         return None
 
 def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
