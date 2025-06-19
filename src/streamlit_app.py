@@ -278,24 +278,107 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         return None
 
 def obtener_tasas_caucion(token_portador, instrumento="Cauciones", panel="Todas", pais="Argentina"):
-    url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
+    """
+    Obtiene las tasas de caución desde la API de IOL
+    
+    Args:
+        token_portador (str): Token de autenticación
+        instrumento (str): Tipo de instrumento (default: "Cauciones")
+        panel (str): Panel de cotización (default: "Todas")
+        pais (str): País de las cotizaciones (default: "Argentina")
+        
+    Returns:
+        DataFrame: DataFrame con las tasas de caución o None en caso de error
+    """
+    url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{pais}/{panel}"
     headers = {
-        "Authorization": f"Bearer {token_portador}"
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
     }
+    
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            if isinstance(data, list) and data:
+                df = pd.DataFrame(data)
+                # Filtrar solo las cauciónes y limpiar los datos
+                df = df[df['tipo'].str.contains('Caución', case=False, na=False)].copy()
+                
+                # Extraer el plazo en días
+                df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
+                
+                # Limpiar la tasa (eliminar % y convertir a float)
+                if 'ultimoPrecio' in df.columns:
+                    df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                
+                return df.sort_values('plazo_dias')
+            return None
         else:
+            st.error(f"Error al obtener tasas de caución: {response.status_code}")
             return None
     except Exception as e:
-        st.error(f'Error al obtener tasas de caución: {str(e)}')
+        st.error(f"Error de conexión al obtener tasas de caución: {str(e)}")
         return None
 
-def parse_datetime_flexible(datetime_string):
-    if not datetime_string:
-        return None
+def mostrar_tasas_caucion(token_portador):
+    """
+    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
+    """
+    st.subheader("📊 Tasas de Caución")
     
+    with st.spinner('Obteniendo tasas de caución...'):
+        df_cauciones = obtener_tasas_caucion(token_portador)
+    
+    if df_cauciones is not None and not df_cauciones.empty:
+        # Mostrar tabla con las tasas
+        st.dataframe(
+            df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto']]
+            .rename(columns={
+                'simbolo': 'Instrumento',
+                'plazo': 'Plazo',
+                'ultimoPrecio': 'Tasa',
+                'monto': 'Monto (en millones)'
+            }),
+            use_container_width=True,
+            height=300
+        )
+        
+        # Crear gráfico de curva de tasas
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=df_cauciones['plazo_dias'],
+            y=df_cauciones['tasa_limpia'],
+            mode='lines+markers+text',
+            name='Tasa',
+            text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+            textposition='top center',
+            line=dict(color='#1f77b4', width=2),
+            marker=dict(size=10, color='#1f77b4')
+        ))
+        
+        fig.update_layout(
+            title='Curva de Tasas de Caución',
+            xaxis_title='Plazo (días)',
+            yaxis_title='Tasa Anual (%)',
+            template='plotly_white',
+            height=500,
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Mostrar resumen estadístico
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+            st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+        with col2:
+            st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+            st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+    else:
+        st.warning("No se encontraron datos de tasas de caución disponibles.")
     formats_to_try = [
         "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S",
@@ -1886,18 +1969,28 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            # Menú de navegación superior
-            menu_opciones = ["🏠 Inicio", "📊 Análisis de Portafolio", "👨‍💼 Panel del Asesor"]
-            seleccion = st.sidebar.radio("Navegación", menu_opciones, index=0 if 'cliente_seleccionado' not in st.session_state else 1)
-            
-            if seleccion == menu_opciones[1]:  # Análisis de Portafolio
+            st.sidebar.title("Menú Principal")
+            opcion = st.sidebar.radio(
+                "Seleccione una opción:",
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                index=0,
+            )
+
+            # Mostrar la página seleccionada
+            if opcion == "🏠 Inicio":
+                st.info("👆 Seleccione una opción del menú para comenzar")
+            elif opcion == "📊 Análisis de Portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif seleccion == menu_opciones[2]:  # Panel del Asesor
+            elif opcion == "💰 Tasas de Caución":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    mostrar_tasas_caucion(st.session_state.token_acceso)
+                else:
+                    st.warning("Por favor inicie sesión para ver las tasas de caución")
+            elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
-            else:  # Inicio
                 st.info("👆 Seleccione una opción del menú para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
