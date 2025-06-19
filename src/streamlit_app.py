@@ -1192,6 +1192,11 @@ class PortfolioManager:
 def mostrar_resumen_portafolio(portafolio):
     st.markdown("### 📈 Resumen del Portafolio")
     
+    # Mostrar PYL (Pesos por Liquidar) si está disponible
+    if 'saldos' in portafolio and 'pyl' in portafolio['saldos']:
+        pyl = portafolio['saldos']['pyl']
+        st.metric("💰 Pesos por Liquidar (PYL)", f"AR$ {pyl:,.2f}")
+    
     activos = portafolio.get('activos', [])
     datos_activos = []
     valor_total = 0
