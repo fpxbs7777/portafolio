@@ -2,46 +2,122 @@ import streamlit as st
 import requests
 import plotly.graph_objects as go
 import pandas as pd
-import numpy as np
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta, date
-import pytz
+from datetime import date, timedelta, datetime
+import numpy as np
+import yfinance as yf
+import scipy.optimize as op
+from scipy import stats
+import random
+import warnings
+import streamlit.components.v1 as components
 
-def parse_datetime_flexible(date_str):
-    """
-    Parse datetime string in various formats to datetime object
+warnings.filterwarnings('ignore')
+
+# Configuración de la página con aspecto profesional
+st.set_page_config(
+    page_title="IOL Portfolio Analyzer",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Estilos CSS personalizados
+st.markdown("""
+<style>
+    /* Estilos generales */
+    .stApp {
+        background-color: #f8f9fa;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
     
-    Args:
-        date_str (str): Date string in various formats
-        
-    Returns:
-        datetime: Parsed datetime object or None if parsing fails
-    """
-    if not date_str or pd.isna(date_str):
-        return None
-        
-    # Common date formats to try
-    date_formats = [
-        '%Y-%m-%dT%H:%M:%S',  # ISO format with T
-        '%Y-%m-%d %H:%M:%S',  # Standard format
-        '%Y-%m-%d',           # Date only
-        '%d/%m/%Y',           # DD/MM/YYYY
-        '%m/%d/%Y',           # MM/DD/YYYY
-        '%Y%m%d'              # YYYYMMDD
-    ]
+    /* Mejora de tarjetas y métricas */
+    .stMetric {
+        background-color: white;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border-left: 4px solid #0d6efd;
+    }
     
-    # Remove timezone info if present
-    if 'T' in date_str and '+' in date_str:
-        date_str = date_str.split('+')[0]
+    /* Mejora de pestañas */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 5px;
+    }
     
-    # Try parsing with each format
-    for fmt in date_formats:
-        try:
-            return datetime.strptime(date_str.split('.')[0], fmt)  # Remove milliseconds if present
-        except (ValueError, AttributeError):
-            continue
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        padding: 0 20px;
+        background-color: #e9ecef;
+        border-radius: 8px !important;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
     
-    return None
+    .stTabs [aria-selected="true"] {
+        background-color: #0d6efd !important;
+        color: white !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #dde5ed !important;
+    }
+    
+    /* Mejora de inputs */
+    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox {
+        background-color: white;
+        border-radius: 8px;
+    }
+    
+    /* Botones */
+    .stButton>button {
+        border-radius: 8px;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* Barra lateral */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #2c3e50, #1a1a2e);
+        color: white;
+    }
+    
+    [data-testid="stSidebar"] .stRadio label {
+        color: white !important;
+    }
+    
+    [data-testid="stSidebar"] .stSelectbox label {
+        color: white !important;
+    }
+    
+    [data-testid="stSidebar"] .stTextInput label {
+        color: white !important;
+    }
+    
+    /* Títulos */
+    h1, h2, h3, h4, h5, h6 {
+        color: #2c3e50;
+        font-weight: 600;
+    }
+    
+    /* Tablas */
+    .dataframe {
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    
+    /* Progress bar */
+    .stProgress > div > div > div {
+        background-color: #0d6efd;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 def obtener_encabezado_autorizacion(token_portador):
     return {
@@ -203,7 +279,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
 
 def obtener_tasas_caucion(token_portador):
     """
-    Obtiene las tasas de caución desde la API de IOL con manejo mejorado de errores
+    Obtiene las tasas de caución desde la API de IOL
     
     Args:
         token_portador (str): Token de autenticación Bearer
@@ -211,110 +287,71 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
-    endpoints = [
-        "https://api.invertironline.com/api/v2/estadisticas/argentina/cauciones",
-        "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
-    ]
-    
+    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
+    params = {
+        'cotizacionInstrumentoModel.instrumento': 'cauciones',
+        'cotizacionInstrumentoModel.pais': 'argentina'
+    }
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
     
-    for url in endpoints:
-        try:
-            with st.spinner(f"Consultando {url}..."):
-                response = requests.get(url, headers=headers, timeout=15)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    # Procesar según la estructura de la respuesta
-                    if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
-                        df = pd.DataFrame(data['titulos'])
-                    elif isinstance(data, list):
-                        df = pd.DataFrame(data)
-                    else:
-                        continue  # Intentar con el siguiente endpoint
-                    
-                    # Limpiar y procesar los datos
-                    if not df.empty:
-                        # Intentar determinar la columna de plazo
-                        plazo_col = next((col for col in ['plazo', 'dias', 'plazoDias'] if col in df.columns), None)
-                        if plazo_col is None:
-                            continue
-                            
-                        # Extraer el plazo en días
-                        if df[plazo_col].dtype == 'object':
-                            df['plazo_dias'] = df[plazo_col].str.extract('(\d+)').astype(float)
-                        else:
-                            df['plazo_dias'] = df[plazo_col].astype(float)
-                        
-                        # Limpiar la tasa
-                        tasa_col = next((col for col in ['ultimoPrecio', 'tasa', 'tasaAnual'] if col in df.columns), None)
-                        if tasa_col:
-                            df['tasa_limpia'] = df[tasa_col].astype(str).str.rstrip('%').astype('float')
-                        
-                        # Asegurar columnas necesarias
-                        if 'monto' not in df.columns and 'volumen' in df.columns:
-                            df['monto'] = df['volumen']
-                        
-                        # Ordenar por plazo
-                        df = df.sort_values('plazo_dias')
-                        
-                        # Seleccionar y renombrar columnas
-                        column_mapping = {
-                            'simbolo': 'simbolo',
-                            'plazo': 'plazo',
-                            'plazo_dias': 'plazo_dias',
-                            'ultimoPrecio': 'ultimoPrecio',
-                            'tasa_limpia': 'tasa_limpia',
-                            'monto': 'monto',
-                            'moneda': 'moneda',
-                            'tasa': 'tasa_limpia',
-                            'dias': 'plazo_dias'
-                        }
-                        
-                        # Mantener solo las columnas necesarias
-                        available_columns = [col for col in column_mapping.keys() if col in df.columns]
-                        df = df[available_columns].copy()
-                        
-                        # Renombrar columnas
-                        df = df.rename(columns={
-                            k: v for k, v in column_mapping.items() 
-                            if k in df.columns
-                        })
-                        
-                        # Asegurar que las columnas necesarias existan
-                        required_columns = ['plazo_dias', 'tasa_limpia']
-                        if all(col in df.columns for col in required_columns):
-                            return df
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
             
-            # Si llegamos aquí, la respuesta no fue procesada correctamente
-            if response.status_code == 401:
-                st.error("❌ Error de autenticación. Por favor, verifique su token de acceso.")
-                return None
+            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
+                df = pd.DataFrame(data['titulos'])
                 
-            elif response.status_code >= 400:
-                error_msg = f"Error {response.status_code}: "
-                try:
-                    error_data = response.json()
-                    error_msg += error_data.get('error', error_data.get('message', 'Error desconocido'))
-                except:
-                    error_msg += response.text or "Error desconocido"
-                st.error(f"❌ {error_msg}")
-                return None
+                # Filtrar solo las cauciónes y limpiar los datos
+                df = df[df['plazo'].notna()].copy()
                 
-        except requests.exceptions.RequestException as e:
-            st.warning(f"⚠️ No se pudo conectar a {url}. Intentando con el siguiente endpoint...")
-            continue
+                # Extraer el plazo en días
+                df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
+                
+                # Limpiar la tasa (convertir a float si es necesario)
+                if 'ultimoPrecio' in df.columns:
+                    df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                
+                # Asegurarse de que las columnas necesarias existan
+                if 'monto' not in df.columns and 'volumen' in df.columns:
+                    df['monto'] = df['volumen']
+                
+                # Ordenar por plazo
+                df = df.sort_values('plazo_dias')
+                
+                # Seleccionar solo las columnas necesarias
+                columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
+                columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
+                
+                return df[columnas_disponibles]
             
-        except Exception as e:
-            st.warning(f"⚠️ Error al procesar la respuesta de {url}: {str(e)}. Intentando con el siguiente endpoint...")
-            continue
-    
-    st.error("❌ No se pudieron obtener las tasas de caución. Por favor, intente nuevamente más tarde.")
-    return None
+            st.warning("No se encontraron datos de tasas de caución en la respuesta")
+            return None
+            
+        elif response.status_code == 401:
+            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
+            return None
+            
+        else:
+            error_msg = f"Error {response.status_code} al obtener tasas de caución"
+            try:
+                error_data = response.json()
+                error_msg += f": {error_data.get('message', 'Error desconocido')}"
+            except:
+                error_msg += f": {response.text}"
+            st.error(error_msg)
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
+        return None
 
 def mostrar_tasas_caucion(token_portador):
     """
@@ -391,6 +428,30 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "ISO8601",
+        "mixed"
+    ]
+    
+    for fmt in formats_to_try:
+        try:
+            if fmt == "ISO8601":
+                return pd.to_datetime(datetime_string, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(datetime_string, format='mixed')
+            else:
+                return pd.to_datetime(datetime_string, format=fmt)
+        except Exception:
+            continue
+
+    try:
+        return pd.to_datetime(datetime_string, infer_datetime_format=True)
+    except Exception:
+        return None
 
 def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
@@ -489,38 +550,17 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
     """
     Obtiene la serie histórica de un fondo común de inversión
     """
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
     try:
-        # Primero obtenemos los datos del FCI
-        headers = obtener_encabezado_autorizacion(token_portador)
-        url_fci = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
-        
-        response = requests.get(url_fci, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-        datos_fci = response.json()
-        
-        # Obtenemos los datos históricos del FCI
-        # Nota: La API de IOL no tiene un endpoint directo para históricos de FCIs
-        # Este es un enfoque alternativo que podrías implementar
-        
-        # Si no hay datos históricos, devolvemos un DataFrame con los datos básicos
-        df = pd.DataFrame([{
-            'fecha': parse_datetime_flexible(datos_fci.get('fechaCorte')),
-            'cierre': float(datos_fci.get('ultimoOperado', 0)),
-            'apertura': float(datos_fci.get('ultimoOperado', 0)),
-            'maximo': float(datos_fci.get('ultimoOperado', 0)),
-            'minimo': float(datos_fci.get('ultimoOperado', 0)),
-            'volumen': 0,
-            'simbolo': simbolo,
-            'tipo': 'FCI'
-        }]) if datos_fci else None
-        
-        return df
-        
+        return response.json()
     except requests.exceptions.RequestException as e:
-        st.warning(f"No se pudieron obtener datos históricos para el FCI {simbolo}: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
+        st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
         return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
@@ -579,11 +619,11 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             # Manejo especial para FCIs
             if mercado.lower() == 'fci':
                 data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-                if data and 'fecha' in data.columns and 'cierre' in data.columns:
+                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
                     try:
                         df = pd.DataFrame({
-                            'fecha': data['fecha'],
-                            'cierre': data['cierre']
+                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
+                            'cierre': [data['ultimaCotizacion']['precio']]
                         })
                         df.set_index('fecha', inplace=True)
                         precios[simbolo] = df['cierre']
@@ -1109,838 +1149,9 @@ class PortfolioManager:
         except Exception as e:
             return None, None, None
 
-# --- Constantes y Utilidades ---
-
-# Diccionario de benchmarks y factores de mercado comunes
-BENCHMARK_FACTORS = {
-    '^GSPC': 'S&P 500',
-    '^DJI': 'Dow Jones Industrial Average',
-    '^IXIC': 'NASDAQ Composite',
-    '^MERV': 'MERVAL Argentina',
-    '^BVSP': 'BOVESPA Brasil',
-    '^MXX': 'IPC México',
-    '^GDAXI': 'DAX Alemania',
-    '^FCHI': 'CAC 40 Francia',
-    '^STOXX50E': 'Euro Stoxx 50',
-    '^N225': 'Nikkei 225 Japón',
-    '^HSI': 'Hang Seng Hong Kong',
-    '^AXJO': 'S&P/ASX 200 Australia',
-    '^VIX': 'Índice de Volatilidad (VIX)',
-    '^TNX': 'Rendimiento del Tesoro 10 años',
-    '^TYX': 'Rendimiento del Tesoro 30 años',
-    'DXY': 'Índice del Dólar',
-    'GC=F': 'Oro',
-    'SI=F': 'Plata',
-    'CL=F': 'Petróleo Crudo WTI',
-    'BTC-USD': 'Bitcoin',
-    'ETH-USD': 'Ethereum',
-    'BMA.BA': 'Banco Macro',
-    'GGAL.BA': 'Grupo Financiero Galicia',
-    'YPFD.BA': 'YPF',
-    'PAMP.BA': 'Pampa Energía',
-    'TECO2.BA': 'Telecom Argentina',
-    'TGS.BA': 'Transportadora de Gas del Sur',
-    'LOMA.BA': 'Loma Negra',
-    'CEPU.BA': 'Central Puerto',
-    'CRES.BA': 'Cresud',
-    'MELI.BA': 'MercadoLibre',
-    'EDN.BA': 'Edenor',
-    'COME.BA': 'Sociedad Comercial del Plata',
-    'TXAR.BA': 'Ternium Argentina',
-    'ALUA.BA': 'Aluar',
-    'TGSU2.BA': 'Transportadora de Gas del Sur',
-    'PATA.BA': 'IMPSA',
-    'MIRG.BA': 'Mirgor',
-    'LONG.BA': 'Longvie',
-    'AGRO.BA': 'Cresud',
-    'BIOX.BA': 'Bioceres',
-    'DGCU2.BA': 'DGCU2',
-    'SUPV.BA': 'Grupo Supervielle',
-    'APBR.BA': 'Petrobras Argentina',
-    'TS.BA': 'Tenaris',
-    'TGNO4.BA': 'Transportadora de Gas del Norte',
-    'PAMP.BA': 'Pampa Energía',
-    'MIRG.BA': 'Mirgor',
-    'LONG.BA': 'Longvie',
-    'AGRO.BA': 'Cresud',
-    'BIOX.BA': 'Bioceres',
-    'DGCU2.BA': 'DGCU2',
-    'SUPV.BA': 'Grupo Supervielle',
-    'APBR.BA': 'Petrobras Argentina',
-    'TS.BA': 'Tenaris',
-    'TGNO4.BA': 'Transportadora de Gas del Norte'
-}
-
-def download_data(tickers, period="1y", interval="1d"):
-    """
-    Descarga datos históricos de Yahoo Finance para una lista de tickers.
-    
-    Args:
-        tickers (list): Lista de símbolos de activos
-        period (str): Período de tiempo (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max)
-        interval (str): Intervalo de tiempo (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo)
-        
-    Returns:
-        pd.DataFrame: DataFrame con los precios de cierre ajustados
-    """
-    try:
-        import yfinance as yf
-        
-        if not tickers:
-            return pd.DataFrame()
-            
-        # Descargar datos
-        data = yf.download(
-            tickers=tickers if isinstance(tickers, list) else [tickers],
-            period=period,
-            interval=interval,
-            group_by='ticker',
-            progress=False
-        )
-        
-        # Procesar los datos para obtener solo los precios de cierre ajustados
-        if isinstance(tickers, list) and len(tickers) > 1:
-            # Múltiples tickers
-            close_prices = pd.DataFrame()
-            for ticker in tickers:
-                if (ticker,) in data.columns.get_level_values(0):
-                    close_prices[ticker] = data[(ticker, 'Adj Close')].dropna()
-            return close_prices
-        else:
-            # Un solo ticker
-            if 'Adj Close' in data.columns:
-                return data['Adj Close'].to_frame(name=tickers[0] if isinstance(tickers, list) else tickers)
-            else:
-                return data
-                
-    except Exception as e:
-        st.error(f"Error al descargar datos: {str(e)}")
-        return pd.DataFrame()
-
 # --- Funciones de Visualización ---
-def analizar_portafolio_avanzado(portafolio, token_portador, dias_atras=365):
-    """
-    Realiza un análisis avanzado del portafolio comparando con factores y benchmarks.
-    
-    Args:
-        portafolio (dict): Diccionario con los datos del portafolio
-        token_portador (str): Token de autenticación de InvertirOnline
-        dias_atras (int): Cantidad de días hacia atrás para el análisis
-    """
-    st.title("📊 Análisis Avanzado del Portafolio")
-    
-    # Obtener datos históricos del portafolio
-    portafolio_hist = graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras)
-    
-    if portafolio_hist is None:
-        return
-        
-    # Sección de benchmarks para comparación
-    st.header("🔍 Comparación con Benchmarks")
-    
-    # Seleccionar benchmarks relevantes
-    benchmarks_seleccionados = st.multiselect(
-        "Selecciona benchmarks para comparar:",
-        options=list(BENCHMARK_FACTORS.keys()),
-        default=['^GSPC', '^MERV', 'BMA.BA'],  # SP500, Merval, Banco Macro
-        format_func=lambda x: f"{x} - {BENCHMARK_FACTORS.get(x, '')}"
-    )
-    
-    if not benchmarks_seleccionados:
-        st.warning("Por favor selecciona al menos un benchmark para continuar")
-        return
-    
-    # Descargar datos de los benchmarks
-    with st.spinner("Obteniendo datos de benchmarks..."):
-        try:
-            # Obtener datos históricos de los benchmarks
-            benchmark_data = download_data(benchmarks_seleccionados, period=f"{dias_atras}d")
-            
-            if benchmark_data.empty:
-                st.error("No se pudieron obtener datos de los benchmarks seleccionados")
-                return
-                
-            # Normalizar para comparación
-            benchmark_norm = (benchmark_data / benchmark_data.iloc[0]) * 100
-            
-            # Obtener datos del portafolio (asumiendo que ya están normalizados)
-            portafolio_returns = portafolio_hist['Portfolio']
-            
-            # Crear gráfico comparativo
-            fig = go.Figure()
-            
-            # Agregar líneas de benchmarks
-            for col in benchmark_norm.columns:
-                fig.add_trace(go.Scatter(
-                    x=benchmark_norm.index,
-                    y=benchmark_norm[col],
-                    mode='lines',
-                    name=f"{col} - {BENCHMARK_FACTORS.get(col, '')}",
-                    visible='legendonly'  # Ocultar por defecto para no saturar
-                ))
-            
-            # Agregar línea del portafolio (más visible)
-            fig.add_trace(go.Scatter(
-                x=portafolio_returns.index,
-                y=portafolio_returns,
-                mode='lines',
-                name='Tu Portafolio',
-                line=dict(color='#0d6efd', width=3)
-            ))
-            
-            # Configurar diseño del gráfico
-            fig.update_layout(
-                title='Rendimiento del Portafolio vs Benchmarks',
-                xaxis_title='Fecha',
-                yaxis_title='Retorno Acumulado (%)',
-                hovermode='x unified',
-                template='plotly_white',
-                height=600,
-                legend=dict(
-                    orientation='h',
-                    yanchor='bottom',
-                    y=1.02,
-                    xanchor='right',
-                    x=1
-                )
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Calcular métricas de rendimiento
-            st.subheader("📈 Métricas de Rendimiento")
-            
-            # Calcular retornos anualizados
-            dias_totales = (portafolio_returns.index[-1] - portafolio_returns.index[0]).days
-            retorno_total_port = ((portafolio_returns.iloc[-1] / 100) ** (365/dias_totales) - 1) * 100
-            
-            # Calcular volatilidad anualizada
-            retornos_diarios = portafolio_returns.pct_change().dropna()
-            volatilidad_anual = retornos_diarios.std() * np.sqrt(252) * 100
-            
-            # Calcular ratio de Sharpe (asumiendo tasa libre de riesgo 0% por simplicidad)
-            sharpe_ratio = (retorno_total_port / 100) / (volatilidad_anual / 100) if volatilidad_anual > 0 else 0
-            
-            # Mostrar métricas en columnas
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Retorno Anualizado", f"{retorno_total_port:.2f}%")
-            with col2:
-                st.metric("Volatilidad Anual", f"{volatilidad_anual:.2f}%")
-            with col3:
-                st.metric("Ratio de Sharpe", f"{sharpe_ratio:.2f}")
-            with col4:
-                max_drawdown = ((portafolio_returns / portafolio_returns.cummax()) - 1).min() * 100
-                st.metric("Máximo Drawdown", f"{max_drawdown:.2f}%")
-            
-            # Análisis de factores de riesgo
-            st.header("📊 Análisis de Factores de Riesgo")
-            
-            # Seleccionar factores de riesgo para analizar
-            factores_riesgo = {
-                '^VIX': 'Volatilidad del Mercado (VIX)',
-                '^TNX': 'Rendimiento del Tesoro 10 años',
-                'DXY': 'Índice Dólar',
-                'GC=F': 'Oro',
-                'CL=F': 'Petróleo Crudo',
-                'BTC-USD': 'Bitcoin'
-            }
-            
-            # Calcular correlaciones con factores de riesgo
-            st.subheader("Correlación con Factores de Riesgo")
-            
-            # Descargar datos de factores de riesgo
-            factores_data = download_data(list(factores_riesgo.keys()), period=f"{dias_atras}d")
-            
-            if not factores_data.empty:
-                # Calcular retornos diarios
-                retornos_factores = factores_data.pct_change().dropna()
-                
-                # Calcular correlación con el portafolio
-                correlaciones = retornos_factores.corrwith(portafolio_returns.pct_change().dropna())
-                
-                # Crear gráfico de barras de correlaciones
-                fig_corr = go.Figure(go.Bar(
-                    x=correlaciones.index.map(lambda x: f"{x}\n{factores_riesgo.get(x, '')}"),
-                    y=correlaciones,
-                    marker_color=['#1f77b4' if x > 0 else '#d62728' for x in correlaciones]
-                ))
-                
-                fig_corr.update_layout(
-                    title='Correlación con Factores de Riesgo',
-                    xaxis_title='Factor de Riesgo',
-                    yaxis_title='Coeficiente de Correlación',
-                    yaxis=dict(range=[-1, 1]),
-                    height=500
-                )
-                
-                st.plotly_chart(fig_corr, use_container_width=True)
-                
-                # Interpretación de correlaciones
-                st.subheader("Interpretación de las Correlaciones")
-                
-                interpretaciones = []
-                for factor, valor in correlaciones.items():
-                    if valor > 0.5:
-                        interpretacion = f"✅ **Alta correlación positiva** con {factores_riesgo.get(factor, factor)}. "
-                        interpretacion += "Tu portafolio tiende a moverse en la misma dirección que este factor."
-                    elif valor > 0.2:
-                        interpretacion = f"📈 **Correlación moderada positiva** con {factores_riesgo.get(factor, factor)}. "
-                        interpretacion += "Existe cierta relación positiva con este factor."
-                    elif valor < -0.5:
-                        interpretacion = f"🔀 **Alta correlación negativa** con {factores_riesgo.get(factor, factor)}. "
-                        interpretacion += "Tu portafolio tiende a moverse en dirección opuesta a este factor."
-                    elif valor < -0.2:
-                        interpretacion = f"📉 **Correlación moderada negativa** con {factores_riesgo.get(factor, factor)}. "
-                        interpretacion += "Existe cierta relación inversa con este factor."
-                    else:
-                        interpretacion = f"➖ **Baja correlación** con {factores_riesgo.get(factor, factor)}. "
-                        interpretacion += "No hay una relación clara con este factor."
-                    
-                    interpretaciones.append(f"- {interpretacion} (Correlación: {valor:.2f})")
-                
-                st.markdown("\n".join(interpretaciones))
-                
-                # Análisis de riesgo y recomendaciones
-                st.header("🎯 Recomendaciones de Gestión de Riesgo")
-                
-                # Analizar exposición a diferentes factores
-                exposiciones = {
-                    'Mercado Accionario': ['^GSPC', '^MERV'],
-                    'Bonos': ['^TNX', '^TYX'],
-                    'Divisas': ['DXY', 'BRL=X', 'BRLARS=X'],
-                    'Materias Primas': ['GC=F', 'SI=F', 'CL=F'],
-                    'Criptomonedas': ['BTC-USD', 'ETH-USD']
-                }
-                
-                # Calcular exposición aproximada
-                exposicion_portafolio = {}
-                for categoria, factores in exposiciones.items():
-                    # Esto es una simplificación - en una implementación real se usarían betas o ponderaciones reales
-                    exposicion_portafolio[categoria] = np.mean([
-                        abs(correlaciones.get(factor, 0)) 
-                        for factor in factores 
-                        if factor in correlaciones
-                    ] or [0])
-                
-                # Mostrar exposición por categoría
-                fig_expo = go.Figure(go.Bar(
-                    x=list(exposicion_portafolio.keys()),
-                    y=list(exposicion_portafolio.values()),
-                    marker_color='#4e79a7'
-                ))
-                
-                fig_expo.update_layout(
-                    title='Exposición del Portafolio por Categoría de Riesgo',
-                    xaxis_title='Categoría de Riesgo',
-                    yaxis_title='Nivel de Exposición (0-1)',
-                    yaxis=dict(range=[0, 1])
-                )
-                
-                st.plotly_chart(fig_expo, use_container_width=True)
-                
-                # Generar recomendaciones basadas en el análisis
-                st.subheader("🔍 Recomendaciones Personalizadas")
-                
-                recomendaciones = []
-                
-                # Recomendación basada en volatilidad
-                if volatilidad_anual > 30:
-                    recomendaciones.append("⚠️ **Alta volatilidad detectada**: Considera reducir la exposición a activos de alto riesgo o implementar estrategias de cobertura.")
-                elif volatilidad_anual < 15:
-                    recomendaciones.append("💡 **Baja volatilidad**: Podrías considerar incrementar la exposición a activos de mayor crecimiento si tu perfil de riesgo lo permite.")
-                
-                # Recomendación basada en drawdown
-                if max_drawdown < -20:
-                    recomendaciones.append("⚠️ **Alto riesgo de pérdida**: El máximo drawdown histórico es significativo. Revisa tu tolerancia al riesgo.")
-                
-                # Recomendación basada en correlaciones
-                if any(abs(correlaciones) > 0.7):
-                    activos_correl = correlaciones[abs(correlaciones) > 0.7].index.tolist()
-                    activos_nombres = [factores_riesgo.get(a, a) for a in activos_correl]
-                    recomendaciones.append(f"🔗 **Alta dependencia de factores externos**: Tu portafolio está fuertemente correlacionado con {', '.join(activos_nombres)}. Considera diversificar.")
-                
-                # Recomendación general de diversificación
-                if len(portafolio['activos']) < 5:
-                    recomendaciones.append("🌍 **Oportunidad de diversificación**: Tu portafolio tiene pocos activos. Considera diversificar para reducir el riesgo no sistemático.")
-                
-                # Mostrar recomendaciones o mensaje si no hay recomendaciones específicas
-                if recomendaciones:
-                    st.markdown("### Recomendaciones para tu portafolio:")
-                    for rec in recomendaciones:
-                        st.markdown(f"- {rec}")
-                else:
-                    st.success("✅ Tu portafolio parece estar bien diversificado según nuestro análisis.")
-                
-                # Sección de simulación de escenarios
-                st.header("🔄 Simulación de Escenarios")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    escenario_mercado = st.selectbox(
-                        "Selecciona un escenario de mercado:",
-                        ["Mercado Alcista", "Mercado Bajista", "Mayor Volatilidad", "Recesión", "Personalizado"]
-                    )
-                
-                with col2:
-                    if escenario_mercado == "Personalizado":
-                        cambio_mercado = st.slider("Cambio porcentual en el mercado (%):", -50, 50, 10)
-                    else:
-                        cambios = {
-                            "Mercado Alcista": 20,
-                            "Mercado Bajista": -20,
-                            "Mayor Volatilidad": 0,  # Se maneja diferente
-                            "Recesión": -30
-                        }
-                        cambio_mercado = cambios[escenario_mercado]
-                
-                # Calcular impacto estimado
-                if escenario_mercado == "Mayor Volatilidad":
-                    st.info("""
-                    En un escenario de mayor volatilidad:
-                    - Las acciones de crecimiento suelen verse más afectadas
-                    - Los activos refugio como el oro y los bonos pueden apreciarse
-                    - La correlación entre activos puede aumentar
-                    """)
-                else:
-                    # Estimación simplificada del impacto
-                    beta_promedio = 1.0  # Esto debería calcularse basado en la composición real
-                    impacto_estimado = (cambio_mercado / 100) * beta_promedio * 100
-                    
-                    st.metric(
-                        f"Impacto estimado en el portafolio para {escenario_mercado}:",
-                        f"{impacto_estimado:+.1f}%",
-                        delta=f"Para un movimiento del mercado de {cambio_mercado}%"
-                    )
-                    
-                    # Recomendaciones específicas por escenario
-                    if escenario_mercado == "Mercado Bajista" or escenario_mercado == "Recesión":
-                        st.warning("""
-                        **Acciones recomendadas:**
-                        - Considera aumentar la exposición a activos defensivos
-                        - Revisa tu asignación a bonos del tesoro y oro
-                        - Evalúa estrategias de cobertura
-                        """)
-                    elif escenario_mercado == "Mercado Alcista":
-                        st.success("""
-                        **Oportunidades:**
-                        - Podrías aumentar exposición a acciones de crecimiento
-                        - Sectores cíclicos podrían desempeñarse bien
-                        - Considera tomar ganancias en posiciones con fuertes subas
-                        """)
-            
-            # Sección de optimización de cartera
-            st.header("⚙️ Optimización de Cartera")
-            
-            if st.checkbox("Mostrar herramientas avanzadas de optimización"):
-                st.subheader("Optimización de Markowitz")
-                st.write("""
-                La optimización de Markowitz busca encontrar la asignación de activos que maximiza 
-                el retorno esperado para un nivel dado de riesgo, o minimiza el riesgo para un 
-                nivel dado de retorno esperado.
-                """)
-                
-                # Simular pesos aleatorios para la frontera eficiente
-                if st.button("Calcular Frontera Eficiente"):
-                    with st.spinner("Calculando frontera eficiente..."):
-                        try:
-                            # Obtener datos históricos de los activos del portafolio
-                            tickers = [a['simbolo'] for a in portafolio['activos'] if 'simbolo' in a]
-                            if tickers:
-                                # Descargar datos históricos
-                                data = download_data(tickers, period=f"{dias_atras}d")
-                                if not data.empty:
-                                    # Calcular retornos esperados y matriz de covarianza
-                                    returns = data.pct_change().dropna()
-                                    expected_returns = returns.mean() * 252
-                                    cov_matrix = returns.cov() * 252
-                                    
-                                    # Generar carteras aleatorias
-                                    num_portfolios = 10000
-                                    results = np.zeros((3, num_portfolios))
-                                    weights_record = []
-                                    
-                                    for i in range(num_portfolios):
-                                        weights = np.random.random(len(tickers))
-                                        weights /= np.sum(weights)
-                                        weights_record.append(weights)
-                                        portfolio_return = np.sum(expected_returns * weights)
-                                        portfolio_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-                                        results[0,i] = portfolio_std_dev
-                                        results[1,i] = portfolio_return
-                                        results[2,i] = (portfolio_return - 0.02) / portfolio_std_dev  # Sharpe ratio (rf=2%)
-                                    
-                                    # Encontrar la cartera óptima (máximo ratio de Sharpe)
-                                    max_sharpe_idx = np.argmax(results[2])
-                                    optimal_weights = weights_record[max_sharpe_idx]
-                                    
-                                    # Crear gráfico de la frontera eficiente
-                                    fig_frontier = go.Figure()
-                                    
-                                    # Puntos de carteras aleatorias
-                                    fig_frontier.add_trace(go.Scatter(
-                                        x=results[0,:],
-                                        y=results[1,:],
-                                        mode='markers',
-                                        name='Carteras Aleatorias',
-                                        marker=dict(
-                                            size=5,
-                                            color=results[2,:],
-                                            colorscale='Viridis',
-                                            showscale=True,
-                                            colorbar=dict(title='Ratio de Sharpe')
-                                        )
-                                    ))
-                                    
-                                    # Cartera óptima
-                                    fig_frontier.add_trace(go.Scatter(
-                                        x=[results[0,max_sharpe_idx]],
-                                        y=[results[1,max_sharpe_idx]],
-                                        mode='markers',
-                                        name='Cartera Óptima',
-                                        marker=dict(
-                                            size=15,
-                                            color='red',
-                                            symbol='star'
-                                        )
-                                    ))
-                                    
-                                    # Configurar diseño
-                                    fig_frontier.update_layout(
-                                        title='Frontera Eficiente de Markowitz',
-                                        xaxis_title='Riesgo (Desviación Estándar Anualizada)',
-                                        yaxis_title='Retorno Anualizado Esperado',
-                                        showlegend=True,
-                                        height=600
-                                    )
-                                    
-                                    st.plotly_chart(fig_frontier, use_container_width=True)
-                                    
-                                    # Mostrar pesos óptimos
-                                    st.subheader("Asignación Óptima de Activos")
-                                    pesos_optimos = pd.DataFrame({
-                                        'Activo': tickers,
-                                        'Peso Actual (%)': [a.get('peso', 0) for a in portafolio['activos'] if 'simbolo' in a],
-                                        'Peso Óptimo (%)': (optimal_weights * 100).round(2)
-                                    })
-                                    
-                                    st.dataframe(pesos_optimos.style.format({
-                                        'Peso Actual (%)': '{:.2f}%',
-                                        'Peso Óptimo (%)': '{:.2f}%'
-                                    }))
-                                    
-                                    # Recomendaciones de rebalanceo
-                                    st.subheader("Recomendaciones de Rebalanceo")
-                                    
-                                    cambios = []
-                                    for _, row in pesos_optimos.iterrows():
-                                        dif = row['Peso Óptimo (%)'] - row['Peso Actual (%)']
-                                        if abs(dif) > 5:  # Solo mostrar cambios significativos
-                                            accion = "Aumentar" if dif > 0 else "Reducir"
-                                            cambios.append(f"- {accion} exposición a **{row['Activo']}** en {abs(dif):.1f}%")
-                                    
-                                    if cambios:
-                                        st.markdown("\n".join(cambios))
-                                    else:
-                                        st.success("Tu cartera ya está bastante cerca de la asignación óptima según el modelo de Markowitz.")
-                                    
-                        except Exception as e:
-                            st.error(f"Error al calcular la frontera eficiente: {str(e)}")
-            
-        except Exception as e:
-            st.error(f"Error en el análisis avanzado: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
-
-def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
-    """
-    Grafica el rendimiento histórico del portafolio usando datos de InvertirOnline
-    
-    Args:
-        portafolio (dict): Diccionario con los datos del portafolio
-        token_portador (str): Token de autenticación de InvertirOnline
-        dias_atras (int): Cantidad de días hacia atrás para el histórico
-    """
-    try:
-        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
-            st.warning("No hay activos en el portafolio para mostrar el rendimiento histórico")
-            return None
-            
-        # Obtener fechas para el histórico
-        fecha_hasta = datetime.now()
-        fecha_desde = fecha_hasta - timedelta(days=dias_atras)
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
-        
-        # Obtener datos históricos para cada activo
-        datos_historicos = {}
-        activos_procesados = set()
-        
-        with st.spinner("Obteniendo datos históricos..."):
-            progress_bar = st.progress(0)
-            total_activos = len([a for a in portafolio['activos'] if float(a.get('cantidad', 0)) > 0])
-            
-            for i, activo in enumerate(portafolio['activos']):
-                try:
-                    # Obtener información del activo
-                    if 'titulo' in activo and isinstance(activo['titulo'], dict):
-                        titulo = activo['titulo']
-                        simbolo = titulo.get('simbolo')
-                        mercado = titulo.get('mercado', 'bCBA').lower()  # Asegurar minúsculas
-                        tipo = titulo.get('tipo', 'ACCIONES')
-                        cantidad = float(activo.get('cantidad', 0))
-                    else:
-                        simbolo = activo.get('simbolo')
-                        mercado = activo.get('mercado', 'bCBA').lower()  # Asegurar minúsculas
-                        tipo = activo.get('tipo', 'ACCIONES')
-                        cantidad = float(activo.get('cantidad', 0))
-                    
-                    # Actualizar barra de progreso
-                    progress_bar.progress((i + 1) / len(portafolio['activos']))
-                    
-                    # Validar datos del activo
-                    if not simbolo or simbolo in activos_procesados or cantidad <= 0:
-                        continue
-                    
-                    # Obtener datos históricos según el tipo de activo
-                    try:
-                        if 'FONDO' in tipo.upper() or 'FCI' in tipo.upper():
-                            # Para fondos comunes de inversión
-                            data = obtener_serie_historica_fci(
-                                token_portador=token_portador,
-                                simbolo=simbolo,
-                                fecha_desde=fecha_desde_str,
-                                fecha_hasta=fecha_hasta_str
-                            )
-                            if data is not None and not data.empty:
-                                if 'cierre' in data.columns and 'fecha' in data.columns:
-                                    data = data.set_index('fecha')['cierre']
-                                elif 'ultimaCotizacion' in data.columns:
-                                    data = data['ultimaCotizacion'].apply(
-                                        lambda x: x['precio'] if isinstance(x, dict) and 'precio' in x else None
-                                    )
-                                    data = data[data.notna()]  # Eliminar valores nulos
-                        else:
-                            # Para acciones, bonos, etc.
-                            data = obtener_serie_historica_iol(
-                                token_portador=token_portador,
-                                mercado=mercado,
-                                simbolo=simbolo,
-                                fecha_desde=fecha_desde_str,
-                                fecha_hasta=fecha_hasta_str,
-                                ajustada="ajustada"
-                            )
-                            
-                            # Procesar la respuesta según el formato
-                            if data is not None and not data.empty:
-                                if 'ultimaCotizacion' in data.columns:
-                                    data = data['ultimaCotizacion'].apply(
-                                        lambda x: x['precio'] if isinstance(x, dict) and 'precio' in x else None
-                                    )
-                                    data = data[data.notna()]  # Eliminar valores nulos
-                                elif 'cierre' in data.columns and 'fecha' in data.columns:
-                                    data = data.set_index('fecha')['cierre']
-                        
-                        if data is not None and not data.empty:
-                            # Asegurarse de que los datos sean numéricos
-                            data = pd.to_numeric(data, errors='coerce')
-                            data = data[data.notna()]  # Eliminar valores no numéricos
-                            
-                            if not data.empty:
-                                # Multiplicar por la cantidad para obtener el valor total de la posición
-                                datos_historicos[simbolo] = data * cantidad
-                                activos_procesados.add(simbolo)
-                                
-                    except Exception as e:
-                        st.warning(f"Error al procesar datos para {simbolo} ({tipo}): {str(e)}")
-                        
-                except Exception as e:
-                    st.warning(f"Error al obtener datos para {activo.get('simbolo', 'activo')}: {str(e)}")
-                    continue
-                
-            progress_bar.empty()
-    
-    except Exception as e:
-        st.error(f"Error al obtener datos históricos: {str(e)}")
-        import traceback
-        st.error(traceback.format_exc())
-        return None
-    
-    if not datos_historicos:
-        st.error("No se pudieron obtener datos históricos para los activos del portafolio.")
-        return None
-    
-    try:
-        # Crear DataFrame con todos los datos históricos
-        df_hist = pd.DataFrame(datos_historicos)
-        
-        # Verificar si hay suficientes datos
-        if df_hist.empty or len(df_hist) < 2:
-            st.warning("No hay suficientes datos históricos para mostrar el rendimiento.")
-            return None
-            
-        # Ordenar por fecha (índice)
-        df_hist = df_hist.sort_index()
-        
-        # Llenar valores faltantes usando forward fill (útil para FCIs que no cotizan diariamente)
-        df_hist = df_hist.ffill()
-        
-        # Calcular el valor total del portafolio para cada fecha
-        df_hist['Portfolio'] = df_hist.sum(axis=1)
-        
-        # Eliminar filas con valores nulos (pueden quedar después del ffill)
-        df_hist = df_hist.dropna()
-        
-        if df_hist.empty:
-            st.warning("No hay suficientes datos válidos después de la limpieza.")
-            return None
-            
-        # Calcular retornos acumulados normalizados al 100%
-        df_retornos = (df_hist / df_hist.iloc[0] - 1) * 100
-        
-        # Crear gráfico de rendimiento
-        fig = go.Figure()
-        
-        # Colores para los activos
-        colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-        
-        # Primero el portafolio completo (línea más gruesa)
-        fig.add_trace(go.Scatter(
-            x=df_retornos.index,
-            y=df_retornos['Portfolio'],
-            mode='lines+markers',
-            name='Portafolio Total',
-            line=dict(color='#0d6efd', width=3),
-            marker=dict(size=6, color='#0d6efd'),
-            hovertemplate='%{y:.2f}%<extra></extra>',
-            visible=True
-        ))
-        
-        # Luego los activos individuales
-        for i, col in enumerate([c for c in df_retornos.columns if c != 'Portfolio']):
-            color_idx = i % len(colores)
-            fig.add_trace(go.Scatter(
-                x=df_retornos.index,
-                y=df_retornos[col],
-                mode='lines',
-                name=col,
-                line=dict(color=colores[color_idx], width=1.5, dash='dot'),
-                hovertemplate=f'{col}: %{{y:.2f}}%<extra></extra>',
-                visible='legendonly'  # Ocultar por defecto para no saturar
-            ))
-        
-        # Configuración del diseño del gráfico
-        fig.update_layout(
-            title='Rendimiento Acumulado del Portafolio',
-            xaxis_title='Fecha',
-            yaxis_title='Rendimiento Acumulado (%)',
-            legend_title='Activos',
-            hovermode='x unified',
-            template='plotly_white',
-            height=600,
-            margin=dict(l=50, r=50, t=80, b=50),
-            legend=dict(
-                orientation='h',
-                yanchor='bottom',
-                y=1.02,
-                xanchor='right',
-                x=1,
-                bgcolor='rgba(255,255,255,0.8)'
-            ),
-            xaxis=dict(
-                rangeslider=dict(visible=True),
-                type='date',
-                showgrid=True,
-                gridcolor='lightgray',
-                rangeselector=dict(
-                    buttons=list([
-                        dict(count=1, label='1m', step='month', stepmode='backward'),
-                        dict(count=6, label='6m', step='month', stepmode='backward'),
-                        dict(count=1, label='YTD', step='year', stepmode='todate'),
-                        dict(count=1, label='1y', step='year', stepmode='backward'),
-                        dict(step='all')
-                    ])
-                )
-            ),
-            yaxis=dict(
-                gridcolor='lightgray',
-                zerolinecolor='lightgray',
-                tickformat='.1f%',
-                ticksuffix='%'
-            )
-        )
-        
-        # Mostrar el gráfico
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Mostrar métricas resumidas
-        if not df_retornos.empty:
-            ultimo_valor = df_retornos['Portfolio'].iloc[-1]
-            max_valor = df_retornos['Portfolio'].max()
-            min_valor = df_retornos['Portfolio'].min()
-            
-            # Calcular retorno anualizado aproximado
-            dias_totales = (df_retornos.index[-1] - df_retornos.index[0]).days
-            if dias_totales > 0:
-                retorno_anualizado = ((1 + ultimo_valor/100) ** (365/dias_totales) - 1) * 100
-            else:
-                retorno_anualizado = 0
-            
-            # Calcular drawdown máximo
-            df_hist['Max'] = df_hist['Portfolio'].cummax()
-            df_hist['Drawdown'] = (df_hist['Portfolio'] / df_hist['Max'] - 1) * 100
-            max_drawdown = df_hist['Drawdown'].min()
-            
-            # Mostrar métricas en columnas
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Rendimiento Total", f"{ultimo_valor:.2f}%")
-            with col2:
-                st.metric("Máximo Histórico", f"{max_valor:.2f}%")
-            with col3:
-                st.metric("Retorno Anualizado", f"{retorno_anualizado:.2f}%")
-            with col4:
-                st.metric("Máximo Drawdown", f"{max_drawdown:.2f}%")
-        
-        # Mostrar tabla con los últimos valores
-        st.subheader("Valores Actuales")
-        ultimos_valores = df_hist.iloc[-1:].T
-        ultimos_valores.columns = ['Valor']
-        
-        # Calcular pesos porcentuales
-        valor_total = ultimos_valores.loc['Portfolio', 'Valor']
-        ultimos_valores['Peso (%)'] = (ultimos_valores['Valor'] / valor_total * 100).round(2)
-        
-        # Ordenar por valor (excluyendo el total del portafolio)
-        ultimos_valores = ultimos_valores.drop('Portfolio').sort_values('Valor', ascending=False)
-        
-        # Formatear valores
-        st.dataframe(
-            ultimos_valores.style.format({
-                'Valor': '{:,.2f}',
-                'Peso (%)': '{:,.2f}%'
-            })
-        )
-        
-        return fig
-        
-    except Exception as e:
-        st.error(f"Error al generar el gráfico de rendimiento: {str(e)}")
-        import traceback
-        st.error(traceback.format_exc())
-        return None
-def mostrar_resumen_portafolio(portafolio, token_portador):
+def mostrar_resumen_portafolio(portafolio):
     st.markdown("### 📈 Resumen del Portafolio")
-    
-    # Mostrar PYL (Pesos por Liquidar) si está disponible
-    if 'saldos' in portafolio and 'pyl' in portafolio['saldos']:
-        pyl = portafolio['saldos']['pyl']
-        st.metric("💰 Pesos por Liquidar (PYL)", f"AR$ {pyl:,.2f}")
-    
-    # Mostrar gráfico de rendimiento
-    graficar_rendimiento_portafolio(portafolio, token_portador)
     
     activos = portafolio.get('activos', [])
     datos_activos = []
@@ -2478,276 +1689,89 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
-def obtener_montos_estimados_mep(token_portador, monto):
-    """
-    Obtiene los montos estimados para una operación MEP
+def mostrar_analisis_tecnico(token_acceso, id_cliente):
+    st.markdown("### 📊 Análisis Técnico")
     
-    Args:
-        token_portador (str): Token de autenticación
-        monto (float): Monto a operar
-        
-    Returns:
-        dict: Diccionario con los montos estimados o None en caso de error
-    """
-    try:
-        headers = obtener_encabezado_autorizacion(token_portador)
-        url = f"https://api.invertironline.com/api/v2/OperatoriaSimplificada/MontosEstimados/{monto}"
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener montos estimados: {str(e)}")
-        return None
-
-def obtener_parametros_operatoria(token_portador, id_tipo_operatoria):
-    """
-    Obtiene los parámetros de un tipo de operación simplificada
+    with st.spinner("Obteniendo portafolio..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
     
-    Args:
-        token_portador (str): Token de autenticación
-        id_tipo_operatoria (int): ID del tipo de operación
-        
-    Returns:
-        dict: Diccionario con los parámetros o None en caso de error
-    """
-    try:
-        headers = obtener_encabezado_autorizacion(token_portador)
-        url = f"https://api.invertironline.com/api/v2/OperatoriaSimplificada/{id_tipo_operatoria}/Parametros"
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener parámetros de operación: {str(e)}")
-        return None
-
-def validar_operacion(token_portador, monto, id_tipo_operatoria):
-    """
-    Valida una operación simplificada
-    
-    Args:
-        token_portador (str): Token de autenticación
-        monto (float): Monto a operar
-        id_tipo_operatoria (int): ID del tipo de operación
-        
-    Returns:
-        dict: Resultado de la validación o None en caso de error
-    """
-    try:
-        headers = obtener_encabezado_autorizacion(token_portador)
-        url = f"https://api.invertironline.com/api/v2/OperatoriaSimplificada/Validar/{monto}/{id_tipo_operatoria}"
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al validar operación: {str(e)}")
-        return None
-
-def ejecutar_operacion(token_portador, monto, id_tipo_operatoria, id_cuenta_bancaria):
-    """
-    Ejecuta una operación simplificada
-    
-    Args:
-        token_portador (str): Token de autenticación
-        monto (float): Monto a operar
-        id_tipo_operatoria (int): ID del tipo de operación
-        id_cuenta_bancaria (int): ID de la cuenta bancaria
-        
-    Returns:
-        dict: Resultado de la operación o None en caso de error
-    """
-    try:
-        headers = obtener_encabezado_autorizacion(token_portador)
-        headers['Content-Type'] = 'application/json'
-        url = "https://api.invertironline.com/api/v2/OperatoriaSimplificada/Comprar"
-        payload = {
-            "monto": monto,
-            "idTipoOperatoriaSimplificada": id_tipo_operatoria,
-            "idCuentaBancaria": id_cuenta_bancaria
-        }
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al ejecutar operación: {str(e)}")
-        if hasattr(e, 'response') and e.response is not None:
-            st.error(f"Respuesta del servidor: {e.response.text}")
-        return None
-
-def mostrar_operatoria_simplificada():
-    """
-    Muestra la interfaz para operaciones simplificadas (MEP)
-    """
-    st.title("💱 Operaciones Simplificadas")
-    
-    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-        st.error("Debe iniciar sesión primero")
+    if not portafolio:
+        st.warning("No se pudo obtener el portafolio del cliente")
         return
-        
-    token_acceso = st.session_state.token_acceso
     
-    # Tipos de operación disponibles (IDs pueden variar según la API)
-    TIPOS_OPERACION = {
-        1: "Compra Dólar MEP",
-        2: "Venta Dólar MEP"
-    }
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("El portafolio está vacío")
+        return
     
-    with st.form("operacion_form"):
-        st.subheader("📊 Nueva Operación")
-        
-        # Selección de tipo de operación
-        operacion = st.selectbox(
-            "Tipo de Operación",
-            options=list(TIPOS_OPERACION.keys()),
-            format_func=lambda x: TIPOS_OPERACION[x]
-        )
-        
-        # Monto de la operación
-        monto = st.number_input(
-            "Monto",
-            min_value=0.01,
-            value=1000.0,
-            step=100.0,
-            help="Monto a operar en pesos para compra o en dólares para venta"
-        )
-        
-        # ID de cuenta bancaria (deberías obtenerlo de la API de cuentas del usuario)
-        # Por ahora lo dejamos como input, pero deberías obtenerlo de la API
-        cuenta_bancaria = st.number_input(
-            "ID Cuenta Bancaria",
-            min_value=1,
-            value=1,
-            help="ID de la cuenta bancaria a utilizar"
-        )
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Botón para simular
-            simular = st.form_submit_button("🔄 Simular Operación")
-        
-        with col2:
-            # Botón para ejecutar (solo visible si la simulación fue exitosa)
-            if st.session_state.get('simulacion_exitosa', False):
-                ejecutar = st.form_submit_button("✅ Confirmar Operación")
-            else:
-                st.form_submit_button("✅ Confirmar Operación", disabled=True)
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
     
-    # Lógica de simulación
-    if simular:
-        with st.spinner("Simulando operación..."):
-            # Primero validamos la operación
-            validacion = validar_operacion(token_acceso, monto, operacion)
-            
-            if validacion and validacion.get('ok', False):
-                # Si la validación es exitosa, obtenemos los montos estimados
-                montos = obtener_montos_estimados_mep(token_acceso, monto)
-                
-                if montos:
-                    st.session_state.simulacion_exitosa = True
-                    st.session_state.montos_estimados = montos
-                    
-                    st.success("✅ Simulación exitosa")
-                    
-                    # Mostrar resumen de la operación
-                    st.subheader("📋 Resumen de la Operación")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.metric("Tipo de Operación", TIPOS_OPERACION[operacion])
-                        st.metric("Monto Solicitado", f"${monto:,.2f}")
-                    
-                    with col2:
-                        if operacion == 1:  # Compra MEP
-                            st.metric("Monto Estimado en Dólares", f"US$ {montos.get('montoDolar', 0):,.2f}")
-                            st.metric("Monto Neto en Pesos", f"$ {montos.get('montoNetoPesos', 0):,.2f}")
-                        else:  # Venta MEP
-                            st.metric("Monto Estimado en Pesos", f"$ {montos.get('montoPesos', 0):,.2f}")
-                            st.metric("Monto Neto en Dólares", f"US$ {montos.get('montoNetoDolar', 0):,.4f}")
-                    
-                    # Mostrar comisiones e impuestos
-                    with st.expander("📊 Detalle de Comisiones e Impuestos"):
-                        st.metric("Comisión Compra", f"$ {montos.get('comisionCompra', 0):,.2f}")
-                        st.metric("Comisión Venta", f"$ {montos.get('comisionVenta', 0):,.2f}")
-                        st.metric("Derecho de Mercado Compra", f"$ {montos.get('derechoMercadoCompra', 0):,.2f}")
-                        st.metric("Derecho de Mercado Venta", f"$ {montos.get('derechoMercadoVenta', 0):,.2f}")
-            else:
-                st.session_state.simulacion_exitosa = False
-                error_msg = validacion.get('messages', [{}])[0].get('description', 'Error desconocido') if validacion else 'Error al validar la operación'
-                st.error(f"❌ {error_msg}")
+    if not simbolos:
+        st.warning("No se encontraron símbolos válidos")
+        return
     
-    # Lógica de ejecución
-    elif 'ejecutar' in locals() and ejecutar and st.session_state.get('simulacion_exitosa', False):
-        with st.spinner("Procesando operación..."):
-            resultado = ejecutar_operacion(
-                token_acceso,
-                monto,
-                operacion,
-                cuenta_bancaria
-            )
-            
-            if resultado and resultado.get('ok', False):
-                st.success("✅ Operación realizada con éxito")
-                st.balloons()
-                
-                # Mostrar resumen de la operación ejecutada
-                st.subheader("📋 Comprobante de Operación")
-                st.json(resultado)
-                
-                # Limpiar estado de simulación
-                st.session_state.simulacion_exitosa = False
-            else:
-                error_msg = resultado.get('messages', [{}])[0].get('description', 'Error desconocido') if resultado else 'Error al ejecutar la operación'
-                st.error(f"❌ {error_msg}")
-
-def monte_carlo_prediction(historical_prices, days=252, simulations=1000):
-    """
-    Realiza una simulación de Monte Carlo para predecir el precio futuro
+    simbolo_seleccionado = st.selectbox(
+        "Seleccione un activo para análisis técnico:",
+        options=simbolos
+    )
     
-    Args:
-        historical_prices: Serie de precios históricos
-        days: Días a proyectar
-        simulations: Número de simulaciones
+    if simbolo_seleccionado:
+        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
         
-    Returns:
-        dict: Diccionario con estadísticas de la simulación
-    """
-    try:
-        # Calcular retornos logarítmicos
-        returns = np.log(1 + historical_prices.pct_change().dropna())
-        
-        # Calcular parámetros de la distribución
-        u = returns.mean()
-        var = returns.var()
-        drift = u - (0.5 * var)
-        stdev = returns.std()
-        
-        # Crear matriz de precios simulados
-        daily_returns = np.exp(drift + stdev * np.random.standard_normal((days, simulations)))
-        
-        # Crear trayectorias de precios
-        price_paths = np.zeros_like(daily_returns)
-        price_paths[0] = historical_prices.iloc[-1]
-        
-        for t in range(1, days):
-            price_paths[t] = price_paths[t-1] * daily_returns[t]
-        
-        # Calcular estadísticas
-        final_prices = price_paths[-1, :]
-        
-        return {
-            'mean': np.mean(final_prices),
-            'median': np.median(final_prices),
-            'std': np.std(final_prices),
-            'min': np.min(final_prices),
-            'max': np.max(final_prices),
-            'percentile_5': np.percentile(final_prices, 5),
-            'percentile_95': np.percentile(final_prices, 95),
-            'simulations': price_paths
-        }
-    except Exception as e:
-        st.error(f"Error en simulación Monte Carlo: {str(e)}")
-        return None
+        # Widget de TradingView
+        tv_widget = f"""
+        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+          "container_id": "tradingview_{simbolo_seleccionado}",
+          "width": "100%",
+          "height": 650,
+          "symbol": "{simbolo_seleccionado}",
+          "interval": "D",
+          "timezone": "America/Argentina/Buenos_Aires",
+          "theme": "light",
+          "style": "1",
+          "locale": "es",
+          "toolbar_bg": "#f4f7f9",
+          "enable_publishing": false,
+          "allow_symbol_change": true,
+          "hide_side_toolbar": false,
+          "studies": [
+            "MACD@tv-basicstudies",
+            "RSI@tv-basicstudies",
+            "StochasticRSI@tv-basicstudies",
+            "Volume@tv-basicstudies",
+            "Moving Average@tv-basicstudies"
+          ],
+          "drawings_access": {{
+            "type": "black",
+            "tools": [
+              {{"name": "Trend Line"}},
+              {{"name": "Horizontal Line"}},
+              {{"name": "Fibonacci Retracement"}},
+              {{"name": "Rectangle"}},
+              {{"name": "Text"}}
+            ]
+          }},
+          "enabled_features": [
+            "study_templates",
+            "header_indicators",
+            "header_compare",
+            "header_screenshot",
+            "header_fullscreen_button",
+            "header_settings",
+            "header_symbol_search"
+          ]
+        }});
+        </script>
+        """
+        components.html(tv_widget, height=680)
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
@@ -2844,35 +1868,32 @@ def mostrar_movimientos_asesor():
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
+
     if not cliente:
         st.error("No hay cliente seleccionado")
         return
+
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
-    # Obtener datos del portafolio para usar en todas las pestañas
-    portafolio = obtener_portafolio_invertir_online(id_cliente, token_acceso)
-    
-    # Crear pestañas
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    # Crear tabs con iconos
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Optimización",
-        "📊 Análisis Avanzado"
+        "🔄 Optimización"
     ])
-    
+
     with tab1:
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
-            
-    with tab6:  # Nueva pestaña de Análisis Avanzado
-        if portafolio:
-            analizar_portafolio_avanzado(portafolio, token_acceso)
+            mostrar_resumen_portafolio(portafolio)
         else:
-            st.error("No se pudo cargar el portafolio para el análisis avanzado")
+            st.warning("No se pudo obtener el portafolio del cliente")
+    
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
@@ -2888,9 +1909,6 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
-        
-    with tab6:
-        mostrar_operatoria_simplificada()
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
