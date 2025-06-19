@@ -355,58 +355,75 @@ def mostrar_tasas_caucion(token_portador):
     """
     st.subheader("📊 Tasas de Caución")
     
-    with st.spinner('Obteniendo tasas de caución...'):
-        df_cauciones = obtener_tasas_caucion(token_portador)
-    
-    if df_cauciones is not None and not df_cauciones.empty:
-        # Mostrar tabla con las tasas
-        st.dataframe(
-            df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto']]
-            .rename(columns={
-                'simbolo': 'Instrumento',
-                'plazo': 'Plazo',
-                'ultimoPrecio': 'Tasa',
-                'monto': 'Monto (en millones)'
-            }),
-            use_container_width=True,
-            height=300
-        )
-        
-        # Crear gráfico de curva de tasas
-        fig = go.Figure()
-        
-        fig.add_trace(go.Scatter(
-            x=df_cauciones['plazo_dias'],
-            y=df_cauciones['tasa_limpia'],
-            mode='lines+markers+text',
-            name='Tasa',
-            text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-            textposition='top center',
-            line=dict(color='#1f77b4', width=2),
-            marker=dict(size=10, color='#1f77b4')
-        ))
-        
-        fig.update_layout(
-            title='Curva de Tasas de Caución',
-            xaxis_title='Plazo (días)',
-            yaxis_title='Tasa Anual (%)',
-            template='plotly_white',
-            height=500,
-            showlegend=False
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Mostrar resumen estadístico
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-            st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-        with col2:
-            st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-            st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
-    else:
-        st.warning("No se encontraron datos de tasas de caución disponibles.")
+    try:
+        with st.spinner('Obteniendo tasas de caución...'):
+            df_cauciones = obtener_tasas_caucion(token_portador)
+            
+            # Verificar si se obtuvieron datos
+            if df_cauciones is None or df_cauciones.empty:
+                st.warning("No se encontraron datos de tasas de caución.")
+                return
+                
+            # Verificar columnas requeridas
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+            if missing_columns:
+                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+                return
+            
+            # Mostrar tabla con las tasas
+            st.dataframe(
+                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                             else ['simbolo', 'plazo', 'ultimoPrecio']]
+                .rename(columns={
+                    'simbolo': 'Instrumento',
+                    'plazo': 'Plazo',
+                    'ultimoPrecio': 'Tasa',
+                    'monto': 'Monto (en millones)'
+                }),
+                use_container_width=True,
+                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+            )
+            
+            # Crear gráfico de curva de tasas si hay suficientes puntos
+            if len(df_cauciones) > 1:
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_cauciones['plazo_dias'],
+                    y=df_cauciones['tasa_limpia'],
+                    mode='lines+markers+text',
+                    name='Tasa',
+                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                    textposition='top center',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=10, color='#1f77b4')
+                ))
+                
+                fig.update_layout(
+                    title='Curva de Tasas de Caución',
+                    xaxis_title='Plazo (días)',
+                    yaxis_title='Tasa Anual (%)',
+                    template='plotly_white',
+                    height=500,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar resumen estadístico
+            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+                with col2:
+                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+                    
+    except Exception as e:
+        st.error(f"Error al mostrar las tasas de caución: {str(e)}")
+        st.exception(e)  # Mostrar el traceback completo para depuración
     formats_to_try = [
         "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S",
