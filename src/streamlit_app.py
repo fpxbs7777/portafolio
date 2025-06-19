@@ -1119,47 +1119,69 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
         token_portador (str): Token de autenticación de InvertirOnline
         dias_atras (int): Cantidad de días hacia atrás para el histórico
     """
-    st.markdown("### 📊 Rendimiento Histórico del Portafolio")
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("No hay activos en el portafolio para mostrar el rendimiento histórico.")
-        return
-    
-    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-    fecha_desde = (datetime.now() - timedelta(days=dias_atras)).strftime('%Y-%m-%d')
-    
-    # Obtener datos históricos para cada activo
-    datos_historicos = {}
-    
-    with st.spinner("Obteniendo datos históricos..."):
-        for activo in activos:
-            try:
-                titulo = activo.get('titulo', {})
-                simbolo = titulo.get('simbolo')
-                mercado = titulo.get('mercado', 'BCBA')
-                cantidad = float(activo.get('cantidad', 0))
-                
-                if not simbolo or cantidad <= 0:
-                    continue
-                
-                # Obtener datos históricos
-                data = obtener_serie_historica_iol(
-                    token_portador=token_portador,
-                    mercado=mercado,
-                    simbolo=simbolo,
-                    fecha_desde=fecha_desde,
-                    fecha_hasta=fecha_hasta,
-                    ajustada="ajustada"
-                )
-                
-                if data is not None and not data.empty:
-                    # Multiplicar por la cantidad para obtener el valor total de la posición
-                    datos_historicos[simbolo] = data * cantidad
+    try:
+        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+            st.warning("No hay activos en el portafolio para mostrar el rendimiento histórico")
+            return None
             
-            except Exception as e:
-                st.warning(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
-                continue
+        # Obtener fechas para el histórico
+        fecha_hasta = datetime.now()
+        fecha_desde = fecha_hasta - timedelta(days=dias_atras)
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        
+        # Obtener datos históricos para cada activo
+        datos_historicos = {}
+        activos_procesados = set()
+        
+        with st.spinner("Obteniendo datos históricos..."):
+            for activo in portafolio['activos']:
+                try:
+                    # Manejar diferentes estructuras de activos
+                    if 'titulo' in activo and isinstance(activo['titulo'], dict):
+                        titulo = activo['titulo']
+                        simbolo = titulo.get('simbolo')
+                        mercado = titulo.get('mercado', 'BCBA')
+                        tipo = titulo.get('tipo', 'ACCIONES')
+                        cantidad = float(activo.get('cantidad', 0))
+                    else:
+                        simbolo = activo.get('simbolo')
+                        mercado = activo.get('mercado', 'BCBA')
+                        tipo = activo.get('tipo', 'ACCIONES')
+                        cantidad = float(activo.get('cantidad', 0))
+                    
+                    if not simbolo or simbolo in activos_procesados or cantidad <= 0:
+                        continue
+                    
+                    # Obtener datos históricos según el tipo de activo
+                    if tipo.upper() == 'FCI':
+                        data = obtener_serie_historica_fci(
+                            token_portador=token_portador,
+                            simbolo=simbolo,
+                            fecha_desde=fecha_desde_str,
+                            fecha_hasta=fecha_hasta_str
+                        )
+                    else:
+                        data = obtener_serie_historica_iol(
+                            token_portador=token_portador,
+                            mercado=mercado,
+                            simbolo=simbolo,
+                            fecha_desde=fecha_desde_str,
+                            fecha_hasta=fecha_hasta_str,
+                            ajustada="ajustada"
+                        )
+                    
+                    if data is not None and not data.empty:
+                        if 'cierre' in data.columns and 'fecha' in data.columns:
+                            # Para datos de FCIs u otros formatos que ya tienen columna 'cierre'
+                            data = data.set_index('fecha')['cierre']
+                        # Multiplicar por la cantidad para obtener el valor total de la posición
+                        datos_historicos[simbolo] = data * cantidad
+                        activos_procesados.add(simbolo)
+                
+                except Exception as e:
+                    st.warning(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
+                    continue
     
     if not datos_historicos:
         st.error("No se pudieron obtener datos históricos para los activos del portafolio.")
@@ -1169,37 +1191,62 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
         # Crear DataFrame con todos los datos históricos
         df_hist = pd.DataFrame(datos_historicos)
         
+        # Verificar si hay suficientes datos
+        if df_hist.empty or len(df_hist) < 2:
+            st.warning("No hay suficientes datos históricos para mostrar el rendimiento.")
+            return
+            
+        # Ordenar por fecha (índice)
+        df_hist = df_hist.sort_index()
+        
+        # Llenar valores faltantes usando forward fill (útil para FCIs que no cotizan diariamente)
+        df_hist = df_hist.ffill()
+        
         # Calcular el valor total del portafolio para cada fecha
         df_hist['Portfolio'] = df_hist.sum(axis=1)
         
-        # Calcular retornos acumulados
+        # Eliminar filas con valores nulos (pueden quedar después del ffill)
+        df_hist = df_hist.dropna()
+        
+        if df_hist.empty:
+            st.warning("No hay suficientes datos válidos después de la limpieza.")
+            return
+            
+        # Calcular retornos acumulados normalizados al 100%
         df_retornos = (df_hist / df_hist.iloc[0] - 1) * 100
         
         # Crear gráfico de rendimiento
         fig = go.Figure()
         
-        # Agregar cada activo al gráfico
-        for col in df_retornos.columns:
-            if col != 'Portfolio':
-                fig.add_trace(go.Scatter(
-                    x=df_retornos.index,
-                    y=df_retornos[col],
-                    mode='lines',
-                    name=col,
-                    opacity=0.5,
-                    visible='legendonly'  # Ocultar por defecto
-                ))
+        # Agregar cada activo al gráfico con colores distintos
+        colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
         
-        # Agregar el portafolio total (visible por defecto)
+        # Primero el portafolio completo (línea más gruesa)
         fig.add_trace(go.Scatter(
             x=df_retornos.index,
             y=df_retornos['Portfolio'],
-            mode='lines',
+            mode='lines+markers',
             name='Portafolio Total',
-            line=dict(color='#1f77b4', width=3)
+            line=dict(color='#0d6efd', width=3),
+            marker=dict(size=6, color='#0d6efd'),
+            hovertemplate='%{y:.2f}%<extra></extra>'
         ))
         
-        # Configurar el diseño del gráfico
+        # Luego los activos individuales
+        for i, col in enumerate([c for c in df_retornos.columns if c != 'Portfolio']):
+            color_idx = i % len(colores)
+            fig.add_trace(go.Scatter(
+                x=df_retornos.index,
+                y=df_retornos[col],
+                mode='lines',
+                name=col,
+                line=dict(color=colores[color_idx], width=1.5, dash='dot'),
+                hovertemplate=f'{col}: %{{y:.2f}}%<extra></extra>',
+                visible='legendonly'  # Ocultar por defecto para no saturar
+            ))
+            
+        # Actualizar diseño del gráfico
         fig.update_layout(
             title='Rendimiento Acumulado del Portafolio',
             xaxis_title='Fecha',
@@ -1208,51 +1255,67 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
             hovermode='x unified',
             template='plotly_white',
             height=600,
-            showlegend=True
+            margin=dict(l=50, r=50, t=80, b=50),
+            legend=dict(
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                xanchor='right',
+                x=1
+            ),
+            xaxis=dict(
+                rangeslider=dict(visible=True),
+                type='date',
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            yaxis=dict(
+                gridcolor='lightgray',
+                zerolinecolor='lightgray',
+                tickformat='.1f%',
+                ticksuffix='%'
+            )
         )
         
-        # Mostrar el gráfico en Streamlit
+        # Mostrar el gráfico
         st.plotly_chart(fig, use_container_width=True)
         
-        # Mostrar estadísticas de rendimiento
-        st.subheader("Estadísticas de Rendimiento")
+        # Mostrar métricas resumidas
+        if not df_retornos.empty:
+            ultimo_valor = df_retornos['Portfolio'].iloc[-1]
+            max_valor = df_retornos['Portfolio'].max()
+            min_valor = df_retornos['Portfolio'].min()
+            
+            # Calcular retorno anualizado aproximado
+            dias_totales = (df_retornos.index[-1] - df_retornos.index[0]).days
+            if dias_totales > 0:
+                retorno_anualizado = ((1 + ultimo_valor/100) ** (365/dias_totales) - 1) * 100
+            else:
+                retorno_anualizado = 0
+                
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Rendimiento Total", f"{ultimo_valor:.2f}%")
+            with col2:
+                st.metric("Máximo Histórico", f"{max_valor:.2f}%")
+            with col3:
+                st.metric("Mínimo Histórico", f"{min_valor:.2f}%")
+            with col4:
+                st.metric("Retorno Anualizado", f"{retorno_anualizado:.2f}%")
         
-        # Calcular métricas
-        retorno_total = df_retornos['Portfolio'].iloc[-1]
-        volatilidad_anual = df_retornos['Portfolio'].std() * np.sqrt(252)  # Volatilidad anualizada
-        sharpe_ratio = (df_retornos['Portfolio'].mean() / df_retornos['Portfolio'].std()) * np.sqrt(252) if df_retornos['Portfolio'].std() > 0 else 0
+        # Mostrar tabla con los últimos valores
+        st.subheader("Últimos Valores")
+        ultimos_valores = df_hist.iloc[-1:].T
+        ultimos_valores.columns = ['Valor']
+        st.dataframe(ultimos_valores.style.format('{:,.2f}'))
         
-        # Mostrar métricas en columnas
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Retorno Total (%)", f"{retorno_total:.2f}%")
-        with col2:
-            st.metric("Volatilidad Anual (%)", f"{volatilidad_anual:.2f}%")
-        with col3:
-            st.metric("Ratio de Sharpe", f"{sharpe_ratio:.2f}")
-        
-        # Mostrar tabla con los activos y su contribución al rendimiento
-        st.subheader("Contribución por Activo")
-        contribuciones = []
-        
-        for col in df_retornos.columns:
-            if col != 'Portfolio':
-                contrib = df_retornos[col].iloc[-1]
-                peso_inicial = (df_hist[col].iloc[0] / df_hist.iloc[0].sum()) * 100
-                contribuciones.append({
-                    'Activo': col,
-                    'Retorno (%)': f"{contrib:.2f}",
-                    'Peso Inicial (%)': f"{peso_inicial:.2f}",
-                    'Contribución al Retorno (%)': f"{contrib * (peso_inicial/100):.2f}"
-                })
-        
-        if contribuciones:
-            df_contrib = pd.DataFrame(contribuciones)
-            st.dataframe(df_contrib, use_container_width=True)
+        return fig
         
     except Exception as e:
         st.error(f"Error al generar el gráfico de rendimiento: {str(e)}")
-
+        import traceback
+        st.error(traceback.format_exc())
+        return None
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
