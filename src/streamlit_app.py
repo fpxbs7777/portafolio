@@ -2,122 +2,46 @@ import streamlit as st
 import requests
 import plotly.graph_objects as go
 import pandas as pd
-from plotly.subplots import make_subplots
-from datetime import date, timedelta, datetime
 import numpy as np
-import yfinance as yf
-import scipy.optimize as op
-from scipy import stats
-import random
-import warnings
-import streamlit.components.v1 as components
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta, date
+import pytz
 
-warnings.filterwarnings('ignore')
-
-# Configuración de la página con aspecto profesional
-st.set_page_config(
-    page_title="IOL Portfolio Analyzer",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Estilos CSS personalizados
-st.markdown("""
-<style>
-    /* Estilos generales */
-    .stApp {
-        background-color: #f8f9fa;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
+def parse_datetime_flexible(date_str):
+    """
+    Parse datetime string in various formats to datetime object
     
-    /* Mejora de tarjetas y métricas */
-    .stMetric {
-        background-color: white;
-        border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        border-left: 4px solid #0d6efd;
-    }
+    Args:
+        date_str (str): Date string in various formats
+        
+    Returns:
+        datetime: Parsed datetime object or None if parsing fails
+    """
+    if not date_str or pd.isna(date_str):
+        return None
+        
+    # Common date formats to try
+    date_formats = [
+        '%Y-%m-%dT%H:%M:%S',  # ISO format with T
+        '%Y-%m-%d %H:%M:%S',  # Standard format
+        '%Y-%m-%d',           # Date only
+        '%d/%m/%Y',           # DD/MM/YYYY
+        '%m/%d/%Y',           # MM/DD/YYYY
+        '%Y%m%d'              # YYYYMMDD
+    ]
     
-    /* Mejora de pestañas */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 5px;
-    }
+    # Remove timezone info if present
+    if 'T' in date_str and '+' in date_str:
+        date_str = date_str.split('+')[0]
     
-    .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        padding: 0 20px;
-        background-color: #e9ecef;
-        border-radius: 8px !important;
-        font-weight: 500;
-        transition: all 0.3s ease;
-    }
+    # Try parsing with each format
+    for fmt in date_formats:
+        try:
+            return datetime.strptime(date_str.split('.')[0], fmt)  # Remove milliseconds if present
+        except (ValueError, AttributeError):
+            continue
     
-    .stTabs [aria-selected="true"] {
-        background-color: #0d6efd !important;
-        color: white !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #dde5ed !important;
-    }
-    
-    /* Mejora de inputs */
-    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox {
-        background-color: white;
-        border-radius: 8px;
-    }
-    
-    /* Botones */
-    .stButton>button {
-        border-radius: 8px;
-        font-weight: 500;
-        transition: all 0.2s;
-    }
-    
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    
-    /* Barra lateral */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2c3e50, #1a1a2e);
-        color: white;
-    }
-    
-    [data-testid="stSidebar"] .stRadio label {
-        color: white !important;
-    }
-    
-    [data-testid="stSidebar"] .stSelectbox label {
-        color: white !important;
-    }
-    
-    [data-testid="stSidebar"] .stTextInput label {
-        color: white !important;
-    }
-    
-    /* Títulos */
-    h1, h2, h3, h4, h5, h6 {
-        color: #2c3e50;
-        font-weight: 600;
-    }
-    
-    /* Tablas */
-    .dataframe {
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-    }
-    
-    /* Progress bar */
-    .stProgress > div > div > div {
-        background-color: #0d6efd;
-    }
-</style>
-""", unsafe_allow_html=True)
+    return None
 
 def obtener_encabezado_autorizacion(token_portador):
     return {
@@ -467,30 +391,6 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
-            continue
-
-    try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
-    except Exception:
-        return None
 
 def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
@@ -589,17 +489,38 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
     """
     Obtiene la serie histórica de un fondo común de inversión
     """
-    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
-    headers = {
-        'Authorization': f'Bearer {token_portador}'
-    }
-    
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        # Primero obtenemos los datos del FCI
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url_fci = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
+        
+        response = requests.get(url_fci, headers=headers, timeout=15)
         response.raise_for_status()
-        return response.json()
+        datos_fci = response.json()
+        
+        # Obtenemos los datos históricos del FCI
+        # Nota: La API de IOL no tiene un endpoint directo para históricos de FCIs
+        # Este es un enfoque alternativo que podrías implementar
+        
+        # Si no hay datos históricos, devolvemos un DataFrame con los datos básicos
+        df = pd.DataFrame([{
+            'fecha': parse_datetime_flexible(datos_fci.get('fechaCorte')),
+            'cierre': float(datos_fci.get('ultimoOperado', 0)),
+            'apertura': float(datos_fci.get('ultimoOperado', 0)),
+            'maximo': float(datos_fci.get('ultimoOperado', 0)),
+            'minimo': float(datos_fci.get('ultimoOperado', 0)),
+            'volumen': 0,
+            'simbolo': simbolo,
+            'tipo': 'FCI'
+        }]) if datos_fci else None
+        
+        return df
+        
     except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
+        st.warning(f"No se pudieron obtener datos históricos para el FCI {simbolo}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
         return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
@@ -658,11 +579,11 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             # Manejo especial para FCIs
             if mercado.lower() == 'fci':
                 data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
+                if data and 'fecha' in data.columns and 'cierre' in data.columns:
                     try:
                         df = pd.DataFrame({
-                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
-                            'cierre': [data['ultimaCotizacion']['precio']]
+                            'fecha': data['fecha'],
+                            'cierre': data['cierre']
                         })
                         df.set_index('fecha', inplace=True)
                         precios[simbolo] = df['cierre']
@@ -1879,6 +1800,228 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
+def obtener_montos_estimados_mep(token_portador, monto):
+    """
+    Obtiene los montos estimados para una operación MEP
+    
+    Args:
+        token_portador (str): Token de autenticación
+        monto (float): Monto a operar
+        
+    Returns:
+        dict: Diccionario con los montos estimados o None en caso de error
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/OperatoriaSimplificada/MontosEstimados/{monto}"
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener montos estimados: {str(e)}")
+        return None
+
+def obtener_parametros_operatoria(token_portador, id_tipo_operatoria):
+    """
+    Obtiene los parámetros de un tipo de operación simplificada
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_tipo_operatoria (int): ID del tipo de operación
+        
+    Returns:
+        dict: Diccionario con los parámetros o None en caso de error
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/OperatoriaSimplificada/{id_tipo_operatoria}/Parametros"
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener parámetros de operación: {str(e)}")
+        return None
+
+def validar_operacion(token_portador, monto, id_tipo_operatoria):
+    """
+    Valida una operación simplificada
+    
+    Args:
+        token_portador (str): Token de autenticación
+        monto (float): Monto a operar
+        id_tipo_operatoria (int): ID del tipo de operación
+        
+    Returns:
+        dict: Resultado de la validación o None en caso de error
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/OperatoriaSimplificada/Validar/{monto}/{id_tipo_operatoria}"
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al validar operación: {str(e)}")
+        return None
+
+def ejecutar_operacion(token_portador, monto, id_tipo_operatoria, id_cuenta_bancaria):
+    """
+    Ejecuta una operación simplificada
+    
+    Args:
+        token_portador (str): Token de autenticación
+        monto (float): Monto a operar
+        id_tipo_operatoria (int): ID del tipo de operación
+        id_cuenta_bancaria (int): ID de la cuenta bancaria
+        
+    Returns:
+        dict: Resultado de la operación o None en caso de error
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        headers['Content-Type'] = 'application/json'
+        url = "https://api.invertironline.com/api/v2/OperatoriaSimplificada/Comprar"
+        payload = {
+            "monto": monto,
+            "idTipoOperatoriaSimplificada": id_tipo_operatoria,
+            "idCuentaBancaria": id_cuenta_bancaria
+        }
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al ejecutar operación: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Respuesta del servidor: {e.response.text}")
+        return None
+
+def mostrar_operatoria_simplificada():
+    """
+    Muestra la interfaz para operaciones simplificadas (MEP)
+    """
+    st.title("💱 Operaciones Simplificadas")
+    
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.error("Debe iniciar sesión primero")
+        return
+        
+    token_acceso = st.session_state.token_acceso
+    
+    # Tipos de operación disponibles (IDs pueden variar según la API)
+    TIPOS_OPERACION = {
+        1: "Compra Dólar MEP",
+        2: "Venta Dólar MEP"
+    }
+    
+    with st.form("operacion_form"):
+        st.subheader("📊 Nueva Operación")
+        
+        # Selección de tipo de operación
+        operacion = st.selectbox(
+            "Tipo de Operación",
+            options=list(TIPOS_OPERACION.keys()),
+            format_func=lambda x: TIPOS_OPERACION[x]
+        )
+        
+        # Monto de la operación
+        monto = st.number_input(
+            "Monto",
+            min_value=0.01,
+            value=1000.0,
+            step=100.0,
+            help="Monto a operar en pesos para compra o en dólares para venta"
+        )
+        
+        # ID de cuenta bancaria (deberías obtenerlo de la API de cuentas del usuario)
+        # Por ahora lo dejamos como input, pero deberías obtenerlo de la API
+        cuenta_bancaria = st.number_input(
+            "ID Cuenta Bancaria",
+            min_value=1,
+            value=1,
+            help="ID de la cuenta bancaria a utilizar"
+        )
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Botón para simular
+            simular = st.form_submit_button("🔄 Simular Operación")
+        
+        with col2:
+            # Botón para ejecutar (solo visible si la simulación fue exitosa)
+            if st.session_state.get('simulacion_exitosa', False):
+                ejecutar = st.form_submit_button("✅ Confirmar Operación")
+            else:
+                st.form_submit_button("✅ Confirmar Operación", disabled=True)
+    
+    # Lógica de simulación
+    if simular:
+        with st.spinner("Simulando operación..."):
+            # Primero validamos la operación
+            validacion = validar_operacion(token_acceso, monto, operacion)
+            
+            if validacion and validacion.get('ok', False):
+                # Si la validación es exitosa, obtenemos los montos estimados
+                montos = obtener_montos_estimados_mep(token_acceso, monto)
+                
+                if montos:
+                    st.session_state.simulacion_exitosa = True
+                    st.session_state.montos_estimados = montos
+                    
+                    st.success("✅ Simulación exitosa")
+                    
+                    # Mostrar resumen de la operación
+                    st.subheader("📋 Resumen de la Operación")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.metric("Tipo de Operación", TIPOS_OPERACION[operacion])
+                        st.metric("Monto Solicitado", f"${monto:,.2f}")
+                    
+                    with col2:
+                        if operacion == 1:  # Compra MEP
+                            st.metric("Monto Estimado en Dólares", f"US$ {montos.get('montoDolar', 0):,.2f}")
+                            st.metric("Monto Neto en Pesos", f"$ {montos.get('montoNetoPesos', 0):,.2f}")
+                        else:  # Venta MEP
+                            st.metric("Monto Estimado en Pesos", f"$ {montos.get('montoPesos', 0):,.2f}")
+                            st.metric("Monto Neto en Dólares", f"US$ {montos.get('montoNetoDolar', 0):,.4f}")
+                    
+                    # Mostrar comisiones e impuestos
+                    with st.expander("📊 Detalle de Comisiones e Impuestos"):
+                        st.metric("Comisión Compra", f"$ {montos.get('comisionCompra', 0):,.2f}")
+                        st.metric("Comisión Venta", f"$ {montos.get('comisionVenta', 0):,.2f}")
+                        st.metric("Derecho de Mercado Compra", f"$ {montos.get('derechoMercadoCompra', 0):,.2f}")
+                        st.metric("Derecho de Mercado Venta", f"$ {montos.get('derechoMercadoVenta', 0):,.2f}")
+            else:
+                st.session_state.simulacion_exitosa = False
+                error_msg = validacion.get('messages', [{}])[0].get('description', 'Error desconocido') if validacion else 'Error al validar la operación'
+                st.error(f"❌ {error_msg}")
+    
+    # Lógica de ejecución
+    elif 'ejecutar' in locals() and ejecutar and st.session_state.get('simulacion_exitosa', False):
+        with st.spinner("Procesando operación..."):
+            resultado = ejecutar_operacion(
+                token_acceso,
+                monto,
+                operacion,
+                cuenta_bancaria
+            )
+            
+            if resultado and resultado.get('ok', False):
+                st.success("✅ Operación realizada con éxito")
+                st.balloons()
+                
+                # Mostrar resumen de la operación ejecutada
+                st.subheader("📋 Comprobante de Operación")
+                st.json(resultado)
+                
+                # Limpiar estado de simulación
+                st.session_state.simulacion_exitosa = False
+            else:
+                error_msg = resultado.get('messages', [{}])[0].get('description', 'Error desconocido') if resultado else 'Error al ejecutar la operación'
+                st.error(f"❌ {error_msg}")
+
 def monte_carlo_prediction(historical_prices, days=252, simulations=1000):
     """
     Realiza una simulación de Monte Carlo para predecir el precio futuro
@@ -2034,12 +2177,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Optimización"
+        "🔄 Optimización",
+        "💵 Operaciones MEP"
     ])
 
     with tab1:
@@ -2064,6 +2208,9 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+        
+    with tab6:
+        mostrar_operatoria_simplificada()
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
