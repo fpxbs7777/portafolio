@@ -213,12 +213,19 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
     try:
         respuesta = requests.post(url_cotizacion_mep, headers=encabezados, json=datos)
         if respuesta.status_code == 200:
-            return respuesta.json()
+            resultado = respuesta.json()
+            # Asegurarse de que siempre devolvemos un diccionario
+            if isinstance(resultado, (int, float)):
+                return {'precio': resultado, 'simbolo': simbolo}
+            elif isinstance(resultado, dict):
+                return resultado
+            else:
+                return {'precio': None, 'simbolo': simbolo, 'error': 'Formato de respuesta inesperado'}
         else:
-            return None
+            return {'precio': None, 'simbolo': simbolo, 'error': f'Error HTTP {respuesta.status_code}'}
     except Exception as e:
         st.error(f'Error al obtener cotización MEP: {str(e)}')
-        return None
+        return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
 def obtener_tasas_caucion(token_portador, instrumento="Cauciones", panel="Todas", pais="Argentina"):
     url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
