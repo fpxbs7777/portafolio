@@ -523,10 +523,45 @@ def procesar_respuesta_historico(data, tipo_activo):
         elif isinstance(data, (int, float)):
             return pd.Series([float(data)], index=[pd.Timestamp.now()], name='precio')
             
+        return None
+        
     except Exception as e:
-        st.error(f"Error al procesar datos históricos: {str(e)}")
+        st.error(f"Error al procesar respuesta histórica: {str(e)}")
+        return None
+
+def obtener_fondos_comunes(token_portador):
+    """
+    Obtiene la lista de fondos comunes de inversión disponibles
+    """
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
     
-    return None
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener fondos comunes: {str(e)}")
+        return []
+
+def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """
+    Obtiene la serie histórica de un fondo común de inversión
+    """
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
+        return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
@@ -566,8 +601,8 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
-    Obtiene datos históricos para optimización con manejo mejorado de errores
-    y reintentos automáticos
+    Obtiene datos históricos para optimización con manejo mejorado de errores,
+    reintentos automáticos y soporte para FCIs
     """
     precios = {}
     errores = []
@@ -577,16 +612,35 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         progress_bar = st.progress(0)
         total_symbols = len(simbolos)
         
-        for i, simbolo in enumerate(simbolos):
-            progress = (i + 1) / total_symbols
-            progress_bar.progress(progress, text=f"Procesando {simbolo} ({i+1}/{total_symbols})")
+        for idx, (simbolo, mercado) in enumerate(simbolos):
+            progress = (idx + 1) / total_symbols
+            progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
             
+            # Manejo especial para FCIs
+            if mercado.lower() == 'fci':
+                data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
+                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
+                    try:
+                        df = pd.DataFrame({
+                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
+                            'cierre': [data['ultimaCotizacion']['precio']]
+                        })
+                        df.set_index('fecha', inplace=True)
+                        precios[simbolo] = df['cierre']
+                    except Exception as e:
+                        st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
+                        errores.append(simbolo)
+                else:
+                    st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
+                    errores.append(simbolo)
+                continue
+                
             for attempt in range(max_retries):
                 try:
                     # Intentar obtener datos de IOL
                     serie = obtener_serie_historica_iol(
                         token_portador=token_portador,
-                        mercado="bCBA",  # Ajustar según sea necesario
+                        mercado=mercado,
                         simbolo=simbolo,
                         fecha_desde=fecha_desde,
                         fecha_hasta=fecha_hasta
@@ -598,191 +652,125 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     
                 except Exception as e:
                     if attempt == max_retries - 1:  # Último intento
-                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos")
+                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
                         errores.append(simbolo)
                     continue
             
             # Pequeña pausa entre solicitudes para no saturar el servidor
             time.sleep(0.5)
         
-    progress_bar.empty()
-    
-    if errores:
-        st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
-    
-    if precios:
-        st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
+        progress_bar.empty()
         
-        # Asegurarse de que todas las series tengan la misma longitud
-        min_length = min(len(s) for s in precios.values()) if precios else 0
-        if min_length < 5:  # Mínimo razonable de datos para optimización
-            st.error("Los datos históricos son insuficientes para la optimización")
-            return None, None, None
-            
-        # Crear DataFrame con las series alineadas
-        df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
+        if errores:
+            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
         
-        # Calcular retornos y validar
-        returns = df_precios.pct_change().dropna()
-        
-        if returns.empty or len(returns) < 30:
-            st.warning("No hay suficientes datos para el análisis")
-            return None, None, None
+        if precios:
+            st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
             
-        # Eliminar columnas con desviación estándar cero
-        if (returns.std() == 0).any():
-            columnas_constantes = returns.columns[returns.std() == 0].tolist()
-            returns = returns.drop(columns=columnas_constantes)
-            df_precios = df_precios.drop(columns=columnas_constantes)
-            
-            if returns.empty or len(returns.columns) < 2:
-                st.warning("No hay suficientes activos válidos para la optimización")
+            # Asegurarse de que todas las series tengan la misma longitud
+            min_length = min(len(s) for s in precios.values()) if precios else 0
+            if min_length < 5:  # Mínimo razonable de datos para optimización
+                st.error("Los datos históricos son insuficientes para la optimización")
                 return None, None, None
                 
-        mean_returns = returns.mean()
-        cov_matrix = returns.cov()
+            # Crear DataFrame con las series alineadas
+            df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
+            
+            # Calcular retornos y validar
+            returns = df_precios.pct_change().dropna()
+            
+            if returns.empty or len(returns) < 30:
+                st.warning("No hay suficientes datos para el análisis")
+                return None, None, None
+                
+            # Eliminar columnas con desviación estándar cero
+            if (returns.std() == 0).any():
+                columnas_constantes = returns.columns[returns.std() == 0].tolist()
+                returns = returns.drop(columns=columnas_constantes)
+                df_precios = df_precios.drop(columns=columnas_constantes)
+                
+                if returns.empty or len(returns.columns) < 2:
+                    st.warning("No hay suficientes activos válidos para la optimización")
+                    return None, None, None
+                    
+            mean_returns = returns.mean()
+            cov_matrix = returns.cov()
+            return mean_returns, cov_matrix, df_precios
         
-        return mean_returns, cov_matrix, df_precios
-    
-    try:
-        st.error("❌ No se pudieron cargar los datos históricos")
-        return None, None, None
-    except Exception as e:
-        st.error(f"Error inesperado al procesar los datos: {str(e)}")
-        return None, None, None
-
-def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
-    mercados_mapping = {
-        'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
-        'NASDAQ': 'nASDAQ',
-        'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'
-    }
-    
-    mercado_correcto = mercados_mapping.get(mercado, mercado)
-    
-    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
-    except Exception:
-        return None
-
-def obtener_clase_d(simbolo, mercado, bearer_token):
-    mercados_mapping = {
-        'BCBA': 'bCBA',
-        'NYSE': 'nYSE', 
-        'NASDAQ': 'nASDAQ',
-        'ROFEX': 'rOFEX',
-        'Merval': 'bCBA'
-    }
-    
-    mercado_correcto = mercados_mapping.get(mercado, mercado)
-    
-    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
-    }
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            clases = response.json()
-            for clase in clases:
-                if clase.get('simbolo', '').endswith('D'):
-                    return clase['simbolo']
-            return None
-        else:
-            return None
-    except Exception:
-        return None
-
-# --- Funciones de Optimización de Portafolio ---
-def optimize_portfolio(returns, target_return=None):
-    n_assets = returns.shape[1]
-    
-    # Constraints: weights sum to 1
-    constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
-    
-    # Bounds: each weight between 0 and 1
-    bounds = tuple((0, 1) for _ in range(n_assets))
-    
-    # Initial guess: equal weights
-    init_guess = np.array([1/n_assets] * n_assets)
-    
-    # If target return is provided, add it as a constraint
-    if target_return is not None:
-        # Define the function for target return
-        target_constraint = {
-            'type': 'eq',
-            'fun': lambda w: target_return - np.dot(w, returns.mean())
-        }
-        constraints = [constraints, target_constraint]
-    
-    # Objective function: minimize portfolio variance
-    def objective(w):
-        return np.dot(w.T, np.dot(returns.cov(), w))
-    
-    # Optimization
-    result = op.minimize(
-        objective,
-        init_guess,
-        method='SLSQP',
-        bounds=bounds,
-        constraints=constraints
-    )
-    
-    return result.x
+    st.error("❌ No se pudieron cargar los datos históricos")
+    return None, None, None
 
 def calcular_metricas_portafolio(activos_data, valor_total):
+    """
+    Calcula métricas detalladas del portafolio, incluyendo FCIs si están presentes
+    """
     try:
-        valores = [activo['Valuación'] for activo in activos_data if activo['Valuación'] > 0]
+        # Procesar FCIs si existen
+        fcis = [activo for activo in activos_data if activo.get('tipo_activo', '').lower() == 'fci']
+        total_fci = 0
+        porcentaje_fci = 0
+        
+        if fcis:
+            total_fci = sum(activo.get('valor_actual', 0) for activo in fcis)
+            porcentaje_fci = (total_fci / valor_total) * 100 if valor_total > 0 else 0
+            
+            # Agregar métricas específicas de FCIs
+            for fci in fcis:
+                fci['porcentaje_portafolio'] = (fci.get('valor_actual', 0) / valor_total) * 100 if valor_total > 0 else 0
+                fci['rendimiento_anual'] = fci.get('variacion_anual', 0)
+                fci['volatilidad_anual'] = fci.get('volatilidad_anual', 0)
+                fci['sharpe_ratio'] = fci.get('sharpe_ratio', 0)
+        
+        # Obtener valores de los activos
+        try:
+            valores = [activo.get('Valuación', activo.get('valor_actual', 0)) for activo in activos_data 
+                     if activo.get('Valuación', activo.get('valor_actual', 0)) > 0]
+        except (KeyError, AttributeError):
+            valores = []
         
         if not valores:
             return None
-        
+            
         valores_array = np.array(valores)
         
+        # Cálculo de métricas básicas
         media = np.mean(valores_array)
         mediana = np.median(valores_array)
         std_dev = np.std(valores_array)
         var_95 = np.percentile(valores_array, 5)
         var_99 = np.percentile(valores_array, 1)
         
+        # Cálculo de cuantiles
         q25 = np.percentile(valores_array, 25)
         q50 = np.percentile(valores_array, 50)
         q75 = np.percentile(valores_array, 75)
         q90 = np.percentile(valores_array, 90)
         q95 = np.percentile(valores_array, 95)
         
-        pesos = valores_array / valor_total
+        # Cálculo de concentración
+        pesos = valores_array / valor_total if valor_total > 0 else np.zeros_like(valores_array)
         concentracion = np.sum(pesos ** 2)
         
-        retorno_esperado_anual = 0.08
-        volatilidad_anual = 0.20
+        # Cálculo de retorno y riesgo esperados
+        retorno_esperado_anual = 0.08  # Tasa de retorno anual esperada
+        volatilidad_anual = 0.20  # Volatilidad anual esperada
         
         retorno_esperado_pesos = valor_total * retorno_esperado_anual
         riesgo_anual_pesos = valor_total * volatilidad_anual
         
+        # Simulación de Monte Carlo para calcular métricas de riesgo
         np.random.seed(42)
         num_simulaciones = 1000
         retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
         pl_simulado = valor_total * retornos_simulados
         
+        # Cálculo de probabilidades
         prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
         prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
         prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
         prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
         
+        # Retornar métricas en un diccionario
         return {
             'valor_total': valor_total,
             'media_activo': media,
@@ -800,19 +788,26 @@ def calcular_metricas_portafolio(activos_data, valor_total):
             'concentracion': concentracion,
             'retorno_esperado_anual': retorno_esperado_pesos,
             'riesgo_anual': riesgo_anual_pesos,
-            'pl_esperado_min': np.min(pl_simulado),
-            'pl_esperado_max': np.max(pl_simulado),
-            'pl_esperado_medio': np.mean(pl_simulado),
-            'pl_percentil_5': np.percentile(pl_simulado, 5),
-            'pl_percentil_95': np.percentile(pl_simulado, 95),
+            'pl_esperado_min': np.min(pl_simulado) if len(pl_simulado) > 0 else 0,
+            'pl_esperado_max': np.max(pl_simulado) if len(pl_simulado) > 0 else 0,
+            'pl_esperado_medio': np.mean(pl_simulado) if len(pl_simulado) > 0 else 0,
+            'pl_percentil_5': np.percentile(pl_simulado, 5) if len(pl_simulado) > 0 else 0,
+            'pl_percentil_95': np.percentile(pl_simulado, 95) if len(pl_simulado) > 0 else 0,
             'probabilidades': {
                 'ganancia': prob_ganancia,
                 'perdida': prob_perdida,
                 'perdida_mayor_10': prob_perdida_mayor_10,
                 'ganancia_mayor_10': prob_ganancia_mayor_10
+            },
+            'fcis': {
+                'total_invertido': total_fci,
+                'porcentaje_portafolio': porcentaje_fci,
+                'cantidad': len(fcis)
             }
         }
+        
     except Exception as e:
+        st.error(f"Error al calcular métricas del portafolio: {str(e)}")
         return None
 
 # --- Enhanced Portfolio Management Classes ---
