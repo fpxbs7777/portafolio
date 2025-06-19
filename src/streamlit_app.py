@@ -1135,57 +1135,98 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
         activos_procesados = set()
         
         with st.spinner("Obteniendo datos históricos..."):
-            for activo in portafolio['activos']:
+            progress_bar = st.progress(0)
+            total_activos = len([a for a in portafolio['activos'] if float(a.get('cantidad', 0)) > 0])
+            
+            for i, activo in enumerate(portafolio['activos']):
                 try:
-                    # Manejar diferentes estructuras de activos
+                    # Obtener información del activo
                     if 'titulo' in activo and isinstance(activo['titulo'], dict):
                         titulo = activo['titulo']
                         simbolo = titulo.get('simbolo')
-                        mercado = titulo.get('mercado', 'BCBA')
+                        mercado = titulo.get('mercado', 'bCBA').lower()  # Asegurar minúsculas
                         tipo = titulo.get('tipo', 'ACCIONES')
                         cantidad = float(activo.get('cantidad', 0))
                     else:
                         simbolo = activo.get('simbolo')
-                        mercado = activo.get('mercado', 'BCBA')
+                        mercado = activo.get('mercado', 'bCBA').lower()  # Asegurar minúsculas
                         tipo = activo.get('tipo', 'ACCIONES')
                         cantidad = float(activo.get('cantidad', 0))
                     
+                    # Actualizar barra de progreso
+                    progress_bar.progress((i + 1) / len(portafolio['activos']))
+                    
+                    # Validar datos del activo
                     if not simbolo or simbolo in activos_procesados or cantidad <= 0:
                         continue
                     
                     # Obtener datos históricos según el tipo de activo
-                    if tipo.upper() == 'FCI':
-                        data = obtener_serie_historica_fci(
-                            token_portador=token_portador,
-                            simbolo=simbolo,
-                            fecha_desde=fecha_desde_str,
-                            fecha_hasta=fecha_hasta_str
-                        )
-                    else:
-                        data = obtener_serie_historica_iol(
-                            token_portador=token_portador,
-                            mercado=mercado,
-                            simbolo=simbolo,
-                            fecha_desde=fecha_desde_str,
-                            fecha_hasta=fecha_hasta_str,
-                            ajustada="ajustada"
-                        )
-                    
-                    if data is not None and not data.empty:
-                        if 'cierre' in data.columns and 'fecha' in data.columns:
-                            # Para datos de FCIs u otros formatos que ya tienen columna 'cierre'
-                            data = data.set_index('fecha')['cierre']
-                        # Multiplicar por la cantidad para obtener el valor total de la posición
-                        datos_historicos[simbolo] = data * cantidad
-                        activos_procesados.add(simbolo)
-                
+                    try:
+                        if 'FONDO' in tipo.upper() or 'FCI' in tipo.upper():
+                            # Para fondos comunes de inversión
+                            data = obtener_serie_historica_fci(
+                                token_portador=token_portador,
+                                simbolo=simbolo,
+                                fecha_desde=fecha_desde_str,
+                                fecha_hasta=fecha_hasta_str
+                            )
+                            if data is not None and not data.empty:
+                                if 'cierre' in data.columns and 'fecha' in data.columns:
+                                    data = data.set_index('fecha')['cierre']
+                                elif 'ultimaCotizacion' in data.columns:
+                                    data = data['ultimaCotizacion'].apply(
+                                        lambda x: x['precio'] if isinstance(x, dict) and 'precio' in x else None
+                                    )
+                                    data = data[data.notna()]  # Eliminar valores nulos
+                        else:
+                            # Para acciones, bonos, etc.
+                            data = obtener_serie_historica_iol(
+                                token_portador=token_portador,
+                                mercado=mercado,
+                                simbolo=simbolo,
+                                fecha_desde=fecha_desde_str,
+                                fecha_hasta=fecha_hasta_str,
+                                ajustada="ajustada"
+                            )
+                            
+                            # Procesar la respuesta según el formato
+                            if data is not None and not data.empty:
+                                if 'ultimaCotizacion' in data.columns:
+                                    data = data['ultimaCotizacion'].apply(
+                                        lambda x: x['precio'] if isinstance(x, dict) and 'precio' in x else None
+                                    )
+                                    data = data[data.notna()]  # Eliminar valores nulos
+                                elif 'cierre' in data.columns and 'fecha' in data.columns:
+                                    data = data.set_index('fecha')['cierre']
+                        
+                        if data is not None and not data.empty:
+                            # Asegurarse de que los datos sean numéricos
+                            data = pd.to_numeric(data, errors='coerce')
+                            data = data[data.notna()]  # Eliminar valores no numéricos
+                            
+                            if not data.empty:
+                                # Multiplicar por la cantidad para obtener el valor total de la posición
+                                datos_historicos[simbolo] = data * cantidad
+                                activos_procesados.add(simbolo)
+                                
+                    except Exception as e:
+                        st.warning(f"Error al procesar datos para {simbolo} ({tipo}): {str(e)}")
+                        
                 except Exception as e:
-                    st.warning(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
+                    st.warning(f"Error al obtener datos para {activo.get('simbolo', 'activo')}: {str(e)}")
                     continue
+                
+            progress_bar.empty()
+    
+    except Exception as e:
+        st.error(f"Error al obtener datos históricos: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
     
     if not datos_historicos:
         st.error("No se pudieron obtener datos históricos para los activos del portafolio.")
-        return
+        return None
     
     try:
         # Crear DataFrame con todos los datos históricos
@@ -1194,7 +1235,7 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
         # Verificar si hay suficientes datos
         if df_hist.empty or len(df_hist) < 2:
             st.warning("No hay suficientes datos históricos para mostrar el rendimiento.")
-            return
+            return None
             
         # Ordenar por fecha (índice)
         df_hist = df_hist.sort_index()
@@ -1210,7 +1251,7 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
         
         if df_hist.empty:
             st.warning("No hay suficientes datos válidos después de la limpieza.")
-            return
+            return None
             
         # Calcular retornos acumulados normalizados al 100%
         df_retornos = (df_hist / df_hist.iloc[0] - 1) * 100
@@ -1218,7 +1259,7 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
         # Crear gráfico de rendimiento
         fig = go.Figure()
         
-        # Agregar cada activo al gráfico con colores distintos
+        # Colores para los activos
         colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
                   '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
         
@@ -1230,7 +1271,8 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
             name='Portafolio Total',
             line=dict(color='#0d6efd', width=3),
             marker=dict(size=6, color='#0d6efd'),
-            hovertemplate='%{y:.2f}%<extra></extra>'
+            hovertemplate='%{y:.2f}%<extra></extra>',
+            visible=True
         ))
         
         # Luego los activos individuales
@@ -1245,8 +1287,8 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
                 hovertemplate=f'{col}: %{{y:.2f}}%<extra></extra>',
                 visible='legendonly'  # Ocultar por defecto para no saturar
             ))
-            
-        # Actualizar diseño del gráfico
+        
+        # Configuración del diseño del gráfico
         fig.update_layout(
             title='Rendimiento Acumulado del Portafolio',
             xaxis_title='Fecha',
@@ -1261,13 +1303,23 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
                 yanchor='bottom',
                 y=1.02,
                 xanchor='right',
-                x=1
+                x=1,
+                bgcolor='rgba(255,255,255,0.8)'
             ),
             xaxis=dict(
                 rangeslider=dict(visible=True),
                 type='date',
                 showgrid=True,
-                gridcolor='lightgray'
+                gridcolor='lightgray',
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=1, label='1m', step='month', stepmode='backward'),
+                        dict(count=6, label='6m', step='month', stepmode='backward'),
+                        dict(count=1, label='YTD', step='year', stepmode='todate'),
+                        dict(count=1, label='1y', step='year', stepmode='backward'),
+                        dict(step='all')
+                    ])
+                )
             ),
             yaxis=dict(
                 gridcolor='lightgray',
@@ -1292,22 +1344,42 @@ def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
                 retorno_anualizado = ((1 + ultimo_valor/100) ** (365/dias_totales) - 1) * 100
             else:
                 retorno_anualizado = 0
-                
+            
+            # Calcular drawdown máximo
+            df_hist['Max'] = df_hist['Portfolio'].cummax()
+            df_hist['Drawdown'] = (df_hist['Portfolio'] / df_hist['Max'] - 1) * 100
+            max_drawdown = df_hist['Drawdown'].min()
+            
+            # Mostrar métricas en columnas
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Rendimiento Total", f"{ultimo_valor:.2f}%")
             with col2:
                 st.metric("Máximo Histórico", f"{max_valor:.2f}%")
             with col3:
-                st.metric("Mínimo Histórico", f"{min_valor:.2f}%")
-            with col4:
                 st.metric("Retorno Anualizado", f"{retorno_anualizado:.2f}%")
+            with col4:
+                st.metric("Máximo Drawdown", f"{max_drawdown:.2f}%")
         
         # Mostrar tabla con los últimos valores
-        st.subheader("Últimos Valores")
+        st.subheader("Valores Actuales")
         ultimos_valores = df_hist.iloc[-1:].T
         ultimos_valores.columns = ['Valor']
-        st.dataframe(ultimos_valores.style.format('{:,.2f}'))
+        
+        # Calcular pesos porcentuales
+        valor_total = ultimos_valores.loc['Portfolio', 'Valor']
+        ultimos_valores['Peso (%)'] = (ultimos_valores['Valor'] / valor_total * 100).round(2)
+        
+        # Ordenar por valor (excluyendo el total del portafolio)
+        ultimos_valores = ultimos_valores.drop('Portfolio').sort_values('Valor', ascending=False)
+        
+        # Formatear valores
+        st.dataframe(
+            ultimos_valores.style.format({
+                'Valor': '{:,.2f}',
+                'Peso (%)': '{:,.2f}%'
+            })
+        )
         
         return fig
         
