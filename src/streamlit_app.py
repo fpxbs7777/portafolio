@@ -398,115 +398,80 @@ def procesar_respuesta_historico(data, tipo_activo):
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
-    Obtiene series históricas para diferentes tipos de activos
+    Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
     """
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {token_portador}',
-        'Content-Type': 'application/json'
-    }
-    
     try:
-        # Obtener el endpoint correcto según el tipo de activo
+        # Primero intentamos con el endpoint específico del mercado
         url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-        
         if not url:
-            st.warning(f"No se pudo determinar el endpoint para el mercado: {mercado}")
+            st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
             return None
-            
-        # Realizar la petición
-        response = requests.get(url, headers=headers, timeout=30)
         
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        # Configurar un timeout más corto para no bloquear la interfaz
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        # Verificar si la respuesta es exitosa
         if response.status_code == 200:
             data = response.json()
+            if isinstance(data, dict) and data.get('status') == 'error':
+                st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
+                return None
+                
+            # Procesar la respuesta según el tipo de activo
             return procesar_respuesta_historico(data, mercado)
         else:
-            st.warning(f"Error en la respuesta del servidor: {response.status_code} - {response.text}")
+            st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
             return None
             
     except requests.exceptions.RequestException as e:
-        st.error(f"Error de conexión: {str(e)}")
+        st.warning(f"Error de conexión para {simbolo}: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"Error inesperado: {str(e)}")
-        return None
-
-def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
-    try:
-        sufijos_ar = ['.BA', '.AR']
-        
-        for sufijo in sufijos_ar:
-            try:
-                ticker = yf.Ticker(simbolo + sufijo)
-                data = ticker.history(start=fecha_desde, end=fecha_hasta)
-                if not data.empty and len(data) > 10:
-                    return data['Close']
-            except:
-                continue
-        
-        try:
-            ticker = yf.Ticker(simbolo)
-            data = ticker.history(start=fecha_desde, end=fecha_hasta)
-            if not data.empty and len(data) > 10:
-                return data['Close']
-        except:
-            pass
-            
-        return None
-    except Exception:
+        st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
         return None
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
-    try:
-        df_precios = pd.DataFrame()
-        simbolos_exitosos = []
-        simbolos_fallidos = []
-        detalles_errores = {}
-        
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
-        
+    """
+    Obtiene datos históricos para optimización con manejo mejorado de errores
+    y reintentos automáticos
+    """
+    precios = {}
+    errores = []
+    max_retries = 2
+    
+    with st.spinner("Obteniendo datos históricos..."):
         progress_bar = st.progress(0)
-        total_simbolos = len(simbolos)
+        total_symbols = len(simbolos)
         
-        for idx, simbolo in enumerate(simbolos):
-            progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
+        for i, simbolo in enumerate(simbolos):
+            progress = (i + 1) / total_symbols
+            progress_bar.progress(progress, text=f"Procesando {simbolo} ({i+1}/{total_symbols})")
             
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
-            serie_obtenida = False
-            
-            for mercado in mercados:
+            for attempt in range(max_retries):
                 try:
-                    simbolo_consulta = simbolo
-                    if mercado not in ['Opciones', 'FCI']:
-                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
-                        if clase_d:
-                            simbolo_consulta = clase_d
-                    
+                    # Intentar obtener datos de IOL
                     serie = obtener_serie_historica_iol(
-                        token_portador, mercado, simbolo_consulta, 
-                        fecha_desde_str, fecha_hasta_str
+                        token_portador=token_portador,
+                        mercado="bCBA",  # Ajustar según sea necesario
+                        simbolo=simbolo,
+                        fecha_desde=fecha_desde,
+                        fecha_hasta=fecha_hasta
                     )
                     
-                    if serie is not None and len(serie) > 10:
-                        if serie.nunique() > 1:
-                            df_precios[simbolo_consulta] = serie
-                            simbolos_exitosos.append(simbolo_consulta)
-                            serie_obtenida = True
-                            break
+                    if serie is not None and not serie.empty:
+                        precios[simbolo] = serie
+                        break  # Salir del bucle de reintentos si tiene éxito
+                    
                 except Exception as e:
-                    detalles_errores[f"{simbolo}_{mercado}"] = str(e)
+                    if attempt == max_retries - 1:  # Último intento
+                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos")
+                        errores.append(simbolo)
                     continue
             
-            if not serie_obtenida:
-                try:
-                    serie_yf = obtener_datos_alternativos_yfinance(
-                        simbolo, fecha_desde, fecha_hasta
-                    )
-                    if serie_yf is not None and len(serie_yf) > 10:
-                        if serie_yf.nunique() > 1:
-                            df_precios[simbolo] = serie_yf
-                            simbolos_exitosos.append(simbolo)
+            # Pequeña pausa entre solicitudes para no saturar el servidor
+            time.sleep(0.5)
                             serie_obtenida = True
                 except Exception as e:
                     detalles_errores[f"{simbolo}_yfinance"] = str(e)
