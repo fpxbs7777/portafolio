@@ -282,27 +282,19 @@ def obtener_tasas_caucion(token_portador):
     Obtiene las tasas de caución desde la API de IOL
     
     Args:
-        token_portador (str): Token de autenticación
+        token_portador (str): Token de autenticación Bearer
         
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
-    base_url = "https://api.invertironline.com/api/v2"
-    endpoint = "cotizaciones-orleans/cauciones/argentina/Operables"
-    url = f"{base_url}/{endpoint}"
-    
-    params = {
-        'cotizacionInstrumentoModel.instrumento': 'cauciones',
-        'cotizacionInstrumentoModel.pais': 'argentina'
-    }
-    
+    url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
     
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
+        response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
@@ -318,10 +310,7 @@ def obtener_tasas_caucion(token_portador):
                 
                 # Limpiar la tasa (convertir a float si es necesario)
                 if 'ultimoPrecio' in df.columns:
-                    if df['ultimoPrecio'].dtype == 'object':
-                        df['tasa_limpia'] = df['ultimoPrecio'].str.rstrip('%').astype('float')
-                    else:
-                        df['tasa_limpia'] = df['ultimoPrecio'].astype('float')
+                    df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
                 
                 # Asegurarse de que las columnas necesarias existan
                 if 'monto' not in df.columns and 'volumen' in df.columns:
