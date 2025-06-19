@@ -1109,7 +1109,550 @@ class PortfolioManager:
         except Exception as e:
             return None, None, None
 
+# --- Constantes y Utilidades ---
+
+# Diccionario de benchmarks y factores de mercado comunes
+BENCHMARK_FACTORS = {
+    '^GSPC': 'S&P 500',
+    '^DJI': 'Dow Jones Industrial Average',
+    '^IXIC': 'NASDAQ Composite',
+    '^MERV': 'MERVAL Argentina',
+    '^BVSP': 'BOVESPA Brasil',
+    '^MXX': 'IPC México',
+    '^GDAXI': 'DAX Alemania',
+    '^FCHI': 'CAC 40 Francia',
+    '^STOXX50E': 'Euro Stoxx 50',
+    '^N225': 'Nikkei 225 Japón',
+    '^HSI': 'Hang Seng Hong Kong',
+    '^AXJO': 'S&P/ASX 200 Australia',
+    '^VIX': 'Índice de Volatilidad (VIX)',
+    '^TNX': 'Rendimiento del Tesoro 10 años',
+    '^TYX': 'Rendimiento del Tesoro 30 años',
+    'DXY': 'Índice del Dólar',
+    'GC=F': 'Oro',
+    'SI=F': 'Plata',
+    'CL=F': 'Petróleo Crudo WTI',
+    'BTC-USD': 'Bitcoin',
+    'ETH-USD': 'Ethereum',
+    'BMA.BA': 'Banco Macro',
+    'GGAL.BA': 'Grupo Financiero Galicia',
+    'YPFD.BA': 'YPF',
+    'PAMP.BA': 'Pampa Energía',
+    'TECO2.BA': 'Telecom Argentina',
+    'TGS.BA': 'Transportadora de Gas del Sur',
+    'LOMA.BA': 'Loma Negra',
+    'CEPU.BA': 'Central Puerto',
+    'CRES.BA': 'Cresud',
+    'MELI.BA': 'MercadoLibre',
+    'EDN.BA': 'Edenor',
+    'COME.BA': 'Sociedad Comercial del Plata',
+    'TXAR.BA': 'Ternium Argentina',
+    'ALUA.BA': 'Aluar',
+    'TGSU2.BA': 'Transportadora de Gas del Sur',
+    'PATA.BA': 'IMPSA',
+    'MIRG.BA': 'Mirgor',
+    'LONG.BA': 'Longvie',
+    'AGRO.BA': 'Cresud',
+    'BIOX.BA': 'Bioceres',
+    'DGCU2.BA': 'DGCU2',
+    'SUPV.BA': 'Grupo Supervielle',
+    'APBR.BA': 'Petrobras Argentina',
+    'TS.BA': 'Tenaris',
+    'TGNO4.BA': 'Transportadora de Gas del Norte',
+    'PAMP.BA': 'Pampa Energía',
+    'MIRG.BA': 'Mirgor',
+    'LONG.BA': 'Longvie',
+    'AGRO.BA': 'Cresud',
+    'BIOX.BA': 'Bioceres',
+    'DGCU2.BA': 'DGCU2',
+    'SUPV.BA': 'Grupo Supervielle',
+    'APBR.BA': 'Petrobras Argentina',
+    'TS.BA': 'Tenaris',
+    'TGNO4.BA': 'Transportadora de Gas del Norte'
+}
+
+def download_data(tickers, period="1y", interval="1d"):
+    """
+    Descarga datos históricos de Yahoo Finance para una lista de tickers.
+    
+    Args:
+        tickers (list): Lista de símbolos de activos
+        period (str): Período de tiempo (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max)
+        interval (str): Intervalo de tiempo (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo)
+        
+    Returns:
+        pd.DataFrame: DataFrame con los precios de cierre ajustados
+    """
+    try:
+        import yfinance as yf
+        
+        if not tickers:
+            return pd.DataFrame()
+            
+        # Descargar datos
+        data = yf.download(
+            tickers=tickers if isinstance(tickers, list) else [tickers],
+            period=period,
+            interval=interval,
+            group_by='ticker',
+            progress=False
+        )
+        
+        # Procesar los datos para obtener solo los precios de cierre ajustados
+        if isinstance(tickers, list) and len(tickers) > 1:
+            # Múltiples tickers
+            close_prices = pd.DataFrame()
+            for ticker in tickers:
+                if (ticker,) in data.columns.get_level_values(0):
+                    close_prices[ticker] = data[(ticker, 'Adj Close')].dropna()
+            return close_prices
+        else:
+            # Un solo ticker
+            if 'Adj Close' in data.columns:
+                return data['Adj Close'].to_frame(name=tickers[0] if isinstance(tickers, list) else tickers)
+            else:
+                return data
+                
+    except Exception as e:
+        st.error(f"Error al descargar datos: {str(e)}")
+        return pd.DataFrame()
+
 # --- Funciones de Visualización ---
+def analizar_portafolio_avanzado(portafolio, token_portador, dias_atras=365):
+    """
+    Realiza un análisis avanzado del portafolio comparando con factores y benchmarks.
+    
+    Args:
+        portafolio (dict): Diccionario con los datos del portafolio
+        token_portador (str): Token de autenticación de InvertirOnline
+        dias_atras (int): Cantidad de días hacia atrás para el análisis
+    """
+    st.title("📊 Análisis Avanzado del Portafolio")
+    
+    # Obtener datos históricos del portafolio
+    portafolio_hist = graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras)
+    
+    if portafolio_hist is None:
+        return
+        
+    # Sección de benchmarks para comparación
+    st.header("🔍 Comparación con Benchmarks")
+    
+    # Seleccionar benchmarks relevantes
+    benchmarks_seleccionados = st.multiselect(
+        "Selecciona benchmarks para comparar:",
+        options=list(BENCHMARK_FACTORS.keys()),
+        default=['^GSPC', '^MERV', 'BMA.BA'],  # SP500, Merval, Banco Macro
+        format_func=lambda x: f"{x} - {BENCHMARK_FACTORS.get(x, '')}"
+    )
+    
+    if not benchmarks_seleccionados:
+        st.warning("Por favor selecciona al menos un benchmark para continuar")
+        return
+    
+    # Descargar datos de los benchmarks
+    with st.spinner("Obteniendo datos de benchmarks..."):
+        try:
+            # Obtener datos históricos de los benchmarks
+            benchmark_data = download_data(benchmarks_seleccionados, period=f"{dias_atras}d")
+            
+            if benchmark_data.empty:
+                st.error("No se pudieron obtener datos de los benchmarks seleccionados")
+                return
+                
+            # Normalizar para comparación
+            benchmark_norm = (benchmark_data / benchmark_data.iloc[0]) * 100
+            
+            # Obtener datos del portafolio (asumiendo que ya están normalizados)
+            portafolio_returns = portafolio_hist['Portfolio']
+            
+            # Crear gráfico comparativo
+            fig = go.Figure()
+            
+            # Agregar líneas de benchmarks
+            for col in benchmark_norm.columns:
+                fig.add_trace(go.Scatter(
+                    x=benchmark_norm.index,
+                    y=benchmark_norm[col],
+                    mode='lines',
+                    name=f"{col} - {BENCHMARK_FACTORS.get(col, '')}",
+                    visible='legendonly'  # Ocultar por defecto para no saturar
+                ))
+            
+            # Agregar línea del portafolio (más visible)
+            fig.add_trace(go.Scatter(
+                x=portafolio_returns.index,
+                y=portafolio_returns,
+                mode='lines',
+                name='Tu Portafolio',
+                line=dict(color='#0d6efd', width=3)
+            ))
+            
+            # Configurar diseño del gráfico
+            fig.update_layout(
+                title='Rendimiento del Portafolio vs Benchmarks',
+                xaxis_title='Fecha',
+                yaxis_title='Retorno Acumulado (%)',
+                hovermode='x unified',
+                template='plotly_white',
+                height=600,
+                legend=dict(
+                    orientation='h',
+                    yanchor='bottom',
+                    y=1.02,
+                    xanchor='right',
+                    x=1
+                )
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Calcular métricas de rendimiento
+            st.subheader("📈 Métricas de Rendimiento")
+            
+            # Calcular retornos anualizados
+            dias_totales = (portafolio_returns.index[-1] - portafolio_returns.index[0]).days
+            retorno_total_port = ((portafolio_returns.iloc[-1] / 100) ** (365/dias_totales) - 1) * 100
+            
+            # Calcular volatilidad anualizada
+            retornos_diarios = portafolio_returns.pct_change().dropna()
+            volatilidad_anual = retornos_diarios.std() * np.sqrt(252) * 100
+            
+            # Calcular ratio de Sharpe (asumiendo tasa libre de riesgo 0% por simplicidad)
+            sharpe_ratio = (retorno_total_port / 100) / (volatilidad_anual / 100) if volatilidad_anual > 0 else 0
+            
+            # Mostrar métricas en columnas
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Retorno Anualizado", f"{retorno_total_port:.2f}%")
+            with col2:
+                st.metric("Volatilidad Anual", f"{volatilidad_anual:.2f}%")
+            with col3:
+                st.metric("Ratio de Sharpe", f"{sharpe_ratio:.2f}")
+            with col4:
+                max_drawdown = ((portafolio_returns / portafolio_returns.cummax()) - 1).min() * 100
+                st.metric("Máximo Drawdown", f"{max_drawdown:.2f}%")
+            
+            # Análisis de factores de riesgo
+            st.header("📊 Análisis de Factores de Riesgo")
+            
+            # Seleccionar factores de riesgo para analizar
+            factores_riesgo = {
+                '^VIX': 'Volatilidad del Mercado (VIX)',
+                '^TNX': 'Rendimiento del Tesoro 10 años',
+                'DXY': 'Índice Dólar',
+                'GC=F': 'Oro',
+                'CL=F': 'Petróleo Crudo',
+                'BTC-USD': 'Bitcoin'
+            }
+            
+            # Calcular correlaciones con factores de riesgo
+            st.subheader("Correlación con Factores de Riesgo")
+            
+            # Descargar datos de factores de riesgo
+            factores_data = download_data(list(factores_riesgo.keys()), period=f"{dias_atras}d")
+            
+            if not factores_data.empty:
+                # Calcular retornos diarios
+                retornos_factores = factores_data.pct_change().dropna()
+                
+                # Calcular correlación con el portafolio
+                correlaciones = retornos_factores.corrwith(portafolio_returns.pct_change().dropna())
+                
+                # Crear gráfico de barras de correlaciones
+                fig_corr = go.Figure(go.Bar(
+                    x=correlaciones.index.map(lambda x: f"{x}\n{factores_riesgo.get(x, '')}"),
+                    y=correlaciones,
+                    marker_color=['#1f77b4' if x > 0 else '#d62728' for x in correlaciones]
+                ))
+                
+                fig_corr.update_layout(
+                    title='Correlación con Factores de Riesgo',
+                    xaxis_title='Factor de Riesgo',
+                    yaxis_title='Coeficiente de Correlación',
+                    yaxis=dict(range=[-1, 1]),
+                    height=500
+                )
+                
+                st.plotly_chart(fig_corr, use_container_width=True)
+                
+                # Interpretación de correlaciones
+                st.subheader("Interpretación de las Correlaciones")
+                
+                interpretaciones = []
+                for factor, valor in correlaciones.items():
+                    if valor > 0.5:
+                        interpretacion = f"✅ **Alta correlación positiva** con {factores_riesgo.get(factor, factor)}. "
+                        interpretacion += "Tu portafolio tiende a moverse en la misma dirección que este factor."
+                    elif valor > 0.2:
+                        interpretacion = f"📈 **Correlación moderada positiva** con {factores_riesgo.get(factor, factor)}. "
+                        interpretacion += "Existe cierta relación positiva con este factor."
+                    elif valor < -0.5:
+                        interpretacion = f"🔀 **Alta correlación negativa** con {factores_riesgo.get(factor, factor)}. "
+                        interpretacion += "Tu portafolio tiende a moverse en dirección opuesta a este factor."
+                    elif valor < -0.2:
+                        interpretacion = f"📉 **Correlación moderada negativa** con {factores_riesgo.get(factor, factor)}. "
+                        interpretacion += "Existe cierta relación inversa con este factor."
+                    else:
+                        interpretacion = f"➖ **Baja correlación** con {factores_riesgo.get(factor, factor)}. "
+                        interpretacion += "No hay una relación clara con este factor."
+                    
+                    interpretaciones.append(f"- {interpretacion} (Correlación: {valor:.2f})")
+                
+                st.markdown("\n".join(interpretaciones))
+                
+                # Análisis de riesgo y recomendaciones
+                st.header("🎯 Recomendaciones de Gestión de Riesgo")
+                
+                # Analizar exposición a diferentes factores
+                exposiciones = {
+                    'Mercado Accionario': ['^GSPC', '^MERV'],
+                    'Bonos': ['^TNX', '^TYX'],
+                    'Divisas': ['DXY', 'BRL=X', 'BRLARS=X'],
+                    'Materias Primas': ['GC=F', 'SI=F', 'CL=F'],
+                    'Criptomonedas': ['BTC-USD', 'ETH-USD']
+                }
+                
+                # Calcular exposición aproximada
+                exposicion_portafolio = {}
+                for categoria, factores in exposiciones.items():
+                    # Esto es una simplificación - en una implementación real se usarían betas o ponderaciones reales
+                    exposicion_portafolio[categoria] = np.mean([
+                        abs(correlaciones.get(factor, 0)) 
+                        for factor in factores 
+                        if factor in correlaciones
+                    ] or [0])
+                
+                # Mostrar exposición por categoría
+                fig_expo = go.Figure(go.Bar(
+                    x=list(exposicion_portafolio.keys()),
+                    y=list(exposicion_portafolio.values()),
+                    marker_color='#4e79a7'
+                ))
+                
+                fig_expo.update_layout(
+                    title='Exposición del Portafolio por Categoría de Riesgo',
+                    xaxis_title='Categoría de Riesgo',
+                    yaxis_title='Nivel de Exposición (0-1)',
+                    yaxis=dict(range=[0, 1])
+                )
+                
+                st.plotly_chart(fig_expo, use_container_width=True)
+                
+                # Generar recomendaciones basadas en el análisis
+                st.subheader("🔍 Recomendaciones Personalizadas")
+                
+                recomendaciones = []
+                
+                # Recomendación basada en volatilidad
+                if volatilidad_anual > 30:
+                    recomendaciones.append("⚠️ **Alta volatilidad detectada**: Considera reducir la exposición a activos de alto riesgo o implementar estrategias de cobertura.")
+                elif volatilidad_anual < 15:
+                    recomendaciones.append("💡 **Baja volatilidad**: Podrías considerar incrementar la exposición a activos de mayor crecimiento si tu perfil de riesgo lo permite.")
+                
+                # Recomendación basada en drawdown
+                if max_drawdown < -20:
+                    recomendaciones.append("⚠️ **Alto riesgo de pérdida**: El máximo drawdown histórico es significativo. Revisa tu tolerancia al riesgo.")
+                
+                # Recomendación basada en correlaciones
+                if any(abs(correlaciones) > 0.7):
+                    activos_correl = correlaciones[abs(correlaciones) > 0.7].index.tolist()
+                    activos_nombres = [factores_riesgo.get(a, a) for a in activos_correl]
+                    recomendaciones.append(f"🔗 **Alta dependencia de factores externos**: Tu portafolio está fuertemente correlacionado con {', '.join(activos_nombres)}. Considera diversificar.")
+                
+                # Recomendación general de diversificación
+                if len(portafolio['activos']) < 5:
+                    recomendaciones.append("🌍 **Oportunidad de diversificación**: Tu portafolio tiene pocos activos. Considera diversificar para reducir el riesgo no sistemático.")
+                
+                # Mostrar recomendaciones o mensaje si no hay recomendaciones específicas
+                if recomendaciones:
+                    st.markdown("### Recomendaciones para tu portafolio:")
+                    for rec in recomendaciones:
+                        st.markdown(f"- {rec}")
+                else:
+                    st.success("✅ Tu portafolio parece estar bien diversificado según nuestro análisis.")
+                
+                # Sección de simulación de escenarios
+                st.header("🔄 Simulación de Escenarios")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    escenario_mercado = st.selectbox(
+                        "Selecciona un escenario de mercado:",
+                        ["Mercado Alcista", "Mercado Bajista", "Mayor Volatilidad", "Recesión", "Personalizado"]
+                    )
+                
+                with col2:
+                    if escenario_mercado == "Personalizado":
+                        cambio_mercado = st.slider("Cambio porcentual en el mercado (%):", -50, 50, 10)
+                    else:
+                        cambios = {
+                            "Mercado Alcista": 20,
+                            "Mercado Bajista": -20,
+                            "Mayor Volatilidad": 0,  # Se maneja diferente
+                            "Recesión": -30
+                        }
+                        cambio_mercado = cambios[escenario_mercado]
+                
+                # Calcular impacto estimado
+                if escenario_mercado == "Mayor Volatilidad":
+                    st.info("""
+                    En un escenario de mayor volatilidad:
+                    - Las acciones de crecimiento suelen verse más afectadas
+                    - Los activos refugio como el oro y los bonos pueden apreciarse
+                    - La correlación entre activos puede aumentar
+                    """)
+                else:
+                    # Estimación simplificada del impacto
+                    beta_promedio = 1.0  # Esto debería calcularse basado en la composición real
+                    impacto_estimado = (cambio_mercado / 100) * beta_promedio * 100
+                    
+                    st.metric(
+                        f"Impacto estimado en el portafolio para {escenario_mercado}:",
+                        f"{impacto_estimado:+.1f}%",
+                        delta=f"Para un movimiento del mercado de {cambio_mercado}%"
+                    )
+                    
+                    # Recomendaciones específicas por escenario
+                    if escenario_mercado == "Mercado Bajista" or escenario_mercado == "Recesión":
+                        st.warning("""
+                        **Acciones recomendadas:**
+                        - Considera aumentar la exposición a activos defensivos
+                        - Revisa tu asignación a bonos del tesoro y oro
+                        - Evalúa estrategias de cobertura
+                        """)
+                    elif escenario_mercado == "Mercado Alcista":
+                        st.success("""
+                        **Oportunidades:**
+                        - Podrías aumentar exposición a acciones de crecimiento
+                        - Sectores cíclicos podrían desempeñarse bien
+                        - Considera tomar ganancias en posiciones con fuertes subas
+                        """)
+            
+            # Sección de optimización de cartera
+            st.header("⚙️ Optimización de Cartera")
+            
+            if st.checkbox("Mostrar herramientas avanzadas de optimización"):
+                st.subheader("Optimización de Markowitz")
+                st.write("""
+                La optimización de Markowitz busca encontrar la asignación de activos que maximiza 
+                el retorno esperado para un nivel dado de riesgo, o minimiza el riesgo para un 
+                nivel dado de retorno esperado.
+                """)
+                
+                # Simular pesos aleatorios para la frontera eficiente
+                if st.button("Calcular Frontera Eficiente"):
+                    with st.spinner("Calculando frontera eficiente..."):
+                        try:
+                            # Obtener datos históricos de los activos del portafolio
+                            tickers = [a['simbolo'] for a in portafolio['activos'] if 'simbolo' in a]
+                            if tickers:
+                                # Descargar datos históricos
+                                data = download_data(tickers, period=f"{dias_atras}d")
+                                if not data.empty:
+                                    # Calcular retornos esperados y matriz de covarianza
+                                    returns = data.pct_change().dropna()
+                                    expected_returns = returns.mean() * 252
+                                    cov_matrix = returns.cov() * 252
+                                    
+                                    # Generar carteras aleatorias
+                                    num_portfolios = 10000
+                                    results = np.zeros((3, num_portfolios))
+                                    weights_record = []
+                                    
+                                    for i in range(num_portfolios):
+                                        weights = np.random.random(len(tickers))
+                                        weights /= np.sum(weights)
+                                        weights_record.append(weights)
+                                        portfolio_return = np.sum(expected_returns * weights)
+                                        portfolio_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                                        results[0,i] = portfolio_std_dev
+                                        results[1,i] = portfolio_return
+                                        results[2,i] = (portfolio_return - 0.02) / portfolio_std_dev  # Sharpe ratio (rf=2%)
+                                    
+                                    # Encontrar la cartera óptima (máximo ratio de Sharpe)
+                                    max_sharpe_idx = np.argmax(results[2])
+                                    optimal_weights = weights_record[max_sharpe_idx]
+                                    
+                                    # Crear gráfico de la frontera eficiente
+                                    fig_frontier = go.Figure()
+                                    
+                                    # Puntos de carteras aleatorias
+                                    fig_frontier.add_trace(go.Scatter(
+                                        x=results[0,:],
+                                        y=results[1,:],
+                                        mode='markers',
+                                        name='Carteras Aleatorias',
+                                        marker=dict(
+                                            size=5,
+                                            color=results[2,:],
+                                            colorscale='Viridis',
+                                            showscale=True,
+                                            colorbar=dict(title='Ratio de Sharpe')
+                                        )
+                                    ))
+                                    
+                                    # Cartera óptima
+                                    fig_frontier.add_trace(go.Scatter(
+                                        x=[results[0,max_sharpe_idx]],
+                                        y=[results[1,max_sharpe_idx]],
+                                        mode='markers',
+                                        name='Cartera Óptima',
+                                        marker=dict(
+                                            size=15,
+                                            color='red',
+                                            symbol='star'
+                                        )
+                                    ))
+                                    
+                                    # Configurar diseño
+                                    fig_frontier.update_layout(
+                                        title='Frontera Eficiente de Markowitz',
+                                        xaxis_title='Riesgo (Desviación Estándar Anualizada)',
+                                        yaxis_title='Retorno Anualizado Esperado',
+                                        showlegend=True,
+                                        height=600
+                                    )
+                                    
+                                    st.plotly_chart(fig_frontier, use_container_width=True)
+                                    
+                                    # Mostrar pesos óptimos
+                                    st.subheader("Asignación Óptima de Activos")
+                                    pesos_optimos = pd.DataFrame({
+                                        'Activo': tickers,
+                                        'Peso Actual (%)': [a.get('peso', 0) for a in portafolio['activos'] if 'simbolo' in a],
+                                        'Peso Óptimo (%)': (optimal_weights * 100).round(2)
+                                    })
+                                    
+                                    st.dataframe(pesos_optimos.style.format({
+                                        'Peso Actual (%)': '{:.2f}%',
+                                        'Peso Óptimo (%)': '{:.2f}%'
+                                    }))
+                                    
+                                    # Recomendaciones de rebalanceo
+                                    st.subheader("Recomendaciones de Rebalanceo")
+                                    
+                                    cambios = []
+                                    for _, row in pesos_optimos.iterrows():
+                                        dif = row['Peso Óptimo (%)'] - row['Peso Actual (%)']
+                                        if abs(dif) > 5:  # Solo mostrar cambios significativos
+                                            accion = "Aumentar" if dif > 0 else "Reducir"
+                                            cambios.append(f"- {accion} exposición a **{row['Activo']}** en {abs(dif):.1f}%")
+                                    
+                                    if cambios:
+                                        st.markdown("\n".join(cambios))
+                                    else:
+                                        st.success("Tu cartera ya está bastante cerca de la asignación óptima según el modelo de Markowitz.")
+                                    
+                        except Exception as e:
+                            st.error(f"Error al calcular la frontera eficiente: {str(e)}")
+            
+        except Exception as e:
+            st.error(f"Error en el análisis avanzado: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
+
 def graficar_rendimiento_portafolio(portafolio, token_portador, dias_atras=365):
     """
     Grafica el rendimiento histórico del portafolio usando datos de InvertirOnline
@@ -2301,33 +2844,35 @@ def mostrar_movimientos_asesor():
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
-
     if not cliente:
         st.error("No hay cliente seleccionado")
         return
-
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
-    # Crear tabs con iconos
+    # Obtener datos del portafolio para usar en todas las pestañas
+    portafolio = obtener_portafolio_invertir_online(id_cliente, token_acceso)
+    
+    # Crear pestañas
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Optimización",
-        "💵 Operaciones MEP"
+        "📊 Análisis Avanzado"
     ])
-
+    
     with tab1:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
+            
+    with tab6:  # Nueva pestaña de Análisis Avanzado
+        if portafolio:
+            analizar_portafolio_avanzado(portafolio, token_acceso)
         else:
-            st.warning("No se pudo obtener el portafolio del cliente")
-    
+            st.error("No se pudo cargar el portafolio para el análisis avanzado")
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
