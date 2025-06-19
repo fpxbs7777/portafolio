@@ -1879,46 +1879,54 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
-def mostrar_analisis_tecnico(token_acceso, id_cliente):
-    st.markdown("### 📊 Análisis Técnico")
+def monte_carlo_prediction(historical_prices, days=252, simulations=1000):
+    """
+    Realiza una simulación de Monte Carlo para predecir el precio futuro
     
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
-        return
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("El portafolio está vacío")
-        return
-    
-    simbolos = []
-    for activo in activos:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
-            simbolos.append(simbolo)
-    
-    if not simbolos:
-        st.warning("No se encontraron símbolos válidos")
-        return
-    
-    simbolo_seleccionado = st.selectbox(
-        "Seleccione un activo para análisis técnico:",
-        options=simbolos
-    )
-    
-    if simbolo_seleccionado:
-        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
+    Args:
+        historical_prices: Serie de precios históricos
+        days: Días a proyectar
+        simulations: Número de simulaciones
         
-        # Widget de TradingView
-        tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
+    Returns:
+        dict: Diccionario con estadísticas de la simulación
+    """
+    try:
+        # Calcular retornos logarítmicos
+        returns = np.log(1 + historical_prices.pct_change().dropna())
+        
+        # Calcular parámetros de la distribución
+        u = returns.mean()
+        var = returns.var()
+        drift = u - (0.5 * var)
+        stdev = returns.std()
+        
+        # Crear matriz de precios simulados
+        daily_returns = np.exp(drift + stdev * np.random.standard_normal((days, simulations)))
+        
+        # Crear trayectorias de precios
+        price_paths = np.zeros_like(daily_returns)
+        price_paths[0] = historical_prices.iloc[-1]
+        
+        for t in range(1, days):
+            price_paths[t] = price_paths[t-1] * daily_returns[t]
+        
+        # Calcular estadísticas
+        final_prices = price_paths[-1, :]
+        
+        return {
+            'mean': np.mean(final_prices),
+            'median': np.median(final_prices),
+            'std': np.std(final_prices),
+            'min': np.min(final_prices),
+            'max': np.max(final_prices),
+            'percentile_5': np.percentile(final_prices, 5),
+            'percentile_95': np.percentile(final_prices, 95),
+            'simulations': price_paths
+        }
+    except Exception as e:
+        st.error(f"Error en simulación Monte Carlo: {str(e)}")
+        return None
           "container_id": "tradingview_{simbolo_seleccionado}",
           "width": "100%",
           "height": 650,
@@ -2080,7 +2088,7 @@ def mostrar_analisis_portafolio():
     with tab1:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
-            mostrar_resumen_portafolio(portafolio)
+            mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
