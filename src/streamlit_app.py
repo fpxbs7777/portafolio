@@ -1226,9 +1226,13 @@ def mostrar_resumen_portafolio(portafolio):
                 if precio_unitario > 0:
                     try:
                         cantidad_num = float(cantidad)
-                        valuacion = cantidad_num * precio_unitario
-                    except (ValueError, TypeError):
-                        pass
+                        # Ajustar la valuación para bonos (precio por 100 nominal)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                        else:
+                            valuacion = cantidad_num * precio_unitario
+                    except (ValueError, TypeError) as e:
+                        st.warning(f"Error calculando valuación para {simbolo}: {str(e)}")
             
             datos_activos.append({
                 'Símbolo': simbolo,
