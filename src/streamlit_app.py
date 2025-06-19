@@ -1427,7 +1427,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
             with st.spinner("Consultando tasas de caución..."):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
             
-            if tasas_caucion and isinstance(tasas_caucion, list) and tasas_caucion:
+            if tasas_caucion is not None and not tasas_caucion.empty:
                 df_tasas = pd.DataFrame(tasas_caucion)
                 columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
                 columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
