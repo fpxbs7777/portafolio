@@ -1,18 +1,167 @@
 import streamlit as st
-import requests
-import plotly.graph_objects as go
 import pandas as pd
-from plotly.subplots import make_subplots
-from datetime import date, timedelta, datetime
 import numpy as np
-import yfinance as yf
-import scipy.optimize as op
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import requests
+from datetime import datetime, timedelta
+import base64
+import io
+import matplotlib.pyplot as plt
 from scipy import stats
-import random
+import seaborn as sns
+from scipy.optimize import minimize
 import warnings
-import streamlit.components.v1 as components
-
+import random
+from typing import Dict, List, Tuple, Optional, Union
 warnings.filterwarnings('ignore')
+
+# Configuración de la API
+API_BASE_URL = 'https://api.invertironline.com'
+TOKEN_URL = f"{API_BASE_URL}/token"
+
+class IOLDataFetcher:
+    def __init__(self, username: str, password: str):
+        self.username = username
+        self.password = password
+        self.access_token = None
+        self.refresh_token = None
+        self._authenticate()
+    
+    def _authenticate(self) -> bool:
+        """Autentica y obtiene los tokens de acceso"""
+        payload = {
+            'username': self.username,
+            'password': self.password,
+            'grant_type': 'password'
+        }
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        
+        response = requests.post(TOKEN_URL, data=payload, headers=headers)
+        if response.status_code == 200:
+            tokens = response.json()
+            self.access_token = tokens['access_token']
+            self.refresh_token = tokens['refresh_token']
+            return True
+        else:
+            st.error(f"Error de autenticación: {response.status_code} - {response.text}")
+            return False
+    
+    def _refresh_token(self) -> bool:
+        """Actualiza el token de acceso usando el refresh token"""
+        if not self.refresh_token:
+            return self._authenticate()
+            
+        payload = {
+            'refresh_token': self.refresh_token,
+            'grant_type': 'refresh_token'
+        }
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        
+        response = requests.post(TOKEN_URL, data=payload, headers=headers)
+        if response.status_code == 200:
+            tokens = response.json()
+            self.access_token = tokens['access_token']
+            self.refresh_token = tokens.get('refresh_token', self.refresh_token)
+            return True
+        else:
+            return self._authenticate()
+    
+    def _make_request(self, endpoint: str, method: str = 'GET', **kwargs) -> Optional[dict]:
+        """Realiza una petición autenticada a la API"""
+        if not self.access_token:
+            if not self._authenticate():
+                return None
+        
+        url = f"{API_BASE_URL}{endpoint}"
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            if method.upper() == 'GET':
+                response = requests.get(url, headers=headers, **kwargs)
+            elif method.upper() == 'POST':
+                response = requests.post(url, headers=headers, **kwargs)
+            else:
+                raise ValueError(f"Método HTTP no soportado: {method}")
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 401:  # Token expirado
+                if self._refresh_token():
+                    return self._make_request(endpoint, method, **kwargs)
+            
+            st.error(f"Error en la petición {endpoint}: {response.status_code} - {response.text}")
+            return None
+            
+        except Exception as e:
+            st.error(f"Error al realizar la petición a {endpoint}: {str(e)}")
+            return None
+    
+    def get_historical_data(self, symbol: str, market: str, 
+                          start_date: str, end_date: str, 
+                          adjusted: bool = False) -> Optional[pd.DataFrame]:
+        """Obtiene datos históricos para un símbolo en un mercado específico"""
+        endpoint = f"/api/v2/{market}/Titulos/{symbol}/Cotizacion/seriehistorica/"
+        endpoint += f"{start_date}/{end_date}/{'Ajustada' if adjusted else 'SinAjustar'}"
+        
+        data = self._make_request(endpoint)
+        if data and isinstance(data, list):
+            df = pd.DataFrame(data)
+            if not df.empty and 'fecha' in df.columns:
+                df['fecha'] = pd.to_datetime(df['fecha'])
+                df.set_index('fecha', inplace=True)
+                df.sort_index(inplace=True)
+                return df
+        return None
+    
+    def get_tickers_by_panel(self, panel: str, country: str = 'Argentina') -> List[dict]:
+        """Obtiene los tickers disponibles para un panel específico"""
+        endpoint = f'/api/v2/cotizaciones-orleans/{panel}/{country}/Operables'
+        params = {
+            'cotizacionInstrumentoModel.instrumento': panel,
+            'cotizacionInstrumentoModel.pais': country.lower()
+        }
+        
+        data = self._make_request(endpoint, params=params)
+        if data and 'titulos' in data:
+            return data['titulos']
+        return []
+    
+    def get_random_assets(self, panels: List[str], n_assets: int, country: str = 'Argentina') -> Dict[str, List[dict]]:
+        """Obtiene activos aleatorios de los paneles especificados"""
+        selected_assets = {}
+        
+        for panel in panels:
+            tickers = self.get_tickers_by_panel(panel, country)
+            if tickers:
+                # Seleccionar aleatoriamente hasta n_assets del panel
+                selected = random.sample(tickers, min(n_assets, len(tickers)))
+                selected_assets[panel] = selected
+        
+        return selected_assets
+    
+    def get_historical_data_for_assets(self, assets: Dict[str, List[dict]], 
+                                     start_date: str, end_date: str,
+                                     adjusted: bool = False) -> Dict[str, pd.DataFrame]:
+        """Obtiene datos históricos para múltiples activos"""
+        historical_data = {}
+        
+        for panel, asset_list in assets.items():
+            for asset in asset_list:
+                symbol = asset.get('simbolo')
+                market = asset.get('mercado', 'BCBA')  # Por defecto BCBA si no se especifica
+                
+                if symbol and market:
+                    df = self.get_historical_data(symbol, market, start_date, end_date, adjusted)
+                    if df is not None and not df.empty:
+                        asset_key = f"{panel}_{symbol}"
+                        historical_data[asset_key] = df
+        
+        return historical_data
 
 # Configuración de la página con aspecto profesional
 st.set_page_config(
@@ -938,73 +1087,566 @@ class manager:
         return port_output
 
 class output:
-    def __init__(self, returns, notional):
+    def __init__(self, returns, notional, prices=None):
+        """
+        Inicializa el objeto de salida del portafolio con métricas básicas.
+        
+        Args:
+            returns (pd.Series): Serie de retornos diarios del portafolio
+            notional (float): Valor nominal del portafolio
+            prices (pd.Series, optional): Serie de precios del portafolio para análisis adicional
+        """
         self.returns = returns
+        self.prices = prices
         self.notional = notional
+        
+        # Métricas básicas
         self.mean_daily = np.mean(returns)
+        self.median_daily = np.median(returns)
         self.volatility_daily = np.std(returns)
-        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
-        self.var_95 = np.percentile(returns, 5)
-        self.skewness = stats.skew(returns)
-        self.kurtosis = stats.kurtosis(returns)
+        self.skewness = stats.skew(returns, nan_policy='omit')
+        self.kurtosis = stats.kurtosis(returns, nan_policy='omit')
         self.jb_stat, self.p_value = stats.jarque_bera(returns)
         self.is_normal = self.p_value > 0.05
+        
+        # Métricas de riesgo
+        self.var_95 = np.percentile(returns, 5)
+        self.cvar_95 = self._calculate_cvar(returns, 0.05)
+        self.max_drawdown = self._calculate_max_drawdown()
+        
+        # Ratios
+        self.sharpe_ratio = self._calculate_sharpe_ratio()
+        self.sortino_ratio = self._calculate_sortino_ratio()
+        self.calmar_ratio = self._calculate_calmar_ratio()
+        
+        # Anualización (asumiendo 252 días hábiles)
+        self.volatility_annual = self.volatility_daily * np.sqrt(252)
+        self.return_annual = (1 + self.mean_daily) ** 252 - 1
+        
+        # Configuración
         self.decimals = 4
         self.str_title = 'Portfolio Returns'
-        self.volatility_annual = self.volatility_daily * np.sqrt(252)
-        self.return_annual = self.mean_daily * 252
         
-        # Placeholders que serán actualizados por el manager
+        # Placeholders
         self.weights = None
         self.dataframe_allocation = None
+        self.monte_carlo_prices = None
+        self.monte_carlo_returns = None
+        self.simulation_days = 252  # Días hábiles para simulación
+        
+    def _calculate_cvar(self, returns, alpha=0.05):
+        """Calcula el Conditional Value at Risk (CVaR)"""
+        if len(returns) == 0:
+            return np.nan
+        sorted_returns = np.sort(returns)
+        index = int(alpha * len(sorted_returns))
+        return np.mean(sorted_returns[:index]) if index > 0 else np.min(returns)
+    
+    def _calculate_max_drawdown(self):
+        """Calcula el máximo drawdown basado en precios o retornos"""
+        if self.prices is not None and len(self.prices) > 1:
+            cumulative_returns = (1 + self.returns).cumprod()
+            rolling_max = cumulative_returns.cummax()
+            drawdowns = (cumulative_returns - rolling_max) / rolling_max
+            return drawdowns.min()
+        elif len(self.returns) > 0:
+            cumulative_returns = (1 + self.returns).cumprod()
+            rolling_max = cumulative_returns.cummax()
+            drawdowns = (cumulative_returns - rolling_max) / rolling_max
+            return drawdowns.min()
+        return np.nan
+    
+    def _calculate_sharpe_ratio(self, risk_free_rate=0.0):
+        """Calcula el ratio de Sharpe anualizado"""
+        if self.volatility_daily == 0:
+            return 0
+        return (self.mean_daily * 252 - risk_free_rate) / (self.volatility_daily * np.sqrt(252))
+    
+    def _calculate_sortino_ratio(self, risk_free_rate=0.0):
+        """Calcula el ratio de Sortino anualizado"""
+        if len(self.returns) == 0:
+            return 0
+        excess_returns = self.returns - risk_free_rate/252
+        downside_returns = np.minimum(0, excess_returns)
+        downside_deviation = np.std(downside_returns) * np.sqrt(252)
+        return (np.mean(excess_returns) * 252 - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
+    
+    def _calculate_calmar_ratio(self, years=3):
+        """Calcula el ratio de Calmar (retorno anualizado / máximo drawdown)"""
+        if self.max_drawdown == 0 or np.isnan(self.max_drawdown):
+            return 0
+        return self.return_annual / abs(self.max_drawdown)
 
     def get_metrics_dict(self):
-        """Retorna métricas del portafolio en formato diccionario"""
-        return {
-            'Mean Daily': self.mean_daily,
-            'Volatility Daily': self.volatility_daily,
-            'Sharpe Ratio': self.sharpe_ratio,
-            'VaR 95%': self.var_95,
-            'Skewness': self.skewness,
-            'Kurtosis': self.kurtosis,
-            'JB Statistic': self.jb_stat,
-            'P-Value': self.p_value,
-            'Is Normal': self.is_normal,
-            'Annual Return': self.return_annual,
-            'Annual Volatility': self.volatility_annual
+        """
+        Retorna un diccionario con métricas detalladas del portafolio.
+        
+        Returns:
+            dict: Diccionario con métricas de rendimiento, riesgo y ratios
+        """
+        metrics = {
+            # Rendimiento
+            'Retorno Promedio Diario': self.mean_daily,
+            'Retorno Mediano Diario': self.median_daily,
+            'Retorno Anualizado': self.return_annual,
+            
+            # Riesgo
+            'Volatilidad Diaria': self.volatility_daily,
+            'Volatilidad Anualizada': self.volatility_annual,
+            'VaR 95% (1 día)': self.var_95,
+            'CVaR 95% (1 día)': self.cvar_95,
+            'Máximo Drawdown': self.max_drawdown if not np.isnan(self.max_drawdown) else 0,
+            
+            # Ratios
+            'Ratio de Sharpe': self.sharpe_ratio,
+            'Ratio de Sortino': self.sortino_ratio,
+            'Ratio de Calmar': self.calmar_ratio,
+            
+            # Estadísticas de distribución
+            'Asimetría': self.skewness,
+            'Curtosis': self.kurtosis,
+            'Estadístico JB': self.jb_stat,
+            'P-Valor (Normalidad)': self.p_value,
+            'Distribución Normal': 'Sí' if self.is_normal else 'No'
         }
+        
+        # Agregar métricas de Monte Carlo si están disponibles
+        if hasattr(self, 'monte_carlo_returns') and self.monte_carlo_returns is not None and len(self.monte_carlo_returns) > 0:
+            try:
+                mc_returns = self.monte_carlo_returns.flatten()
+                metrics.update({
+                    'Retorno Esperado (MC)': np.mean(mc_returns) * 252,
+                    'Volatilidad (MC)': np.std(mc_returns) * np.sqrt(252),
+                    'Mejor Escenario (MC)': np.percentile(mc_returns, 90) * 252,
+                    'Peor Escenario (MC)': np.percentile(mc_returns, 10) * 252,
+                    'Prob. Pérdida (MC)': np.mean(mc_returns < 0) * 100
+                })
+            except Exception as e:
+                st.warning(f"Error al calcular métricas de Monte Carlo: {str(e)}")
+        
+        # Formatear valores para mejor visualización
+        formatted_metrics = {}
+        for key, value in metrics.items():
+            if isinstance(value, float):
+                if 'Ratio' in key or 'Retorno' in key or 'VaR' in key or 'CVaR' in key or 'Volatilidad' in key:
+                    if 'Prob.' in key:
+                        formatted_metrics[key] = f"{value:.2f}%"
+                    else:
+                        formatted_metrics[key] = f"{value:.6f}"
+                elif 'P-Valor' in key:
+                    formatted_metrics[key] = f"{value:.6f}"
+                elif 'Máximo Drawdown' in key:
+                    formatted_metrics[key] = f"{value*100:.2f}%"
+                else:
+                    formatted_metrics[key] = f"{value:.6f}"
+            elif isinstance(value, bool):
+                formatted_metrics[key] = 'Sí' if value else 'No'
+            else:
+                formatted_metrics[key] = value
+        
+        return formatted_metrics
 
-    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
-        """Crea un histograma de retornos usando Plotly para Streamlit"""
-        if self.returns is None or len(self.returns) == 0:
-            fig = go.Figure()
-            fig.add_annotation(
-                text="No hay datos suficientes para mostrar",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
+    def run_monte_carlo_simulation(self, n_simulations=1000, days=252, random_seed=None):
+        """
+        Ejecuta una simulación Monte Carlo para proyectar precios futuros del portafolio.
+        
+        Args:
+            n_simulations (int): Número de simulaciones a ejecutar
+            days (int): Número de días a proyectar
+            random_seed (int, optional): Semilla para reproducibilidad
+            
+        Returns:
+            tuple: (precios_simulados, retornos_simulados)
+        """
+        if random_seed is not None:
+            np.random.seed(random_seed)
+            
+        if self.prices is not None and len(self.prices) > 1:
+            # Usar precios históricos si están disponibles
+            log_returns = np.log(self.prices / self.prices.shift(1)).dropna()
+        else:
+            # Usar retornos directos si no hay precios
+            log_returns = np.log(1 + self.returns).dropna()
+        
+        if len(log_returns) < 2:
+            raise ValueError("No hay suficientes datos para la simulación")
+        
+        # Calcular parámetros de la distribución
+        mu = log_returns.mean()
+        sigma = log_returns.std()
+        last_price = self.prices.iloc[-1] if self.prices is not None else 1.0
+        
+        # Inicializar matriz de precios simulados
+        self.simulation_days = days
+        simulated_prices = np.zeros((days, n_simulations))
+        
+        # Generar trayectorias de precios
+        for i in range(n_simulations):
+            # Generar retornos aleatorios con distribución normal
+            random_returns = np.random.normal(mu, sigma, days)
+            # Calcular precios simulados
+            price_series = [last_price]
+            for r in random_returns:
+                price_series.append(price_series[-1] * np.exp(r))
+            simulated_prices[:, i] = price_series[1:]
+        
+        self.monte_carlo_prices = simulated_prices
+        self.monte_carlo_returns = (simulated_prices[1:] / simulated_prices[:-1] - 1)
+        
+        # Calcular métricas de la simulación
+        if hasattr(self, 'monte_carlo_returns') and self.monte_carlo_returns is not None and len(self.monte_carlo_returns) > 0:
+            try:
+                mc_returns = self.monte_carlo_returns.flatten()
+                self.simulation_metrics = {
+                    'retorno_anual': np.mean(mc_returns) * 252 * 100,
+                    'volatilidad_anual': np.std(mc_returns) * np.sqrt(252) * 100,
+                    'prob_perdida': np.mean(mc_returns < 0) * 100
+                }
+            except Exception as e:
+                gridcolor='LightPink',
+                zeroline=True,
+                zerolinewidth=2,
+                zerolinecolor='Gray',
+                type='log' if last_price > 1000 else 'linear'  # Usar escala logarítmica para valores altos
             )
-            fig.update_layout(title=title)
-            return fig
+        )
         
-        fig = go.Figure(data=[go.Histogram(
-            x=self.returns,
-            nbinsx=30,
-            name="Retornos del Portafolio",
-            marker_color='#0d6efd'
-        )])
+        return fig
         
-        # Agregar líneas de métricas importantes
-        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
-                     annotation_text=f"Media: {self.mean_daily:.4f}")
-        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
-                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
+    def plot_monte_carlo_simulation(self, n_simulations=100, days=252):
+        """Visualiza la simulación Monte Carlo de precios futuros"""
+        if self.monte_carlo_prices is None:
+            self.run_monte_carlo_simulation(n_simulations, days)
+            
+        fig = go.Figure()
         
+        # Añadir trayectorias simuladas
+        for i in range(min(n_simulations, 50)):  # Limitar a 50 trayectorias para mejor rendimiento
+            fig.add_trace(go.Scatter(
+                x=list(range(days)),
+                y=self.monte_carlo_prices[:, i],
+                mode='lines',
+                line=dict(width=1, color='rgba(31, 119, 180, 0.1)'),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            
+        # Calcular percentiles
+        percentiles = np.percentile(self.monte_carlo_prices, [5, 50, 95], axis=1)
+        
+        # Añadir percentiles
+        fig.add_trace(go.Scatter(
+            x=list(range(days)),
+            y=percentiles[1],  # Mediana
+            mode='lines',
+            line=dict(color='#2ca02c', width=2),
+            name='Mediana',
+            hovertemplate='Día %{x}<br>Precio: %{y:.2f}<extra></extra>'
+        ))
+        
+        # Rango de confianza 90%
+        fig.add_trace(go.Scatter(
+            x=list(range(days)) + list(range(days))[::-1],
+            y=np.concatenate([percentiles[0], percentiles[2][::-1]]),  # 5% a 95%
+            fill='toself',
+            fillcolor='rgba(44, 160, 44, 0.2)',
+            line=dict(width=0),
+            name='Rango 90%',
+            hoverinfo='skip'
+        ))
+        
+        # Actualizar diseño
         fig.update_layout(
-            title=f"{title}",
-            xaxis_title="Retorno",
-            yaxis_title="Frecuencia",
+            title=dict(
+                text=f'Simulación Monte Carlo ({n_simulations} simulaciones)',
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis_title='Días hábiles',
+            yaxis_title='Valor del Portafolio',
+            showlegend=True,
+            template='plotly_white',
+            height=600,
+            hovermode='x unified',
+            margin=dict(l=50, r=50, t=80, b=50)
+        )
+        
+        return fig
+        
+    def plot_return_distribution(self, title=None, show_metrics=True):
+        """
+        Visualiza la distribución de retornos con histograma, KDE y estadísticas.
+        
+        Args:
+            title (str, optional): Título del gráfico
+            show_metrics (bool): Si se muestran las métricas en el gráfico
+            
+        Returns:
+            plotly.graph_objs.Figure: Figura con la distribución de retornos
+        """
+        if self.returns is None or len(self.returns) == 0:
+            st.warning("No hay datos de retornos para mostrar")
+            return None
+            
+        # Crear figura con subplots
+        fig = make_subplots(rows=2, cols=1, 
+                          row_heights=[0.7, 0.3],
+                          vertical_spacing=0.02,
+                          shared_xaxes=True)
+        
+        # Histograma
+        hist_data = np.clip(self.returns, 
+                          np.percentile(self.returns, 0.1), 
+                          np.percentile(self.returns, 99.9))
+        
+        fig.add_trace(
+            go.Histogram(
+                x=hist_data,
+                nbinsx=100,
+                name='Frecuencia',
+                marker_color='#1f77b4',
+                opacity=0.7,
+                hovertemplate='Retorno: %{x:.4f}<br>Frecuencia: %{y}' + '<extra></extra>',
+                hoverlabel=dict(namelength=0)
+            ),
+            row=1, col=1
+        )
+        
+        # Línea KDE
+        x = np.linspace(min(hist_data), max(hist_data), 500)
+        kde = stats.gaussian_kde(hist_data)
+        kde_curve = kde(x)
+        
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=kde_curve * len(hist_data) * (max(hist_data) - min(hist_data)) / 100,
+                mode='lines',
+                name='KDE',
+                line=dict(color='#ff7f0e', width=2),
+                hovertemplate='Retorno: %{x:.4f}<br>Densidad: %{y:.4f}' + '<extra>KDE</extra>'
+            ),
+            row=1, col=1
+        )
+        
+        # Línea distribución normal
+        normal_pdf = stats.norm.pdf(x, loc=np.mean(hist_data), scale=np.std(hist_data))
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=normal_pdf * len(hist_data) * (max(hist_data) - min(hist_data)) / 100,
+                mode='lines',
+                name='Normal',
+                line=dict(color='#2ca02c', width=2, dash='dash'),
+                hovertemplate='Retorno: %{x:.4f}<br>Densidad: %{y:.4f}' + '<extra>Normal</extra>'
+            ),
+            row=1, col=1
+        )
+        
+        # Box plot
+        fig.add_trace(
+            go.Box(
+                x=hist_data,
+                name='',
+                boxpoints=False,
+                marker_color='#1f77b4',
+                line_width=1,
+                showlegend=False,
+                hoverinfo='x'
+            ),
+            row=2, col=1
+        )
+        
+        # Líneas de referencia importantes
+        mean = np.mean(self.returns)
+        median = np.median(self.returns)
+        std = np.std(self.returns)
+        
+        # Añadir líneas verticales
+        for value, name, color, dash in [
+            (mean, 'Media', 'red', 'solid'),
+            (median, 'Mediana', 'green', 'solid'),
+            (self.var_95, 'VaR 95%', 'purple', 'dash'),
+            (self.cvar_95, 'CVaR 95%', 'orange', 'dot')
+        ]:
+            fig.add_vline(
+                x=value,
+                line=dict(color=color, width=1.5, dash=dash),
+                opacity=0.8,
+                annotation_text=f"{name}: {value:.4f}",
+                annotation_position="top right",
+                row=1, col=1
+            )
+        
+        # Actualizar diseño
+        fig.update_layout(
+            title=dict(
+                text=title or 'Distribución de Retornos',
+                x=0.5,
+                xanchor='center',
+                font=dict(size=18)
+            ),
+            showlegend=True,
+            template='plotly_white',
+            height=700,
+            hovermode='x',
+            margin=dict(l=50, r=50, t=80, b=50),
+            plot_bgcolor='rgba(0,0,0,0.02)',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        # Actualizar ejes
+        fig.update_xaxes(
+            title_text="Retornos",
+            row=2, col=1,
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)',
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='LightGray',
+            showspikes=True,
+            spikethickness=1,
+            spikedash='dot',
+            spikecolor='#999999',
+            spikemode='across',
+            spikesnap='cursor',
+            fixedrange=False
+        )
+        
+        fig.update_yaxes(
+            title_text="Frecuencia",
+            row=1, col=1,
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)',
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='LightGray',
+            fixedrange=False
+        )
+        
+        # Ocultar el eje y del box plot
+        fig.update_yaxes(
+            showticklabels=False,
+            row=2, col=1,
+            fixedrange=False
+        )
+        
+        # Añadir anotaciones con métricas si se solicita
+        if show_metrics:
+            metrics_text = (
+                f"<b>Estadísticas Descriptivas:</b><br>"
+                f"Media: {mean:.6f}<br>"
+                f"Mediana: {median:.6f}<br>"
+                f"Desv. Estándar: {std:.6f}<br>"
+                f"Asimetría: {self.skewness:.4f}<br>"
+                f"Curtosis: {self.kurtosis:.4f}<br>"
+                f"VaR 95%: {self.var_95:.6f}<br>"
+                f"CVaR 95%: {self.cvar_95:.6f}"
+            )
+            
+            fig.add_annotation(
+                x=0.02,
+                y=0.98,
+                xref='paper',
+                yref='paper',
+                text=metrics_text,
+                showarrow=False,
+                align='left',
+                bordercolor='#c7c7c7',
+                borderwidth=1,
+                borderpad=4,
+                bgcolor='white',
+                opacity=0.8,
+                xanchor='left',
+                yanchor='top'
+            )
+        
+        return fig
+        
+    def plot_drawdowns(self):
+        """Visualiza los drawdowns del portafolio"""
+        if self.prices is None or len(self.prices) < 2:
+            return None
+            
+        # Calcular drawdowns
+        cumulative_returns = (1 + self.returns).cumprod()
+        rolling_max = cumulative_returns.cummax()
+        drawdowns = (cumulative_returns - rolling_max) / rolling_max
+        
+        fig = go.Figure()
+        
+        # Área de drawdown
+        fig.add_trace(go.Scatter(
+            x=drawdowns.index,
+            y=drawdowns * 100,  # Convertir a porcentaje
+            fill='tozeroy',
+            mode='none',
+            name='Drawdown',
+            fillcolor='rgba(255, 127, 14, 0.3)',
+            line=dict(color='#ff7f0e', width=1)
+        ))
+        
+        # Línea de drawdown
+        fig.add_trace(go.Scatter(
+            x=drawdowns.index,
+            y=drawdowns * 100,
+            mode='lines',
+            name='Drawdown',
+            line=dict(color='#ff7f0e', width=1.5),
+            hovertemplate='%{y:.2f}%<extra></extra>'
+        ))
+        
+        # Línea en y=0
+        fig.add_hline(
+            y=0,
+            line_dash='dash',
+            line_color='gray',
+            opacity=0.7
+        )
+        
+        # Calcular métricas
+        max_drawdown = drawdowns.min() * 100
+        avg_drawdown = drawdowns.mean() * 100
+        
+        # Añadir anotación con métricas
+        metrics_text = (
+            f"<b>Métricas de Drawdown:</b><br>"
+            f"Máximo Drawdown: {max_drawdown:.2f}%<br>"
+            f"Drawdown Promedio: {avg_drawdown:.2f}%"
+        )
+        
+        fig.add_annotation(
+            x=0.02,
+            y=0.98,
+            xref='paper',
+            yref='paper',
+            text=metrics_text,
+            showarrow=False,
+            align='left',
+            bordercolor='#c7c7c7',
+            borderwidth=1,
+            borderpad=4,
+            bgcolor='white',
+            opacity=0.8
+        )
+        
+        # Actualizar diseño
+        fig.update_layout(
+            title='Evolución de Drawdowns',
+            xaxis_title='Fecha',
+            yaxis_title='Drawdown (%)',
             showlegend=False,
-            template='plotly_white'
+            template='plotly_white',
+            height=400,
+            hovermode='x'
         )
         
         return fig
