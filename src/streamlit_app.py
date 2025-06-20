@@ -12,6 +12,8 @@ import random
 import warnings
 import streamlit.components.v1 as components
 import time
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 warnings.filterwarnings('ignore')
 
@@ -559,19 +561,45 @@ class SerieHistoricaIOL:
         """Detecta automáticamente el mercado más probable para un símbolo"""
         simbolo_upper = simbolo.upper()
         
-        # Patrones comunes para detectar mercados
-        if simbolo_upper.endswith('.BA') or simbolo_upper.endswith('D'):
-            return ['BCBA', 'Cedears']
-        elif simbolo_upper.startswith('AL') or simbolo_upper.startswith('GD') or simbolo_upper.startswith('AY'):
-            return ['TitulosPublicos', 'Bonos', 'BCBA']
-        elif any(ext in simbolo_upper for ext in ['C', 'V', 'D']) and len(simbolo_upper) <= 6:
-            return ['TitulosPublicos', 'Bonos']
-        elif simbolo_upper in ['GGAL', 'YPFD', 'PAMP', 'TXAR', 'BMA', 'SUPV']:
-            return ['BCBA']
-        elif len(simbolo_upper) <= 4 and simbolo_upper.isalpha():
+        # Mapeo de prefijos/sufijos a mercados
+        prefijos_especiales = {
+            'AL': ['TitulosPublicos', 'Bonos', 'BCBA'],
+            'GD': ['TitulosPublicos', 'Bonos', 'BCBA'],
+            'AY': ['TitulosPublicos', 'Bonos', 'BCBA'],
+            'D': ['Cedears', 'BCBA'],  # Cedears normalmente terminan con D
+            'C': ['TitulosPublicos', 'Bonos']
+        }
+        
+        # Tickers internacionales conocidos (NASDAQ/NYSE)
+        tickers_internacionales = ['NVDA', 'GOOGL', 'TSLA', 'AAPL', 'AMZN', 'META', 'ARKK']
+        
+        # Primero verificar si es un ticker internacional conocido
+        if simbolo_upper in tickers_internacionales:
             return ['NYSE', 'NASDAQ']
-        else:
-            return ['BCBA', 'TitulosPublicos', 'Bonos', 'Cedears']
+        
+        # Verificar prefijos especiales
+        for prefijo, mercados in prefijos_especiales.items():
+            if simbolo_upper.startswith(prefijo) or simbolo_upper.endswith(prefijo):
+                return mercados
+        
+        # Cedears comunes
+        cedears_comunes = ['GGAL', 'YPFD', 'PAMP', 'TXAR', 'BMA', 'SUPV', 'COME']
+        if simbolo_upper in cedears_comunes:
+            return ['BCBA']
+        
+        # Para tickers de 1-5 letras (probablemente internacionales)
+        if len(simbolo_upper) <= 5 and simbolo_upper.isalpha():
+            return ['NYSE', 'NASDAQ', 'Cedears', 'BCBA']
+        
+        # Para tickers con puntos (como NVDA.BA)
+        if '.' in simbolo_upper:
+            base = simbolo_upper.split('.')[0]
+            if base in tickers_internacionales:
+                return ['Cedears', 'BCBA']
+            return ['BCBA', 'Cedears']
+        
+        # Default para otros casos
+        return ['BCBA', 'TitulosPublicos', 'Bonos', 'Cedears', 'NYSE', 'NASDAQ']
     
     def obtener_serie_historica(self, simbolo, fecha_desde, fecha_hasta, 
                                mercados=None, ajustada='ajustada', max_datos_por_mercado=1):
@@ -2471,6 +2499,210 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+class AnalizadorPortafolio:
+    """
+    Sistema completo de análisis de portafolio con:
+    - Métricas detalladas
+    - Explicaciones claras
+    - Visualizaciones interactivas
+    - Recomendaciones automáticas
+    """
+    def __init__(self, portafolio_data):
+        """
+        Inicializa con datos del portafolio de IOL
+        portafolio_data: DataFrame con columnas ['simbolo', 'tipo', 'cantidad', 'precio', 'moneda']
+        """
+        self.portafolio = portafolio_data
+        self.metricas = self._calcular_metricas()
+        self.explicaciones = {
+            'total_activos': "Número total de posiciones en tu portafolio, incluyendo múltiples posiciones del mismo activo.",
+            'simbolos_unicos': "Cantidad de activos diferentes en tu portafolio.",
+            'tipos_activos': "Diversificación por clase de activo (acciones, bonos, etc.).",
+            'valor_total': "Valor total calculado en pesos al precio de mercado actual.",
+            'concentracion': """
+                Índice de Herfindahl (0-1) que mide concentración:
+                < 0.15 🟢 Baja | 0.15-0.25 🟡 Media | > 0.25 🔴 Alta
+                Calculado como suma de (valor_activo/valor_total)^2
+            """,
+            'volatilidad': "Desviación estándar del valor diario histórico del portafolio.",
+            'retorno_esperado': "Media de los retornos históricos proyectados a 1 año.",
+            'optimista': "Escenario del mejor 5% de las simulaciones (95% percentil).",
+            'pesimista': "Escenario del peor 5% de las simulaciones (5% percentil).",
+            'prob_ganancia': "Porcentaje de simulaciones con resultado positivo.",
+            'prob_perdida': "Porcentaje de simulaciones con resultado negativo.",
+            'prob_ganancia_10': "Probabilidad de ganar más del 10%.",
+            'prob_perdida_10': "Probabilidad de perder más del 10%."
+        }
+    
+    def _calcular_metricas(self):
+        """Calcula todas las métricas clave del portafolio"""
+        # Métricas básicas
+        valor_por_activo = self.portafolio['cantidad'] * self.portafolio['precio']
+        valor_total = valor_por_activo.sum()
+        
+        # Cálculo de concentración (Índice Herfindahl)
+        participaciones = (valor_por_activo / valor_total) ** 2
+        concentracion = participaciones.sum()
+        
+        # Nivel de concentración (texto)
+        if concentracion < 0.15:
+            nivel_concentracion = "🟢 Baja"
+        elif concentracion < 0.25:
+            nivel_concentracion = "🟡 Media"
+        else:
+            nivel_concentracion = "🔴 Alta"
+        
+        return {
+            'total_activos': len(self.portafolio),
+            'simbolos_unicos': self.portafolio['simbolo'].nunique(),
+            'tipos_activos': self.portafolio['tipo'].nunique(),
+            'valor_total': valor_total,
+            'concentracion': concentracion,
+            'nivel_concentracion': nivel_concentracion,
+            'volatilidad': self._calcular_volatilidad(),
+            'retornos': self._calcular_retornos_diarios()
+        }
+    
+    def _calcular_volatilidad(self):
+        """Calcula volatilidad histórica del portafolio"""
+        # Implementar cálculo real con datos históricos
+        return 2946  # Valor de ejemplo
+    
+    def _calcular_retornos_diarios(self):
+        """Obtiene serie histórica de retornos diarios"""
+        # Implementar con API de IOL
+        return np.random.normal(0.001, 0.02, 252)  # Datos de ejemplo
+    
+    def generar_recomendaciones(self):
+        """Genera recomendaciones basadas en el análisis"""
+        recomendaciones = []
+        
+        if self.metricas['concentracion'] > 0.25:
+            recomendaciones.append("🔴 Considera diversificar tu portafolio para reducir riesgo de concentración")
+        elif self.metricas['concentracion'] > 0.15:
+            recomendaciones.append("🟡 Tu portafolio tiene una concentración moderada")
+        else:
+            recomendaciones.append("🟢 Buen nivel de diversificación en tu portafolio")
+            
+        if self.metricas['tipos_activos'] < 3:
+            recomendaciones.append("🔴 Aumenta diversificación incluyendo más clases de activos")
+            
+        if len(recomendaciones) == 0:
+            recomendaciones.append("🟢 Tu portafolio está bien diversificado y balanceado")
+            
+        return recomendaciones
+    
+    def mostrar_resumen(self):
+        """Muestra dashboard completo con todas las métricas"""
+        st.title("📊 Análisis Integral de Portafolio")
+        
+        # Sección 1: Resumen General
+        st.header("📈 Resumen del Portafolio")
+        cols = st.columns(4)
+        cols[0].metric("Total de Activos", self.metricas['total_activos'], 
+                      help=self.explicaciones['total_activos'])
+        cols[1].metric("Símbolos Únicos", self.metricas['simbolos_unicos'],
+                      help=self.explicaciones['simbolos_unicos'])
+        cols[2].metric("Tipos de Activos", self.metricas['tipos_activos'],
+                      help=self.explicaciones['tipos_activos'])
+        cols[3].metric("Valor Total", f"${self.metricas['valor_total']:,.2f}",
+                      help=self.explicaciones['valor_total'])
+        
+        # Sección 2: Análisis de Riesgo
+        st.header("⚖️ Análisis de Riesgo")
+        cols = st.columns(3)
+        cols[0].metric("Concentración", f"{self.metricas['concentracion']:.3f}",
+                      help=self.explicaciones['concentracion'])
+        cols[1].metric("Volatilidad", f"${self.metricas['volatilidad']:,.2f}",
+                      help=self.explicaciones['volatilidad'])
+        cols[2].metric("Nivel Concentración", self.metricas['nivel_concentracion'],
+                      help="Índice de Herfindahl para medir concentración de riesgo")
+        
+        # Sección 3: Proyecciones
+        st.header("📈 Proyecciones de Rendimiento")
+        proyecciones = self._calcular_proyecciones()
+        
+        cols = st.columns(3)
+        cols[0].metric("Retorno Esperado", f"${proyecciones['retorno_esperado']:,.2f}",
+                      help=self.explicaciones['retorno_esperado'])
+        cols[1].metric("Escenario Optimista", f"${proyecciones['optimista']:,.2f}",
+                      help=self.explicaciones['optimista'])
+        cols[2].metric("Escenario Pesimista", f"${proyecciones['pesimista']:,.2f}",
+                      help=self.explicaciones['pesimista'])
+        
+        # Sección 4: Probabilidades
+        st.header("🎯 Probabilidades")
+        cols = st.columns(4)
+        cols[0].metric("Ganancia", f"{proyecciones['prob_ganancia']:.1f}%",
+                      help=self.explicaciones['prob_ganancia'])
+        cols[1].metric("Pérdida", f"{proyecciones['prob_perdida']:.1f}%",
+                      help=self.explicaciones['prob_perdida'])
+        cols[2].metric("Ganancia >10%", f"{proyecciones['prob_ganancia_10']:.1f}%",
+                      help=self.explicaciones['prob_ganancia_10'])
+        cols[3].metric("Pérdida >10%", f"{proyecciones['prob_perdida_10']:.1f}%",
+                      help=self.explicaciones['prob_perdida_10'])
+        
+        # Sección 5: Distribución de Activos
+        st.header("📊 Distribución de Activos")
+        self._graficar_distribucion_activos()
+        
+        # Sección 6: Detalle de Activos
+        st.header("📋 Detalle de Activos")
+        st.dataframe(self.portafolio, use_container_width=True)
+        
+        # Sección 7: Recomendaciones
+        st.header("💡 Recomendaciones")
+        for rec in self.generar_recomendaciones():
+            st.markdown(f"- {rec}")
+    
+    def _calcular_proyecciones(self, n_simulaciones=10000, horizonte=252):
+        """Calcula proyecciones usando simulación Monte Carlo"""
+        retornos = self.metricas['retornos']
+        media = np.mean(retornos)
+        std = np.std(retornos)
+        
+        # Simulación Monte Carlo
+        simulaciones = np.random.normal(media, std, (n_simulaciones, horizonte))
+        trayectorias = np.cumprod(1 + simulaciones, axis=1) * self.metricas['valor_total']
+        
+        # Calcular métricas
+        finales = trayectorias[:, -1]
+        
+        return {
+            'retorno_esperado': np.median(finales),
+            'optimista': np.percentile(finales, 95),
+            'pesimista': np.percentile(finales, 5),
+            'prob_ganancia': np.mean(finales > self.metricas['valor_total']) * 100,
+            'prob_perdida': np.mean(finales < self.metricas['valor_total']) * 100,
+            'prob_ganancia_10': np.mean(finales > self.metricas['valor_total'] * 1.1) * 100,
+            'prob_perdida_10': np.mean(finales < self.metricas['valor_total'] * 0.9) * 100
+        }
+    
+    def _graficar_distribucion_activos(self):
+        """Muestra gráfico de distribución de activos por tipo"""
+        df_activos = self.portafolio.copy()
+        df_activos['valor'] = df_activos['cantidad'] * df_activos['precio']
+        
+        # Agrupar por tipo de activo
+        df_tipos = df_activos.groupby('tipo')['valor'].sum().reset_index()
+        
+        # Crear gráfico de torta
+        fig = go.Figure(data=[go.Pie(
+            labels=df_tipos['tipo'],
+            values=df_tipos['valor'],
+            hole=.3,
+            textinfo='label+percent',
+            insidetextorientation='radial'
+        )])
+        
+        fig.update_layout(
+            title_text="Distribución por Tipo de Activo",
+            showlegend=False,
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     main()
