@@ -916,7 +916,7 @@ def optimizar_portafolio(returns, num_portfolios=10000, risk_free_rate=0.05):
     
     return results, np.array(weights_record)
 
-def mostrar_grafico_optimizacion(results, returns):
+def mostrar_grafico_optimizacion(results, returns, weights_record):
     """Muestra el gráfico de optimización del portafolio"""
     max_sharpe_idx = np.argmax(results[2])
     sdp, rp = results[0, max_sharpe_idx], results[1, max_sharpe_idx]
@@ -1245,12 +1245,10 @@ def main():
             if not simbolo:
                 continue  # Saltar si no hay símbolo
             
-            # Obtener datos históricos
-            datos = obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, 'Ajustada', bearer_token)
-            if datos:
-                df_temp = pd.DataFrame(datos)
-                if not df_temp.empty and 'ultimoPrecio' in df_temp.columns:
-                    precios[simbolo] = df_temp['ultimoPrecio']
+            # Corregido: usar la función correcta
+            datos = obtener_serie_historica_iol(bearer_token, mercado, simbolo, fecha_desde, fecha_hasta, 'ajustada')
+            if datos is not None and not datos.empty:
+                precios[simbolo] = datos
         
         # Crear DataFrame con los precios
         if precios:
@@ -1262,7 +1260,7 @@ def main():
             # Optimizar portafolio
             print("\nOptimizando portafolio...")
             resultados, pesos = optimizar_portafolio(retornos)
-            mostrar_grafico_optimizacion(resultados, retornos)
+            mostrar_grafico_optimizacion(resultados, retornos, pesos)
     
     # 4. Mostrar tipos de fondos y administradoras
     print("\n=== INFORMACIÓN ADICIONAL ===")
