@@ -11,6 +11,7 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+import time
 
 warnings.filterwarnings('ignore')
 
@@ -428,277 +429,474 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
-            continue
 
-    try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
-    except Exception:
-        return None
-
-def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+class SerieHistoricaIOL:
     """
-    Devuelve el endpoint correcto según el tipo de activo
+    Clase universal para obtener series históricas de todos los mercados y activos de IOL
     """
-    base_url = "https://api.invertironline.com/api/v2"
     
-    # Mapeo de mercados a sus respectivos endpoints
-    endpoints = {
-        'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'FCI': f"{base_url}/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
-        'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
-        'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-    }
+    def __init__(self, bearer_token, refresh_token=None):
+        self.bearer_token = bearer_token
+        self.refresh_token = refresh_token
+        self.base_url = "https://api.invertironline.com/api/v2"
+        self.headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {self.bearer_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Configuración de mercados y endpoints
+        self.mercados_config = {
+            'BCBA': {
+                'endpoint': 'BCBA/Titulos',
+                'tipos_activos': ['Acciones', 'Bonos', 'TitulosPublicos', 'Cedears']
+            },
+            'NYSE': {
+                'endpoint': 'NYSE/Titulos', 
+                'tipos_activos': ['Acciones', 'ADRs']
+            },
+            'NASDAQ': {
+                'endpoint': 'NASDAQ/Titulos',
+                'tipos_activos': ['Acciones', 'ADRs']
+            },
+            'ROFEX': {
+                'endpoint': 'ROFEX/Titulos',
+                'tipos_activos': ['Futuros', 'Opciones']
+            },
+            'FCI': {
+                'endpoint': 'Titulos/FCI',
+                'tipos_activos': ['FCI']
+            },
+            'Bonos': {
+                'endpoint': 'Bonos/Titulos',
+                'tipos_activos': ['Bonos', 'TitulosPublicos']
+            },
+            'Cedears': {
+                'endpoint': 'Cedears/Titulos',
+                'tipos_activos': ['Cedears']
+            },
+            'ADRs': {
+                'endpoint': 'ADRs/Titulos',
+                'tipos_activos': ['ADRs']
+            },
+            'TitulosPublicos': {
+                'endpoint': 'TitulosPublicos',
+                'tipos_activos': ['TitulosPublicos', 'Bonos']
+            },
+            'Opciones': {
+                'endpoint': 'Opciones',
+                'tipos_activos': ['Opciones']
+            },
+            'Cauciones': {
+                'endpoint': 'Cotizaciones/Cauciones',
+                'tipos_activos': ['Caucion']
+            }
+        }
+        
+        # Endpoints especiales
+        self.endpoints_especiales = {
+            'MEP': 'Cotizaciones/MEP',
+            'Cauciones': 'Cotizaciones/Cauciones/Todas/Argentina',
+            'Instrumentos': 'Instrumentos'
+        }
     
-    # Intentar determinar automáticamente el tipo de activo si no se especifica
-    if mercado not in endpoints:
-        if simbolo.endswith(('.BA', '.AR')):
-            return endpoints.get('Cedears')
-        elif any(ext in simbolo.upper() for ext in ['AL', 'GD', 'AY24', 'GD30', 'AL30']):
-            return endpoints.get('Bonos')
-        else:
-            # Por defecto, asumimos que es un título regular
-            return f"{base_url}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    
-    return endpoints.get(mercado)
-
-def procesar_respuesta_historico(data, tipo_activo):
-    """
-    Procesa la respuesta de la API según el tipo de activo
-    """
-    if not data:
-        return None
-    
-    try:
-        # Para series históricas estándar
-        if isinstance(data, list):
-            precios = []
-            fechas = []
+    def refrescar_token(self):
+        """Refresca el token de acceso"""
+        if not self.refresh_token:
+            return False
             
-            for item in data:
-                try:
-                    # Manejar diferentes estructuras de respuesta
-                    if isinstance(item, dict):
-                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
-                        if not precio or precio == 0:
-                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+        try:
+            token_url = 'https://api.invertironline.com/token'
+            payload = {
+                'refresh_token': self.refresh_token,
+                'grant_type': 'refresh_token'
+            }
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            response = requests.post(token_url, data=payload, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                tokens = response.json()
+                self.bearer_token = tokens['access_token']
+                self.refresh_token = tokens['refresh_token']
+                self.headers['Authorization'] = f'Bearer {self.bearer_token}'
+                return True
+            else:
+                st.error(f'Error refrescando token: {response.status_code}')
+                return False
+        except Exception as e:
+            st.error(f'Error al refrescar token: {str(e)}')
+            return False
+    
+    def _hacer_peticion(self, url, max_reintentos=2):
+        """Hace una petición HTTP con manejo de errores y reintentos"""
+        for intento in range(max_reintentos + 1):
+            try:
+                response = requests.get(url, headers=self.headers, timeout=15)
+                
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 401 and intento == 0:
+                    # Intentar refrescar token
+                    if self.refrescar_token():
+                        continue
+                    else:
+                        return None
+                else:
+                    if intento == max_reintentos:
+                        st.warning(f"Error {response.status_code} en URL: {url}")
+                    return None
+                    
+            except requests.exceptions.RequestException as e:
+                if intento == max_reintentos:
+                    st.warning(f"Error de conexión: {str(e)}")
+                time.sleep(1)  # Pausa entre reintentos
+                
+        return None
+    
+    def detectar_mercado_simbolo(self, simbolo):
+        """Detecta automáticamente el mercado más probable para un símbolo"""
+        simbolo_upper = simbolo.upper()
+        
+        # Patrones comunes para detectar mercados
+        if simbolo_upper.endswith('.BA') or simbolo_upper.endswith('D'):
+            return ['BCBA', 'Cedears']
+        elif simbolo_upper.startswith('AL') or simbolo_upper.startswith('GD') or simbolo_upper.startswith('AY'):
+            return ['TitulosPublicos', 'Bonos', 'BCBA']
+        elif any(ext in simbolo_upper for ext in ['C', 'V', 'D']) and len(simbolo_upper) <= 6:
+            return ['TitulosPublicos', 'Bonos']
+        elif simbolo_upper in ['GGAL', 'YPFD', 'PAMP', 'TXAR', 'BMA', 'SUPV']:
+            return ['BCBA']
+        elif len(simbolo_upper) <= 4 and simbolo_upper.isalpha():
+            return ['NYSE', 'NASDAQ']
+        else:
+            return ['BCBA', 'TitulosPublicos', 'Bonos', 'Cedears']
+    
+    def obtener_serie_historica(self, simbolo, fecha_desde, fecha_hasta, 
+                               mercados=None, ajustada='ajustada', max_datos_por_mercado=1):
+        """
+        Obtiene serie histórica para un símbolo específico
+        
+        Args:
+            simbolo (str): Símbolo del activo
+            fecha_desde (str): Fecha de inicio (formato 'YYYY-MM-DD')
+            fecha_hasta (str): Fecha de fin (formato 'YYYY-MM-DD')
+            mercados (list): Lista de mercados a consultar (None = auto-detectar)
+            ajustada (str): 'ajustada' o 'SinAjustar'
+            max_datos_por_mercado (int): Máximo número de mercados a consultar
+            
+        Returns:
+            pandas.Series: Serie de precios indexada por fecha
+        """
+        if mercados is None:
+            mercados = self.detectar_mercado_simbolo(simbolo)
+        
+        mercados_a_probar = mercados[:max_datos_por_mercado] if max_datos_por_mercado else mercados
+        
+        for mercado in mercados_a_probar:
+            try:
+                serie = self._obtener_serie_mercado_especifico(
+                    simbolo, mercado, fecha_desde, fecha_hasta, ajustada
+                )
+                if serie is not None and not serie.empty:
+                    return serie
+            except Exception as e:
+                continue
+        
+        return None
+    
+    def _obtener_serie_mercado_especifico(self, simbolo, mercado, fecha_desde, fecha_hasta, ajustada):
+        """Obtiene serie para un mercado específico"""
+        if mercado not in self.mercados_config:
+            return None
+        
+        config = self.mercados_config[mercado]
+        endpoint = config['endpoint']
+        
+        # Construir URL según el tipo de mercado
+        if mercado == 'FCI':
+            url = f"{self.base_url}/{endpoint}/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        elif mercado in ['Opciones']:
+            url = f"{self.base_url}/{endpoint}/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        elif mercado == 'Cauciones':
+            # Para cauciones, usamos endpoint diferente
+            url = f"{self.base_url}/Cotizaciones/Cauciones/Todas/Argentina"
+        else:
+            url = f"{self.base_url}/{endpoint}/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        
+        data = self._hacer_peticion(url)
+        return self._procesar_respuesta_serie(data, simbolo)
+    
+    def _procesar_respuesta_serie(self, data, simbolo):
+        """Procesa la respuesta de la API y devuelve una serie de pandas"""
+        if not data:
+            return None
+        
+        try:
+            # Manejar diferentes formatos de respuesta
+            if isinstance(data, list):
+                precios = []
+                fechas = []
+                
+                for item in data:
+                    try:
+                        # Diferentes campos de precio según el endpoint
+                        precio = (item.get('ultimoPrecio') or 
+                                item.get('precio') or 
+                                item.get('valor') or
+                                item.get('cierre') or
+                                item.get('cierreAnterior') or
+                                item.get('precioPromedio') or
+                                item.get('apertura'))
                         
-                        fecha_str = item.get('fechaHora') or item.get('fecha')
+                        fecha_str = (item.get('fechaHora') or 
+                                   item.get('fecha') or
+                                   item.get('fechaOperacion'))
                         
                         if precio is not None and precio > 0 and fecha_str:
-                            fecha_parsed = parse_datetime_flexible(fecha_str)
-                            if fecha_parsed is not None:
+                            fecha_parsed = self._parse_fecha(fecha_str)
+                            if fecha_parsed:
                                 precios.append(float(precio))
                                 fechas.append(fecha_parsed)
-                except (ValueError, AttributeError) as e:
-                    continue
-            
-            if precios and fechas:
-                serie = pd.Series(precios, index=fechas, name='precio')
-                serie = serie[~serie.index.duplicated(keep='last')]
-                return serie.sort_index()
-        
-        # Para respuestas que son un solo valor (ej: MEP)
-        elif isinstance(data, (int, float)):
-            return pd.Series([float(data)], index=[pd.Timestamp.now()], name='precio')
-            
-        return None
-        
-    except Exception as e:
-        st.error(f"Error al procesar respuesta histórica: {str(e)}")
-        return None
-
-def obtener_fondos_comunes(token_portador):
-    """
-    Obtiene la lista de fondos comunes de inversión disponibles
-    """
-    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
-    headers = {
-        'Authorization': f'Bearer {token_portador}'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener fondos comunes: {str(e)}")
-        return []
-
-def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene la serie histórica de un fondo común de inversión
-    """
-    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
-    headers = {
-        'Authorization': f'Bearer {token_portador}'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
-        return None
-
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    """
-    Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
-    """
-    try:
-        # Primero intentamos con el endpoint específico del mercado
-        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-        if not url:
-            st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
-            return None
-        
-        headers = obtener_encabezado_autorizacion(token_portador)
-        
-        # Configurar un timeout más corto para no bloquear la interfaz
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        # Verificar si la respuesta es exitosa
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict) and data.get('status') == 'error':
-                st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
-                return None
+                    except (ValueError, TypeError):
+                        continue
                 
-            # Procesar la respuesta según el tipo de activo
-            return procesar_respuesta_historico(data, mercado)
-        else:
-            st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
+                if precios and fechas:
+                    serie = pd.Series(precios, index=fechas, name=simbolo)
+                    serie = serie[~serie.index.duplicated(keep='last')]
+                    return serie.sort_index()
+            
+            # Para respuestas de FCI o datos únicos
+            elif isinstance(data, dict):
+                if 'ultimaCotizacion' in data:
+                    cotizacion = data['ultimaCotizacion']
+                    precio = cotizacion.get('precio')
+                    fecha = cotizacion.get('fecha')
+                    
+                    if precio and fecha:
+                        fecha_parsed = self._parse_fecha(fecha)
+                        if fecha_parsed:
+                            return pd.Series([float(precio)], index=[fecha_parsed], name=simbolo)
+                
+                # Manejar otros formatos de respuesta
+                elif 'precio' in data and ('fecha' in data or 'fechaHora' in data):
+                    precio = data.get('precio')
+                    fecha = data.get('fecha') or data.get('fechaHora')
+                    
+                    if precio and fecha:
+                        fecha_parsed = self._parse_fecha(fecha)
+                        if fecha_parsed:
+                            return pd.Series([float(precio)], index=[fecha_parsed], name=simbolo)
+            
+            # Para respuestas numéricas simples (ej: MEP)
+            elif isinstance(data, (int, float)):
+                return pd.Series([float(data)], index=[pd.Timestamp.now()], name=simbolo)
+            
             return None
             
-    except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión para {simbolo}: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
-        return None
+        except Exception as e:
+            st.warning(f"Error procesando serie para {simbolo}: {str(e)}")
+            return None
+    
+    def _parse_fecha(self, fecha_str):
+        """Parse flexible de fechas"""
+        formatos = [
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%d-%m-%Y"
+        ]
+        
+        for fmt in formatos:
+            try:
+                return pd.to_datetime(fecha_str, format=fmt)
+            except:
+                continue
+        
+        try:
+            return pd.to_datetime(fecha_str, infer_datetime_format=True)
+        except:
+            return None
+    
+    def obtener_multiples_series(self, simbolos_mercados, fecha_desde, fecha_hasta, 
+                                ajustada='ajustada', mostrar_progreso=True):
+        """
+        Obtiene múltiples series históricas
+        
+        Args:
+            simbolos_mercados (list): Lista de tuplas (simbolo, mercado) o lista de símbolos
+            fecha_desde (str): Fecha inicio
+            fecha_hasta (str): Fecha fin
+            ajustada (str): Tipo de ajuste
+            mostrar_progreso (bool): Mostrar barra de progreso
+            
+        Returns:
+            dict: Diccionario con símbolo como clave y serie como valor
+        """
+        series_dict = {}
+        
+        if mostrar_progreso:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+        
+        total = len(simbolos_mercados)
+        
+        for idx, item in enumerate(simbolos_mercados):
+            if isinstance(item, tuple):
+                simbolo, mercados = item
+            else:
+                simbolo = item
+                mercados = None
+            
+            if mostrar_progreso:
+                progress = (idx + 1) / total
+                progress_bar.progress(progress)
+                status_text.text(f"Procesando {simbolo} ({idx + 1}/{total})")
+            
+            try:
+                serie = self.obtener_serie_historica(
+                    simbolo=simbolo,
+                    fecha_desde=fecha_desde,
+                    fecha_hasta=fecha_hasta,
+                    mercados=mercados,
+                    ajustada=ajustada
+                )
+                
+                if serie is not None and not serie.empty:
+                    series_dict[simbolo] = serie
+                else:
+                    st.warning(f"No se obtuvieron datos para {simbolo}")
+                    
+            except Exception as e:
+                st.warning(f"Error obteniendo {simbolo}: {str(e)}")
+            
+            # Pausa para no saturar la API
+            time.sleep(0.3)
+        
+        if mostrar_progreso:
+            progress_bar.empty()
+            status_text.empty()
+        
+        return series_dict
+    
+    def obtener_cotizacion_mep(self, simbolo, id_plazo_compra=1, id_plazo_venta=1):
+        """Obtiene cotización MEP para un símbolo"""
+        url = f"{self.base_url}/Cotizaciones/MEP"
+        datos = {
+            "simbolo": simbolo,
+            "idPlazoOperatoriaCompra": id_plazo_compra,
+            "idPlazoOperatoriaVenta": id_plazo_venta
+        }
+        
+        try:
+            response = requests.post(url, headers=self.headers, json=datos, timeout=15)
+            if response.status_code == 200:
+                resultado = response.json()
+                if isinstance(resultado, (int, float)):
+                    return {'precio': resultado, 'simbolo': simbolo}
+                elif isinstance(resultado, dict):
+                    return resultado
+                else:
+                    return {'precio': None, 'simbolo': simbolo, 'error': 'Formato inesperado'}
+            else:
+                return {'precio': None, 'simbolo': simbolo, 'error': f'Error HTTP {response.status_code}'}
+        except Exception as e:
+            return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
+    
+    def listar_instrumentos_mercado(self, mercado):
+        """Lista todos los instrumentos disponibles en un mercado"""
+        if mercado not in self.mercados_config:
+            return []
+        
+        config = self.mercados_config[mercado]
+        endpoint = config['endpoint']
+        
+        # URL para listar instrumentos
+        url = f"{self.base_url}/{endpoint}"
+        
+        data = self._hacer_peticion(url)
+        if data and isinstance(data, list):
+            return [item.get('simbolo', '') for item in data if 'simbolo' in item]
+        elif data and isinstance(data, dict) and 'titulos' in data:
+            return [item.get('simbolo', '') for item in data['titulos'] if 'simbolo' in item]
+        else:
+            return []
+
+# Función de conveniencia para mantener compatibilidad
+def crear_serie_historica_manager(token_acceso, refresh_token=None):
+    """Crea una instancia del manager de series históricas"""
+    return SerieHistoricaIOL(token_acceso, refresh_token)
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
-    Obtiene datos históricos para optimización con manejo mejorado de errores,
-    reintentos automáticos y soporte para FCIs
+    Obtiene datos históricos para optimización usando la nueva clase universal
     """
-    precios = {}
-    errores = []
-    max_retries = 2
-    
-    with st.spinner("Obteniendo datos históricos..."):
-        progress_bar = st.progress(0)
-        total_symbols = len(simbolos)
+    try:
+        # Crear manager de series históricas
+        serie_manager = SerieHistoricaIOL(token_portador)
         
-        for idx, (simbolo, mercado) in enumerate(simbolos):
-            progress = (idx + 1) / total_symbols
-            progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
-            
-            # Manejo especial para FCIs
-            if mercado.lower() == 'fci':
-                data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
-                    try:
-                        df = pd.DataFrame({
-                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
-                            'cierre': [data['ultimaCotizacion']['precio']]
-                        })
-                        df.set_index('fecha', inplace=True)
-                        precios[simbolo] = df['cierre']
-                    except Exception as e:
-                        st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
-                        errores.append(simbolo)
-                else:
-                    st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
-                    errores.append(simbolo)
-                continue
-                
-            for attempt in range(max_retries):
-                try:
-                    # Intentar obtener datos de IOL
-                    serie = obtener_serie_historica_iol(
-                        token_portador=token_portador,
-                        mercado=mercado,
-                        simbolo=simbolo,
-                        fecha_desde=fecha_desde,
-                        fecha_hasta=fecha_hasta
-                    )
-                    
-                    if serie is not None and not serie.empty:
-                        precios[simbolo] = serie
-                        break  # Salir del bucle de reintentos si tiene éxito
-                    
-                except Exception as e:
-                    if attempt == max_retries - 1:  # Último intento
-                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
-                        errores.append(simbolo)
-                    continue
-            
-            # Pequeña pausa entre solicitudes para no saturar el servidor
-            time.sleep(0.5)
+        # Preparar lista de símbolos con mercados auto-detectados
+        simbolos_procesados = []
+        for item in simbolos:
+            if isinstance(item, tuple):
+                simbolo, mercado = item
+                simbolos_procesados.append((simbolo, [mercado] if mercado else None))
+            else:
+                simbolos_procesados.append(item)
         
-        progress_bar.empty()
+        # Obtener series múltiples
+        series_dict = serie_manager.obtener_multiples_series(
+            simbolos_mercados=simbolos_procesados,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+            ajustada='ajustada',
+            mostrar_progreso=True
+        )
         
-        if errores:
-            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
+        if not series_dict:
+            st.error("❌ No se pudieron cargar los datos históricos")
+            return None, None, None
         
-        if precios:
-            st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
-            
-            # Asegurarse de que todas las series tengan la misma longitud
-            min_length = min(len(s) for s in precios.values()) if precios else 0
-            if min_length < 5:  # Mínimo razonable de datos para optimización
-                st.error("Los datos históricos son insuficientes para la optimización")
-                return None, None, None
-                
-            # Crear DataFrame con las series alineadas
-            df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
-            
-            # Calcular retornos y validar
-            returns = df_precios.pct_change().dropna()
-            
-            if returns.empty or len(returns) < 30:
-                st.warning("No hay suficientes datos para el análisis")
-                return None, None, None
-                
-            # Eliminar columnas con desviación estándar cero
-            if (returns.std() == 0).any():
-                columnas_constantes = returns.columns[returns.std() == 0].tolist()
-                returns = returns.drop(columns=columnas_constantes)
-                df_precios = df_precios.drop(columns=columnas_constantes)
-                
-                if returns.empty or len(returns.columns) < 2:
-                    st.warning("No hay suficientes activos válidos para la optimización")
-                    return None, None, None
-                    
-            mean_returns = returns.mean()
-            cov_matrix = returns.cov()
-            return mean_returns, cov_matrix, df_precios
+        # Crear DataFrame alineado
+        df_precios = pd.DataFrame(series_dict)
         
-    st.error("❌ No se pudieron cargar los datos históricos")
-    return None, None, None
+        if df_precios.empty:
+            st.error("❌ DataFrame vacío")
+            return None, None, None
+        
+        # Rellenar datos faltantes hacia adelante
+        df_precios = df_precios.fillna(method='ffill').dropna()
+        
+        if len(df_precios) < 30:
+            st.warning("⚠️ Datos insuficientes para análisis (menos de 30 observaciones)")
+            return None, None, None
+        
+        # Calcular retornos
+        returns = df_precios.pct_change().dropna()
+        
+        # Eliminar columnas con varianza cero
+        valid_columns = returns.columns[returns.std() > 0]
+        if len(valid_columns) < 2:
+            st.warning("⚠️ No hay suficientes activos con variación para optimización")
+            return None, None, None
+        
+        returns = returns[valid_columns]
+        df_precios = df_precios[valid_columns]
+        
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        
+        st.success(f"✅ Datos cargados: {len(valid_columns)} activos, {len(returns)} observaciones")
+        
+        return mean_returns, cov_matrix, df_precios
+        
+    except Exception as e:
+        st.error(f"❌ Error en get_historical_data_for_optimization: {str(e)}")
+        return None, None, None
 
 def calcular_metricas_portafolio(activos_data, valor_total):
     """
@@ -1606,6 +1804,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
                         labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
                         
+                                               
                         for i, (label, portfolio) in enumerate(portfolios.items()):
                             if portfolio is not None:
                                 fig.add_trace(go.Scatter(
