@@ -9,7 +9,10 @@ from typing import Dict, List, Optional, Tuple, Union
 warnings.filterwarnings('ignore')
 
 # Configuración de estilo para gráficos
-plt.style.use('seaborn')
+try:
+    plt.style.use('seaborn')
+except OSError:
+    plt.style.use('default')  # Fallback to default style if seaborn is not available
 plt.rcParams['figure.figsize'] = [12, 6]
 
 # Constantes para perfiles de inversor
