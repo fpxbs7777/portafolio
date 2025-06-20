@@ -639,66 +639,23 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         
         # Procesar la respuesta
         data = response.json()
-                        token_portador=token_portador,
-                        mercado=mercado,
-                        simbolo=simbolo,
-                        fecha_desde=fecha_desde,
-                        fecha_hasta=fecha_hasta
-                    )
-                    
-                    if serie is not None and not serie.empty:
-                        precios[simbolo] = serie
-                        break  # Salir del bucle de reintentos si tiene éxito
-                    
-                except Exception as e:
-                    if attempt == max_retries - 1:  # Último intento
-                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
-                        errores.append(simbolo)
-                    continue
-            
-            # Pequeña pausa entre solicitudes para no saturar el servidor
-            time.sleep(0.5)
         
-        progress_bar.empty()
+        # Convertir a DataFrame para mantener compatibilidad
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            # Asegurar que las columnas de fecha estén en el formato correcto
+            if 'fecha' in df.columns:
+                df['fecha'] = pd.to_datetime(df['fecha'])
+                df.set_index('fecha', inplace=True)
+            return df
+        return None
         
-        if errores:
-            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
-        
-        if precios:
-            st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
-            
-            # Asegurarse de que todas las series tengan la misma longitud
-            min_length = min(len(s) for s in precios.values()) if precios else 0
-            if min_length < 5:  # Mínimo razonable de datos para optimización
-                st.error("Los datos históricos son insuficientes para la optimización")
-                return None, None, None
-                
-            # Crear DataFrame con las series alineadas
-            df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
-            
-            # Calcular retornos y validar
-            returns = df_precios.pct_change().dropna()
-            
-            if returns.empty or len(returns) < 30:
-                st.warning("No hay suficientes datos para el análisis")
-                return None, None, None
-                
-            # Eliminar columnas con desviación estándar cero
-            if (returns.std() == 0).any():
-                columnas_constantes = returns.columns[returns.std() == 0].tolist()
-                returns = returns.drop(columns=columnas_constantes)
-                df_precios = df_precios.drop(columns=columnas_constantes)
-                
-                if returns.empty or len(returns.columns) < 2:
-                    st.warning("No hay suficientes activos válidos para la optimización")
-                    return None, None, None
-                    
-            mean_returns = returns.mean()
-            cov_matrix = returns.cov()
-            return mean_returns, cov_matrix, df_precios
-        
-    st.error("❌ No se pudieron cargar los datos históricos")
-    return None, None, None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar datos históricos para {simbolo}: {str(e)}")
+        return None
 
 def calcular_metricas_portafolio(activos_data, valor_total):
     """
