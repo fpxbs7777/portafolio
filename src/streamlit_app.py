@@ -825,6 +825,182 @@ class SerieHistoricaIOL:
             return [item.get('simbolo', '') for item in data['titulos'] if 'simbolo' in item]
         else:
             return []
+    
+    def obtener_tickers_por_panel(self, paneles, pais='Argentina'):
+        """
+        Obtiene tickers operables por panel
+        
+        Args:
+            paneles (list): Lista de paneles a consultar
+            pais (str): País de los instrumentos
+            
+        Returns:
+            dict: Diccionario {panel: [tickers]}
+            DataFrame: DataFrame con todos los tickers y sus paneles
+        """
+        tickers_por_panel = {}
+        tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
+        
+        for panel in paneles:
+            url = f'{self.base_url}/cotizaciones-orleans/{panel}/{pais}/Operables'
+            data = self._hacer_peticion(url)
+            
+            if data and 'titulos' in data:
+                tickers = [titulo['simbolo'] for titulo in data['titulos']]
+                tickers_por_panel[panel] = tickers
+                panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
+                tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
+            
+        return tickers_por_panel, tickers_df
+    
+    def obtener_series_historicas_aleatorias(self, tickers_por_panel, paneles_seleccionados,
+                                          cantidad_activos, fecha_desde, fecha_hasta, 
+                                          ajustada='ajustada'):
+        """
+        Obtiene series históricas para activos seleccionados aleatoriamente por panel
+        
+        Args:
+            tickers_por_panel (dict): Diccionario de tickers por panel
+            paneles_seleccionados (list): Paneles a considerar
+            cantidad_activos (int): Número de activos por panel
+            fecha_desde (str): Fecha inicio
+            fecha_hasta (str): Fecha fin
+            ajustada (str): Tipo de ajuste
+            
+        Returns:
+            DataFrame: Series históricas consolidadas
+        """
+        series_historicas = pd.DataFrame()
+        
+        for panel in paneles_seleccionados:
+            if panel in tickers_por_panel:
+                seleccion = random.sample(tickers_por_panel[panel], 
+                                      min(cantidad_activos, len(tickers_por_panel[panel])))
+                for simbolo in seleccion:
+                    mercado = self.detectar_mercado_simbolo(simbolo)[0]
+                    serie = self.obtener_serie_historica(simbolo, mercado, fecha_desde, 
+                                                        fecha_hasta, ajustada)
+                    if serie is not None:
+                        df = pd.DataFrame(serie)
+                        df['simbolo'] = simbolo
+                        df['panel'] = panel
+                        series_historicas = pd.concat([series_historicas, df], 
+                                                  ignore_index=True)
+        
+        return series_historicas
+    
+    def obtener_series_historicas_aleatorias_con_capital(self, tickers_por_panel, paneles_seleccionados, 
+                                                       cantidad_activos, fecha_desde, fecha_hasta, 
+                                                       ajustada, capital_ars):
+        """
+        Obtiene series históricas para activos aleatorios considerando capital disponible
+        
+        Args:
+            tickers_por_panel (dict): Diccionario de tickers por panel
+            paneles_seleccionados (list): Paneles a considerar
+            cantidad_activos (int): Número de activos por panel
+            fecha_desde (str): Fecha inicio
+            fecha_hasta (str): Fecha fin
+            ajustada (str): Tipo de ajuste
+            capital_ars (float): Capital disponible en ARS
+            
+        Returns:
+            DataFrame: Series históricas consolidadas
+            dict: Diccionario con los activos seleccionados por panel
+        """
+        series_historicas = pd.DataFrame()
+        precios_ultimos = {}
+        seleccion_final = {}
+
+        for panel in paneles_seleccionados:
+            if panel in tickers_por_panel:
+                tickers = tickers_por_panel[panel]
+                random.shuffle(tickers)
+                seleccionados = []
+                
+                for simbolo in tickers:
+                    mercado = self.detectar_mercado_simbolo(simbolo)[0]
+                    serie = self.obtener_serie_historica(simbolo, mercado, fecha_desde, 
+                                                        fecha_hasta, ajustada)
+                    
+                    if serie is not None and len(serie) > 0:
+                        precio_final = serie.iloc[-1]
+                        precios_ultimos[simbolo] = precio_final
+                        seleccionados.append((simbolo, serie, precio_final))
+                    
+                    if len(seleccionados) >= cantidad_activos:
+                        break
+                
+                # Filtrar por capital disponible
+                seleccionados.sort(key=lambda x: x[2])
+                seleccionables = []
+                capital_restante = capital_ars
+                
+                for simbolo, serie, precio in seleccionados:
+                    if precio <= capital_restante:
+                        seleccionables.append((simbolo, serie, precio))
+                        capital_restante -= precio
+                
+                # Consolidar resultados
+                if len(seleccionables) > 0:
+                    for simbolo, serie, precio in seleccionables:
+                        df = pd.DataFrame({'precio': serie, 'fecha': serie.index})
+                        df['simbolo'] = simbolo
+                        df['panel'] = panel
+                        series_historicas = pd.concat([series_historicas, df], ignore_index=True)
+                    
+                    seleccion_final[panel] = [s[0] for s in seleccionables]
+        
+        return series_historicas, seleccion_final
+    
+    def calcular_valorizado_portafolio(self, series_historicas, seleccion_final):
+        """
+        Calcula la evolución del valor del portafolio por panel
+        
+        Args:
+            series_historicas (DataFrame): Series históricas
+            seleccion_final (dict): Activos seleccionados por panel
+            
+        Returns:
+            dict: Diccionario con la evolución del valor por panel
+        """
+        portafolios_val = {}
+        
+        for panel, simbolos in seleccion_final.items():
+            df_panel = series_historicas[series_historicas['panel'] == panel]
+            df_pivot = df_panel.pivot_table(index='fecha', columns='simbolo', values='precio')
+            df_pivot = df_pivot[simbolos].sort_index()
+            
+            # Calcular valorizado (suma simple)
+            portafolio_val = df_pivot.sum(axis=1)
+            portafolios_val[panel] = portafolio_val
+        
+        return portafolios_val
+    
+    @staticmethod
+    def calcular_rsi(series, period=14):
+        """Calcula el RSI de una serie de precios"""
+        delta = series.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    @staticmethod
+    def calcular_rvi(series, period=14):
+        """
+        Calcula el Relative Volatility Index (RVI)
+        Similar al RSI pero usando desviación estándar
+        """
+        delta = series.diff()
+        std = delta.rolling(window=period).std()
+        up = std.where(delta > 0, 0)
+        down = std.where(delta < 0, 0).abs()
+        up_mean = up.rolling(window=period).mean()
+        down_mean = down.rolling(window=period).mean()
+        rvi = 100 * up_mean / (up_mean + down_mean)
+        return rvi
 
 # Función de conveniencia para mantener compatibilidad
 def crear_serie_historica_manager(token_acceso, refresh_token=None):
