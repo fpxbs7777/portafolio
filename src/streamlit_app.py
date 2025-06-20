@@ -775,6 +775,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                             'cierre': [data['ultimaCotizacion']['precio']]
                         })
                         df.set_index('fecha', inplace=True)
+                        df.sort_index(inplace=True)
                         precios[simbolo] = df['cierre']
                     except Exception as e:
                         st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
@@ -1246,6 +1247,69 @@ class output:
         
         return formatted_metrics
 
+    def plot_monte_carlo_simulation(self, n_simulations=100, days=252, show_percentiles=True, title=None):
+        """Visualiza la simulación Monte Carlo de precios futuros"""
+        if self.monte_carlo_prices is None:
+            self.run_monte_carlo_simulation(n_simulations, days)
+            
+        fig = go.Figure()
+        
+        # Añadir trayectorias simuladas
+        for i in range(min(n_simulations, 50)):  # Limitar a 50 trayectorias para mejor rendimiento
+            fig.add_trace(go.Scatter(
+                x=list(range(days)),
+                y=self.monte_carlo_prices[:, i],
+                mode='lines',
+                line=dict(width=1, color='rgba(31, 119, 180, 0.1)'),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            
+        # Calcular percentiles
+        percentiles = np.percentile(self.monte_carlo_prices, [5, 50, 95], axis=1)
+        
+        # Añadir percentiles
+        fig.add_trace(go.Scatter(
+            x=list(range(days)),
+            y=percentiles[1],  # Mediana
+            mode='lines',
+            name='Mediana',
+            line=dict(color='#2ca02c', width=2),
+            hovertemplate='%{y:.2f}<extra></extra>'
+        ))
+        
+        # Rango de confianza 90%
+        fig.add_trace(go.Scatter(
+            x=list(range(days)) + list(range(days))[::-1],
+            y=np.concatenate([percentiles[0], percentiles[2][::-1]]),  # 5% a 95%
+            fill='toself',
+            fillcolor='rgba(44, 160, 44, 0.2)',
+            line=dict(width=0),
+            name='Rango 90%',
+            hoverinfo='skip'
+        ))
+        
+        # Añadir línea horizontal del valor inicial
+        fig.add_hline(
+            y=self.notional,
+            line_dash='dash',
+            line_color='#ff7f0e',
+            opacity=0.7,
+            annotation_text=f'Valor Inicial: ${self.notional:,.2f}',
+            annotation_position='bottom right'
+        )
+            
+        # Configuración del diseño
+        fig.update_layout(
+            title=title or 'Simulación Monte Carlo',
+            xaxis_title='Días',
+            yaxis_title='Valor',
+            template='plotly_white',
+            hovermode='x'
+        )
+        
+        return fig
+        
     def run_monte_carlo_simulation(self, n_simulations=1000, days=252, random_seed=None):
         """
         Ejecuta una simulación Monte Carlo para proyectar precios futuros del portafolio.
@@ -1313,66 +1377,6 @@ class output:
         
         return fig
     
-    def plot_monte_carlo_simulation(self, n_simulations=100, days=252, show_percentiles=True, title=None):
-        """Visualiza la simulación Monte Carlo de precios futuros con mejoras visuales"""
-        if self.monte_carlo_prices is None:
-            self.run_monte_carlo_simulation(n_simulations, days)
-            
-        fig = go.Figure()
-        
-        # Añadir trayectorias simuladas
-        for i in range(min(n_simulations, 50)):  # Limitar a 50 trayectorias para mejor rendimiento
-            fig.add_trace(go.Scatter(
-                x=list(range(days)),
-                y=self.monte_carlo_prices[:, i],
-                mode='lines',
-                line=dict(width=1, color='rgba(31, 119, 180, 0.1)'),
-                showlegend=False,
-                hoverinfo='skip'
-            ))
-            
-        # Calcular percentiles
-        percentiles = np.percentile(self.monte_carlo_prices, [5, 50, 95], axis=1)
-        
-        # Añadir percentiles
-        fig.add_trace(go.Scatter(
-            x=list(range(days)),
-            y=percentiles[1],  # Mediana
-            mode='lines',
-            line=dict(color='#2ca02c', width=2),
-            name='Mediana',
-            hovertemplate='Día %{x}<br>Precio: %{y:.2f}<extra></extra>'
-        ))
-        
-        # Rango de confianza 90%
-        fig.add_trace(go.Scatter(
-            x=list(range(days)) + list(range(days))[::-1],
-            y=np.concatenate([percentiles[0], percentiles[2][::-1]]),  # 5% a 95%
-            fill='toself',
-            fillcolor='rgba(44, 160, 44, 0.2)',
-            line=dict(width=0),
-            name='Rango 90%',
-            hoverinfo='skip'
-        ))
-        
-        # Actualizar diseño
-        fig.update_layout(
-            title=dict(
-                text=f'Simulación Monte Carlo ({n_simulations} simulaciones)',
-                x=0.5,
-                xanchor='center'
-            ),
-            xaxis_title='Días hábiles',
-            yaxis_title='Valor del Portafolio',
-            showlegend=True,
-            template='plotly_white',
-            height=600,
-            hovermode='x unified',
-            margin=dict(l=50, r=50, t=80, b=50)
-        )
-        
-        return fig
-        
     def plot_return_distribution(self, title=None, show_metrics=True):
         """
         Visualiza la distribución de retornos con histograma, KDE y estadísticas.
