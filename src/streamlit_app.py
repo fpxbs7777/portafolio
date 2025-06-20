@@ -1312,9 +1312,9 @@ class output:
         )
         
         return fig
-        
-    def plot_monte_carlo_simulation(self, n_simulations=100, days=252):
-        """Visualiza la simulación Monte Carlo de precios futuros"""
+    
+    def plot_monte_carlo_simulation(self, n_simulations=100, days=252, show_percentiles=True, title=None):
+        """Visualiza la simulación Monte Carlo de precios futuros con mejoras visuales"""
         if self.monte_carlo_prices is None:
             self.run_monte_carlo_simulation(n_simulations, days)
             
