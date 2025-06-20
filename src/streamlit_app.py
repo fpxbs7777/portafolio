@@ -100,72 +100,172 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         pd.Series: Serie temporal con los precios históricos o None en caso de error
     """
     max_retries = 3
-    retry_delay = 1  # segundos
     
+    # Validar fechas
+    try:
+        fecha_desde_dt = parse_datetime_flexible(fecha_desde)
+        fecha_hasta_dt = parse_datetime_flexible(fecha_hasta)
+        
+        if not fecha_desde_dt or not fecha_hasta_dt:
+            print("Error: Formato de fecha inválido")
+            return None
+            
+        if fecha_desde_dt > fecha_hasta_dt:
+            print("Error: La fecha de inicio no puede ser posterior a la fecha de fin")
+            return None
+            
+    except Exception as e:
+        print(f"Error al procesar las fechas: {str(e)}")
+        return None
+    
+    # Intentar hasta max_retries veces
     for attempt in range(max_retries):
         try:
-            # Formatear fechas si son objetos datetime
-            if hasattr(fecha_desde, 'strftime'):
-                fecha_desde = fecha_desde.strftime('%Y-%m-%d')
-            if hasattr(fecha_hasta, 'strftime'):
-                fecha_hasta = fecha_hasta.strftime('%Y-%m-%d')
-                
             # Obtener el endpoint correcto según el tipo de activo
             url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
             if not url:
-                print(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
+                print(f"No se pudo determinar el endpoint para el mercado: {mercado}")
                 return None
+                
+            print(f"Obteniendo datos históricos de: {url}")
             
+            # Configurar los encabezados de autenticación
             headers = obtener_encabezado_autorizacion(token_portador)
             
-            # Configurar timeout con valores razonables
-            timeout = (10, 30)  # (connect, read) en segundos
-            response = requests.get(url, headers=headers, timeout=timeout)
+            # Realizar la solicitud con un timeout razonable
+            response = requests.get(url, headers=headers, timeout=(15, 60))  # 15s conexión, 60s lectura
             
-            # Verificar si la respuesta es exitosa
+            # Verificar si la respuesta fue exitosa
             if response.status_code == 200:
-                data = response.json()
-                
-                # Manejar diferentes formatos de respuesta de error
-                if isinstance(data, dict) and data.get('status') == 'error':
-                    error_msg = data.get('message', 'Error desconocido')
-                    print(f"Error en la respuesta para {simbolo}: {error_msg}")
+                # Intentar parsear la respuesta JSON
+                try:
+                    data = response.json()
+                except ValueError as e:
+                    print(f"Error al decodificar la respuesta JSON: {e}")
+                    print(f"Respuesta del servidor: {response.text[:500]}")
+                    
+                    # Intentar extraer datos de la respuesta aunque no sea JSON válido
+                    if response.text.strip():
+                        try:
+                            # Intentar con diferentes codificaciones
+                            for encoding in ['utf-8', 'latin-1', 'iso-8859-1']:
+                                try:
+                                    data = response.content.decode(encoding)
+                                    if data.strip():
+                                        print(f"Respuesta decodificada con {encoding}: {data[:200]}...")
+                                        # Intentar parsear como JSON si parece serlo
+                                        if data.strip().startswith('{') or data.strip().startswith('['):
+                                            data = json.loads(data)
+                                            break
+                                        else:
+                                            # Si no es JSON, devolver como texto plano
+                                            return pd.Series([float(x) for x in data.split() if x.replace('.', '').isdigit()])
+                                except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                                    continue
+                            
+                            if isinstance(data, str):
+                                print("No se pudo convertir la respuesta a un formato manejable")
+                                return None
+                                
+                        except Exception as parse_error:
+                            print(f"Error al procesar la respuesta: {str(parse_error)}")
+                            return None
+                    
+                    # Si llegamos aquí, no se pudo procesar la respuesta
+                    if attempt < max_retries - 1:
+                        print(f"Reintentando... (Intento {attempt + 2}/{max_retries})")
+                        time.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 2, 60)  # Backoff exponencial, máximo 60 segundos
+                        continue
                     return None
                 
-                # Procesar la respuesta según el tipo de activo
+                # Verificar si la respuesta indica un error
+                if isinstance(data, dict):
+                    if 'error' in data or 'status' in data and data.get('status') == 'error':
+                        error_msg = data.get('error', data.get('message', 'Error desconocido en la API'))
+                        print(f"Error en la respuesta de la API: {error_msg}")
+                        
+                        # Manejo específico de errores conocidos
+                        if "no cotiza" in str(error_msg).lower() or "no existe" in str(error_msg).lower():
+                            return None
+                        
+                        # Reintentar si es un error temporal
+                        if attempt < max_retries - 1 and any(keyword in str(error_msg).lower() 
+                                                         for keyword in ['temporal', 'temporalmente', 'reintentar']):
+                            print(f"Reintentando en {retry_delay} segundos...")
+                            time.sleep(retry_delay)
+                            retry_delay = min(retry_delay * 2, 60)
+                            continue
+                        
+                        return None
+                
+                # Procesar los datos históricos
+                print(f"Procesando {len(data) if hasattr(data, '__len__') else 1} registros...")
                 serie = procesar_respuesta_historico(data, mercado)
+                
                 if serie is not None and not serie.empty:
-                    return serie
+                    # Verificar que la serie tenga datos en el rango solicitado
+                    if not serie.empty and len(serie) > 0:
+                        print(f"Datos históricos obtenidos correctamente: {len(serie)} puntos de datos")
+                        return serie
+                    else:
+                        print("La serie está vacía o no contiene datos en el rango especificado")
+                        return None
                 else:
-                    print(f"No se pudieron procesar los datos para {simbolo}")
+                    print(f"No se pudieron procesar los datos históricos para {simbolo}")
+                    print(f"Tipo de datos recibido: {type(data)}")
+                    print(f"Muestra de datos: {str(data)[:300]}..." if data else "Sin datos")
                     return None
                     
+            elif response.status_code == 401:  # No autorizado
+                print("Error de autenticación: Token inválido o expirado")
+                # No tiene sentido reintentar con el mismo token
+                return None
+                
+            elif response.status_code == 403:  # Prohibido
+                print("Acceso denegado: No tiene permisos para acceder a este recurso")
+                return None
+                
+            elif response.status_code == 404:  # No encontrado
+                print(f"Recurso no encontrado: {url}")
+                return None
+                
             elif response.status_code == 429:  # Too Many Requests
                 retry_after = int(response.headers.get('Retry-After', retry_delay))
-                if attempt < max_retries - 1:
-                    print(f"Rate limit alcanzado. Reintentando en {retry_after} segundos...")
-                    time.sleep(retry_after)
-                    continue
-                else:
-                    print(f"Error 429: Demasiadas solicitudes para {simbolo}")
-                    return None
-                    
-            else:
-                print(f"Error {response.status_code} al obtener datos para {simbolo}")
-                print(f"Respuesta: {response.text[:500]}")  # Mostrar parte del error
-                return None
-                
-        except requests.exceptions.RequestException as e:
-            if attempt < max_retries - 1:
-                print(f"Error de conexión para {simbolo} (intento {attempt + 1}/{max_retries}): {str(e)}")
-                time.sleep(retry_delay * (attempt + 1))  # Backoff exponencial
+                print(f"Límite de tasa excedido. Reintentando en {retry_after} segundos...")
+                time.sleep(retry_after)
+                retry_delay = min(retry_delay * 2, 60)  # Aumentar el retraso para el próximo intento
                 continue
+                
+            elif 500 <= response.status_code < 600:  # Errores del servidor
+                print(f"Error del servidor ({response.status_code}). Reintentando en {retry_delay} segundos...")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 60)
+                    continue
+                
             else:
-                print(f"Error de conexión para {simbolo} después de {max_retries} intentos: {str(e)}")
+                print(f"Error en la solicitud HTTP: {response.status_code} - {response.reason}")
+                print(f"Respuesta: {response.text[:500]}")
                 return None
                 
+        except requests.exceptions.Timeout:
+            print(f"Tiempo de espera agotado al intentar conectar con el servidor (intento {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60)
+            continue
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Error de conexión: {str(e)}")
+            if attempt < max_retries - 1:
+                print(f"Reintentando en {retry_delay} segundos... (Intento {attempt + 2}/{max_retries})")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60)  # Backoff exponencial, máximo 60 segundos
+            continue
+        
         except Exception as e:
-            print(f"Error inesperado al procesar {simbolo}: {str(e)}")
+            print(f"Error inesperado: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
@@ -395,30 +495,107 @@ def obtener_encabezado_autorizacion(token_portador):
     }
 
 def parse_datetime_flexible(datetime_string):
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
+    """
+    Intenta parsear una cadena de fecha/hora en varios formatos comunes.
+    
+    Args:
+        datetime_string: Cadena de fecha/hora a parsear (str, int, float, datetime, Timestamp)
+        
+    Returns:
+        datetime: Objeto datetime con la fecha/hora parseada, o None si no se pudo parsear
+    """
+    if not datetime_string and not isinstance(datetime_string, (int, float)):
+        return None
+        
+    # Si ya es un objeto datetime o Timestamp, devolverlo directamente
+    if isinstance(datetime_string, (datetime, pd.Timestamp)):
+        return datetime_string
+        
+    # Si es un número (timestamp), convertirlo
+    if isinstance(datetime_string, (int, float)):
+        try:
+            # Intentar primero como milisegundos (más común en APIs)
+            if datetime_string > 1e12:  # Si es mayor que el año 33658
+                return datetime.fromtimestamp(datetime_string / 1000.0)
+            else:
+                return datetime.fromtimestamp(datetime_string)
+        except (ValueError, OSError) as e:
+            print(f"Error al convertir timestamp {datetime_string}: {str(e)}")
+            return None
+    
+    # Asegurarse de que es string
+    datetime_str = str(datetime_string).strip()
+    
+    # Lista de formatos a intentar (ordenados de más específicos a más genéricos)
+    formats = [
+        # ISO 8601 con timezone
+        '%Y-%m-%dT%H:%M:%S.%f%z',  # 2023-04-15T14:30:45.123456-03:00
+        '%Y-%m-%dT%H:%M:%S%z',     # 2023-04-15T14:30:45-0300
+        
+        # ISO 8601 sin timezone
+        '%Y-%m-%dT%H:%M:%S.%f',    # 2023-04-15T14:30:45.123456
+        '%Y-%m-%d %H:%M:%S.%f',    # 2023-04-15 14:30:45.123456
+        
+        # Formatos estándar
+        '%Y-%m-%dT%H:%M:%S',       # 2023-04-15T14:30:45
+        '%Y-%m-%d %H:%M:%S',       # 2023-04-15 14:30:45
+        
+        # Formatos de fecha con diferentes separadores
+        '%Y/%m/%d %H:%M:%S',       # 2023/04/15 14:30:45
+        '%d-%m-%Y %H:%M:%S',       # 15-04-2023 14:30:45
+        '%d/%m/%Y %H:%M:%S',       # 15/04/2023 14:30:45
+        '%m-%d-%Y %H:%M:%S',       # 04-15-2023 14:30:45
+        '%m/%d/%Y %H:%M:%S',       # 04/15/2023 14:30:45
+        
+        # Solo fecha
+        '%Y-%m-%d',                # 2023-04-15
+        '%d-%m-%Y',                # 15-04-2023
+        '%d/%m/%Y',                # 15/04/2023
+        '%m-%d-%Y',                # 04-15-2023
+        '%m/%d/%Y',                # 04/15/2023
+        '%Y%m%d',                  # 20230415
+        
+        # Formatos con nombres de mes
+        '%d-%b-%y',                # 15-Apr-23
+        '%d-%b-%Y',                # 15-Apr-2023
+        '%d %b %Y',                # 15 Apr 2023
+        '%d %B %Y',                # 15 April 2023
+        
+        # Formatos con hora en 12h
+        '%Y-%m-%d %I:%M:%S %p',    # 2023-04-15 02:30:45 PM
+        '%m/%d/%Y %I:%M %p',       # 04/15/2023 02:30 PM
     ]
     
-    for fmt in formats_to_try:
+    # Intentar con cada formato
+    for fmt in formats:
         try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
+            # Intentar parsear con el formato actual
+            parsed = datetime.strptime(datetime_str, fmt)
+            
+            # Si el año es muy antiguo o futuro, probablemente sea un error de formato
+            current_year = datetime.now().year
+            if not (1900 <= parsed.year <= current_year + 2):
+                continue
+                
+            return parsed
+            
+        except ValueError:
             continue
-
+    
+    # Intentar con dateutil.parser si está disponible (más flexible pero más lento)
     try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
-    except Exception:
-        return None
+        from dateutil import parser
+        parsed = parser.parse(datetime_str)
+        # Verificar que el año sea razonable
+        current_year = datetime.now().year
+        if 1900 <= parsed.year <= current_year + 2:
+            return parsed
+    except (ImportError, ValueError, OverflowError) as e:
+        pass
+    
+    # Si no se pudo parsear con ningún formato conocido
+    print(f"No se pudo parsear la fecha: {datetime_string}")
+    return None
 
 def obtener_fcis(bearer_token):
     url = "https://api.invertironline.com/api/v2/Titulos/FCI"
@@ -767,15 +944,97 @@ def mostrar_grafico_optimizacion(results, returns):
     print(optimal_allocation)
 
 def analizar_riesgo(portafolio_df):
-    """Analiza el perfil de riesgo del portafolio"""
-    if portafolio_df.empty:
-        return {}
+    """
+    Analiza el perfil de riesgo del portafolio.
+    
+    Args:
+        portafolio_df (pd.DataFrame): DataFrame con los activos del portafolio
         
-    riesgo = {
-        'exposicion_por_activo': portafolio_df.groupby('tipo')['valorMercado'].sum() / portafolio_df['valorMercado'].sum(),
-        'top_riesgos': portafolio_df.nlargest(5, 'valorMercado')[['simbolo', 'valorMercado', 'rentabilidadPorcentaje']]
+    Returns:
+        dict: Diccionario con el análisis de riesgo
+    """
+    if portafolio_df is None or portafolio_df.empty:
+        return {
+            'error': 'El portafolio está vacío',
+            'exposicion_por_activo': {},
+            'top_riesgos': pd.DataFrame(),
+            'advertencias': []
+        }
+    
+    # Hacer una copia para no modificar el dataframe original
+    df = portafolio_df.copy()
+    advertencias = []
+    
+    # Verificar columnas requeridas
+    columnas_requeridas = {'tipo', 'valorMercado'}
+    columnas_faltantes = columnas_requeridas - set(df.columns)
+    
+    if columnas_faltantes:
+        return {
+            'error': f'Faltan columnas requeridas: {", ".join(columnas_faltantes)}',
+            'exposicion_por_activo': {},
+            'top_riesgos': pd.DataFrame(),
+            'advertencias': [f'Columnas faltantes: {", ".join(columnas_faltantes)}']
+        }
+    
+    # Manejar valores faltantes o inválidos en valorMercado
+    if df['valorMercado'].isna().any() or (df['valorMercado'] <= 0).any():
+        advertencias.append('Se encontraron valores inválidos o faltantes en valorMercado. Se reemplazarán por 0.')
+        df['valorMercado'] = df['valorMercado'].fillna(0).clip(lower=0)
+    
+    # Calcular exposición por tipo de activo
+    try:
+        exposicion = df.groupby('tipo')['valorMercado'].sum()
+        total_valor = df['valorMercado'].sum()
+        
+        if total_valor > 0:
+            exposicion_por_activo = (exposicion / total_valor).to_dict()
+        else:
+            exposicion_por_activo = {}
+            advertencias.append('El valor total del portafolio es 0 o negativo')
+    except Exception as e:
+        exposicion_por_activo = {}
+        advertencias.append(f'Error al calcular exposición por activo: {str(e)}')
+    
+    # Identificar mayores riesgos (top 5 por valor de mercado)
+    try:
+        columnas_riesgo = ['simbolo', 'valorMercado', 'rentabilidadPorcentaje']
+        columnas_disponibles = [col for col in columnas_riesgo if col in df.columns]
+        
+        if len(columnas_disponibles) < 2:  # Necesitamos al menos símbolo y valorMercado
+            top_riesgos = pd.DataFrame(columns=['simbolo', 'valorMercado'])
+            advertencias.append('No hay suficientes datos para calcular los mayores riesgos')
+        else:
+            # Ordenar por valor de mercado descendente y tomar los 5 mayores
+            top_riesgos = df.sort_values('valorMercado', ascending=False).head(5)[columnas_disponibles]
+    except Exception as e:
+        top_riesgos = pd.DataFrame()
+        advertencias.append(f'Error al identificar mayores riesgos: {str(e)}')
+    
+    # Calcular métricas adicionales de riesgo
+    try:
+        # Calcular concentración (índice Herfindahl-Hirschman)
+        if not df.empty and 'valorMercado' in df.columns:
+            participacion = df['valorMercado'] / df['valorMercado'].sum()
+            hhi = (participacion ** 2).sum() * 10000  # Escalar a 0-10000
+            concentracion = {
+                'hhi': hhi,
+                'nivel': 'Baja concentración' if hhi < 1500 else 
+                        'Moderada concentración' if hhi < 2500 else 'Alta concentración'
+            }
+        else:
+            concentracion = {'hhi': None, 'nivel': 'No disponible'}
+    except Exception as e:
+        concentracion = {'hhi': None, 'nivel': f'Error: {str(e)}'}
+        advertencias.append(f'Error al calcular concentración: {str(e)}')
+    
+    return {
+        'exposicion_por_activo': exposicion_por_activo,
+        'top_riesgos': top_riesgos,
+        'concentracion': concentracion,
+        'advertencias': advertencias if advertencias else None,
+        'fecha_analisis': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
-    return riesgo
 
 def main():
     # Configuración inicial
