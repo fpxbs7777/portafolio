@@ -2008,8 +2008,19 @@ def main():
                 if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
                     with st.spinner("Actualizando..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista actualizada")
+                        if nuevos_clientes:
+                            # Preservar los perfiles existentes si es posible
+                            clientes_actuales = {c.get('numeroCliente', c.get('id')): c for c in st.session_state.clientes}
+                            
+                            for cliente in nuevos_clientes:
+                                cliente_id = cliente.get('numeroCliente', cliente.get('id'))
+                                if cliente_id in clientes_actuales and 'perfil' in clientes_actuales[cliente_id]:
+                                    cliente['perfil'] = clientes_actuales[cliente_id]['perfil']
+                            
+                            st.session_state.clientes = nuevos_clientes
+                            st.success("✅ Lista de clientes actualizada")
+                        else:
+                            st.warning("No se pudieron cargar los clientes")
                         st.rerun()
             else:
                 st.warning("No se encontraron clientes")
