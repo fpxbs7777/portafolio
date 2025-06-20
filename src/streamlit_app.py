@@ -674,15 +674,15 @@ def main():
                 <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
                 <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis Completo</h3>
+                        <h3>&#128202; Análisis Completo</h3>
                         <p>Visualice todos sus activos en un solo lugar con detalle</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
+                        <h3>&#128200; Gráficos Interactivos</h3>
                         <p>Comprenda su portafolio con visualizaciones avanzadas</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>⚖️ Gestión de Riesgo</h3>
+                        <h3>&#9878;&#65039; Gestión de Riesgo</h3>
                         <p>Identifique concentraciones y optimice su perfil de riesgo</p>
                     </div>
                 </div>
