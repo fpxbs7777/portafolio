@@ -315,40 +315,105 @@ def obtener_administradoras(bearer_token):
         return None
 
 def analizar_perfil_portafolio(portafolio_df: pd.DataFrame) -> Dict:
-    """Analiza la composición del portafolio y sugiere un perfil de inversor"""
-    if portafolio_df.empty:
+    """
+    Analiza la composición del portafolio y sugiere un perfil de inversor.
+    
+    Args:
+        portafolio_df: DataFrame con los activos del portafolio
+        
+    Returns:
+        Dict con el perfil sugerido, composición actual y mensaje
+    """
+    # Verificar si el DataFrame está vacío
+    if portafolio_df is None or portafolio_df.empty:
         return {
             'perfil_sugerido': 'SIN_DATOS',
             'mensaje': 'No hay datos suficientes para analizar el portafolio.',
             'composicion_actual': {}
         }
     
-    # Calcular composición por tipo de activo
-    composicion = portafolio_df.groupby('tipo')['valorMercado'].sum() / portafolio_df['valorMercado'].sum() * 100
-    composicion_actual = composicion.to_dict()
+    # Verificar columnas necesarias
+    columnas_necesarias = ['tipo', 'valorMercado']
+    columnas_faltantes = [col for col in columnas_necesarias if col not in portafolio_df.columns]
     
-    # Mapear tipos a categorías más amplias
-    renta_fija = composicion.get('BONOS', 0) + composicion.get('LETRAS', 0) + composicion.get('FIDEICOMISOS', 0)
-    renta_variable = composicion.get('ACCIONES', 0) + composicion.get('CEDEARS', 0) + composicion.get('ETFS', 0)
-    renta_mixta = composicion.get('FCI', 0)  # Asumiendo que los FCIs son mixtos
+    if columnas_faltantes:
+        print(f"Advertencia: Columnas faltantes en el portafolio: {', '.join(columnas_faltantes)}")
+        print("Columnas disponibles:", portafolio_df.columns.tolist())
+        
+        # Intentar con nombres alternativos de columnas
+        mapeo_columnas = {
+            'tipo': next((col for col in ['tipo', 'type', 'assetType'] if col in portafolio_df.columns), None),
+            'valorMercado': next((col for col in ['valorMercado', 'marketValue', 'currentValue', 'valorActual'] 
+                               if col in portafolio_df.columns), None)
+        }
+        
+        if None in mapeo_columnas.values():
+            return {
+                'perfil_sugerido': 'NO_DETERMINADO',
+                'mensaje': f'No se pueden analizar los datos. Faltan columnas requeridas: {columnas_faltantes}',
+                'composicion_actual': {}
+            }
+        
+        # Renombrar columnas temporalmente
+        portafolio_df = portafolio_df.rename(columns={
+            mapeo_columnas['tipo']: 'tipo',
+            mapeo_columnas['valorMercado']: 'valorMercado'
+        })
     
-    # Determinar perfil basado en la composición
-    if renta_fija >= 70:
-        perfil = 'CONSERVADOR'
-    elif renta_variable >= 40:
-        perfil = 'ARRIESGADO'
-    else:
-        perfil = 'MODERADO'
-    
-    return {
-        'perfil_sugerido': perfil,
-        'composicion_actual': {
-            'Renta Fija': renta_fija,
-            'Renta Mixta': renta_mixta,
-            'Renta Variable': renta_variable
-        },
-        'mensaje': f'El portafolio actual sugiere un perfil {perfil}.'
-    }
+    try:
+        # Calcular composición por tipo de activo
+        valor_total = portafolio_df['valorMercado'].sum()
+        if valor_total <= 0:
+            raise ValueError("El valor total del portafolio debe ser mayor a cero")
+            
+        composicion = portafolio_df.groupby('tipo')['valorMercado'].sum() / valor_total * 100
+        composicion_actual = composicion.to_dict()
+        
+        # Mapear tipos a categorías más amplias (insensible a mayúsculas/minúsculas)
+        composicion_lower = {k.upper(): v for k, v in composicion_actual.items()}
+        
+        renta_fija = sum(v for k, v in composicion_lower.items() 
+                        if any(term in k for term in ['BONO', 'LETRA', 'FIDEICOMISO', 'OBLIGACION', 'TITULO', 'PUBLICO']))
+        
+        renta_variable = sum(v for k, v in composicion_lower.items() 
+                           if any(term in k for term in ['ACCION', 'CEDEAR', 'ETF', 'ACCIONES', 'ACCIONARIA']))
+        
+        renta_mixta = sum(v for k, v in composicion_lower.items() 
+                         if any(term in k for term in ['FCI', 'FONDO', 'MIXTO', 'BALANCEADO']))
+        
+        # Normalizar para que sumen 100%
+        total = renta_fija + renta_variable + renta_mixta
+        if total > 0:
+            factor = 100 / total
+            renta_fija *= factor
+            renta_variable *= factor
+            renta_mixta *= factor
+        
+        # Determinar perfil basado en la composición
+        if renta_fija >= 70:
+            perfil = 'CONSERVADOR'
+        elif renta_variable >= 40:
+            perfil = 'ARRIESGADO'
+        else:
+            perfil = 'MODERADO'
+        
+        return {
+            'perfil_sugerido': perfil,
+            'composicion_actual': {
+                'Renta Fija': round(renta_fija, 2),
+                'Renta Mixta': round(renta_mixta, 2),
+                'Renta Variable': round(renta_variable, 2)
+            },
+            'mensaje': f'El portafolio actual sugiere un perfil {perfil}.'
+        }
+        
+    except Exception as e:
+        print(f"Error al analizar el perfil del portafolio: {str(e)}")
+        return {
+            'perfil_sugerido': 'ERROR',
+            'mensaje': f'Error al analizar el portafolio: {str(e)}',
+            'composicion_actual': {}
+        }
 
 def recomendar_fcis_por_perfil(perfil: str, fcis_disponibles: pd.DataFrame) -> pd.DataFrame:
     """Recomienda FCIs basados en el perfil del inversor"""
