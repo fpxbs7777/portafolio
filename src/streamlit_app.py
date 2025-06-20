@@ -1240,8 +1240,10 @@ def main():
         fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
         
         for activo in activos_analisis:
-            simbolo = activo['simbolo']
+            simbolo = activo.get('simbolo')
             mercado = activo.get('mercado', 'BCBA')  # Valor por defecto BCBA
+            if not simbolo:
+                continue  # Saltar si no hay símbolo
             
             # Obtener datos históricos
             datos = obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, 'Ajustada', bearer_token)
