@@ -5,11 +5,43 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from scipy.optimize import minimize
 import warnings
+from typing import Dict, List, Optional, Tuple, Union
 warnings.filterwarnings('ignore')
 
 # Configuración de estilo para gráficos
 plt.style.use('seaborn')
 plt.rcParams['figure.figsize'] = [12, 6]
+
+# Constantes para perfiles de inversor
+PERFILES_INVERSOR = {
+    'CONSERVADOR': {
+        'nombre': 'Conservador',
+        'descripcion': 'Prefiere bajo riesgo y estabilidad en sus inversiones.',
+        'composicion': [
+            {'tipo': 'Renta Fija', 'min': 70, 'max': 100},
+            {'tipo': 'Renta Mixta', 'min': 0, 'max': 30},
+            {'tipo': 'Renta Variable', 'min': 0, 'max': 10}
+        ]
+    },
+    'MODERADO': {
+        'nombre': 'Moderado',
+        'descripcion': 'Busca equilibrio entre riesgo y retorno.',
+        'composicion': [
+            {'tipo': 'Renta Fija', 'min': 40, 'max': 70},
+            {'tipo': 'Renta Mixta', 'min': 20, 'max': 50},
+            {'tipo': 'Renta Variable', 'min': 10, 'max': 30}
+        ]
+    },
+    'ARRIESGADO': {
+        'nombre': 'Arriesgado',
+        'descripcion': 'Buscador de altos retornos asumiendo mayor riesgo.',
+        'composicion': [
+            {'tipo': 'Renta Fija', 'min': 0, 'max': 30},
+            {'tipo': 'Renta Mixta', 'min': 20, 'max': 50},
+            {'tipo': 'Renta Variable', 'min': 40, 'max': 70}
+        ]
+    }
+}
 
 def obtener_tokens(username, password):
     token_url = 'https://api.invertironline.com/token'
@@ -234,6 +266,37 @@ def obtener_tipos_fondos(bearer_token):
         print(response.text)
         return None
 
+def obtener_test_inversor(bearer_token: str) -> Optional[Dict]:
+    """Obtiene las opciones disponibles para el test de perfil de inversor"""
+    url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error al obtener el test de perfil de inversor: {response.status_code}")
+        print(response.text)
+        return None
+
+def enviar_respuestas_test(bearer_token: str, respuestas: Dict) -> Optional[Dict]:
+    """Envía las respuestas del test de perfil de inversor"""
+    url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    response = requests.post(url, json=respuestas, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error al enviar las respuestas del test: {response.status_code}")
+        print(response.text)
+        return None
+
 def obtener_administradoras(bearer_token):
     url = "https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras"
     headers = {
@@ -247,6 +310,69 @@ def obtener_administradoras(bearer_token):
         print(f"Error al obtener administradoras: {response.status_code}")
         print(response.text)
         return None
+
+def analizar_perfil_portafolio(portafolio_df: pd.DataFrame) -> Dict:
+    """Analiza la composición del portafolio y sugiere un perfil de inversor"""
+    if portafolio_df.empty:
+        return {
+            'perfil_sugerido': 'SIN_DATOS',
+            'mensaje': 'No hay datos suficientes para analizar el portafolio.',
+            'composicion_actual': {}
+        }
+    
+    # Calcular composición por tipo de activo
+    composicion = portafolio_df.groupby('tipo')['valorMercado'].sum() / portafolio_df['valorMercado'].sum() * 100
+    composicion_actual = composicion.to_dict()
+    
+    # Mapear tipos a categorías más amplias
+    renta_fija = composicion.get('BONOS', 0) + composicion.get('LETRAS', 0) + composicion.get('FIDEICOMISOS', 0)
+    renta_variable = composicion.get('ACCIONES', 0) + composicion.get('CEDEARS', 0) + composicion.get('ETFS', 0)
+    renta_mixta = composicion.get('FCI', 0)  # Asumiendo que los FCIs son mixtos
+    
+    # Determinar perfil basado en la composición
+    if renta_fija >= 70:
+        perfil = 'CONSERVADOR'
+    elif renta_variable >= 40:
+        perfil = 'ARRIESGADO'
+    else:
+        perfil = 'MODERADO'
+    
+    return {
+        'perfil_sugerido': perfil,
+        'composicion_actual': {
+            'Renta Fija': renta_fija,
+            'Renta Mixta': renta_mixta,
+            'Renta Variable': renta_variable
+        },
+        'mensaje': f'El portafolio actual sugiere un perfil {perfil}.'
+    }
+
+def recomendar_fcis_por_perfil(perfil: str, fcis_disponibles: pd.DataFrame) -> pd.DataFrame:
+    """Recomienda FCIs basados en el perfil del inversor"""
+    if perfil not in PERFILES_INVERSOR:
+        perfil = 'MODERADO'  # Perfil por defecto
+    
+    # Filtrar FCIs según el perfil
+    if perfil == 'CONSERVADOR':
+        fcis_filtrados = fcis_disponibles[
+            (fcis_disponibles['perfilInversor'].str.contains('Conservador', case=False)) |
+            (fcis_disponibles['tipoFondo'].str.contains('Renta Fija', case=False))
+        ]
+    elif perfil == 'ARRIESGADO':
+        fcis_filtrados = fcis_disponibles[
+            (fcis_disponibles['perfilInversor'].str.contains('Arriesgado|Agresivo', case=False)) |
+            (fcis_disponibles['tipoFondo'].str.contains('Renta Variable', case=False))
+        ]
+    else:  # MODERADO
+        fcis_filtrados = fcis_disponibles[
+            (fcis_disponibles['perfilInversor'].str.contains('Moderado', case=False)) |
+            (fcis_disponibles['tipoFondo'].str.contains('Mixto', case=False))
+        ]
+    
+    # Ordenar por rentabilidad reciente (si está disponible)
+    if 'rentabilidadUltimos30Dias' in fcis_filtrados.columns:
+        return fcis_filtrados.sort_values('rentabilidadUltimos30Dias', ascending=False)
+    return fcis_filtrados
         
 def obtener_portafolio(bearer_token):
     """Obtiene el portafolio actual del cliente"""
@@ -343,6 +469,37 @@ def main():
     if not bearer_token:
         print("Error al autenticar. Verifica tus credenciales.")
         return
+    
+    # 0. Realizar test de perfil de inversor
+    print("\n=== TEST DE PERFIL DE INVERSOR ===")
+    test_data = obtener_test_inversor(bearer_token)
+    perfil_inversor = 'MODERADO'  # Perfil por defecto
+    
+    if test_data:
+        print("Opciones del test de perfil de inversor obtenidas.")
+        # Aquí podrías implementar la lógica para mostrar las preguntas y recopilar respuestas
+        # Por ahora, usaremos respuestas de ejemplo
+        respuestas_ejemplo = {
+            "enviarEmailCliente": False,
+            "instrumentosInvertidosAnteriormente": [1, 2],
+            "nivelesConocimientoInstrumentos": [1],
+            "idPlazoElegido": 2,
+            "idEdadElegida": 3,
+            "idObjetivoInversionElegida": 1,
+            "idPolizaElegida": 1,
+            "idCapacidadAhorroElegida": 2,
+            "idPorcentajePatrimonioDedicado": 2
+        }
+        
+        resultado_test = enviar_respuestas_test(bearer_token, respuestas_ejemplo)
+        if resultado_test and 'perfilSugerido' in resultado_test:
+            perfil_inversor = resultado_test['perfilSugerido'].get('nombre', 'MODERADO')
+            print(f"\nPerfil de inversor identificado: {perfil_inversor}")
+            print(f"Detalles: {resultado_test['perfilSugerido'].get('detalle', 'Sin detalles adicionales')}")
+        else:
+            print("No se pudo determinar el perfil del inversor. Usando perfil moderado por defecto.")
+    else:
+        print("No se pudo obtener el test de perfil. Usando perfil moderado por defecto.")
 
     # 1. Obtener y mostrar portafolio actual
     print("\n=== PORTAFOLIO ACTUAL ===")
@@ -360,7 +517,39 @@ def main():
         
         # Mostrar composición del portafolio
         print("\nComposición del Portafolio:")
-        print(df_portafolio[['simbolo', 'descripcion', 'cantidad', 'precioPromedio', 'ultimoPrecio', 'variacionDiaria', 'rentabilidadPorcentaje', 'valorMercado']])
+        print(df_portafolio[['simbolo', 'tipo', 'descripcion', 'cantidad', 'precioPromedio', 'ultimoPrecio', 'variacionDiaria', 'rentabilidadPorcentaje', 'valorMercado']])
+        
+        # Análisis de perfil del portafolio
+        print("\n=== ANÁLISIS DE PERFIL DE INVERSIÓN ===")
+        analisis_perfil = analizar_perfil_portafolio(df_portafolio)
+        perfil_portafolio = analisis_perfil['perfil_sugerido']
+        composicion_actual = analisis_perfil['composicion_actual']
+        
+        print(f"\nPerfil sugerido por composición actual: {perfil_portafolio}")
+        print("\nComposición actual del portafolio:")
+        for tipo, porcentaje in composicion_actual.items():
+            print(f"- {tipo}: {porcentaje:.1f}%")
+        
+        # Comparar con perfil objetivo
+        perfil_objetivo = PERFILES_INVERSOR.get(perfil_inversor, PERFILES_INVERSOR['MODERADO'])
+        print(f"\nComparación con perfil objetivo ({perfil_inversor}):")
+        
+        recomendaciones = []
+        for objetivo in perfil_objetivo['composicion']:
+            tipo = objetivo['tipo']
+            actual = composicion_actual.get(tipo, 0)
+            print(f"- {tipo}: {actual:.1f}% (Objetivo: {objetivo['min']}-{objetivo['max']}%)")
+            
+            # Generar recomendaciones
+            if actual < objetivo['min']:
+                recomendaciones.append(f"Aumentar exposición a {tipo}")
+            elif actual > objetivo['max']:
+                recomendaciones.append(f"Reducir exposición a {tipo}")
+        
+        if recomendaciones:
+            print("\nRecomendaciones de rebalanceo:")
+            for rec in recomendaciones:
+                print(f"- {rec}")
         
         # Análisis de riesgo
         riesgo = analizar_riesgo(df_portafolio)
@@ -372,35 +561,63 @@ def main():
             print(riesgo['top_riesgos'])
     else:
         print("No se encontraron activos en el portafolio.")
+        perfil_portafolio = 'MODERADO'
     
-    # 2. Obtener y mostrar FCIs del portafolio
+    # 2. Obtener y mostrar FCIs con recomendaciones
     print("\n=== FONDOS COMUNES DE INVERSIÓN ===")
     fcis = obtener_fcis(bearer_token)
     
     if fcis:
         df_fcis = pd.DataFrame(fcis)
         
+        # Obtener detalles adicionales de cada FCI
+        df_fcis['rentabilidadUltimos30Dias'] = 0.0
+        for idx, fci in df_fcis.iterrows():
+            detalle = obtener_fci_por_simbolo(fci['simbolo'], bearer_token)
+            if detalle and 'rentabilidadUltimos30Dias' in detalle:
+                df_fcis.at[idx, 'rentabilidadUltimos30Dias'] = detalle['rentabilidadUltimos30Dias']
+        
         # Filtrar solo FCIs que están en el portafolio
-        if 'activos' in portafolio:
+        if 'activos' in portafolio and portafolio['activos']:
             fcis_portafolio = [activo['simbolo'] for activo in portafolio['activos'] if activo.get('tipo') == 'FCI']
             if fcis_portafolio:
                 df_fcis_portafolio = df_fcis[df_fcis['simbolo'].isin(fcis_portafolio)]
-                print("\nFCIs en tu Portafolio:")
-                print(df_fcis_portafolio[['simbolo', 'descripcion', 'tipoFondo', 'perfilInversor', 'plazoLiquidacion']])
+                print("\n=== FCIs EN TU PORTAFOLIO ===")
+                print(df_fcis_portafolio[['simbolo', 'descripcion', 'tipoFondo', 'perfilInversor', 'rentabilidadUltimos30Dias', 'plazoLiquidacion']])
                 
                 # Mostrar detalles de cada FCI
-                for simbolo in fcis_portafolio:
-                    detalle = obtener_fci_por_simbolo(simbolo, bearer_token)
-                    if detalle:
-                        print(f"\nDetalle de {simbolo}:")
-                        print(f"Administradora: {detalle.get('administradora', 'N/A')}")
-                        print(f"Rentabilidad 30 días: {detalle.get('rentabilidadUltimos30Dias', 'N/A')}%")
-                        print(f"Patrimonio: ${detalle.get('patrimonio', 0):,.2f}")
-                        print(f"Participantes: {detalle.get('cantidadParticipe', 'N/A')}")
+                for _, fci in df_fcis_portafolio.iterrows():
+                    print(f"\nDetalle de {fci['simbolo']}:")
+                    print(f"Descripción: {fci.get('descripcion', 'N/A')}")
+                    print(f"Tipo: {fci.get('tipoFondo', 'N/A')}")
+                    print(f"Perfil: {fci.get('perfilInversor', 'N/A')}")
+                    print(f"Rentabilidad 30 días: {fci.get('rentabilidadUltimos30Dias', 'N/A')}%")
+                    print(f"Plazo de liquidación: {fci.get('plazoLiquidacion', 'N/A')}")
+        
+        # Mostrar recomendaciones de FCIs según perfil
+        print("\n=== RECOMENDACIONES DE FCIs SEGÚN TU PERFIL ===")
+        fcis_recomendados = recomendar_fcis_por_perfil(perfil_inversor, df_fcis)
+        
+        if not fcis_recomendados.empty:
+            print(f"\nFCIs recomendados para perfil {perfil_inversor}:")
+            print(fcis_recomendados[['simbolo', 'descripcion', 'tipoFondo', 'perfilInversor', 'rentabilidadUltimos30Dias']].head(5))
+            
+            # Mostrar detalles de los FCIs recomendados
+            print("\nDetalles de los FCIs recomendados:")
+            for _, fci in fcis_recomendados.head(3).iterrows():
+                detalle = obtener_fci_por_simbolo(fci['simbolo'], bearer_token)
+                if detalle:
+                    print(f"\n{fci['simbolo']} - {fci['descripcion']}")
+                    print(f"Administradora: {detalle.get('administradora', 'N/A')}")
+                    print(f"Rentabilidad 30 días: {detalle.get('rentabilidadUltimos30Dias', 'N/A')}%")
+                    print(f"Patrimonio: ${detalle.get('patrimonio', 0):,.2f}")
+                    print(f"Participantes: {detalle.get('cantidadParticipe', 'N/A')}")
+        else:
+            print("No se encontraron FCIs que coincidan con tu perfil de inversor.")
         
         # Mostrar todos los FCIs disponibles
-        print("\nTodos los FCIs Disponibles:")
-        print(df_fcis[['simbolo', 'descripcion', 'tipoFondo', 'perfilInversor']].head(10))  # Mostrar solo los primeros 10
+        print("\n=== TODOS LOS FCIs DISPONIBLES ===")
+        print(df_fcis[['simbolo', 'descripcion', 'tipoFondo', 'perfilInversor', 'rentabilidadUltimos30Dias']].head(10))
     
     # 3. Análisis de series históricas para optimización
     print("\n=== ANÁLISIS DE SERIES TEMPORALES ===")
