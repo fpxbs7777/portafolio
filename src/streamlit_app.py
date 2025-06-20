@@ -690,29 +690,29 @@ def main():
             """, unsafe_allow_html=True)
             
             # Características
-            st.subheader("✨ Características Principales")
+            st.subheader("&#10024; Características Principales")
             cols = st.columns(3)
             with cols[0]:
                 st.markdown("""
-                **📊 Análisis Detallado**  
+                **&#128202; Análisis Detallado**  
                 - Valuación completa de activos  
                 - Distribución por tipo de instrumento  
                 - Concentración del portafolio  
-                """)
+                """, unsafe_allow_html=True)
             with cols[1]:
                 st.markdown("""
-                **📈 Herramientas Profesionales**  
+                **&#128200; Herramientas Profesionales**  
                 - Optimización de portafolio  
                 - Análisis técnico avanzado  
                 - Proyecciones de rendimiento  
-                """)
+                """, unsafe_allow_html=True)
             with cols[2]:
                 st.markdown("""
-                **💱 Datos de Mercado**  
+                **&#128177; Datos de Mercado**  
                 - Cotizaciones MEP en tiempo real  
                 - Tasas de caución actualizadas  
                 - Estado de cuenta consolidado  
-                """)
+                """, unsafe_allow_html=True)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
