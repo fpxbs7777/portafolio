@@ -455,79 +455,133 @@ def mostrar_tasas_caucion(token_portador):
 
 def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
-    Devuelve el endpoint correcto según el tipo de activo
+    Función mantenida por compatibilidad, pero ya no es necesaria con la nueva implementación
     """
-    base_url = "https://api.invertironline.com/api/v2"
-    
-    # Mapeo de mercados a sus respectivos endpoints
-    endpoints = {
-        'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'FCI': f"{base_url}/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
-        'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
-        'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-    }
-    
-    # Intentar determinar automáticamente el tipo de activo si no se especifica
-    if mercado not in endpoints:
-        if simbolo.endswith(('.BA', '.AR')):
-            return endpoints.get('Cedears')
-        elif any(ext in simbolo.upper() for ext in ['AL', 'GD', 'AY24', 'GD30', 'AL30']):
-            return endpoints.get('Bonos')
-        else:
-            # Por defecto, asumimos que es un título regular
-            return f"{base_url}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    
-    return endpoints.get(mercado)
+    return None
 
 def procesar_respuesta_historico(data, tipo_activo):
     """
-    Procesa la respuesta de la API según el tipo de activo
+    Función mantenida por compatibilidad, pero ya no es necesaria con la nueva implementación
     """
-    if not data:
+    return data
+
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+    """
+    Obtiene series históricas para diferentes tipos de activos utilizando la API de IOL
+    """
+    try:
+        # Mapear ajustada al formato requerido por la nueva API
+        ajuste = 'Ajustada' if ajustada.lower() == 'ajustada' else 'SinAjustar'
+        
+        # Construir la URL según la nueva API
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajuste}"
+        
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
+        
+        # Realizar la solicitud
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        # Procesar la respuesta
+        data = response.json()
+        
+        # Convertir a DataFrame para mantener compatibilidad
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            # Asegurar que las columnas de fecha estén en el formato correcto
+            if 'fecha' in df.columns:
+                df['fecha'] = pd.to_datetime(df['fecha'])
+                df.set_index('fecha', inplace=True)
+            return df
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar datos históricos para {simbolo}: {str(e)}")
+        return None
+
+def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos históricos para optimización utilizando la nueva implementación de la API
+    """
+    import time
+    
+    datos_historicos = {}
+    
+    for simbolo in simbolos:
+        # Determinar el mercado basado en el símbolo o usar BCBA por defecto
+        mercado = 'BCBA'  # Por defecto
+        
+        # Verificar si es un FCI (podemos ampliar esta lógica según sea necesario)
+        if isinstance(simbolo, dict) and simbolo.get('tipo') == 'FCI':
+            datos_fci = obtener_serie_historica_fci(token_portador, simbolo['simbolo'], fecha_desde, fecha_hasta)
+            if datos_fci is not None and not datos_fci.empty:
+                datos_historicos[simbolo['simbolo']] = datos_fci
+            continue
+            
+        # Para activos regulares
+        max_reintentos = 3
+        reintento = 0
+        exito = False
+        
+        while reintento < max_reintentos and not exito:
+            try:
+                # Usar la nueva implementación de obtener_serie_historica_iol
+                datos = obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta)
+                
+                if datos is not None and not datos.empty:
+                    # Asegurar que tenemos las columnas necesarias
+                    if 'ultimoPrecio' in datos.columns:
+                        datos['close'] = datos['ultimoPrecio']
+                    elif 'cierre' in datos.columns:
+                        datos['close'] = datos['cierre']
+                    
+                    # Si no hay columna 'close', intentar con la primera columna numérica
+                    if 'close' not in datos.columns and len(datos.columns) > 0:
+                        for col in datos.columns:
+                            if pd.api.types.is_numeric_dtype(datos[col]):
+                                datos['close'] = datos[col]
+                                break
+                    
+                    if 'close' in datos.columns:
+                        datos_historicos[simbolo] = datos
+                        exito = True
+                    else:
+                        st.warning(f"No se pudo determinar la columna de precios para {simbolo}")
+                        break
+                else:
+                    reintento += 1
+                    if reintento < max_reintentos:
+                        time.sleep(1)  # Esperar antes de reintentar
+            except Exception as e:
+                st.warning(f"Error al obtener datos para {simbolo} (reintento {reintento + 1}/{max_reintentos}): {str(e)}")
+                reintento += 1
+                if reintento < max_reintentos:
+                    time.sleep(1)  # Esperar antes de reintentar
+    
+    # Verificar si todos los símbolos fallaron
+    if not datos_historicos:
+        st.error("No se pudieron obtener datos históricos para ningún símbolo.")
         return None
     
-    try:
-        # Para series históricas estándar
-        if isinstance(data, list):
-            precios = []
-            fechas = []
-            
-            for item in data:
-                try:
-                    # Manejar diferentes estructuras de respuesta
-                    if isinstance(item, dict):
-                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
-                        if not precio or precio == 0:
-                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                        
-                        fecha_str = item.get('fechaHora') or item.get('fecha')
-                        
-                        if precio is not None and precio > 0 and fecha_str:
-                            fecha_parsed = parse_datetime_flexible(fecha_str)
-                            if fecha_parsed is not None:
-                                precios.append(float(precio))
-                                fechas.append(fecha_parsed)
-                except (ValueError, AttributeError) as e:
-                    continue
-            
-            if precios and fechas:
-                serie = pd.Series(precios, index=fechas, name='precio')
-                serie = serie[~serie.index.duplicated(keep='last')]
-                return serie.sort_index()
-        
-        # Para respuestas que son un solo valor (ej: MEP)
-        elif isinstance(data, (int, float)):
-            return pd.Series([float(data)], index=[pd.Timestamp.now()], name='precio')
-            
-        return None
-        
-    except Exception as e:
-        st.error(f"Error al procesar respuesta histórica: {str(e)}")
-        return None
+    # Alinear las fechas de todos los DataFrames
+    precios = pd.DataFrame()
+    for simbolo, df in datos_historicos.items():
+        if 'close' in df.columns:
+            precios[simbolo] = df['close']
+    
+    # Eliminar filas con valores faltantes
+    precios = precios.dropna(how='all')
+    
+    # Calcular retornos logarítmicos
+    retornos = np.log(precios / precios.shift(1)).dropna()
+    
+    return precios, retornos
 
 def obtener_fondos_comunes(token_portador):
     """
@@ -565,80 +619,26 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
-    Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
+    Obtiene series históricas para diferentes tipos de activos utilizando la API de IOL
     """
     try:
-        # Primero intentamos con el endpoint específico del mercado
-        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-        if not url:
-            st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
-            return None
+        # Mapear ajustada al formato requerido por la nueva API
+        ajuste = 'Ajustada' if ajustada.lower() == 'ajustada' else 'SinAjustar'
         
-        headers = obtener_encabezado_autorizacion(token_portador)
+        # Construir la URL según la nueva API
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajuste}"
         
-        # Configurar un timeout más corto para no bloquear la interfaz
-        response = requests.get(url, headers=headers, timeout=10)
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
         
-        # Verificar si la respuesta es exitosa
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict) and data.get('status') == 'error':
-                st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
-                return None
-                
-            # Procesar la respuesta según el tipo de activo
-            return procesar_respuesta_historico(data, mercado)
-        else:
-            st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión para {simbolo}: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
-        return None
-
-def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
-    """
-    Obtiene datos históricos para optimización con manejo mejorado de errores,
-    reintentos automáticos y soporte para FCIs
-    """
-    precios = {}
-    errores = []
-    max_retries = 2
-    
-    with st.spinner("Obteniendo datos históricos..."):
-        progress_bar = st.progress(0)
-        total_symbols = len(simbolos)
+        # Realizar la solicitud
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
         
-        for idx, (simbolo, mercado) in enumerate(simbolos):
-            progress = (idx + 1) / total_symbols
-            progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
-            
-            # Manejo especial para FCIs
-            if mercado.lower() == 'fci':
-                data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
-                    try:
-                        df = pd.DataFrame({
-                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
-                            'cierre': [data['ultimaCotizacion']['precio']]
-                        })
-                        df.set_index('fecha', inplace=True)
-                        precios[simbolo] = df['cierre']
-                    except Exception as e:
-                        st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
-                        errores.append(simbolo)
-                else:
-                    st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
-                    errores.append(simbolo)
-                continue
-                
-            for attempt in range(max_retries):
-                try:
-                    # Intentar obtener datos de IOL
-                    serie = obtener_serie_historica_iol(
+        # Procesar la respuesta
+        data = response.json()
                         token_portador=token_portador,
                         mercado=mercado,
                         simbolo=simbolo,
