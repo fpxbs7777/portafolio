@@ -1990,8 +1990,23 @@ def main():
             
             if clientes:
                 st.subheader("Selección de Cliente")
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                
+                # Crear lista de opciones con nombre completo desde el perfil si está disponible
+                opciones_clientes = []
+                for c in clientes:
+                    cliente_id = c.get('numeroCliente', c.get('id'))
+                    if 'perfil' in c and c['perfil']:
+                        nombre = f"{c['perfil'].get('apellido', '')}, {c['perfil'].get('nombre', '')}".strip()
+                        if not nombre:
+                            nombre = c.get('apellidoYNombre', c.get('nombre', f'Cliente {cliente_id}'))
+                    else:
+                        nombre = c.get('apellidoYNombre', c.get('nombre', f'Cliente {cliente_id}'))
+                    opciones_clientes.append((cliente_id, nombre))
+                
+                # Ordenar por nombre
+                opciones_clientes.sort(key=lambda x: x[1])
+                cliente_ids = [x[0] for x in opciones_clientes]
+                cliente_nombres = [x[1] for x in opciones_clientes]
                 
                 cliente_seleccionado = st.selectbox(
                     "Seleccione un cliente:",
@@ -2000,10 +2015,68 @@ def main():
                     label_visibility="collapsed"
                 )
                 
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                # Obtener el cliente seleccionado
+                cliente_actual = next(
+                    (c for c in clientes if str(c.get('numeroCliente', c.get('id'))) == str(cliente_seleccionado)),
                     None
                 )
+                
+                # Mostrar información del perfil si está disponible
+                if cliente_actual and 'perfil' in cliente_actual and cliente_actual['perfil']:
+                    perfil = cliente_actual['perfil']
+                    with st.expander("👤 Información del Perfil", expanded=True):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Nombre", f"{perfil.get('nombre', '')} {perfil.get('apellido', '')}")
+                            st.metric("DNI", perfil.get('dni', 'No disponible'))
+                            st.metric("CUIL/CUIT", perfil.get('cuitCuil', 'No disponible'))
+                            
+                        with col2:
+                            st.metric("Email", perfil.get('email', 'No disponible'))
+                            estado_cuenta = "🟢 Activa" if perfil.get('cuentaAbierta', False) else "🔴 Inactiva"
+                            st.metric("Estado de la Cuenta", estado_cuenta)
+                            
+                            # Mostrar perfil de inversor con color según el riesgo
+                            perfil_inversor = perfil.get('perfilInversor', 'No definido')
+                            color = "#28a745"  # Verde por defecto
+                            if "conservador" in perfil_inversor.lower():
+                                color = "#28a745"  # Verde
+                            elif "moderado" in perfil_inversor.lower():
+                                color = "#ffc107"  # Amarillo
+                            elif "agresivo" in perfil_inversor.lower():
+                                color = "#dc3545"  # Rojo
+                                
+                            st.markdown(f"""
+                                <div style="margin-top: 10px; margin-bottom: 10px;">
+                                    <div style="font-size: 0.8em; color: #666; margin-bottom: 2px;">Perfil de Inversor</div>
+                                    <div style="background-color: {color}20; border-left: 4px solid {color}; padding: 8px 12px; border-radius: 4px;">
+                                        <strong style="color: {color};">{perfil_inversor}</strong>
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Mostrar alertas si hay actualizaciones pendientes
+                        actualizaciones_pendientes = []
+                        if perfil.get('actualizarDDJJ', False):
+                            actualizaciones_pendientes.append("Declaración Jurada")
+                        if perfil.get('actualizarTestInversor', False):
+                            actualizaciones_pendientes.append("Test de Inversor")
+                        if perfil.get('actualizarTyC', False):
+                            actualizaciones_pendientes.append("Términos y Condiciones")
+                        if perfil.get('actualizarTyCApp', False):
+                            actualizaciones_pendientes.append("Términos y Condiciones de la App")
+                            
+                        if actualizaciones_pendientes:
+                            st.warning(f"⚠️ **Actualizaciones pendientes:** {', '.join(actualizaciones_pendientes)}")
+                        
+                        # Mostrar si está en período de arrepentimiento
+                        if perfil.get('esBajaArrepentimiento', False):
+                            st.error("""
+                            ⚠️ **Período de Arrepentimiento Activo**  
+                            El cliente se encuentra dentro del período de arrepentimiento.
+                            """)
+                
+                st.session_state.cliente_seleccionado = cliente_actual
                 
                 if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
                     with st.spinner("Actualizando..."):
