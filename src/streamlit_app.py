@@ -378,32 +378,90 @@ def recomendar_fcis_por_perfil(perfil: str, fcis_disponibles: pd.DataFrame) -> p
     return fcis_filtrados
         
 def obtener_portafolio(bearer_token):
-    """Obtiene el portafolio actual del cliente"""
+    """
+    Obtiene el portafolio actual del cliente
+    
+    Args:
+        bearer_token: Token de autenticación
+        
+    Returns:
+        dict or None: Datos del portafolio o None en caso de error
+    """
     url = "https://api.invertironline.com/api/v2/portafolio/argentina"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {bearer_token}'
     }
+    
+    print("\nSolicitando datos del portafolio...")
     response = requests.get(url, headers=headers)
+    
     if response.status_code == 200:
-        return response.json()
+        portafolio = response.json()
+        
+        # Verificar la estructura de la respuesta
+        if 'activos' in portafolio and portafolio['activos']:
+            print(f"Se encontraron {len(portafolio['activos'])} activos en el portafolio")
+            # Mostrar los primeros activos para depuración
+            for i, activo in enumerate(portafolio['activos'][:3], 1):
+                print(f"\nActivo {i}:")
+                for key, value in activo.items():
+                    print(f"  {key}: {value}")
+        else:
+            print("No se encontraron activos en el portafolio")
+            
+        return portafolio
     else:
         print(f"Error al obtener el portafolio: {response.status_code}")
-        print(response.text)
+        print("Respuesta del servidor:", response.text)
         return None
 
 def calcular_estadisticas_portafolio(portafolio_df):
-    """Calcula estadísticas básicas del portafolio"""
-    if portafolio_df.empty:
-        return {}
+    """
+    Calcula estadísticas básicas del portafolio.
+    
+    Args:
+        portafolio_df: DataFrame con los activos del portafolio
         
+    Returns:
+        dict: Diccionario con las estadísticas calculadas
+    """
+    if portafolio_df is None or portafolio_df.empty:
+        print("Advertencia: El DataFrame del portafolio está vacío o es None")
+        return {}
+    
+    # Mostrar las columnas disponibles para depuración
+    print("\nColumnas disponibles en el portafolio:", portafolio_df.columns.tolist())
+    
+    # Mapeo de posibles nombres de columnas para diferentes versiones de la API
+    col_valor = next((col for col in ['valorMercado', 'marketValue', 'currentValue'] 
+                     if col in portafolio_df.columns), None)
+    col_rent = next((col for col in ['rentabilidadPorcentaje', 'returnPercentage', 'performance'] 
+                    if col in portafolio_df.columns), None)
+    
+    if col_valor is None:
+        print("Advertencia: No se encontró la columna de valor en el portafolio")
+        print("Se intentará calcular el valor a partir de cantidad y precio")
+        if 'cantidad' in portafolio_df.columns and 'ultimoPrecio' in portafolio_df.columns:
+            portafolio_df['valorCalculado'] = portafolio_df['cantidad'] * portafolio_df['ultimoPrecio']
+            col_valor = 'valorCalculado'
+    
+    # Calcular estadísticas con manejo de columnas faltantes
     stats = {
-        'valor_total': portafolio_df['valorMercado'].sum(),
-        'cantidad_activos': len(portafolio_df),
-        'rentabilidad_promedio': portafolio_df['rentabilidadPorcentaje'].mean(),
-        'volatilidad_promedio': portafolio_df['volatilidadAnual'].mean() if 'volatilidadAnual' in portafolio_df.columns else None,
-        'sharpe_ratio': portafolio_df['sharpeRatio'].mean() if 'sharpeRatio' in portafolio_df.columns else None
+        'valor_total': portafolio_df[col_valor].sum() if col_valor is not None else None,
+        'cantidad_activos': len(portafolio_df)
     }
+    
+    # Añadir métricas opcionales si están disponibles
+    if col_rent is not None:
+        stats['rentabilidad_promedio'] = portafolio_df[col_rent].mean()
+    
+    if 'volatilidadAnual' in portafolio_df.columns:
+        stats['volatilidad_promedio'] = portafolio_df['volatilidadAnual'].mean()
+    
+    if 'sharpeRatio' in portafolio_df.columns:
+        stats['sharpe_ratio'] = portafolio_df['sharpeRatio'].mean()
+    
     return stats
 
 def optimizar_portafolio(returns, num_portfolios=10000, risk_free_rate=0.05):
@@ -511,59 +569,90 @@ def main():
     if portafolio and 'activos' in portafolio and portafolio['activos']:
         df_portafolio = pd.DataFrame(portafolio['activos'])
         
+        # Mostrar información de depuración
+        print("\nPrimeras filas del portafolio:")
+        print(df_portafolio.head())
+        print("\nColumnas disponibles:", df_portafolio.columns.tolist())
+        
         # Calcular estadísticas del portafolio
         stats = calcular_estadisticas_portafolio(df_portafolio)
-        print("\nResumen del Portafolio:")
-        print(f"Valor Total: ${stats['valor_total']:,.2f}")
-        print(f"Cantidad de Activos: {stats['cantidad_activos']}")
-        print(f"Rentabilidad Promedio: {stats['rentabilidad_promedio']:.2f}%")
         
-        # Mostrar composición del portafolio
-        print("\nComposición del Portafolio:")
-        print(df_portafolio[['simbolo', 'tipo', 'descripcion', 'cantidad', 'precioPromedio', 'ultimoPrecio', 'variacionDiaria', 'rentabilidadPorcentaje', 'valorMercado']])
+        print("\n=== RESUMEN DEL PORTAFOLIO ===")
+        if 'valor_total' in stats and stats['valor_total'] is not None:
+            print(f"Valor Total: ${stats['valor_total']:,.2f}")
+        else:
+            print("No se pudo calcular el valor total del portafolio")
+            
+        print(f"Cantidad de Activos: {stats['cantidad_activos']}")
+        
+        if 'rentabilidad_promedio' in stats and stats['rentabilidad_promedio'] is not None:
+            print(f"Rentabilidad Promedio: {stats['rentabilidad_promedio']:.2f}%")
+        
+        # Mostrar composición del portafolio (solo columnas existentes)
+        print("\n=== COMPOSICIÓN DEL PORTAFOLIO ===")
+        columnas_deseadas = ['simbolo', 'tipo', 'descripcion', 'cantidad', 'precioPromedio', 
+                            'ultimoPrecio', 'variacionDiaria', 'rentabilidadPorcentaje', 'valorMercado']
+        columnas_existentes = [col for col in columnas_deseadas if col in df_portafolio.columns]
+        
+        if columnas_existentes:
+            print(df_portafolio[columnas_existentes].to_string())
+        else:
+            print("No se encontraron columnas de datos para mostrar.")
         
         # Análisis de perfil del portafolio
         print("\n=== ANÁLISIS DE PERFIL DE INVERSIÓN ===")
         analisis_perfil = analizar_perfil_portafolio(df_portafolio)
-        perfil_portafolio = analisis_perfil['perfil_sugerido']
-        composicion_actual = analisis_perfil['composicion_actual']
         
-        print(f"\nPerfil sugerido por composición actual: {perfil_portafolio}")
-        print("\nComposición actual del portafolio:")
-        for tipo, porcentaje in composicion_actual.items():
-            print(f"- {tipo}: {porcentaje:.1f}%")
-        
-        # Comparar con perfil objetivo
-        perfil_objetivo = PERFILES_INVERSOR.get(perfil_inversor, PERFILES_INVERSOR['MODERADO'])
-        print(f"\nComparación con perfil objetivo ({perfil_inversor}):")
-        
-        recomendaciones = []
-        for objetivo in perfil_objetivo['composicion']:
-            tipo = objetivo['tipo']
-            actual = composicion_actual.get(tipo, 0)
-            print(f"- {tipo}: {actual:.1f}% (Objetivo: {objetivo['min']}-{objetivo['max']}%)")
+        if analisis_perfil and 'perfil_sugerido' in analisis_perfil:
+            perfil_portafolio = analisis_perfil['perfil_sugerido']
+            composicion_actual = analisis_perfil.get('composicion_actual', {})
             
-            # Generar recomendaciones
-            if actual < objetivo['min']:
-                recomendaciones.append(f"Aumentar exposición a {tipo}")
-            elif actual > objetivo['max']:
-                recomendaciones.append(f"Reducir exposición a {tipo}")
-        
-        if recomendaciones:
-            print("\nRecomendaciones de rebalanceo:")
-            for rec in recomendaciones:
-                print(f"- {rec}")
+            print(f"\nPerfil sugerido por composición actual: {perfil_portafolio}")
+            
+            if composicion_actual:
+                print("\nComposición actual del portafolio:")
+                for tipo, porcentaje in composicion_actual.items():
+                    print(f"- {tipo}: {porcentaje:.1f}%")
+            
+            # Comparar con perfil objetivo
+            perfil_objetivo = PERFILES_INVERSOR.get(perfil_inversor, PERFILES_INVERSOR['MODERADO'])
+            print(f"\nComparación con perfil objetivo ({perfil_inversor}):")
+            
+            recomendaciones = []
+            for objetivo in perfil_objetivo['composicion']:
+                tipo = objetivo['tipo']
+                actual = composicion_actual.get(tipo, 0)
+                print(f"- {tipo}: {actual:.1f}% (Objetivo: {objetivo['min']}-{objetivo['max']}%)")
+                
+                # Generar recomendaciones
+                if actual < objetivo['min']:
+                    recomendaciones.append(f"Aumentar exposición a {tipo}")
+                elif actual > objetivo['max']:
+                    recomendaciones.append(f"Reducir exposición a {tipo}")
+            
+            if recomendaciones:
+                print("\nRecomendaciones de rebalanceo:")
+                for rec in recomendaciones:
+                    print(f"- {rec}")
+        else:
+            print("No se pudo realizar el análisis de perfil del portafolio.")
+            perfil_portafolio = 'MODERADO'
         
         # Análisis de riesgo
+        print("\n=== ANÁLISIS DE RIESGO ===")
         riesgo = analizar_riesgo(df_portafolio)
         if riesgo:
-            print("\nExposición por Tipo de Activo:")
-            print(riesgo['exposicion_por_activo'])
+            if 'exposicion_por_activo' in riesgo and not riesgo['exposicion_por_activo'].empty:
+                print("\nExposición por Tipo de Activo:")
+                print(riesgo['exposicion_por_activo'])
             
-            print("\nMayores Posiciones por Riesgo:")
-            print(riesgo['top_riesgos'])
+            if 'top_riesgos' in riesgo and not riesgo['top_riesgos'].empty:
+                print("\nMayores Posiciones por Riesgo:")
+                print(riesgo['top_riesgos'])
+            else:
+                print("No se encontraron datos de riesgo para mostrar.")
     else:
-        print("No se encontraron activos en el portafolio.")
+        print("No se encontraron activos en el portafolio o no se pudo acceder a los datos.")
         perfil_portafolio = 'MODERADO'
     
     # 2. Obtener y mostrar FCIs con recomendaciones
