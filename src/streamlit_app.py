@@ -1559,6 +1559,7 @@ def mostrar_resumen_portafolio(portafolio):
     datos_activos = []
     valor_total = 0
     
+    # Procesar cada activo para extraer información relevante
     for activo in activos:
         try:
             titulo = activo.get('titulo', {})
@@ -1567,21 +1568,17 @@ def mostrar_resumen_portafolio(portafolio):
             tipo = titulo.get('tipo', 'N/A')
             cantidad = activo.get('cantidad', 0)
             
+            # Campos posibles para obtener la valuación
             campos_valuacion = [
-                'valuacionEnMonedaOriginal',
-                'valuacionActual',
-                'valorNominalEnMonedaOriginal', 
-                'valorNominal',
-                'valuacionDolar',
-                'valuacion',
-                'valorActual',
-                'montoInvertido',
-                'valorMercado',
-                'valorTotal',
-                'importe'
+                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
+                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido',
+                'valorMercado', 'valorTotal', 'importe'
             ]
             
             valuacion = 0
+            precio_unitario = 0
+            
+            # 1. Intentar obtener la valuación directa
             for campo in campos_valuacion:
                 if campo in activo and activo[campo] is not None:
                     try:
@@ -1592,18 +1589,14 @@ def mostrar_resumen_portafolio(portafolio):
                     except (ValueError, TypeError):
                         continue
             
+            # 2. Si no hay valuación, intentar calcularla con cantidad * precio
             if valuacion == 0 and cantidad:
                 campos_precio = [
-                    'precioPromedio',
-                    'precioCompra',
-                    'precioActual',
-                    'precio',
-                    'precioUnitario',
-                    'ultimoPrecio',
-                    'cotizacion'
+                    'precioPromedio', 'precioCompra', 'precioActual', 'precio',
+                    'precioUnitario', 'ultimoPrecio', 'cotizacion'
                 ]
                 
-                precio_unitario = 0
+                # Buscar precio en el activo
                 for campo in campos_precio:
                     if campo in activo and activo[campo] is not None:
                         try:
@@ -1614,6 +1607,7 @@ def mostrar_resumen_portafolio(portafolio):
                         except (ValueError, TypeError):
                             continue
                 
+                # Si no encontramos precio en el activo, buscamos en el título
                 if precio_unitario == 0:
                     for campo in campos_precio:
                         if campo in titulo and titulo[campo] is not None:
@@ -1625,10 +1619,11 @@ def mostrar_resumen_portafolio(portafolio):
                             except (ValueError, TypeError):
                                 continue
                 
+                # Calcular la valuación
                 if precio_unitario > 0:
                     try:
                         cantidad_num = float(cantidad)
-                        # Ajustar la valuación para bonos (precio por 100 nominal)
+                        # Ajuste para bonos (precio por 100 nominal)
                         if tipo == 'TitulosPublicos':
                             valuacion = (cantidad_num * precio_unitario) / 100.0
                         else:
@@ -1636,141 +1631,51 @@ def mostrar_resumen_portafolio(portafolio):
                     except (ValueError, TypeError) as e:
                         st.warning(f"Error calculando valuación para {simbolo}: {str(e)}")
             
-            datos_activos.append({
-                'Símbolo': simbolo,
-                'Descripción': descripcion,
-                'Tipo': tipo,
-                'Cantidad': cantidad,
-                'Valuación': valuacion,
-            })
-            
-            valor_total += valuacion
+            # Agregar a los datos del portafolio
+            if simbolo != 'N/A' and cantidad > 0:
+                datos_activos.append({
+                    'simbolo': simbolo,
+                    'tipo': tipo,
+                    'cantidad': float(cantidad),
+                    'precio': precio_unitario if precio_unitario > 0 else valuacion/float(cantidad) if float(cantidad) > 0 else 0,
+                    'moneda': 'ARS',  # Asumimos ARS por defecto
+                    'descripcion': descripcion,
+                    'valor_total': valuacion
+                })
+                valor_total += valuacion
+                
         except Exception as e:
+            st.warning(f"Error procesando activo: {str(e)}")
             continue
     
+    # Si hay datos, mostramos el análisis
     if datos_activos:
-        df_activos = pd.DataFrame(datos_activos)
-        metricas = calcular_metricas_portafolio(datos_activos, valor_total)
+        # Convertir a DataFrame
+        df_portafolio = pd.DataFrame(datos_activos)
         
-        # Información General
-        cols = st.columns(4)
-        cols[0].metric("Total de Activos", len(datos_activos))
-        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
-        
-        if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
+        # Crear y mostrar el análisis con la nueva clase
+        try:
+            analizador = AnalizadorPortafolio(df_portafolio)
+            analizador.mostrar_resumen()
             
-            cols[0].metric("Concentración", 
-                          f"{metricas['concentracion']:.3f}",
-                          help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
+            # Mostrar tabla detallada de activos
+            st.subheader("📋 Detalle de Activos")
+            st.dataframe(df_portafolio[['simbolo', 'descripcion', 'tipo', 'cantidad', 'precio', 'valor_total']]
+                        .rename(columns={
+                            'simbolo': 'Símbolo',
+                            'descripcion': 'Descripción',
+                            'tipo': 'Tipo',
+                            'cantidad': 'Cantidad',
+                            'precio': 'Precio Unitario',
+                            'valor_total': 'Valor Total'
+                        }), 
+                        use_container_width=True)
             
-            cols[1].metric("Volatilidad", 
-                          f"${metricas['std_dev_activo']:,.0f}",
-                          help="Desviación estándar de los valores de activos")
-            
-            concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
-            cols[2].metric("Nivel Concentración", concentracion_status)
-            
-            # Proyecciones
-            st.subheader("📈 Proyecciones de Rendimiento")
-            cols = st.columns(3)
-            cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
-            cols[1].metric("Escenario Optimista", f"${metricas['pl_percentil_95']:,.0f}")
-            cols[2].metric("Escenario Pesimista", f"${metricas['pl_percentil_5']:,.0f}")
-            
-            # Probabilidades
-            st.subheader("🎯 Probabilidades")
-            cols = st.columns(4)
-            probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
-        
-        # Gráficos
-        st.subheader("📊 Distribución de Activos")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-                tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
-                fig_pie = go.Figure(data=[go.Pie(
-                    labels=tipo_stats['Tipo'],
-                    values=tipo_stats['Valuación'],
-                    textinfo='label+percent',
-                    hole=0.4,
-                    marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
-                )])
-                fig_pie.update_layout(
-                    title="Distribución por Tipo",
-                    height=400
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
-        
-        with col2:
-            if len(datos_activos) > 1:
-                valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                if valores_activos:
-                    fig_hist = go.Figure(data=[go.Histogram(
-                        x=valores_activos,
-                        nbinsx=min(20, len(valores_activos)),
-                        marker_color='#0d6efd'
-                    )])
-                    fig_hist.update_layout(
-                        title="Distribución de Valores",
-                        xaxis_title="Valor ($)",
-                        yaxis_title="Frecuencia",
-                        height=400
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
-        
-        # Tabla de activos
-        st.subheader("📋 Detalle de Activos")
-        df_display = df_activos.copy()
-        df_display['Valuación'] = df_display['Valuación'].apply(
-            lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-        )
-        df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
-        df_display = df_display.sort_values('Peso (%)', ascending=False)
-        
-        st.dataframe(df_display, use_container_width=True, height=400)
-        
-        # Recomendaciones
-        st.subheader("💡 Recomendaciones")
-        if metricas:
-            if metricas['concentracion'] > 0.5:
-                st.warning("""
-                **⚠️ Portafolio Altamente Concentrado**  
-                Considere diversificar sus inversiones para reducir el riesgo.
-                """)
-            elif metricas['concentracion'] > 0.25:
-                st.info("""
-                **ℹ️ Concentración Moderada**  
-                Podría mejorar su diversificación para optimizar el riesgo.
-                """)
-            else:
-                st.success("""
-                **✅ Buena Diversificación**  
-                Su portafolio está bien diversificado.
-                """)
-            
-            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
-            if ratio_riesgo_retorno > 0.5:
-                st.success("""
-                **✅ Buen Balance Riesgo-Retorno**  
-                La relación entre riesgo y retorno es favorable.
-                """)
-            else:
-                st.warning("""
-                **⚠️ Revisar Balance Riesgo-Retorno**  
-                El riesgo podría ser alto en relación al retorno esperado.
-                """)
+        except Exception as e:
+            st.error(f"Error generando análisis del portafolio: {str(e)}")
+            st.exception(e)  # Mostrar detalles del error para depuración
     else:
-        st.warning("No se encontraron activos en el portafolio")
+        st.warning("No se encontraron activos para analizar en el portafolio")
 
 def mostrar_estado_cuenta(estado_cuenta):
     st.markdown("### 💰 Estado de Cuenta")
