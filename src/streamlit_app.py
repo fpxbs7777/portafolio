@@ -1159,7 +1159,7 @@ def main():
         print("\n=== ANÁLISIS DE RIESGO ===")
         riesgo = analizar_riesgo(df_portafolio)
         if riesgo:
-            if 'exposicion_por_activo' in riesgo and not riesgo['exposicion_por_activo'].empty:
+            if 'exposicion_por_activo' in riesgo and riesgo['exposicion_por_activo']:
                 print("\nExposición por Tipo de Activo:")
                 print(riesgo['exposicion_por_activo'])
             
