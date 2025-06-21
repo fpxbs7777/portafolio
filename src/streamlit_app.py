@@ -2385,255 +2385,61 @@ class PortfolioOptimizer:
     def obtener_serie_historica(self, simbolo: str, mercado: str = None, 
                                       fecha_desde: str = None, 
                                       fecha_hasta: str = None, 
-                                      reintentos: int = 3) -> pd.DataFrame:
+                                      ajustada: str = 'SinAjustar') -> pd.DataFrame:
         """
-        Obtiene la serie histórica de precios con detección automática de mercado.
-        
+        Obtiene la serie histórica de precios para un activo, probando en varios mercados si no se especifica uno.
+        Utiliza la API de InvertirOnline.
+
         Args:
-            simbolo: Símbolo del activo (ej: 'GGAL', 'AAPL')
-            mercado: Mercado del activo (opcional, se detecta automáticamente si es None)
-            fecha_desde: Fecha de inicio en formato 'YYYY-MM-DD' (por defecto: 1 año atrás)
-            fecha_hasta: Fecha de fin en formato 'YYYY-MM-DD' (por defecto: hoy)
-            reintentos: Número de reintentos en caso de error
-            
+            simbolo (str): Símbolo del activo (ej: 'AL30', 'GD30').
+            mercado (str, optional): Mercado específico a consultar. Si es None, prueba una lista predefinida.
+            fecha_desde (str, optional): Fecha de inicio 'YYYY-MM-DD'. Por defecto, un año atrás.
+            fecha_hasta (str, optional): Fecha de fin 'YYYY-MM-DD'. Por defecto, hoy.
+            ajustada (str, optional): Si la serie debe ser 'Ajustada' o 'SinAjustar'.
+
         Returns:
-            DataFrame con la serie histórica de precios o None si hay error
+            pd.DataFrame: DataFrame con la serie histórica, o None si no se encuentran datos.
         """
-        # Validar y configurar fechas
-        try:
-            fecha_hasta_dt = datetime.strptime(fecha_hasta or datetime.now().strftime('%Y-%m-%d'), '%Y-%m-%d')
-            fecha_desde_dt = datetime.strptime(fecha_desde or (fecha_hasta_dt - timedelta(days=365)).strftime('%Y-%m-%d'), '%Y-%m-%d')
-            
-            # Asegurarse de que no se pida data del futuro
-            if fecha_hasta_dt > datetime.now():
-                fecha_hasta_dt = datetime.now()
-                fecha_hasta = fecha_hasta_dt.strftime('%Y-%m-%d')
-                print(f"Ajustando fecha hasta a la fecha actual: {fecha_hasta}")
-                
-            if fecha_desde_dt > fecha_hasta_dt:
-                print(f"Error: La fecha de inicio {fecha_desde} es posterior a la fecha de fin {fecha_hasta}")
-                return None
-                
-        except ValueError as e:
-            print(f"Error al validar fechas: {str(e)}")
+        # Validar y establecer fechas
+        if fecha_hasta is None:
+            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+        if fecha_desde is None:
+            fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+            fecha_desde = (fecha_hasta_dt - timedelta(days=365)).strftime('%Y-%m-%d')
+
+        if not self.token_portador:
+            st.error("El token de autenticación no está disponible. Por favor, inicie sesión de nuevo.")
             return None
-            
-        # Lista de mercados a probar (en orden de prioridad)
-        mercados_a_probar = []
+
+        mercados_a_probar = [mercado] if mercado else ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
         
-        # Si no se especifica el mercado, detectarlo automáticamente
-        if mercado is None:
-            # Primero intentar con los mercados locales para Argentina
-            mercados_a_probar = [
-                'BCBA',    # Mercado local argentino
-                'ROFEX',   # Mercado de futuros argentino
-                'NYSE',    # Mercado de Nueva York
-                'NASDAQ',  # Mercado Nasdaq
-                'AMEX',    # Mercado American
-                'BCE',     # Bolsa de Comercio de Buenos Aires
-                'CCL',     # Contado con Liqui
-                'MEP'      # Mercado de Efectos Públicos
-            ]
-        else:
-            mercados_a_probar = [mercado]
-        
-        # Intentar con cada mercado hasta encontrar uno que funcione
+        st.info(f"Buscando serie histórica para {simbolo}...")
         for mercado_intento in mercados_a_probar:
-            for intento in range(reintentos):
-                try:
-                    # Para acciones argentinas, añadir .BA si es necesario
-                    if mercado_intento == 'BCBA' and not any(simbolo.endswith(ext) for ext in ['.BA', '.BA.C', '.BA.D']):
-                        simbolo_yf = f"{simbolo}.BA"
-                    else:
-                        simbolo_yf = simbolo
+            url = f"https://api.invertironline.com/api/v2/{mercado_intento}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+            headers = self.obtener_encabezado_autorizacion()
+
+            print(f"Intentando en mercado: {mercado_intento}...")
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                datos = response.json()
+                if datos and isinstance(datos, list):
+                    df = pd.DataFrame(datos)
+                    st.success(f"Datos obtenidos para {simbolo} en {mercado_intento} ({len(df)} registros).")
                     
-                    # Primero intentar con IOL API
-                    token = obtener_tokens(os.getenv('INVERTIR_USERNAME'), os.getenv('INVERTIR_PASSWORD'))[0]
-                    if not token:
-                        print(f"❌ No se pudo obtener token para {simbolo} en {mercado_intento}")
-                        continue
+                    # Procesamiento del DataFrame
+                    df.rename(columns={'ultimoPrecio': 'cierre', 'montoOperado': 'volumen'}, inplace=True)
+                    df['fecha'] = pd.to_datetime(df['fecha'])
+                    df.set_index('fecha', inplace=True)
                     
-                    # Construir URL con formato correcto
-                    headers = obtener_encabezado_autorizacion(token)
-                    url = f"{self.base_url}/api/v2/{mercado_intento}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+                    columnas_deseadas = ['apertura', 'cierre', 'maximo', 'minimo', 'volumen']
+                    columnas_presentes = [col for col in columnas_deseadas if col in df.columns]
                     
-                    # Asegurar que las fechas están en formato ISO
-                    fecha_desde_iso = datetime.strptime(fecha_desde, '%Y-%m-%d').isoformat()
-                    fecha_hasta_iso = datetime.strptime(fecha_hasta, '%Y-%m-%d').isoformat()
-                    
-                    # Construir URL final
-                    url_final = url.replace(fecha_desde, fecha_desde_iso).replace(fecha_hasta, fecha_hasta_iso)
-                    
-                    print(f"Intentando obtener datos de IOL para {simbolo} en {mercado_intento}")
-                    print(f"URL: {url_final}")
-                    
-                    # Hacer la solicitud
-                    response = requests.get(url_final, headers=headers)
-                    
-                    if response.status_code == 200:
-                        try:
-                            data = response.json()
-                            
-                            if isinstance(data, list) and len(data) > 0:
-                                # Convertir datos a DataFrame
-                                df = pd.DataFrame(data)
-                                
-                                # Verificar y ajustar columnas
-                                columnas_requeridas = {
-                                    'fecha': ['fecha', 'fechaHora'],
-                                    'ultimoPrecio': ['ultimoPrecio', 'precio'],
-                                    'apertura': ['apertura'],
-                                    'maximo': ['maximo'],
-                                    'minimo': ['minimo'],
-                                    'montoOperado': ['montoOperado', 'volumen']
-                                }
-                                
-                                # Intentar encontrar columnas alternativas
-                                columnas_faltantes = []
-                                for col_principal, alternativas in columnas_requeridas.items():
-                                    if col_principal not in df.columns:
-                                        encontrado = False
-                                        for alt in alternativas:
-                                            if alt in df.columns:
-                                                df[col_principal] = df[alt]
-                                                encontrado = True
-                                                break
-                                        if not encontrado:
-                                            columnas_faltantes.append(col_principal)
-                                
-                                if columnas_faltantes:
-                                    print(f"❌ Columnas faltantes: {columnas_faltantes}")
-                                    continue
-                                
-                                # Reorganizar columnas para consistencia
-                                df = df.rename(columns={
-                                    'fecha': 'fecha',
-                                    'ultimoPrecio': 'cierre',
-                                    'apertura': 'apertura',
-                                    'maximo': 'maximo',
-                                    'minimo': 'minimo',
-                                    'montoOperado': 'volumen'
-                                })
-                                
-                                # Validar formato de fechas
-                                try:
-                                    df['fecha'] = pd.to_datetime(df['fecha'])
-                                except Exception as e:
-                                    print(f"❌ Error al procesar fechas: {str(e)}")
-                                    print(f"Valores de fecha en la respuesta: {df['fecha'].head().tolist()}")
-                                    continue
-                                
-                                # Asegurar que el índice es datetime
-                                df = df.set_index('fecha')
-                                
-                                # Verificar y limpiar NaNs
-                                if df.isna().any().any():
-                                    print(f"⚠️ Valores NaN encontrados en los datos")
-                                    # Llenar NaNs con el último valor válido
-                                    df = df.fillna(method='ffill')
-                                    if df.isna().any().any():
-                                        print(f"❌ Aún hay NaNs después de llenar")
-                                        continue
-                                
-                                print(f"✅ Datos obtenidos de IOL para {simbolo} en {mercado_intento} ({len(df)} registros)")
-                                print(f"Columnas disponibles: {df.columns.tolist()}")
-                                print(f"Primer registro: {df.iloc[0].to_dict()}")
-                                return df
-                            else:
-                                print(f"⚠️ Respuesta vacía o formato incorrecto de IOL para {simbolo} en {mercado_intento}")
-                                print(f"Contenido de la respuesta: {data}")
-                        except Exception as e:
-                            print(f"❌ Error al procesar datos IOL: {str(e)}")
-                            print(f"Status: {response.status_code}, Headers: {response.headers}")
-                            print(f"Contenido de la respuesta: {response.text}")
-                    else:
-                        print(f"❌ Error IOL API para {simbolo} en {mercado_intento}: {response.status_code}")
-                        print(f"Headers: {response.headers}")
-                        print(f"Contenido: {response.text}")
-                    
-                    # Si IOL falla, intentar con yfinance
-                    print(f"Intentando obtener datos para {simbolo} en {mercado_intento} usando yfinance...")
-                    
-                    # Descargar datos usando yfinance
-                    try:
-                        df = yf.download(
-                            simbolo_yf, 
-                            start=fecha_desde, 
-                            end=fecha_hasta, 
-                            progress=False,
-                            threads=True,
-                            timeout=10  # Timeout de 10 segundos
-                        )
-                        
-                        if df.empty:
-                            print(f"⚠️ DataFrame vacío para {simbolo} en {mercado_intento} usando yfinance")
-                            continue
-                            
-                        # Verificar que todas las columnas necesarias están presentes
-                        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                        missing_columns = [col for col in required_columns if col not in df.columns]
-                        
-                        if missing_columns:
-                            print(f"⚠️ Columnas faltantes en yfinance: {missing_columns}")
-                            print(f"Columnas disponibles: {df.columns.tolist()}")
-                            continue
-                            
-                        # Renombrar columnas para consistencia
-                        df = df.rename(columns={
-                            'Open': 'apertura',
-                            'High': 'maximo',
-                            'Low': 'minimo',
-                            'Close': 'cierre',
-                            'Volume': 'volumen',
-                            'Adj Close': 'cierreAjustado'
-                        })
-                        
-                        # Verificar que el índice sea datetime
-                        if not isinstance(df.index, pd.DatetimeIndex):
-                            print(f"⚠️ Índice no es datetime para {simbolo} en {mercado_intento}")
-                            continue
-                            
-                        print(f"✅ Datos obtenidos de yfinance para {simbolo} en {mercado_intento} ({len(df)} registros)")
-                        return df
-                        
-                    except Exception as e:
-                        print(f"❌ Error al obtener datos de yfinance para {simbolo} en {mercado_intento}: {str(e)}")
-                        continue
-                    
-                    # Verificar que hay suficientes datos
-                    if df.empty or len(df) < 5:  # Al menos 5 puntos de datos
-                        print(f"Insuficientes datos para {simbolo} en {mercado_intento} ({len(df)} puntos)")
-                        continue
-                        
-                    # Renombrar columnas para consistencia
-                    df = df.rename(columns={
-                        'Open': 'apertura',
-                        'High': 'maximo',
-                        'Low': 'minimo',
-                        'Close': 'cierre',
-                        'Volume': 'volumen',
-                        'Adj Close': 'cierreAjustado'
-                    })
-                    
-                    # Asegurar que el índice sea datetime
-                    df.index = pd.to_datetime(df.index)
-                    
-                    # Si llegamos aquí, los datos son válidos
-                    print(f"✅ Datos obtenidos para {simbolo} en {mercado_intento} ({len(df)} registros)")
-                    return df
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    if intento < reintentos - 1:  # No es el último intento
-                        print(f"Intento {intento + 1} falló para {simbolo} en {mercado_intento}: {error_msg}")
-                        time.sleep(1)  # Esperar 1 segundo antes de reintentar
-                        continue
-                    
-                    print(f"Todos los intentos fallaron para {simbolo} en {mercado_intento}: {error_msg}")
-                    continue
-        
-        # Si llegamos aquí, ningún mercado funcionó
-        print(f"❌ No se pudo obtener datos para {simbolo} en ningún mercado. Mercados probados: {', '.join(mercados_a_probar)}")
+                    return df[columnas_presentes]
+            else:
+                print(f"No se encontraron datos para {simbolo} en {mercado_intento} (Status: {response.status_code}).")
+
+        st.warning(f"No se pudo obtener la serie histórica para {simbolo} en ninguno de los mercados probados.")
         return None
 
     def seleccionar_activos_aleatorios(
