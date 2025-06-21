@@ -2453,23 +2453,56 @@ class PortfolioOptimizer:
                         print(f"❌ No se pudo obtener token para {simbolo} en {mercado_intento}")
                         continue
                     
+                    # Construir URL con formato correcto
                     headers = obtener_encabezado_autorizacion(token)
                     url = f"{self.base_url}/api/v2/{mercado_intento}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
                     
-                    response = requests.get(url, headers=headers)
+                    # Asegurar que las fechas están en formato ISO
+                    fecha_desde_iso = datetime.strptime(fecha_desde, '%Y-%m-%d').isoformat()
+                    fecha_hasta_iso = datetime.strptime(fecha_hasta, '%Y-%m-%d').isoformat()
+                    
+                    # Construir URL final
+                    url_final = url.replace(fecha_desde, fecha_desde_iso).replace(fecha_hasta, fecha_hasta_iso)
+                    
+                    print(f"Intentando obtener datos de IOL para {simbolo} en {mercado_intento}")
+                    print(f"URL: {url_final}")
+                    
+                    # Hacer la solicitud
+                    response = requests.get(url_final, headers=headers)
                     
                     if response.status_code == 200:
                         try:
                             data = response.json()
+                            
                             if isinstance(data, list) and len(data) > 0:
                                 # Convertir datos a DataFrame
                                 df = pd.DataFrame(data)
-                                # Verificar que todas las columnas necesarias existen
-                                required_columns = ['fecha', 'ultimoPrecio', 'apertura', 'maximo', 'minimo', 'montoOperado']
-                                missing_columns = [col for col in required_columns if col not in df.columns]
                                 
-                                if missing_columns:
-                                    print(f"⚠️ Columnas faltantes en respuesta IOL: {missing_columns}")
+                                # Verificar y ajustar columnas
+                                columnas_requeridas = {
+                                    'fecha': ['fecha', 'fechaHora'],
+                                    'ultimoPrecio': ['ultimoPrecio', 'precio'],
+                                    'apertura': ['apertura'],
+                                    'maximo': ['maximo'],
+                                    'minimo': ['minimo'],
+                                    'montoOperado': ['montoOperado', 'volumen']
+                                }
+                                
+                                # Intentar encontrar columnas alternativas
+                                columnas_faltantes = []
+                                for col_principal, alternativas in columnas_requeridas.items():
+                                    if col_principal not in df.columns:
+                                        encontrado = False
+                                        for alt in alternativas:
+                                            if alt in df.columns:
+                                                df[col_principal] = df[alt]
+                                                encontrado = True
+                                                break
+                                        if not encontrado:
+                                            columnas_faltantes.append(col_principal)
+                                
+                                if columnas_faltantes:
+                                    print(f"❌ Columnas faltantes: {columnas_faltantes}")
                                     continue
                                 
                                 # Reorganizar columnas para consistencia
@@ -2490,8 +2523,21 @@ class PortfolioOptimizer:
                                     print(f"Valores de fecha en la respuesta: {df['fecha'].head().tolist()}")
                                     continue
                                 
+                                # Asegurar que el índice es datetime
                                 df = df.set_index('fecha')
+                                
+                                # Verificar y limpiar NaNs
+                                if df.isna().any().any():
+                                    print(f"⚠️ Valores NaN encontrados en los datos")
+                                    # Llenar NaNs con el último valor válido
+                                    df = df.fillna(method='ffill')
+                                    if df.isna().any().any():
+                                        print(f"❌ Aún hay NaNs después de llenar")
+                                        continue
+                                
                                 print(f"✅ Datos obtenidos de IOL para {simbolo} en {mercado_intento} ({len(df)} registros)")
+                                print(f"Columnas disponibles: {df.columns.tolist()}")
+                                print(f"Primer registro: {df.iloc[0].to_dict()}")
                                 return df
                             else:
                                 print(f"⚠️ Respuesta vacía o formato incorrecto de IOL para {simbolo} en {mercado_intento}")
