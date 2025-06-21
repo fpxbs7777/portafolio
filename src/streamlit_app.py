@@ -2382,75 +2382,89 @@ class PortfolioOptimizer:
         
         return tickers_por_panel, pd.DataFrame(tickers_data)
 
-    def obtener_serie_historica(self, simbolo: str, mercado: str = 'BCBA', 
-                              fecha_desde: str = None, 
-                              fecha_hasta: str = None) -> pd.DataFrame:
+    def obtener_serie_historica(self, simbolo: str, mercado: str = None, 
+                                      fecha_desde: str = None, 
+                                      fecha_hasta: str = None, 
+                                      reintentos: int = 3) -> pd.DataFrame:
         """
-        Obtiene la serie histórica de precios usando yfinance.
+        Obtiene la serie histórica de precios con detección automática de mercado.
         
         Args:
-            simbolo: Símbolo del activo (se añade .BA para acciones argentinas)
-            mercado: No se usa, se mantiene por compatibilidad
-            fecha_desde: Fecha de inicio (YYYY-MM-DD)
-            fecha_hasta: Fecha de fin (YYYY-MM-DD)
+            simbolo: Símbolo del activo (ej: 'GGAL', 'AAPL')
+            mercado: Mercado del activo (opcional, se detecta automáticamente si es None)
+            fecha_desde: Fecha de inicio en formato 'YYYY-MM-DD' (por defecto: 1 año atrás)
+            fecha_hasta: Fecha de fin en formato 'YYYY-MM-DD' (por defecto: hoy)
+            reintentos: Número de reintentos en caso de error
             
         Returns:
-            DataFrame con la serie histórica de precios
+            DataFrame con la serie histórica de precios o None si hay error
         """
-        try:
-            # Configurar fechas por defecto (últimos 2 años)
-            if not fecha_hasta:
-                fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-            if not fecha_desde:
-                fecha_desde = (datetime.now() - timedelta(days=365*2)).strftime('%Y-%m-%d')
-                
-            # Convertir fechas a datetime
-            try:
-                fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
-                fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
-                
-                if fecha_desde_dt > fecha_hasta_dt:
-                    st.warning(f"La fecha de inicio {fecha_desde} es posterior a la fecha de fin {fecha_hasta}")
-                    return None
-                    
-            except ValueError as ve:
-                st.error(f"Formato de fecha inválido: {str(ve)}")
-                return None
-                
-            # Asegurarse de que el símbolo tenga el sufijo .BA si es necesario
-            ticker = f"{simbolo}.BA" if not simbolo.endswith(('.BA', '.BA.')) else simbolo
+        # Configurar fechas por defecto si no se especifican
+        if fecha_desde is None:
+            fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+        if fecha_hasta is None:
+            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
             
-            with st.spinner(f"Obteniendo datos para {ticker}..."):
-                # Obtener datos de yfinance
-                df = yf.download(
-                    ticker,
-                    start=fecha_desde,
-                    end=fecha_hasta,
-                    progress=False
-                )
-                
-                if df.empty:
-                    st.warning(f"No se encontraron datos para {ticker} en el rango especificado")
-                    return None
+        # Lista de mercados a probar (en orden de prioridad)
+        mercados_a_probar = []
+        
+        # Si no se especifica el mercado, detectarlo automáticamente
+        if mercado is None:
+            # Primero intentar con los mercados locales para Argentina
+            mercados_a_probar = ['BCBA', 'ROFEX', 'NYSE', 'NASDAQ', 'AMEX']
+        else:
+            mercados_a_probar = [mercado]
+        
+        # Intentar con cada mercado hasta encontrar uno que funcione
+        for mercado_intento in mercados_a_probar:
+            for intento in range(reintentos):
+                try:
+                    # Para acciones argentinas, añadir .BA si es necesario
+                    if mercado_intento == 'BCBA' and not any(simbolo.endswith(ext) for ext in ['.BA', '.BA.C', '.BA.D']):
+                        simbolo_yf = f"{simbolo}.BA"
+                    else:
+                        simbolo_yf = simbolo
                     
-                # Renombrar columnas y seleccionar solo precio de cierre
-                df = df[['Close']].copy()
-                df.columns = ['precio']
-                df['simbolo'] = simbolo  # Guardar el símbolo original
-                
-                # Eliminar filas con valores faltantes
-                df = df.dropna()
-                
-                if df.empty:
-                    st.warning(f"No hay datos válidos para {ticker} después de la limpieza")
-                    return None
+                    # Descargar datos usando yfinance
+                    df = yf.download(
+                        simbolo_yf, 
+                        start=fecha_desde, 
+                        end=fecha_hasta, 
+                        progress=False,
+                        threads=True
+                    )
                     
-                st.success(f"✅ Datos obtenidos para {simbolo} ({len(df)} registros)")
-                return df
-                
-        except Exception as e:
-            st.error(f"Error al obtener datos para {simbolo}: {str(e)}")
-            return None
+                    # Si el DataFrame está vacío, continuar con el siguiente mercado
+                    if df.empty:
+                        continue
+                        
+                    # Renombrar columnas para consistencia
+                    df = df.rename(columns={
+                        'Open': 'apertura',
+                        'High': 'maximo',
+                        'Low': 'minimo',
+                        'Close': 'cierre',
+                        'Volume': 'volumen',
+                        'Adj Close': 'cierreAjustado'
+                    })
+                    
+                    # Asegurar que el índice sea datetime
+                    df.index = pd.to_datetime(df.index)
+                    
+                    # Si llegamos aquí, los datos son válidos
+                    return df
+                    
+                except Exception as e:
+                    if intento < reintentos - 1:  # No es el último intento
+                        time.sleep(1)  # Esperar 1 segundo antes de reintentar
+                        continue
+                    
+                    # Si es el último intento, continuar con el siguiente mercado
+                    continue
+        
+        # Si llegamos aquí, ningún mercado funcionó
+        print(f"No se pudo obtener datos para {simbolo} en ningún mercado")
+        return None
 
     def seleccionar_activos_aleatorios(
         self, 
@@ -2506,7 +2520,7 @@ class PortfolioOptimizer:
                         
                         if df is not None and not df.empty:
                             # Buscar columna de precio
-                            col_precio = next((c for c in ['precio'] 
+                            col_precio = next((c for c in ['ultimoPrecio', 'precio', 'cierre'] 
                                              if c in df.columns), None)
                             
                             if col_precio is not None:
