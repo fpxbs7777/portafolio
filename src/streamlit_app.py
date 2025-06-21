@@ -1241,13 +1241,13 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
 class PortfolioManager:
     def __init__(self, symbols, token, fecha_desde, fecha_hasta):
         self.symbols = symbols
-        self.token = token
-        self.fecha_desde = fecha_desde
+        self.token = token        self.fecha_desde = fecha_desde
         self.fecha_hasta = fecha_hasta
         self.data_loaded = False
         self.returns = None
         self.prices = None
-        self.notional = 100000  # Valor nominal por defecto        self.manager = None
+        self.notional = 100000  # Valor nominal por defecto
+        self.manager = None
     
     def load_data(self):
         try:
@@ -1271,7 +1271,8 @@ class PortfolioManager:
                 
         except Exception as e:
             return False
-      def compute_portfolio(self, strategy='markowitz', target_return=None):
+    
+    def compute_portfolio(self, strategy='markowitz', target_return=None):
         if not self.data_loaded or self.returns is None:
             return None
         
@@ -1696,10 +1697,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     
     col1, col2 = st.columns(2)
     with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
-    with col2:        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-    with col2:
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")    with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+    
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
@@ -2229,11 +2229,11 @@ def main():
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
+                    mostrar_tasas_caucion(st.session_state.token_acceso)                    mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")            elif opcion == "👨\u200d💼 Panel del Asesor":
+                    st.warning("Por favor inicie sesión para ver las tasas de caución")
+            elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
-        else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
             # Panel de bienvenida
@@ -2287,7 +2287,7 @@ def main():
                 - Tasas de caución actualizadas  
                 - Estado de cuenta consolidado  
                 """)
-    except Exception as e:
+    except Exception    except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
 if __name__ == "__main__":
