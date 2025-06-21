@@ -1303,13 +1303,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             help="Seleccione la estrategia de optimización a aplicar"
         )
         
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error de conexión: {str(e)}")
-    except ValueError as e:
-        st.error(f"Error en los datos: {str(e)}")
     except Exception as e:
-        st.error(f"Error inesperado: {str(e)}")
-        st.error(traceback.format_exc())
+        st.error(f"Error: {str(e)}")
 
 def mostrar_resumen_portafolio(portafolio):
     st.markdown("### 📈 Resumen del Portafolio")
@@ -1723,6 +1718,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 labels=portfolio_result.dataframe_allocation['rics'],
                                 values=portfolio_result.weights,
                                 textinfo='label+percent',
+                                hole=0.4,
                                 marker_color_discrete_sequence=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
                             )])
                             fig_pie.update_layout(
