@@ -2447,13 +2447,51 @@ class PortfolioOptimizer:
                     else:
                         simbolo_yf = simbolo
                     
+                    # Primero intentar con IOL API
+                    token = obtener_tokens(os.getenv('INVERTIR_USERNAME'), os.getenv('INVERTIR_PASSWORD'))[0]
+                    if not token:
+                        print(f"❌ No se pudo obtener token para {simbolo} en {mercado_intento}")
+                        continue
+                    
+                    headers = obtener_encabezado_autorizacion(token)
+                    url = f"{self.base_url}/api/v2/{mercado_intento}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+                    
+                    response = requests.get(url, headers=headers)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if isinstance(data, list) and len(data) > 0:
+                            # Convertir datos a DataFrame
+                            df = pd.DataFrame(data)
+                            # Reorganizar columnas para consistencia
+                            df = df.rename(columns={
+                                'fecha': 'fecha',
+                                'ultimoPrecio': 'cierre',
+                                'apertura': 'apertura',
+                                'maximo': 'maximo',
+                                'minimo': 'minimo',
+                                'montoOperado': 'volumen'
+                            })
+                            df['fecha'] = pd.to_datetime(df['fecha'])
+                            df = df.set_index('fecha')
+                            print(f"✅ Datos obtenidos de IOL para {simbolo} en {mercado_intento} ({len(df)} registros)")
+                            return df
+                        else:
+                            print(f"⚠️ Respuesta vacía de IOL para {simbolo} en {mercado_intento}")
+                    else:
+                        print(f"❌ Error IOL API para {simbolo} en {mercado_intento}: {response.status_code}")
+                    
+                    # Si IOL falla, intentar con yfinance
+                    print(f"Intentando obtener datos para {simbolo} en {mercado_intento} usando yfinance...")
+                    
                     # Descargar datos usando yfinance
                     df = yf.download(
                         simbolo_yf, 
                         start=fecha_desde, 
                         end=fecha_hasta, 
                         progress=False,
-                        threads=True
+                        threads=True,
+                        timeout=10  # Timeout de 10 segundos
                     )
                     
                     # Verificar que hay suficientes datos
