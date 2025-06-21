@@ -626,8 +626,14 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
             print(response.text)
             return None
             
+    except requests.exceptions.RequestException as e:
+        print(f"Error de conexión al obtener datos para {simbolo}: {str(e)}")
+        return None
+    except ValueError as e:
+        print(f"Error al procesar fechas para {simbolo}: {str(e)}")
+        return None
     except Exception as e:
-        print(f"Error al procesar serie histórica para {simbolo}: {str(e)}")
+        print(f"Error inesperado al procesar {simbolo}: {str(e)}")
         return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
@@ -723,10 +729,14 @@ def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, tok
     """
     try:
         # Convertir fechas a datetime si son strings
-        if isinstance(fecha_desde, str):
-            fecha_desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
-        if isinstance(fecha_hasta, str):
-            fecha_hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+        try:
+            if isinstance(fecha_desde, str):
+                fecha_desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
+            if isinstance(fecha_hasta, str):
+                fecha_hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+        except ValueError as e:
+            st.error(f"Error al procesar fechas: {str(e)}")
+            return None
             
         # Asegurarse de que las fechas sean válidas
         if fecha_desde > fecha_hasta:
@@ -750,48 +760,80 @@ def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, tok
             # Intentar obtener datos hasta 2 veces
             for intento in range(2):
                 try:
-                    # Usar la nueva función que detecta automáticamente el mercado
+                    # Primero intentar con BCBA (para activos argentinos)
                     datos = obtener_serie_historica(simbolo, 'BCBA', fecha_desde_str, fecha_hasta_str, 'ajustada', token_portador)
                     
                     if datos is not None and len(datos) > 0:
                         datos_historicos[simbolo] = datos
                         break
-                min_length = min(len(s) for s in precios.values()) if precios else 0
-                if min_length < 5:  # Mínimo razonable de datos para optimización
-                    st.error("Los datos históricos son insuficientes para la optimización")
-                    return None, None, None
                     
-                # Crear DataFrame con las series alineadas
-                df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
-                
-                # Calcular retornos y validar
-                returns = df_precios.pct_change().dropna()
-                
-                if returns.empty or len(returns) < 30:
-                    st.warning("No hay suficientes datos para el análisis")
-                    return None, None, None
+                    # Si no se encontraron datos en BCBA, intentar en NYSE (para activos internacionales)
+                    datos = obtener_serie_historica(simbolo, 'NYSE', fecha_desde_str, fecha_hasta_str, 'ajustada', token_portador)
                     
-                # Eliminar columnas con desviación estándar cero
-                if (returns.std() == 0).any():
-                    columnas_constantes = returns.columns[returns.std() == 0].tolist()
-                    returns = returns.drop(columns=columnas_constantes)
-                    df_precios = df_precios.drop(columns=columnas_constantes)
+                    if datos is not None and len(datos) > 0:
+                        datos_historicos[simbolo] = datos
+                        break
                     
-                    if returns.empty or len(returns.columns) < 2:
-                        st.warning("No hay suficientes activos válidos para la optimización")
-                        return None, None, None
+                    # Si no se encontraron datos en NYSE, intentar en NASDAQ
+                    datos = obtener_serie_historica(simbolo, 'NASDAQ', fecha_desde_str, fecha_hasta_str, 'ajustada', token_portador)
+                    
+                    if datos is not None and len(datos) > 0:
+                        datos_historicos[simbolo] = datos
+                        break
+                    
+                    # Si es un FCI, usar el endpoint especial
+                    if simbolo.endswith('FCI'):
+                        datos = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde_str, fecha_hasta_str)
+                        if datos is not None and len(datos) > 0:
+                            datos_historicos[simbolo] = datos
+                            break
+                            
+                    # Si después de todos los intentos no se encontraron datos
+                    if intento == 1:  # Es el segundo intento
+                        st.warning(f"No se pudieron obtener datos históricos para {simbolo}")
                         
-                mean_returns = returns.mean()
-                cov_matrix = returns.cov()
-                return mean_returns, cov_matrix, df_precios
+                except requests.exceptions.RequestException as e:
+                    if intento == 1:  # Es el segundo intento
+                        st.error(f"Error de conexión al obtener datos para {simbolo}: {str(e)}")
+                except ValueError as e:
+                    if intento == 1:  # Es el segundo intento
+                        st.error(f"Error al procesar datos para {simbolo}: {str(e)}")
+                except Exception as e:
+                    if intento == 1:  # Es el segundo intento
+                        st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
+                        
+        # Verificar si se obtuvieron datos para todos los símbolos
+        if len(datos_historicos) == 0:
+            st.error("No se pudieron obtener datos históricos para ninguno de los símbolos")
+            return None
             
-        st.error("❌ No se pudieron cargar los datos históricos")
-        return None, None, None
+        # Crear DataFrame con las series alineadas
+        df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in datos_historicos.items()})
         
+        # Calcular retornos y validar
+        returns = df_precios.pct_change().dropna()
+        
+        if returns.empty or len(returns) < 30:
+            st.warning("No hay suficientes datos para el análisis")
+            return None, None, None
+            
+        # Eliminar columnas con desviación estándar cero
+        if (returns.std() == 0).any():
+            columnas_constantes = returns.columns[returns.std() == 0].tolist()
+            returns = returns.drop(columns=columnas_constantes)
+            df_precios = df_precios.drop(columns=columnas_constantes)
+            
+            if returns.empty or len(returns.columns) < 2:
+                st.warning("No hay suficientes activos válidos para la optimización")
+                return None, None, None
+                
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        return mean_returns, cov_matrix, df_precios
+            
     except Exception as e:
         st.error(f"Error inesperado al obtener datos históricos: {str(e)}")
         return None, None, None
-
 def calcular_metricas_portafolio(activos_data, valor_total):
     """
     Calcula métricas detalladas del portafolio, incluyendo FCIs si están presentes
