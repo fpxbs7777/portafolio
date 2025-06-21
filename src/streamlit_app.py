@@ -2399,11 +2399,24 @@ class PortfolioOptimizer:
         Returns:
             DataFrame con la serie histórica de precios o None si hay error
         """
-        # Configurar fechas por defecto si no se especifican
-        if fecha_desde is None:
-            fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-        if fecha_hasta is None:
-            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+        # Validar y configurar fechas
+        try:
+            fecha_hasta_dt = datetime.strptime(fecha_hasta or datetime.now().strftime('%Y-%m-%d'), '%Y-%m-%d')
+            fecha_desde_dt = datetime.strptime(fecha_desde or (fecha_hasta_dt - timedelta(days=365)).strftime('%Y-%m-%d'), '%Y-%m-%d')
+            
+            # Asegurarse de que no se pida data del futuro
+            if fecha_hasta_dt > datetime.now():
+                fecha_hasta_dt = datetime.now()
+                fecha_hasta = fecha_hasta_dt.strftime('%Y-%m-%d')
+                print(f"Ajustando fecha hasta a la fecha actual: {fecha_hasta}")
+                
+            if fecha_desde_dt > fecha_hasta_dt:
+                print(f"Error: La fecha de inicio {fecha_desde} es posterior a la fecha de fin {fecha_hasta}")
+                return None
+                
+        except ValueError as e:
+            print(f"Error al validar fechas: {str(e)}")
+            return None
             
         # Lista de mercados a probar (en orden de prioridad)
         mercados_a_probar = []
@@ -2411,7 +2424,16 @@ class PortfolioOptimizer:
         # Si no se especifica el mercado, detectarlo automáticamente
         if mercado is None:
             # Primero intentar con los mercados locales para Argentina
-            mercados_a_probar = ['BCBA', 'ROFEX', 'NYSE', 'NASDAQ', 'AMEX']
+            mercados_a_probar = [
+                'BCBA',    # Mercado local argentino
+                'ROFEX',   # Mercado de futuros argentino
+                'NYSE',    # Mercado de Nueva York
+                'NASDAQ',  # Mercado Nasdaq
+                'AMEX',    # Mercado American
+                'BCE',     # Bolsa de Comercio de Buenos Aires
+                'CCL',     # Contado con Liqui
+                'MEP'      # Mercado de Efectos Públicos
+            ]
         else:
             mercados_a_probar = [mercado]
         
@@ -2434,8 +2456,9 @@ class PortfolioOptimizer:
                         threads=True
                     )
                     
-                    # Si el DataFrame está vacío, continuar con el siguiente mercado
-                    if df.empty:
+                    # Verificar que hay suficientes datos
+                    if df.empty or len(df) < 5:  # Al menos 5 puntos de datos
+                        print(f"Insuficientes datos para {simbolo} en {mercado_intento} ({len(df)} puntos)")
                         continue
                         
                     # Renombrar columnas para consistencia
@@ -2452,18 +2475,21 @@ class PortfolioOptimizer:
                     df.index = pd.to_datetime(df.index)
                     
                     # Si llegamos aquí, los datos son válidos
+                    print(f"✅ Datos obtenidos para {simbolo} en {mercado_intento} ({len(df)} registros)")
                     return df
                     
                 except Exception as e:
+                    error_msg = str(e)
                     if intento < reintentos - 1:  # No es el último intento
+                        print(f"Intento {intento + 1} falló para {simbolo} en {mercado_intento}: {error_msg}")
                         time.sleep(1)  # Esperar 1 segundo antes de reintentar
                         continue
                     
-                    # Si es el último intento, continuar con el siguiente mercado
+                    print(f"Todos los intentos fallaron para {simbolo} en {mercado_intento}: {error_msg}")
                     continue
         
         # Si llegamos aquí, ningún mercado funcionó
-        print(f"No se pudo obtener datos para {simbolo} en ningún mercado")
+        print(f"❌ No se pudo obtener datos para {simbolo} en ningún mercado. Mercados probados: {', '.join(mercados_a_probar)}")
         return None
 
     def seleccionar_activos_aleatorios(
