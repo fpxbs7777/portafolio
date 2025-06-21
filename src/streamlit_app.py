@@ -3,7 +3,7 @@ import requests
 import plotly.graph_objects as go
 import pandas as pd
 from plotly.subplots import make_subplots
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 import numpy as np
 import yfinance as yf
 import scipy.optimize as op
@@ -11,6 +11,11 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+import time
+from typing import Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 warnings.filterwarnings('ignore')
 
@@ -2335,15 +2340,46 @@ def obtener_tipo_activo(token_portador, simbolo):
         print(f"Error al obtener tipo de activo: {str(e)}")
         return None
 
+@dataclass
+class HistoricalDataRequest:
+    """Clase para manejar las solicitudes de datos históricos."""
+    simbolo: str
+    mercado: str = 'BCBA'  # Por defecto mercado local
+    fecha_desde: str = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    fecha_hasta: str = datetime.now().strftime('%Y-%m-%d')
+    ajustada: bool = False
+    frecuencia: str = 'diaria'  # 'diaria', 'semanal', 'mensual'
+    max_reintentos: int = 3
+    timeout: int = 30
+
+
 class PortfolioOptimizer:
     def __init__(self, token_portador: str):
         """
         Inicializa el optimizador de portafolio con el token de autenticación.
+        
+        Args:
+            token_portador (str): Token de autenticación para la API de InvertirOnline
         """
         self.token_portador = token_portador
         self.paneles_disponibles = [
             'acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables'
         ]
+        self._session = self._create_session()
+        
+    def _create_session(self):
+        """Crea una sesión con reintentos automáticos."""
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "POST"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
 
     def obtener_encabezado_autorizacion(self) -> dict:
         """Retorna los encabezados de autorización."""
@@ -2392,240 +2428,6 @@ class PortfolioOptimizer:
         
         return tickers_por_panel, pd.DataFrame(tickers_data)
 
-    def obtener_serie_historica(self, simbolo: str, mercado: str = None, 
-                                  fecha_desde: str = None, 
-                                  fecha_hasta: str = None, 
-                                  ajustada: str = 'SinAjustar') -> pd.DataFrame:
-        """
-        Obtiene la serie histórica de precios para un activo utilizando la API de IOL.
-        Este método prueba en varios mercados si no se especifica uno y maneja
-        la respuesta de la API para devolver un DataFrame limpio y consistente.
-
-        Args:
-            simbolo (str): Símbolo del activo (ej: 'AL30', 'AAPL').
-            mercado (str, optional): Mercado específico ('BCBA', 'NYSE', etc.). 
-                                     Si es None, se intentarán varios mercados.
-            fecha_desde (str, optional): Fecha de inicio 'YYYY-MM-DD'. Default: un año atrás.
-            fecha_hasta (str, optional): Fecha de fin 'YYYY-MM-DD'. Default: hoy.
-            ajustada (str, optional): Si la serie debe ser 'Ajustada' o 'SinAjustar'.
-
-        Returns:
-            pd.DataFrame: Un DataFrame con la serie histórica (columnas: 'apertura', 
-                          'cierre', 'maximo', 'minimo', 'volumen'), o None si falla.
-        """
-        if not self.token_portador:
-            st.error("Error de autenticación: El token no está disponible.")
-            return None
-
-        # 1. Validar y formatear las fechas
-        try:
-            if fecha_hasta:
-                fecha_hasta_dt = pd.to_datetime(fecha_hasta)
-            else:
-                fecha_hasta_dt = pd.to_datetime(date.today())
-            
-            if fecha_desde:
-                fecha_desde_dt = pd.to_datetime(fecha_desde)
-            else:
-                fecha_desde_dt = fecha_hasta_dt - timedelta(days=365)
-            
-            fecha_desde_str = fecha_desde_dt.strftime('%Y-%m-%d')
-            fecha_hasta_str = fecha_hasta_dt.strftime('%Y-%m-%d')
-        except (ValueError, TypeError) as e:
-            st.error(f"Error en el formato de fecha para {simbolo}: {e}")
-            return None
-
-        # 2. Determinar los mercados a consultar
-        mercados_a_probar = [mercado] if mercado else ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
-        
-        headers = self.obtener_encabezado_autorizacion()
-        if not headers:
-            return None # El error ya se muestra en el método de obtención de encabezado
-
-        # 3. Iterar y consultar la API
-        for mercado_intento in mercados_a_probar:
-            url = f"https://api.invertironline.com/api/v2/{mercado_intento}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde_str}/{fecha_hasta_str}/{ajustada}"
-            
-            try:
-                print(f"🔄 Consultando IOL API para {simbolo} en mercado {mercado_intento}...")
-                response = requests.get(url, headers=headers, timeout=25)
-                
-                # 4. Manejar la respuesta de la API
-                if response.status_code == 200:
-                    data = response.json()
-                    if not data:
-                        print(f"⚠️ No se encontraron datos para {simbolo} en {mercado_intento} (respuesta vacía).")
-                        continue
-                    
-                    print(f"✅ Datos recibidos para {simbolo} desde {mercado_intento}.")
-                    
-                    # 5. Procesar y limpiar los datos
-                    df = pd.DataFrame(data)
-                    
-                    if 'fecha' not in df.columns:
-                        print(f"❌ Error de formato: la respuesta para {simbolo} no contiene la columna 'fecha'.")
-                        continue
-                        
-                    df['fecha'] = pd.to_datetime(df['fecha'])
-                    df.set_index('fecha', inplace=True)
-                    
-                    # Renombrar y seleccionar columnas para consistencia
-                    df.rename(columns={
-                        'precioApertura': 'apertura',
-                        'ultimoPrecio': 'cierre',
-                        'maximo': 'maximo',
-                        'minimo': 'minimo',
-                        'volumen': 'volumen'
-                    }, inplace=True)
-                    
-                    columnas_deseadas = ['apertura', 'cierre', 'maximo', 'minimo', 'volumen']
-                    columnas_presentes = [col for col in columnas_deseadas if col in df.columns]
-                    
-                    if not columnas_presentes:
-                        print(f"❌ Error de formato: no se encontraron columnas de precios válidas para {simbolo}.")
-                        continue
-                        
-                    # Rellenar valores faltantes si es necesario
-                    df[columnas_presentes] = df[columnas_presentes].fillna(method='ffill')
-                    
-                    st.success(f"Serie histórica para '{simbolo}' obtenida del mercado '{mercado_intento}'.")
-                    return df[columnas_presentes]
-
-                elif response.status_code == 401:
-                    st.error("Error de autenticación (401). El token puede haber expirado.")
-                    # No continuar intentando si el token es inválido
-                    return None
-                else:
-                    print(f"❌ Falló la consulta para {simbolo} en {mercado_intento} (Status: {response.status_code}). Mensaje: {response.text}")
-
-            except requests.exceptions.RequestException as e:
-                print(f"❌ Error de conexión al consultar {simbolo} en {mercado_intento}: {e}")
-                # Continuar al siguiente mercado si hay un error de red
-                continue
-
-        # 6. Manejar el caso de fallo en todos los mercados
-        st.warning(f"No se pudo obtener la serie histórica para '{simbolo}' en ninguno de los mercados probados: {', '.join(mercados_a_probar)}.")
-        return None
-
-    def seleccionar_activos_aleatorios(
-        self, 
-        tickers_por_panel: dict,
-        paneles_seleccionados: list,
-        cantidad_activos: int,
-        capital_ars: float
-    ) -> tuple:
-        """
-        Selecciona activos aleatorios de los paneles especificados.
-        
-        Args:
-            tickers_por_panel: Diccionario con tickers por panel
-            paneles_seleccionados: Lista de paneles a considerar
-            cantidad_activos: Cantidad de activos a seleccionar por panel
-            capital_ars: Capital disponible en ARS
-            
-        Returns:
-            Tupla con (DataFrame con datos históricos, diccionario con activos seleccionados por panel)
-        """
-        series_historicas = []
-        seleccion_final = {}
-        
-        with st.spinner("Buscando activos disponibles..."):
-            for panel in paneles_seleccionados:
-                if panel not in tickers_por_panel or not tickers_por_panel[panel]:
-                    st.warning(f"No hay tickers disponibles para el panel {panel}")
-                    continue
-                    
-                tickers = tickers_por_panel[panel].copy()
-                random.shuffle(tickers)
-                seleccionados = []
-                capital_restante = capital_ars
-                intentos = 0
-                max_intentos = min(50, len(tickers))  # Límite de intentos por panel
-                
-                st.info(f"Analizando panel: {panel}...")
-                
-                for simbolo in tickers:
-                    if len(seleccionados) >= cantidad_activos or capital_restante <= 0 or intentos >= max_intentos:
-                        break
-                        
-                    intentos += 1
-                    
-                    with st.spinner(f"Procesando {simbolo}..."):
-                        # Obtener datos históricos para ver el último precio
-                        df = self.obtener_serie_historica(
-                            simbolo=simbolo,
-                            mercado='BCBA',
-                            fecha_desde=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'),
-                            fecha_hasta=datetime.now().strftime('%Y-%m-%d')
-                        )
-                        
-                        if df is not None and not df.empty:
-                            # Buscar columna de precio
-                            col_precio = next((c for c in ['ultimoPrecio', 'precio', 'cierre'] 
-                                             if c in df.columns), None)
-                            
-                            if col_precio is not None:
-                                try:
-                                    # Tomar el último precio disponible
-                                    precio = df[col_precio].dropna().iloc[-1] if not df[col_precio].dropna().empty else None
-                                    
-                                    if precio is not None and precio > 0 and precio <= capital_restante:
-                                        seleccionados.append(simbolo)
-                                        capital_restante -= precio
-                                        
-                                        # Obtener datos históricos completos
-                                        st.info(f"Obteniendo datos históricos para {simbolo}...")
-                                        df_completo = self.obtener_serie_historica(
-                                            simbolo=simbolo,
-                                            mercado='BCBA',
-                                            fecha_desde='2023-01-01',  # Últimos 1.5 años
-                                            fecha_hasta=datetime.now().strftime('%Y-%m-%d')
-                                        )
-                                        
-                                        if df_completo is not None and not df_completo.empty:
-                                            df_completo['panel'] = panel
-                                            series_historicas.append(df_completo)
-                                            st.success(f"✅ {simbolo} añadido al portafolio")
-                                        else:
-                                            st.warning(f"No se pudieron obtener datos históricos completos para {simbolo}")
-                                            seleccionados.pop()  # Quitar de la selección
-                                            capital_restante += precio
-                                except Exception as e:
-                                    st.error(f"Error al procesar {simbolo}: {str(e)}")
-                                    continue
-                
-                if seleccionados:
-                    seleccion_final[panel] = seleccionados
-                    st.success(f"Panel {panel}: {len(seleccionados)} activos seleccionados")
-                else:
-                    st.warning(f"No se pudieron seleccionar activos para el panel {panel}")
-        
-        # Procesar las series históricas
-        if series_historicas:
-            try:
-                df_final = pd.concat(series_historicas)
-                
-                # Pivotar para tener precios por fecha y símbolo
-                df_pivot = df_final.pivot_table(
-                    index=df_final.index,
-                    columns='simbolo',
-                    values='precio',
-                    aggfunc='first'
-                )
-                
-                # Llenar valores faltantes
-                df_pivot = df_pivot.ffill().bfill()
-                
-                st.success(f"✅ Datos cargados para {len(df_pivot.columns)} activos")
-                return df_pivot, seleccion_final
-                
-            except Exception as e:
-                st.error(f"Error al procesar las series históricas: {str(e)}")
-                return pd.DataFrame(), {}
-        
-        st.error("No se pudieron cargar datos históricos para ninguno de los activos seleccionados")
-        return pd.DataFrame(), {}
-
     def calcular_metricas_rendimiento(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Calcula métricas de rendimiento para los activos.
@@ -2659,6 +2461,92 @@ class PortfolioOptimizer:
         
         return pd.DataFrame(metricas)
 
+    def obtener_serie_historica_universal(self, request: Union[HistoricalDataRequest, List[HistoricalDataRequest]]) -> Dict[str, pd.DataFrame]:
+        """
+        Obtiene series históricas de precios para uno o múltiples activos.
+        
+        Args:
+            request: Un solo objeto HistoricalDataRequest o una lista de ellos
+            
+        Returns:
+            Dict[str, pd.DataFrame]: Diccionario con símbolos como claves y DataFrames como valores
+        """
+        if isinstance(request, HistoricalDataRequest):
+            requests_list = [request]
+        else:
+            requests_list = request
+            
+        resultados = {}
+        
+        for req in requests_list:
+            try:
+                # Construir la URL según el tipo de activo
+                if req.mercado.upper() in ['BCBA', 'BCS', 'ROFEX']:
+                    # Mercado local
+                    url = (
+                        f"https://api.invertironline.com/api/v2/{req.mercado}/Titulos/"
+                        f"{req.simbolo}/Cotizacion/seriehistorica/"
+                        f"{req.fecha_desde}/{req.fecha_hasta}/"
+                        f"{'Ajustada' if req.ajustada else 'SinAjustar'}"
+                    )
+                else:
+                    # Mercados internacionales
+                    url = (
+                        f"https://api.invertironline.com/api/v2/{req.mercado}/Titulos/"
+                        f"{req.simbolo}/Cotizacion/"
+                        f"{req.fecha_desde}/{req.fecha_hasta}/"
+                        f"{'Ajustada' if req.ajustada else 'SinAjustar'}"
+                    )
+                
+                # Configurar headers
+                headers = {
+                    'Authorization': f'Bearer {self.token_portador}',
+                    'Accept': 'application/json'
+                }
+                
+                # Realizar la solicitud con manejo de reintentos
+                for intento in range(req.max_reintentos):
+                    try:
+                        response = self._session.get(
+                            url,
+                            headers=headers,
+                            timeout=req.timeout
+                        )
+                        response.raise_for_status()
+                        
+                        # Procesar la respuesta
+                        data = response.json()
+                        if not data:
+                            st.warning(f"No se encontraron datos para {req.simbolo} en {req.mercado}")
+                            continue
+                            
+                        # Convertir a DataFrame y estandarizar
+                        df = pd.DataFrame(data)
+                        if 'fecha' in df.columns:
+                            df['fecha'] = pd.to_datetime(df['fecha'])
+                            df.set_index('fecha', inplace=True)
+                        
+                        # Aplicar frecuencia si es necesario
+                        if req.frecuencia != 'diaria':
+                            if req.frecuencia == 'semanal':
+                                df = df.resample('W').last()
+                            elif req.frecuencia == 'mensual':
+                                df = df.resample('M').last()
+                        
+                        resultados[req.simbolo] = df
+                        break
+                        
+                    except requests.exceptions.RequestException as e:
+                        if intento == req.max_reintentos - 1:
+                            st.error(f"Error al obtener datos para {req.simbolo} en {req.mercado}: {str(e)}")
+                        time.sleep(1)  # Esperar antes de reintentar
+            
+            except Exception as e:
+                st.error(f"Error inesperado procesando {req.simbolo}: {str(e)}")
+                continue
+                
+        return resultados
+        
     def optimizar_portafolio(self, df: pd.DataFrame) -> dict:
         """
         Optimiza el portafolio usando el método de Markowitz.
