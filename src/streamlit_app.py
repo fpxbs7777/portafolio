@@ -11,6 +11,7 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+from portfolio_optimization import PortfolioOptimizer, mostrar_interfaz_optimizacion
 
 warnings.filterwarnings('ignore')
 
@@ -563,40 +564,88 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
         return None
 
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+def refrescar_token(refresh_token):
     """
-    Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
+    Refresca el token de acceso usando el refresh token
     """
     try:
-        # Primero intentamos con el endpoint específico del mercado
-        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-        if not url:
-            st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
-            return None
-        
-        headers = obtener_encabezado_autorizacion(token_portador)
-        
-        # Configurar un timeout más corto para no bloquear la interfaz
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        # Verificar si la respuesta es exitosa
+        token_url = 'https://api.invertironline.com/token'
+        payload = {
+            'refresh_token': refresh_token,
+            'grant_type': 'refresh_token'
+        }
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        response = requests.post(token_url, data=payload, headers=headers)
         if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict) and data.get('status') == 'error':
-                st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
-                return None
-                
-            # Procesar la respuesta según el tipo de activo
-            return procesar_respuesta_historico(data, mercado)
+            tokens = response.json()
+            return tokens['access_token'], tokens['refresh_token']
         else:
-            st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
+            print(f'Error al refrescar token: {response.status_code}')
+            print(response.text)
+            return None, None
+    except Exception as e:
+        print(f'Error en refrescar_token: {str(e)}')
+        return None, None
+
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene series históricas para diferentes tipos de activos
+    
+    Args:
+        token_portador (str): Token de autenticación
+        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ', 'ROFEX')
+        simbolo (str): Símbolo del activo
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
+        ajustada (str): 'Ajustada' o 'SinAjustar' (default: 'SinAjustar')
+        
+    Returns:
+        DataFrame: Serie histórica del activo o None en caso de error
+    """
+    try:
+        # Construir la URL para la API
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        
+        # Configurar headers con el token
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {token_portador}'
+        }
+        
+        # Realizar la solicitud
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        # Verificar si el token expiró
+        if response.status_code == 401:
+            print("Token expirado, intentando refrescar...")
+            # Aquí necesitarías implementar la lógica para refrescar el token
+            # nuevo_token, nuevo_refresh = refrescar_token(refresh_token)
+            # if nuevo_token:
+            #     return obtener_serie_historica_iol(nuevo_token, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
             return None
             
+        response.raise_for_status()
+        
+        # Procesar la respuesta
+        data = response.json()
+        
+        # Convertir a DataFrame
+        if isinstance(data, list):
+            df = pd.DataFrame(data)
+            if not df.empty and 'fecha' in df.columns:
+                df['fecha'] = pd.to_datetime(df['fecha'])
+                df.set_index('fecha', inplace=True)
+                return df
+        
+        return None
+        
     except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión para {simbolo}: {str(e)}")
+        print(f"Error en la solicitud para {simbolo} en {mercado}: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
+        print(f"Error inesperado al procesar {simbolo}: {str(e)}")
         return None
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
@@ -2020,7 +2069,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "📈 Optimización de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -2032,6 +2081,11 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📈 Optimización de Portafolio":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    mostrar_optimizacion_portafolio_avanzada()
+                else:
+                    st.warning("Por favor inicie sesión para acceder a la optimización de portafolio")
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
@@ -2097,5 +2151,183 @@ def main():
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
+def mostrar_optimizacion_portafolio_avanzada():
+    """
+    Muestra la interfaz de optimización de portafolio avanzada
+    """
+    st.title("📈 Optimización de Portafolio")
+    
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.warning("Por favor, inicie sesión para acceder a la optimización de portafolio")
+        return
+    
+    # Inicializar el optimizador
+    optimizador = PortfolioOptimizer(st.session_state.token_acceso)
+    
+    # Configuración de la optimización
+    st.sidebar.header("Configuración de Optimización")
+    
+    # Selección de paneles
+    paneles_disponibles = optimizador.paneles_disponibles
+    paneles_seleccionados = st.sidebar.multiselect(
+        "Seleccione los paneles:",
+        options=paneles_disponibles,
+        default=paneles_disponibles[:2]  # Por defecto selecciona los primeros 2 paneles
+    )
+    
+    # Parámetros de optimización
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        cantidad_activos = st.number_input(
+            "Activos por panel:",
+            min_value=1,
+            max_value=20,
+            value=5,
+            step=1
+        )
+    
+    with col2:
+        capital_ars = st.number_input(
+            "Capital disponible (ARS):",
+            min_value=1000.0,
+            max_value=10000000.0,
+            value=100000.0,
+            step=1000.0
+        )
+    
+    # Fechas para el análisis histórico
+    fecha_hoy = datetime.now().date()
+    fecha_desde = st.sidebar.date_input(
+        "Fecha de inicio:",
+        value=fecha_hoy - timedelta(days=365),
+        max_value=fecha_hoy
+    )
+    
+    # Botón para ejecutar la optimización
+    if st.sidebar.button("🔍 Ejecutar Optimización", use_container_width=True):
+        with st.spinner("Optimizando portafolio..."):
+            try:
+                # Obtener tickers disponibles
+                tickers_por_panel, _ = optimizador.obtener_tickers_por_panel(
+                    paneles_seleccionados
+                )
+                
+                # Seleccionar activos aleatorios
+                df_historicos, seleccion = optimizador.seleccionar_activos_aleatorios(
+                    tickers_por_panel=tickers_por_panel,
+                    paneles_seleccionados=paneles_seleccionados,
+                    cantidad_activos=cantidad_activos,
+                    capital_ars=capital_ars
+                )
+                
+                if df_historicos.empty:
+                    st.error("No se pudieron obtener datos históricos suficientes.")
+                    return
+                
+                # Calcular métricas
+                st.subheader("📊 Métricas de los Activos")
+                metricas = optimizador.calcular_metricas_rendimiento(df_historicos)
+                
+                if not metricas.empty:
+                    st.dataframe(metricas.sort_values('retorno_anual', ascending=False))
+                
+                # Optimizar portafolio
+                st.subheader("⚖️ Asignación Óptima")
+                resultado_optimizacion = optimizador.optimizar_portafolio(df_historicos)
+                
+                if resultado_optimizacion:
+                    # Mostrar pesos óptimos
+                    df_pesos = pd.DataFrame.from_dict(
+                        resultado_optimizacion['pesos'], 
+                        orient='index', 
+                        columns=['Peso']
+                    )
+                    df_pesos['Peso'] = (df_pesos['Peso'] * 100).round(2)
+                    df_pesos = df_pesos.sort_values('Peso', ascending=False)
+                    
+                    # Mostrar tabla de pesos
+                    st.dataframe(df_pesos)
+                    
+                    # Mostrar métricas del portafolio
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Retorno Esperado Anual", f"{resultado_optimizacion['retorno_esperado']*100:.2f}%")
+                    with col2:
+                        st.metric("Volatilidad Anual", f"{resultado_optimizacion['volatilidad']*100:.2f}%")
+                    with col3:
+                        st.metric("Ratio de Sharpe", f"{resultado_optimizacion['sharpe_ratio']:.2f}")
+                    
+                    # Mostrar gráfico de torta de la asignación
+                    fig = go.Figure(data=[go.Pie(
+                        labels=df_pesos.index,
+                        values=df_pesos['Peso'],
+                        hole=.3
+                    )])
+                    fig.update_layout(title="Distribución del Portafolio")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                else:
+                    st.warning("No se pudo calcular la optimización con los datos disponibles.")
+            
+            except Exception as e:
+                st.error(f"Error al optimizar el portafolio: {str(e)}")
+                st.exception(e)
+
+def obtener_tipo_activo(token_portador, simbolo):
+    """
+    Obtiene automáticamente el tipo de activo y mercado para un símbolo dado
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo (str): Símbolo del activo
+        
+    Returns:
+        dict: Diccionario con información sobre el tipo de activo y mercado
+    """
+    try:
+        # Primero intentamos obtener información del activo
+        url = "https://api.invertironline.com/api/v2/activos"
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        # Realizamos la solicitud
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        # Procesamos la respuesta
+        activos = response.json()
+        
+        # Buscamos el activo por símbolo
+        for activo in activos:
+            if activo.get('simbolo') == simbolo:
+                return {
+                    'mercado': activo.get('mercado'),
+                    'tipo': activo.get('tipo'),
+                    'pais': activo.get('pais'),
+                    'moneda': activo.get('moneda')
+                }
+        
+        # Si no encontramos el activo, intentamos con la API de cotizaciones
+        url_cotizaciones = f"https://api.invertironline.com/api/v2/cotizaciones/{simbolo}"
+        response_cotizaciones = requests.get(url_cotizaciones, headers=headers)
+        
+        if response_cotizaciones.status_code == 200:
+            cotizacion = response_cotizaciones.json()
+            return {
+                'mercado': cotizacion.get('mercado'),
+                'tipo': cotizacion.get('tipo'),
+                'pais': cotizacion.get('pais'),
+                'moneda': cotizacion.get('moneda')
+            }
+        
+        return None
+    
+    except Exception as e:
+        print(f"Error al obtener tipo de activo: {str(e)}")
+        return None
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Se produjo un error en la aplicación: {str(e)}")
+        st.exception(e)
