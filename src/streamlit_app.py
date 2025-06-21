@@ -2348,8 +2348,7 @@ class PortfolioOptimizer:
     def obtener_encabezado_autorizacion(self) -> dict:
         """Retorna los encabezados de autorización."""
         return {
-            'Authorization': f'Bearer {self.token_portador}',
-            'Content-Type': 'application/json'
+            'Authorization': f'Bearer {self.token_portador}'
         }
 
     def obtener_tickers_por_panel(self, paneles: list, pais: str = 'Argentina') -> tuple:
