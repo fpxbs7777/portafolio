@@ -11,7 +11,6 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
-from portfolio_optimization import PortfolioOptimizer, mostrar_interfaz_optimizacion
 
 warnings.filterwarnings('ignore')
 
@@ -2324,6 +2323,263 @@ def obtener_tipo_activo(token_portador, simbolo):
     except Exception as e:
         print(f"Error al obtener tipo de activo: {str(e)}")
         return None
+
+class PortfolioOptimizer:
+    def __init__(self, token_portador: str):
+        """
+        Inicializa el optimizador de portafolio con el token de autenticación.
+        """
+        self.token_portador = token_portador
+        self.paneles_disponibles = [
+            'acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables'
+        ]
+
+    def obtener_encabezado_autorizacion(self) -> dict:
+        """Retorna los encabezados de autorización."""
+        return {
+            'Authorization': f'Bearer {self.token_portador}',
+            'Content-Type': 'application/json'
+        }
+
+    def obtener_tickers_por_panel(self, paneles: list, pais: str = 'Argentina') -> tuple:
+        """
+        Obtiene los tickers disponibles por panel.
+        
+        Args:
+            paneles: Lista de paneles a consultar
+            pais: País de los instrumentos
+            
+        Returns:
+            Tupla con (tickers_por_panel, DataFrame con tickers y paneles)
+        """
+        tickers_por_panel = {}
+        tickers_data = []
+        
+        for panel in paneles:
+            try:
+                url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+                params = {
+                    'cotizacionInstrumentoModel.instrumento': panel,
+                    'cotizacionInstrumentoModel.pais': pais.lower()
+                }
+                
+                response = requests.get(
+                    url, 
+                    headers=self.obtener_encabezado_autorizacion(), 
+                    params=params
+                )
+                
+                if response.status_code == 200:
+                    datos = response.json()
+                    tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+                    tickers_por_panel[panel] = tickers
+                    tickers_data.extend([{'panel': panel, 'simbolo': t} for t in tickers])
+                else:
+                    st.warning(f'Error al obtener tickers para {panel}: {response.status_code}')
+                    
+            except Exception as e:
+                st.error(f'Error en obtener_tickers_por_panel para {panel}: {str(e)}')
+        
+        return tickers_por_panel, pd.DataFrame(tickers_data)
+
+    def obtener_serie_historica(self, simbolo: str, mercado: str, fecha_desde: str, 
+                              fecha_hasta: str, ajustada: str = 'SinAjustar') -> pd.DataFrame:
+        """
+        Obtiene la serie histórica de un activo.
+        """
+        try:
+            url = (
+                f"https://api.invertironline.com/api/v2/{mercado}/"
+                f"Titulos/{simbolo}/Cotizacion/seriehistorica/"
+                f"{fecha_desde}/{fecha_hasta}/{ajustada}"
+            )
+            
+            response = requests.get(
+                url,
+                headers=self.obtener_encabezado_autorizacion(),
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list):
+                    df = pd.DataFrame(data)
+                    if not df.empty and 'fecha' in df.columns:
+                        df['fecha'] = pd.to_datetime(df['fecha'])
+                        df.set_index('fecha', inplace=True)
+                        df['simbolo'] = simbolo
+                        return df
+            
+        except Exception as e:
+            st.error(f"Error al obtener serie histórica para {simbolo}: {str(e)}")
+        
+        return None
+
+    def seleccionar_activos_aleatorios(
+        self, 
+        tickers_por_panel: dict,
+        paneles_seleccionados: list,
+        cantidad_activos: int,
+        capital_ars: float
+    ) -> tuple:
+        """
+        Selecciona activos aleatorios de los paneles especificados.
+        
+        Args:
+            tickers_por_panel: Diccionario con tickers por panel
+            paneles_seleccionados: Lista de paneles a considerar
+            cantidad_activos: Cantidad de activos a seleccionar por panel
+            capital_ars: Capital disponible en ARS
+            
+        Returns:
+            Tupla con (DataFrame con datos históricos, diccionario con activos seleccionados por panel)
+        """
+        series_historicas = []
+        seleccion_final = {}
+        
+        for panel in paneles_seleccionados:
+            if panel not in tickers_por_panel:
+                continue
+                
+            tickers = tickers_por_panel[panel].copy()
+            random.shuffle(tickers)
+            seleccionados = []
+            capital_restante = capital_ars
+            
+            for simbolo in tickers:
+                if len(seleccionados) >= cantidad_activos or capital_restante <= 0:
+                    break
+                    
+                # Obtener datos históricos para ver el último precio
+                df = self.obtener_serie_historica(
+                    simbolo=simbolo,
+                    mercado='BCBA',
+                    fecha_desde=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'),
+                    fecha_hasta=datetime.now().strftime('%Y-%m-%d')
+                )
+                
+                if df is not None and not df.empty:
+                    # Buscar columna de precio
+                    col_precio = next((c for c in ['ultimoPrecio', 'precio', 'cierre'] 
+                                     if c in df.columns), None)
+                    
+                    if col_precio is not None:
+                        precio = df[col_precio].iloc[-1]
+                        if precio <= capital_restante:
+                            seleccionados.append(simbolo)
+                            capital_restante -= precio
+                            
+                            # Obtener datos históricos completos
+                            df_completo = self.obtener_serie_historica(
+                                simbolo=simbolo,
+                                mercado='BCBA',
+                                fecha_desde='2021-01-01',
+                                fecha_hasta=datetime.now().strftime('%Y-%m-%d')
+                            )
+                            
+                            if df_completo is not None:
+                                df_completo['panel'] = panel
+                                series_historicas.append(df_completo)
+            
+            if seleccionados:
+                seleccion_final[panel] = seleccionados
+        
+        df_final = pd.concat(series_historicas) if series_historicas else pd.DataFrame()
+        return df_final, seleccion_final
+
+    def calcular_metricas_rendimiento(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calcula métricas de rendimiento para los activos.
+        """
+        if df.empty:
+            return pd.DataFrame()
+            
+        # Asegurarse de que tenemos las columnas necesarias
+        col_precio = next((c for c in ['ultimoPrecio', 'precio', 'cierre'] 
+                          if c in df.columns), None)
+        
+        if col_precio is None:
+            return pd.DataFrame()
+        
+        # Calcular retornos diarios
+        retornos = df.groupby('simbolo')[col_precio].pct_change().dropna()
+        
+        # Calcular métricas
+        metricas = {
+            'retorno_anual': retornos.groupby('simbolo').apply(
+                lambda x: (1 + x).prod() ** (252/len(x)) - 1 if len(x) > 0 else 0
+            ),
+            'volatilidad_anual': retornos.groupby('simbolo').std() * np.sqrt(252),
+            'sharpe_ratio': retornos.groupby('simbolo').apply(
+                lambda x: x.mean() / x.std() * np.sqrt(252) if x.std() > 0 else 0
+            ),
+            'max_drawdown': retornos.groupby('simbolo').apply(
+                lambda x: (1 + x).cumprod().div((1 + x).cumprod().cummax()).sub(1).min()
+            )
+        }
+        
+        return pd.DataFrame(metricas)
+
+    def optimizar_portafolio(self, df: pd.DataFrame) -> dict:
+        """
+        Optimiza el portafolio usando el método de Markowitz.
+        """
+        if df.empty:
+            return {}
+            
+        # Calcular matriz de covarianza y retornos esperados
+        col_precio = next((c for c in ['ultimoPrecio', 'precio', 'cierre'] 
+                          if c in df.columns), None)
+        
+        if col_precio is None:
+            return {}
+            
+        # Pivotar para tener precios por fecha y activo
+        precios = df.pivot_table(
+            index=df.index, 
+            columns='simbolo', 
+            values=col_precio,
+            aggfunc='first'
+        )
+        
+        # Calcular retornos logarítmicos
+        retornos = np.log(precios / precios.shift(1)).dropna()
+        
+        if retornos.empty:
+            return {}
+            
+        # Calcular matriz de covarianza y retornos esperados
+        cov_matrix = retornos.cov() * 252  # Anualizado
+        retornos_esperados = retornos.mean() * 252  # Anualizado
+        
+        # Optimización (versión simplificada)
+        num_portfolios = 10000
+        resultados = np.zeros((4 + len(retornos_esperados), num_portfolios))
+        
+        for i in range(num_portfolios):
+            pesos = np.random.random(len(retornos_esperados))
+            pesos /= np.sum(pesos)
+            
+            # Guardar resultados
+            resultados[0, i] = np.sum(retornos_esperados * pesos)  # Retorno esperado
+            resultados[1, i] = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))  # Volatilidad
+            resultados[2, i] = resultados[0, i] / resultados[1, i] if resultados[1, i] > 0 else 0  # Sharpe ratio
+            
+            # Guardar pesos
+            for j, peso in enumerate(pesos):
+                resultados[j+3, i] = peso
+        
+        # Encontrar el portafolio con mejor ratio de Sharpe
+        max_sharpe_idx = np.argmax(resultados[2])
+        pesos_optimos = resultados[3:, max_sharpe_idx]
+        
+        return {
+            'activos': list(retornos_esperados.index),
+            'pesos': dict(zip(retornos_esperados.index, pesos_optimos)),
+            'retorno_esperado': resultados[0, max_sharpe_idx],
+            'volatilidad': resultados[1, max_sharpe_idx],
+            'sharpe_ratio': resultados[2, max_sharpe_idx]
+        }
 
 if __name__ == "__main__":
     try:
