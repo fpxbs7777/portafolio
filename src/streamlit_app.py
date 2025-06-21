@@ -569,6 +569,19 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     basado en el tipo de activo proporcionado por la API de InvertirOnline.
     """
     try:
+        # Validar fechas
+        fecha_actual = datetime.now()
+        fecha_desde_obj = datetime.strptime(fecha_desde, '%Y-%m-%d')
+        fecha_hasta_obj = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+        
+        if fecha_hasta_obj > fecha_actual:
+            st.warning(f"La fecha hasta ({fecha_hasta}) está en el futuro. Se ajustará a la fecha actual.")
+            fecha_hasta = fecha_actual.strftime('%Y-%m-%d')
+            
+        if fecha_desde_obj > fecha_actual:
+            st.error(f"La fecha desde ({fecha_desde}) está en el futuro. Por favor, seleccione una fecha válida.")
+            return None
+
         # Obtenemos información detallada del título
         url_info = f"https://api.invertironline.com/api/v2/Cotizaciones/{simbolo}/Titulo"
         headers = {
@@ -619,10 +632,17 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
             return None
             
         data = response.json()
+        if not isinstance(data, list) or not data:
+            st.warning(f"No se encontraron datos históricos para {simbolo} en el período especificado")
+            return None
+            
         return procesar_respuesta_historico(data, tipo_activo)
         
     except requests.exceptions.RequestException as e:
         st.error(f"Error de conexión al obtener datos para {simbolo}: {str(e)}")
+        return None
+    except ValueError as e:
+        st.error(f"Error al procesar fechas para {simbolo}: {str(e)}")
         return None
     except Exception as e:
         st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
