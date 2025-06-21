@@ -999,7 +999,7 @@ class manager:
         Args:
             target_return (float, optional): Retorno objetivo para optimización con restricción
             method (str): Método de optimización ('max_sharpe', 'min_vol', 'efficient_risk', 'efficient_return')
-        
+            
         Returns:
             dict: Resultados de la optimización o None en caso de error
         """
@@ -1062,12 +1062,16 @@ class manager:
             portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
             sharpe_ratio = (portfolio_return - self.risk_free_rate) / portfolio_vol if portfolio_vol > 0 else 0
             
-            return {
+            self.optimal_weights = weights
+            self.optimal_metrics = {
                 'return': portfolio_return,
                 'volatility': portfolio_vol,
                 'sharpe_ratio': sharpe_ratio,
                 'weights': dict(zip(self.rics, weights))
             }
+            self.optimization_successful = True
+            
+            return self.optimal_metrics
         else:
             st.error(f"Error en la optimización: {result.message}")
             return None
@@ -1219,7 +1223,7 @@ class PortfolioManager:
             risk_free_rate (float): Tasa libre de riesgo anual (default: 40% para Argentina)
         """
         self.symbols = symbols
-        self.symbols_list = [s[0] for s in symbols]  # Lista de solo símbolos
+        self.symbols_list = [s[0] for s in symbols]
         self.notional = notional
         self.start_date = start_date
         self.end_date = end_date
@@ -1227,58 +1231,96 @@ class PortfolioManager:
         
         # Datos del portafolio
         self.prices = None
+        self.returns = None
         self.mean_returns = None
         self.cov_matrix = None
-        self.notional = 100000  # Valor nominal por defecto
+        self.correlation_matrix = None
+        self.volatilities = None
+        
+        # Resultados de optimización
+        self.optimal_weights = None
+        self.optimal_metrics = None
+        self.efficient_frontier = None
+        self.optimization_successful = False
         self.manager = None
     
+{{ ... }}
     def load_data(self, token_portador):
-        """
-        Carga los datos históricos para los símbolos del portafolio.
+    """
+    Carga los datos históricos para los símbolos del portafolio.
+    
+    Args:
+        token_portador (str): Token de autenticación para la API
         
-        Args:
-            token_portador (str): Token de autenticación para la API
+    Returns:
+        bool: True si los datos se cargaron correctamente, False en caso contrario
+    """
+    try:
+        st.info("⏳ Cargando datos históricos...")
         
-        Returns:
-            bool: True si los datos se cargaron correctamente, False en caso contrario
-        """
-        try:
-            mean_returns, cov_matrix, df_prices = get_historical_data_for_optimization(
-                token_portador, 
-                self.symbols, 
-                self.start_date, 
-                self.end_date
-            )
-            
-            if mean_returns is None or cov_matrix is None or df_prices is None:
-                st.error("❌ No se pudieron cargar los datos históricos")
-                return False
-                
-            # Filtrar los símbolos que sí se cargaron correctamente
-            valid_symbols = [s for s in self.symbols_list if s in df_prices.columns]
-            if len(valid_symbols) < 2:
-                st.error("❌ Se requieren al menos 2 activos válidos para la optimización")
-                return False
-                
-            # Actualizar atributos con los datos cargados
-            self.symbols_list = valid_symbols
-            self.prices = df_prices[valid_symbols]
-            self.returns = self.prices.pct_change().dropna()
-            self.mean_returns = self.returns.mean() * 252  # Anualizado
-            self.cov_matrix = self.returns.cov() * 252     # Anualizado
-            self.correlation_matrix = self.returns.corr()
-            self.volatilities = self.returns.std() * np.sqrt(252)  # Volatilidad anualizada
-            
-            return True
-            
-        except Exception as e:
-            st.error(f"❌ Error al cargar los datos: {str(e)}")
+        # Obtener datos históricos
+        mean_returns, cov_matrix, df_prices = get_historical_data_for_optimization(
+            token_portador, 
+            self.symbols, 
+            self.start_date, 
+            self.end_date
+        )
+        
+        if mean_returns is None or cov_matrix is None or df_prices is None:
+            st.error("❌ No se pudieron cargar los datos históricos")
             return False
+            
+        # Filtrar los símbolos que sí se cargaron correctamente
+        valid_symbols = [s for s in self.symbols_list if s in df_prices.columns]
+        if len(valid_symbols) < 2:
+            st.error("❌ Se requieren al menos 2 activos válidos para la optimización")
+            return False
+            
+        # Actualizar atributos con los datos cargados
+        self.symbols_list = valid_symbols
+        self.prices = df_prices[valid_symbols]
+        self.returns = self.prices.pct_change().dropna()
+        self.mean_returns = self.returns.mean() * 252  # Anualizado
+        self.cov_matrix = self.returns.cov() * 252     # Anualizado
+        self.correlation_matrix = self.returns.corr()
+        self.volatilities = self.returns.std() * np.sqrt(252)  # Volatilidad anualizada
+        
+        # Verificar que la matriz de covarianza sea positiva definida
+        if not np.all(np.linalg.eigvals(self.cov_matrix) > 0):
+            st.warning("⚠️ La matriz de covarianza no es positiva definida. Se ajustará.")
+            self.cov_matrix = self._adjust_covariance_matrix(self.cov_matrix)
+        
+        st.success("✅ Datos históricos cargados correctamente")
+        return True
+        
+    except Exception as e:
+        st.error(f"❌ Error al cargar los datos: {str(e)}")
+        return False
+        
+    def _adjust_covariance_matrix(self, cov_matrix):
+        """Ajusta la matriz de covarianza para asegurar que sea positiva definida"""
+        try:
+            # Método de Higham para encontrar la matriz más cercana positiva definida
+            from scipy.linalg import sqrtm
+            
+            # Calcular la raíz cuadrada de la matriz
+            sqrt_cov = sqrtm(cov_matrix)
+            # Calcular la matriz más cercana positiva definida
+            adjusted_cov = (sqrt_cov + sqrt_cov.T) / 2
+            
+            # Asegurarse de que la diagonal sea positiva
+            np.fill_diagonal(adjusted_cov, np.maximum(np.diag(adjusted_cov), 1e-10))
+            
+            return adjusted_cov
+        except:
+            # Si falla, usar un método más simple
+            return np.maximum(cov_matrix, 1e-10)
     
     def compute_portfolio(self, strategy='markowitz', target_return=None):
         if not self.data_loaded or self.returns is None:
             return None
         
+{{ ... }}
         try:
             if self.manager:
                 # Usar el manager avanzado
