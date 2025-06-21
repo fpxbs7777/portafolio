@@ -655,101 +655,124 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
     Obtiene datos históricos para optimización con manejo mejorado de errores,
     reintentos automáticos y soporte para FCIs
     """
-    precios = {}
-    errores = []
-    max_retries = 2
-    
-    with st.spinner("Obteniendo datos históricos..."):
-        progress_bar = st.progress(0)
-        total_symbols = len(simbolos)
+    try:
+        # Validar y ajustar fechas
+        fecha_actual = datetime.now()
+        fecha_desde_obj = datetime.strptime(fecha_desde, '%Y-%m-%d')
+        fecha_hasta_obj = datetime.strptime(fecha_hasta, '%Y-%m-%d')
         
-        for idx, (simbolo, mercado) in enumerate(simbolos):
-            progress = (idx + 1) / total_symbols
-            progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
+        if fecha_hasta_obj > fecha_actual:
+            st.warning(f"La fecha hasta ({fecha_hasta}) está en el futuro. Se ajustará a la fecha actual.")
+            fecha_hasta = fecha_actual.strftime('%Y-%m-%d')
             
-            # Manejo especial para FCIs
-            if mercado.lower() == 'fci':
-                data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
-                    try:
-                        df = pd.DataFrame({
-                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
-                            'cierre': [data['ultimaCotizacion']['precio']]
-                        })
-                        df.set_index('fecha', inplace=True)
-                        precios[simbolo] = df['cierre']
-                    except Exception as e:
-                        st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
-                        errores.append(simbolo)
-                else:
-                    st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
-                    errores.append(simbolo)
-                continue
+        if fecha_desde_obj > fecha_actual:
+            st.error(f"La fecha desde ({fecha_desde}) está en el futuro. Por favor, seleccione una fecha válida.")
+            return None, None, None
+            
+        # Validar que la fecha desde no sea mayor a la fecha hasta
+        if fecha_desde_obj > fecha_hasta_obj:
+            st.error(f"La fecha desde ({fecha_desde}) no puede ser mayor a la fecha hasta ({fecha_hasta})")
+            return None, None, None
+            
+        precios = {}
+        errores = []
+        max_retries = 2
+        
+        with st.spinner("Obteniendo datos históricos..."):
+            progress_bar = st.progress(0)
+            total_symbols = len(simbolos)
+            
+            for idx, (simbolo, mercado) in enumerate(simbolos):
+                progress = (idx + 1) / total_symbols
+                progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
                 
-            for attempt in range(max_retries):
-                try:
-                    # Intentar obtener datos de IOL
-                    serie = obtener_serie_historica_iol(
-                        token_portador=token_portador,
-                        mercado=mercado,
-                        simbolo=simbolo,
-                        fecha_desde=fecha_desde,
-                        fecha_hasta=fecha_hasta
-                    )
-                    
-                    if serie is not None and not serie.empty:
-                        precios[simbolo] = serie
-                        break  # Salir del bucle de reintentos si tiene éxito
-                    
-                except Exception as e:
-                    if attempt == max_retries - 1:  # Último intento
-                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
+                # Manejo especial para FCIs
+                if mercado.lower() == 'fci':
+                    data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
+                    if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
+                        try:
+                            df = pd.DataFrame({
+                                'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
+                                'cierre': [data['ultimaCotizacion']['precio']]
+                            })
+                            df.set_index('fecha', inplace=True)
+                            precios[simbolo] = df['cierre']
+                        except Exception as e:
+                            st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
+                            errores.append(simbolo)
+                    else:
+                        st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
                         errores.append(simbolo)
                     continue
-            
-            # Pequeña pausa entre solicitudes para no saturar el servidor
-            time.sleep(0.5)
-        
-        progress_bar.empty()
-        
-        if errores:
-            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
-        
-        if precios:
-            st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
-            
-            # Asegurarse de que todas las series tengan la misma longitud
-            min_length = min(len(s) for s in precios.values()) if precios else 0
-            if min_length < 5:  # Mínimo razonable de datos para optimización
-                st.error("Los datos históricos son insuficientes para la optimización")
-                return None, None, None
+                    
+                for attempt in range(max_retries):
+                    try:
+                        # Intentar obtener datos de IOL
+                        serie = obtener_serie_historica_iol(
+                            token_portador=token_portador,
+                            mercado=mercado,
+                            simbolo=simbolo,
+                            fecha_desde=fecha_desde,
+                            fecha_hasta=fecha_hasta
+                        )
+                        
+                        if serie is not None and not serie.empty:
+                            precios[simbolo] = serie
+                            break  # Salir del bucle de reintentos si tiene éxito
+                        
+                    except Exception as e:
+                        if attempt == max_retries - 1:  # Último intento
+                            st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
+                            errores.append(simbolo)
+                        continue
                 
-            # Crear DataFrame con las series alineadas
-            df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
+                # Pequeña pausa entre solicitudes para no saturar el servidor
+                time.sleep(0.5)
             
-            # Calcular retornos y validar
-            returns = df_precios.pct_change().dropna()
+            progress_bar.empty()
             
-            if returns.empty or len(returns) < 30:
-                st.warning("No hay suficientes datos para el análisis")
-                return None, None, None
+            if errores:
+                st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
+            
+            if precios:
+                st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
                 
-            # Eliminar columnas con desviación estándar cero
-            if (returns.std() == 0).any():
-                columnas_constantes = returns.columns[returns.std() == 0].tolist()
-                returns = returns.drop(columns=columnas_constantes)
-                df_precios = df_precios.drop(columns=columnas_constantes)
-                
-                if returns.empty or len(returns.columns) < 2:
-                    st.warning("No hay suficientes activos válidos para la optimización")
+                # Asegurarse de que todas las series tengan la misma longitud
+                min_length = min(len(s) for s in precios.values()) if precios else 0
+                if min_length < 5:  # Mínimo razonable de datos para optimización
+                    st.error("Los datos históricos son insuficientes para la optimización")
                     return None, None, None
                     
-            mean_returns = returns.mean()
-            cov_matrix = returns.cov()
-            return mean_returns, cov_matrix, df_precios
+                # Crear DataFrame con las series alineadas
+                df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
+                
+                # Calcular retornos y validar
+                returns = df_precios.pct_change().dropna()
+                
+                if returns.empty or len(returns) < 30:
+                    st.warning("No hay suficientes datos para el análisis")
+                    return None, None, None
+                    
+                # Eliminar columnas con desviación estándar cero
+                if (returns.std() == 0).any():
+                    columnas_constantes = returns.columns[returns.std() == 0].tolist()
+                    returns = returns.drop(columns=columnas_constantes)
+                    df_precios = df_precios.drop(columns=columnas_constantes)
+                    
+                    if returns.empty or len(returns.columns) < 2:
+                        st.warning("No hay suficientes activos válidos para la optimización")
+                        return None, None, None
+                        
+                mean_returns = returns.mean()
+                cov_matrix = returns.cov()
+                return mean_returns, cov_matrix, df_precios
+            
+        st.error("❌ No se pudieron cargar los datos históricos")
+        return None, None, None
         
-    st.error("❌ No se pudieron cargar los datos históricos")
-    return None, None, None
+    except Exception as e:
+        st.error(f"Error inesperado al obtener datos históricos: {str(e)}")
+        return None, None, None
 
 def calcular_metricas_portafolio(activos_data, valor_total):
     """
