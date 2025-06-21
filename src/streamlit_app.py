@@ -2385,14 +2385,34 @@ class PortfolioOptimizer:
     def obtener_serie_historica(self, simbolo: str, mercado: str, fecha_desde: str, 
                               fecha_hasta: str, ajustada: str = 'SinAjustar') -> pd.DataFrame:
         """
-        Obtiene la serie histórica de un activo.
+        Obtiene la serie histórica de un activo con manejo robusto de errores.
         """
         try:
+            # Validar fechas
+            try:
+                fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+                
+                if fecha_desde_dt > fecha_hasta_dt:
+                    st.warning(f"Fecha de inicio {fecha_desde} es posterior a la fecha de fin {fecha_hasta} para {simbolo}")
+                    return None
+                    
+                # Limitar el rango a 2 años como máximo
+                if (fecha_hasta_dt - fecha_desde_dt).days > 365 * 2:
+                    fecha_desde = (fecha_hasta_dt - timedelta(days=365*2)).strftime('%Y-%m-%d')
+                    st.warning(f"Rango de fechas demasiado amplio para {simbolo}. Se ajustó a los últimos 2 años.")
+                    
+            except ValueError as ve:
+                st.error(f"Error en el formato de fechas para {simbolo}: {str(ve)}")
+                return None
+
             url = (
                 f"https://api.invertironline.com/api/v2/{mercado}/"
                 f"Titulos/{simbolo}/Cotizacion/seriehistorica/"
                 f"{fecha_desde}/{fecha_hasta}/{ajustada}"
             )
+            
+            st.write(f"🔍 Solicitando datos para {simbolo}...")
             
             response = requests.get(
                 url,
@@ -2402,18 +2422,58 @@ class PortfolioOptimizer:
             
             if response.status_code == 200:
                 data = response.json()
+                if not data:
+                    st.warning(f"No se encontraron datos para {simbolo} en el rango de fechas especificado")
+                    return None
+                    
                 if isinstance(data, list):
                     df = pd.DataFrame(data)
-                    if not df.empty and 'fecha' in df.columns:
-                        df['fecha'] = pd.to_datetime(df['fecha'])
-                        df.set_index('fecha', inplace=True)
-                        df['simbolo'] = simbolo
-                        return df
-            
+                    if df.empty:
+                        st.warning(f"Datos vacíos recibidos para {simbolo}")
+                        return None
+                        
+                    if 'fecha' not in df.columns:
+                        st.error(f"Columna 'fecha' no encontrada en los datos de {simbolo}")
+                        return None
+                        
+                    # Convertir fechas y establecer índice
+                    df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce')
+                    df = df.dropna(subset=['fecha'])
+                    
+                    if df.empty:
+                        st.warning(f"No se pudieron procesar las fechas para {simbolo}")
+                        return None
+                        
+                    df.set_index('fecha', inplace=True)
+                    
+                    # Buscar columna de precio
+                    columnas_precio = ['ultimoPrecio', 'precio', 'cierre', 'close', 'last']
+                    col_precio = next((c for c in columnas_precio if c in df.columns), None)
+                    
+                    if col_precio is None:
+                        st.error(f"No se encontró columna de precio en los datos de {simbolo}")
+                        return None
+                        
+                    # Mantener solo columnas relevantes
+                    df = df[[col_precio]].copy()
+                    df.columns = ['precio']
+                    df['simbolo'] = simbolo
+                    
+                    st.success(f"✅ Datos cargados para {simbolo} ({len(df)} registros)")
+                    return df
+                else:
+                    st.error(f"Formato de datos inesperado para {simbolo}")
+                    return None
+            else:
+                st.error(f"Error al obtener datos para {simbolo}: {response.status_code} - {response.text}")
+                return None
+                
+        except requests.exceptions.RequestException as re:
+            st.error(f"Error de conexión al obtener datos para {simbolo}: {str(re)}")
+            return None
         except Exception as e:
-            st.error(f"Error al obtener serie histórica para {simbolo}: {str(e)}")
-        
-        return None
+            st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
+            return None
 
     def seleccionar_activos_aleatorios(
         self, 
@@ -2437,55 +2497,102 @@ class PortfolioOptimizer:
         series_historicas = []
         seleccion_final = {}
         
-        for panel in paneles_seleccionados:
-            if panel not in tickers_por_panel:
-                continue
-                
-            tickers = tickers_por_panel[panel].copy()
-            random.shuffle(tickers)
-            seleccionados = []
-            capital_restante = capital_ars
-            
-            for simbolo in tickers:
-                if len(seleccionados) >= cantidad_activos or capital_restante <= 0:
-                    break
+        with st.spinner("Buscando activos disponibles..."):
+            for panel in paneles_seleccionados:
+                if panel not in tickers_por_panel or not tickers_por_panel[panel]:
+                    st.warning(f"No hay tickers disponibles para el panel {panel}")
+                    continue
                     
-                # Obtener datos históricos para ver el último precio
-                df = self.obtener_serie_historica(
-                    simbolo=simbolo,
-                    mercado='BCBA',
-                    fecha_desde=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'),
-                    fecha_hasta=datetime.now().strftime('%Y-%m-%d')
+                tickers = tickers_por_panel[panel].copy()
+                random.shuffle(tickers)
+                seleccionados = []
+                capital_restante = capital_ars
+                intentos = 0
+                max_intentos = min(50, len(tickers))  # Límite de intentos por panel
+                
+                st.info(f"Analizando panel: {panel}...")
+                
+                for simbolo in tickers:
+                    if len(seleccionados) >= cantidad_activos or capital_restante <= 0 or intentos >= max_intentos:
+                        break
+                        
+                    intentos += 1
+                    
+                    with st.spinner(f"Procesando {simbolo}..."):
+                        # Obtener datos históricos para ver el último precio
+                        df = self.obtener_serie_historica(
+                            simbolo=simbolo,
+                            mercado='BCBA',
+                            fecha_desde=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'),
+                            fecha_hasta=datetime.now().strftime('%Y-%m-%d')
+                        )
+                        
+                        if df is not None and not df.empty:
+                            # Buscar columna de precio
+                            col_precio = next((c for c in ['precio'] 
+                                             if c in df.columns), None)
+                            
+                            if col_precio is not None:
+                                try:
+                                    # Tomar el último precio disponible
+                                    precio = df[col_precio].dropna().iloc[-1] if not df[col_precio].dropna().empty else None
+                                    
+                                    if precio is not None and precio > 0 and precio <= capital_restante:
+                                        seleccionados.append(simbolo)
+                                        capital_restante -= precio
+                                        
+                                        # Obtener datos históricos completos
+                                        st.info(f"Obteniendo datos históricos para {simbolo}...")
+                                        df_completo = self.obtener_serie_historica(
+                                            simbolo=simbolo,
+                                            mercado='BCBA',
+                                            fecha_desde='2023-01-01',  # Últimos 1.5 años
+                                            fecha_hasta=datetime.now().strftime('%Y-%m-%d')
+                                        )
+                                        
+                                        if df_completo is not None and not df_completo.empty:
+                                            df_completo['panel'] = panel
+                                            series_historicas.append(df_completo)
+                                            st.success(f"✅ {simbolo} añadido al portafolio")
+                                        else:
+                                            st.warning(f"No se pudieron obtener datos históricos completos para {simbolo}")
+                                            seleccionados.pop()  # Quitar de la selección
+                                            capital_restante += precio
+                                except Exception as e:
+                                    st.error(f"Error al procesar {simbolo}: {str(e)}")
+                                    continue
+                
+                if seleccionados:
+                    seleccion_final[panel] = seleccionados
+                    st.success(f"Panel {panel}: {len(seleccionados)} activos seleccionados")
+                else:
+                    st.warning(f"No se pudieron seleccionar activos para el panel {panel}")
+        
+        # Procesar las series históricas
+        if series_historicas:
+            try:
+                df_final = pd.concat(series_historicas)
+                
+                # Pivotar para tener precios por fecha y símbolo
+                df_pivot = df_final.pivot_table(
+                    index=df_final.index,
+                    columns='simbolo',
+                    values='precio',
+                    aggfunc='first'
                 )
                 
-                if df is not None and not df.empty:
-                    # Buscar columna de precio
-                    col_precio = next((c for c in ['ultimoPrecio', 'precio', 'cierre'] 
-                                     if c in df.columns), None)
-                    
-                    if col_precio is not None:
-                        precio = df[col_precio].iloc[-1]
-                        if precio <= capital_restante:
-                            seleccionados.append(simbolo)
-                            capital_restante -= precio
-                            
-                            # Obtener datos históricos completos
-                            df_completo = self.obtener_serie_historica(
-                                simbolo=simbolo,
-                                mercado='BCBA',
-                                fecha_desde='2021-01-01',
-                                fecha_hasta=datetime.now().strftime('%Y-%m-%d')
-                            )
-                            
-                            if df_completo is not None:
-                                df_completo['panel'] = panel
-                                series_historicas.append(df_completo)
-            
-            if seleccionados:
-                seleccion_final[panel] = seleccionados
+                # Llenar valores faltantes
+                df_pivot = df_pivot.ffill().bfill()
+                
+                st.success(f"✅ Datos cargados para {len(df_pivot.columns)} activos")
+                return df_pivot, seleccion_final
+                
+            except Exception as e:
+                st.error(f"Error al procesar las series históricas: {str(e)}")
+                return pd.DataFrame(), {}
         
-        df_final = pd.concat(series_historicas) if series_historicas else pd.DataFrame()
-        return df_final, seleccion_final
+        st.error("No se pudieron cargar datos históricos para ninguno de los activos seleccionados")
+        return pd.DataFrame(), {}
 
     def calcular_metricas_rendimiento(self, df: pd.DataFrame) -> pd.DataFrame:
         """
