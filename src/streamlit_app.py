@@ -253,18 +253,33 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         'Content-Type': 'application/json'
     }
     
-    # Preparar el cuerpo de la solicitud
+    # Convertir fechas a formato ISO (YYYY-MM-DD) para compatibilidad con la API
+    try:
+        fecha_desde_iso = pd.to_datetime(fecha_desde).strftime('%Y-%m-%d')
+        fecha_hasta_iso = pd.to_datetime(fecha_hasta).strftime('%Y-%m-%d')
+    except (ValueError, TypeError):
+        st.error("Formato de fecha inválido. Por favor, use un formato reconocido.")
+        return None
+
+    # Preparar el cuerpo de la solicitud (payload) dinámicamente
     payload = {
         "clientes": clientes,
-        "from": fecha_desde,
-        "to": fecha_hasta,
+        "from": fecha_desde_iso,
+        "to": fecha_hasta_iso,
         "dateType": tipo_fecha,
-        "status": estado or "",
-        "type": tipo_operacion or "",
-        "country": pais or "",
-        "currency": moneda or "",
-        "cuentaComitente": cuenta_comitente or ""
     }
+
+    # Añadir parámetros opcionales solo si tienen un valor asignado
+    if estado:
+        payload['status'] = estado
+    if tipo_operacion:
+        payload['type'] = tipo_operacion
+    if pais:
+        payload['country'] = pais
+    if moneda:
+        payload['currency'] = moneda
+    if cuenta_comitente:
+        payload['cuentaComitente'] = cuenta_comitente
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
