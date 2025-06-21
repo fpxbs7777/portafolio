@@ -1219,11 +1219,234 @@ class PortfolioManager:
                 self.symbols, self.notional, target_return, include_min_variance, 
                 self.prices.to_dict('series')
             )
-            return portfolios, returns, volatilities
-        except Exception as e:
-            return None, None, None
 
 # --- Funciones de Visualización ---
+def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
+    """
+    Muestra la interfaz de optimización de portafolio con opción de selección aleatoria de tickers
+    """
+    st.header("🔄 Optimización de Portafolio")
+    
+    # Obtener portafolio actual
+    portafolio = obtener_portafolio(token_acceso, id_cliente, pais='Argentina')
+    if not portafolio:
+        st.error("No se pudo obtener el portafolio actual")
+        return
+        
+    # Obtener datos históricos para los activos actuales
+    activos = [(activo['simbolo'], activo.get('mercado', 'BCBA')) for activo in portafolio]
+    fecha_actual = datetime.now()
+    fecha_desde = (fecha_actual - timedelta(days=365)).strftime('%Y-%m-%d')
+    fecha_hasta = fecha_actual.strftime('%Y-%m-%d')
+    
+    mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+        token_acceso, activos, fecha_desde, fecha_hasta
+    )
+    
+    if df_precios is None:
+        st.error("No se pudieron cargar los datos históricos")
+        return
+        
+    # Mostrar resumen del portafolio actual
+    st.subheader("📈 Portafolio Actual")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Valor Total", f"${df_precios.iloc[-1].sum():,.2f}")
+    with col2:
+        st.metric("Retorno Diario", f"{df_precios.pct_change().iloc[-1].mean():.2%}")
+    
+    # Mostrar gráfico de evolución
+    st.plotly_chart(
+        px.line(
+            df_precios.sum(axis=1),
+            title="Evolución del Portafolio",
+            labels={'value': 'Valor', 'index': 'Fecha'}
+        ),
+        use_container_width=True
+    )
+    
+    # Opciones de optimización
+    st.subheader("🔧 Estrategias de Optimización")
+    estrategia = st.selectbox(
+        "Estrategia de Optimización",
+        ['Markowitz', 'Sharpe Ratio', 'Minimización de Riesgo', 'Selección Aleatoria']
+    )
+    
+    # Parámetros de optimización
+    col1, col2 = st.columns(2)
+    with col1:
+        retorno_objetivo = st.number_input(
+            "Retorno Objetivo (anual)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.08,
+            step=0.01,
+            format="%.2f"
+        )
+    with col2:
+        riesgo_maximo = st.number_input(
+            "Riesgo Máximo (anual)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.20,
+            step=0.01,
+            format="%.2f"
+        )
+    
+    # Parámetros adicionales para selección aleatoria
+    if estrategia == 'Selección Aleatoria':
+        st.subheader("🎲 Parámetros de Selección Aleatoria")
+        paneles = ['acciones', 'cedears', 'adrs', 'titulosPublicos', 'obligacionesNegociables']
+        paneles_seleccionados = st.multiselect(
+            "Paneles a incluir",
+            paneles,
+            default=paneles[:2]
+        )
+        
+        cantidad_activos = st.number_input(
+            "Cantidad de activos por panel",
+            min_value=1,
+            max_value=20,
+            value=5,
+            step=1
+        )
+        
+        capital_ars = st.number_input(
+            "Capital disponible (ARS)",
+            min_value=0.0,
+            value=100000.0,
+            step=1000.0
+        )
+    
+    if st.button("🚀 Optimizar Portafolio"):
+        with st.spinner("Optimizando portafolio..."):
+            try:
+                if estrategia == 'Selección Aleatoria':
+                    # Obtener tickers por panel
+                    tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, paneles_seleccionados, 'Argentina')
+                    
+                    if not tickers_por_panel:
+                        st.error("No se pudieron obtener los tickers disponibles")
+                        return
+                    
+                    # Obtener series históricas aleatorias
+                    series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
+                        tickers_por_panel,
+                        paneles_seleccionados,
+                        cantidad_activos,
+                        fecha_desde,
+                        fecha_hasta,
+                        'SinAjustar',
+                        token_acceso,
+                        capital_ars
+                    )
+                    
+                    if series_historicas is None or seleccion_final is None:
+                        st.error("No se pudieron obtener las series históricas aleatorias")
+                        return
+                    
+                    # Calcular valorizado del portafolio aleatorio
+                    portafolios_val = calcular_valorizado_portafolio(series_historicas, seleccion_final)
+                    
+                    if not portafolios_val:
+                        st.error("No se pudo calcular el valorizado del portafolio")
+                        return
+                    
+                    # Mostrar resultados
+                    st.success("✅ Portafolio aleatorio generado!")
+                    
+                    # Mostrar activos seleccionados
+                    st.subheader("🎯 Activos Seleccionados")
+                    for panel, simbolos in seleccion_final.items():
+                        with st.expander(f"{panel.capitalize()} ({len(simbolos)} activos)"):
+                            st.write(simbolos)
+                    
+                    # Mostrar gráficos de cada panel
+                    for panel, serie_val in portafolios_val.items():
+                        st.subheader(f"📊 {panel.capitalize()}")
+                        
+                        # Gráfico de evolución
+                        fig = px.line(
+                            serie_val,
+                            title=f"Evolución del Portafolio - {panel.capitalize()}",
+                            labels={'value': 'Valor', 'index': 'Fecha'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Indicadores técnicos
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            # RSI
+                            rsi = calcular_rsi(serie_val)
+                            fig = px.line(
+                                rsi,
+                                title=f"RSI - {panel.capitalize()}",
+                                labels={'value': 'RSI', 'index': 'Fecha'}
+                            )
+                            fig.add_hline(y=70, line_dash="dash", line_color="red")
+                            fig.add_hline(y=30, line_dash="dash", line_color="green")
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        with col2:
+                            # RVI
+                            rvi = calcular_rvi(serie_val)
+                            fig = px.line(
+                                rvi,
+                                title=f"RVI - {panel.capitalize()}",
+                                labels={'value': 'RVI', 'index': 'Fecha'}
+                            )
+                            fig.add_hline(y=80, line_dash="dash", line_color="#787B86")
+                            fig.add_hline(y=20, line_dash="dash", line_color="#787B86")
+                            st.plotly_chart(fig, use_container_width=True)
+                else:
+                    # Calcular optimización tradicional
+                    portafolio_optimo = calcular_portafolio_optimo(
+                        mean_returns,
+                        cov_matrix,
+                        estrategia,
+                        retorno_objetivo,
+                        riesgo_maximo
+                    )
+                    
+                    if portafolio_optimo is None:
+                        st.error("No se pudo calcular el portafolio óptimo")
+                        return
+                        
+                    # Mostrar resultados
+                    st.success("✅ Portafolio optimizado!")
+                    
+                    # Mostrar distribución de pesos
+                    st.plotly_chart(
+                        px.pie(
+                            portafolio_optimo,
+                            values='peso',
+                            names='simbolo',
+                            title="Distribución de Pesos en el Portafolio"
+                        ),
+                        use_container_width=True
+                    )
+                    
+                    # Mostrar métricas del portafolio optimizado
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric(
+                            "Retorno Esperado",
+                            f"{portafolio_optimo['retorno_esperado']:.2%}"
+                        )
+                    with col2:
+                        st.metric(
+                            "Volatilidad",
+                            f"{portafolio_optimo['volatilidad']:.2%}"
+                        )
+                    with col3:
+                        st.metric(
+                            "Sharpe Ratio",
+                            f"{portafolio_optimo['sharpe_ratio']:.2f}"
+                        )
+                        
+            except Exception as e:
+                st.error(f"Error al optimizar portafolio: {str(e)}")
+
 def mostrar_resumen_portafolio(portafolio):
     st.markdown("### 📈 Resumen del Portafolio")
     
