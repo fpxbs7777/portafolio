@@ -2382,97 +2382,74 @@ class PortfolioOptimizer:
         
         return tickers_por_panel, pd.DataFrame(tickers_data)
 
-    def obtener_serie_historica(self, simbolo: str, mercado: str, fecha_desde: str, 
-                              fecha_hasta: str, ajustada: str = 'SinAjustar') -> pd.DataFrame:
+    def obtener_serie_historica(self, simbolo: str, mercado: str = 'BCBA', 
+                              fecha_desde: str = None, 
+                              fecha_hasta: str = None) -> pd.DataFrame:
         """
-        Obtiene la serie histórica de un activo con manejo robusto de errores.
+        Obtiene la serie histórica de precios usando yfinance.
+        
+        Args:
+            simbolo: Símbolo del activo (se añade .BA para acciones argentinas)
+            mercado: No se usa, se mantiene por compatibilidad
+            fecha_desde: Fecha de inicio (YYYY-MM-DD)
+            fecha_hasta: Fecha de fin (YYYY-MM-DD)
+            
+        Returns:
+            DataFrame con la serie histórica de precios
         """
         try:
-            # Validar fechas
+            # Configurar fechas por defecto (últimos 2 años)
+            if not fecha_hasta:
+                fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+            if not fecha_desde:
+                fecha_desde = (datetime.now() - timedelta(days=365*2)).strftime('%Y-%m-%d')
+                
+            # Convertir fechas a datetime
             try:
                 fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
                 fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
                 
                 if fecha_desde_dt > fecha_hasta_dt:
-                    st.warning(f"Fecha de inicio {fecha_desde} es posterior a la fecha de fin {fecha_hasta} para {simbolo}")
+                    st.warning(f"La fecha de inicio {fecha_desde} es posterior a la fecha de fin {fecha_hasta}")
                     return None
-                    
-                # Limitar el rango a 2 años como máximo
-                if (fecha_hasta_dt - fecha_desde_dt).days > 365 * 2:
-                    fecha_desde = (fecha_hasta_dt - timedelta(days=365*2)).strftime('%Y-%m-%d')
-                    st.warning(f"Rango de fechas demasiado amplio para {simbolo}. Se ajustó a los últimos 2 años.")
                     
             except ValueError as ve:
-                st.error(f"Error en el formato de fechas para {simbolo}: {str(ve)}")
-                return None
-
-            url = (
-                f"https://api.invertironline.com/api/v2/{mercado}/"
-                f"Titulos/{simbolo}/Cotizacion/seriehistorica/"
-                f"{fecha_desde}/{fecha_hasta}/{ajustada}"
-            )
-            
-            st.write(f"🔍 Solicitando datos para {simbolo}...")
-            
-            response = requests.get(
-                url,
-                headers=self.obtener_encabezado_autorizacion(),
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if not data:
-                    st.warning(f"No se encontraron datos para {simbolo} en el rango de fechas especificado")
-                    return None
-                    
-                if isinstance(data, list):
-                    df = pd.DataFrame(data)
-                    if df.empty:
-                        st.warning(f"Datos vacíos recibidos para {simbolo}")
-                        return None
-                        
-                    if 'fecha' not in df.columns:
-                        st.error(f"Columna 'fecha' no encontrada en los datos de {simbolo}")
-                        return None
-                        
-                    # Convertir fechas y establecer índice
-                    df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce')
-                    df = df.dropna(subset=['fecha'])
-                    
-                    if df.empty:
-                        st.warning(f"No se pudieron procesar las fechas para {simbolo}")
-                        return None
-                        
-                    df.set_index('fecha', inplace=True)
-                    
-                    # Buscar columna de precio
-                    columnas_precio = ['ultimoPrecio', 'precio', 'cierre', 'close', 'last']
-                    col_precio = next((c for c in columnas_precio if c in df.columns), None)
-                    
-                    if col_precio is None:
-                        st.error(f"No se encontró columna de precio en los datos de {simbolo}")
-                        return None
-                        
-                    # Mantener solo columnas relevantes
-                    df = df[[col_precio]].copy()
-                    df.columns = ['precio']
-                    df['simbolo'] = simbolo
-                    
-                    st.success(f"✅ Datos cargados para {simbolo} ({len(df)} registros)")
-                    return df
-                else:
-                    st.error(f"Formato de datos inesperado para {simbolo}")
-                    return None
-            else:
-                st.error(f"Error al obtener datos para {simbolo}: {response.status_code} - {response.text}")
+                st.error(f"Formato de fecha inválido: {str(ve)}")
                 return None
                 
-        except requests.exceptions.RequestException as re:
-            st.error(f"Error de conexión al obtener datos para {simbolo}: {str(re)}")
-            return None
+            # Asegurarse de que el símbolo tenga el sufijo .BA si es necesario
+            ticker = f"{simbolo}.BA" if not simbolo.endswith(('.BA', '.BA.')) else simbolo
+            
+            with st.spinner(f"Obteniendo datos para {ticker}..."):
+                # Obtener datos de yfinance
+                df = yf.download(
+                    ticker,
+                    start=fecha_desde,
+                    end=fecha_hasta,
+                    progress=False
+                )
+                
+                if df.empty:
+                    st.warning(f"No se encontraron datos para {ticker} en el rango especificado")
+                    return None
+                    
+                # Renombrar columnas y seleccionar solo precio de cierre
+                df = df[['Close']].copy()
+                df.columns = ['precio']
+                df['simbolo'] = simbolo  # Guardar el símbolo original
+                
+                # Eliminar filas con valores faltantes
+                df = df.dropna()
+                
+                if df.empty:
+                    st.warning(f"No hay datos válidos para {ticker} después de la limpieza")
+                    return None
+                    
+                st.success(f"✅ Datos obtenidos para {simbolo} ({len(df)} registros)")
+                return df
+                
         except Exception as e:
-            st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
+            st.error(f"Error al obtener datos para {simbolo}: {str(e)}")
             return None
 
     def seleccionar_activos_aleatorios(
