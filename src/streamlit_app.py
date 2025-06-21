@@ -563,6 +563,73 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
         return None
 
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Obtiene la serie histórica de un activo, detectando automáticamente su tipo y mercado correcto.
+    """
+    try:
+        # Primero obtenemos información del activo para detectar su tipo
+        url_info = f"https://api.invertironline.com/api/v2/Cotizaciones/{simbolo}/Titulo"
+        headers = {
+            'Authorization': f'Bearer {bearer_token}',
+            'Accept': 'application/json'
+        }
+        
+        response_info = requests.get(url_info, headers=headers)
+        if response_info.status_code != 200:
+            print(f"No se pudo obtener información del activo {simbolo}: {response_info.status_code}")
+            return None
+            
+        info = response_info.json()
+        tipo_activo = info.get('tipo', '').lower()
+        pais = info.get('pais', '').lower()
+        
+        # Determinar el mercado correcto basado en el tipo y país
+        if 'accion' in tipo_activo or 'cedear' in tipo_activo or 'adr' in tipo_activo:
+            if 'argentina' in pais:
+                mercado = 'BCBA'
+            else:
+                # Para activos internacionales, intentamos determinar el mercado
+                if 'nasdaq' in tipo_activo.lower():
+                    mercado = 'NASDAQ'
+                else:
+                    mercado = 'NYSE'
+        elif 'bono' in tipo_activo or 'obligacion' in tipo_activo or 'titulo' in tipo_activo:
+            mercado = 'BCBA'
+        elif 'futuro' in tipo_activo or 'opcion' in tipo_activo:
+            mercado = 'ROFEX'
+        else:
+            # Si no se puede determinar, usar el mercado proporcionado
+            pass
+            
+        print(f"Obteniendo datos para {simbolo} en mercado {mercado} (Tipo: {tipo_activo}, País: {pais})")
+        
+        # Construir el endpoint correcto
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                # Convertir fechas a datetime si es necesario
+                df = pd.DataFrame(data)
+                if 'fechaHora' in df.columns:
+                    df['fechaHora'] = pd.to_datetime(df['fechaHora'])
+                elif 'fecha' in df.columns:
+                    df['fecha'] = pd.to_datetime(df['fecha'])
+                return df
+            else:
+                print(f"No se encontraron datos históricos para {simbolo} en el período especificado")
+                return None
+        else:
+            print(f"Error en la solicitud de serie histórica para {simbolo} en {mercado}: {response.status_code}")
+            print(response.text)
+            return None
+            
+    except Exception as e:
+        print(f"Error al procesar serie histórica para {simbolo}: {str(e)}")
+        return None
+
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
     Obtiene series históricas para diferentes tipos de activos con detección automática de mercado
@@ -650,94 +717,45 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         st.error(traceback.format_exc())
         return None
 
-def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, token_portador):
     """
-    Obtiene datos históricos para optimización con manejo mejorado de errores,
-    reintentos automáticos y soporte para FCIs
+    Obtiene datos históricos para múltiples símbolos con reintentos y manejo especial para FCIs
     """
     try:
-        # Validar y ajustar fechas
+        # Convertir fechas a datetime si son strings
+        if isinstance(fecha_desde, str):
+            fecha_desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
+        if isinstance(fecha_hasta, str):
+            fecha_hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+            
+        # Asegurarse de que las fechas sean válidas
+        if fecha_desde > fecha_hasta:
+            st.error("La fecha de inicio no puede ser mayor que la fecha de fin")
+            return None
+            
+        # Ajustar fecha hasta si es futura
         fecha_actual = datetime.now()
-        fecha_desde_obj = datetime.strptime(fecha_desde, '%Y-%m-%d')
-        fecha_hasta_obj = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+        if fecha_hasta > fecha_actual:
+            fecha_hasta = fecha_actual
+            st.warning("La fecha de fin se ajustó al día actual")
+            
+        # Convertir fechas de vuelta a string para la API
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
         
-        if fecha_hasta_obj > fecha_actual:
-            st.warning(f"La fecha hasta ({fecha_hasta}) está en el futuro. Se ajustará a la fecha actual.")
-            fecha_hasta = fecha_actual.strftime('%Y-%m-%d')
-            
-        if fecha_desde_obj > fecha_actual:
-            st.error(f"La fecha desde ({fecha_desde}) está en el futuro. Por favor, seleccione una fecha válida.")
-            return None, None, None
-            
-        # Validar que la fecha desde no sea mayor a la fecha hasta
-        if fecha_desde_obj > fecha_hasta_obj:
-            st.error(f"La fecha desde ({fecha_desde}) no puede ser mayor a la fecha hasta ({fecha_hasta})")
-            return None, None, None
-            
-        precios = {}
-        errores = []
-        max_retries = 2
+        # Diccionario para almacenar los datos históricos
+        datos_historicos = {}
         
-        with st.spinner("Obteniendo datos históricos..."):
-            progress_bar = st.progress(0)
-            total_symbols = len(simbolos)
-            
-            for idx, (simbolo, mercado) in enumerate(simbolos):
-                progress = (idx + 1) / total_symbols
-                progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
-                
-                # Manejo especial para FCIs
-                if mercado.lower() == 'fci':
-                    data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-                    if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
-                        try:
-                            df = pd.DataFrame({
-                                'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
-                                'cierre': [data['ultimaCotizacion']['precio']]
-                            })
-                            df.set_index('fecha', inplace=True)
-                            precios[simbolo] = df['cierre']
-                        except Exception as e:
-                            st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
-                            errores.append(simbolo)
-                    else:
-                        st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
-                        errores.append(simbolo)
-                    continue
+        for simbolo in simbolos:
+            # Intentar obtener datos hasta 2 veces
+            for intento in range(2):
+                try:
+                    # Usar la nueva función que detecta automáticamente el mercado
+                    datos = obtener_serie_historica(simbolo, 'BCBA', fecha_desde_str, fecha_hasta_str, 'ajustada', token_portador)
                     
-                for attempt in range(max_retries):
-                    try:
-                        # Intentar obtener datos de IOL
-                        serie = obtener_serie_historica_iol(
-                            token_portador=token_portador,
-                            mercado=mercado,
-                            simbolo=simbolo,
-                            fecha_desde=fecha_desde,
-                            fecha_hasta=fecha_hasta
-                        )
-                        
-                        if serie is not None and not serie.empty:
-                            precios[simbolo] = serie
-                            break  # Salir del bucle de reintentos si tiene éxito
-                        
-                    except Exception as e:
-                        if attempt == max_retries - 1:  # Último intento
-                            st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
-                            errores.append(simbolo)
-                        continue
-                
-                # Pequeña pausa entre solicitudes para no saturar el servidor
-                time.sleep(0.5)
-            
-            progress_bar.empty()
-            
-            if errores:
-                st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
-            
-            if precios:
-                st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
-                
-                # Asegurarse de que todas las series tengan la misma longitud
+                    if datos is not None and len(datos) > 0:
+                        datos_historicos[simbolo] = datos
+                        break
                 min_length = min(len(s) for s in precios.values()) if precios else 0
                 if min_length < 5:  # Mínimo razonable de datos para optimización
                     st.error("Los datos históricos son insuficientes para la optimización")
