@@ -71,81 +71,23 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #0b5ed7 !important;
     }
-    
-    /* Mejora de selectores */
-    .stSelectbox>div>div {
-        background-color: white !important;
-        border-radius: 8px !important;
-        padding: 0.5rem !important;
-    }
-    
-    /* Mejora de sliders */
-    .stSlider>div>div>div {
-        background-color: white !important;
-        border-radius: 8px !important;
-        padding: 0.5rem !important;
-    }
-    
-    /* Mejora de inputs */
-    .stTextInput>div>div {
-        background-color: white !important;
-        border-radius: 8px !important;
-        padding: 0.5rem !important;
-    }
-    
-    /* Mejora de textos */
-    .stText {
-        color: #212529;
-        font-size: 1rem;
-    }
-    
-    /* Mejora de títulos */
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        color: #0d6efd;
-        font-weight: 600;
-        margin-bottom: 1rem;
-    }
-    
-    /* Mejora de alertas */
-    .stAlert {
-        border-radius: 8px !important;
-        padding: 1rem !important;
-    }
-    
-    /* Mejora de progreso */
-    .stProgress>div {
-        border-radius: 8px !important;
-    }
-    
-    /* Mejora de gráficos */
-    .stPlotlyChart {
-        background-color: white !important;
-        border-radius: 8px !important;
-        padding: 1rem !important;
-    }
-    
-    /* Mejora de tablas */
-    .stDataFrame {
-        background-color: white !important;
-        border-radius: 8px !important;
-        padding: 1rem !important;
-        transition: all 0.3s ease;
-    }
-    
-    /* Mejora de pestañas seleccionadas */
-    .stTabs [aria-selected="true"] {
+}  /* Cerrar el bloque CSS */
+
+<style>
+    /* Mejora de botones */
+    .stButton>button {
         background-color: #0d6efd !important;
         color: white !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-radius: 8px !important;
+        padding: 0.5rem 1rem !important;
+        font-weight: 500 !important;
     }
     
-    /* Mejora de pestañas en móvil */
-    @media (max-width: 768px) {
-        .stTabs [data-baseweb="tab"] {
-            font-size: 0.9rem;
-            padding: 0.5rem;
-        }
+    .stButton>button:hover {
+        background-color: #0b5ed7 !important;
     }
+}  /* Cerrar el bloque CSS */
+}  /* Cerrar el bloque CSS */
     
     /* Mejora de botones */
     .stButton>button {
