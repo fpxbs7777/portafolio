@@ -302,18 +302,14 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
-    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
-    params = {
-        'cotizacionInstrumentoModel.instrumento': 'cauciones',
-        'cotizacionInstrumentoModel.pais': 'argentina'
-    }
+    url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
     
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
+        response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
@@ -2398,63 +2394,118 @@ class PortfolioOptimizer:
         return tickers_por_panel, pd.DataFrame(tickers_data)
 
     def obtener_serie_historica(self, simbolo: str, mercado: str = None, 
-                                      fecha_desde: str = None, 
-                                      fecha_hasta: str = None, 
-                                      ajustada: str = 'SinAjustar') -> pd.DataFrame:
+                                  fecha_desde: str = None, 
+                                  fecha_hasta: str = None, 
+                                  ajustada: str = 'SinAjustar') -> pd.DataFrame:
         """
-        Obtiene la serie histórica de precios para un activo, probando en varios mercados si no se especifica uno.
-        Utiliza la API de InvertirOnline.
+        Obtiene la serie histórica de precios para un activo utilizando la API de IOL.
+        Este método prueba en varios mercados si no se especifica uno y maneja
+        la respuesta de la API para devolver un DataFrame limpio y consistente.
 
         Args:
-            simbolo (str): Símbolo del activo (ej: 'AL30', 'GD30').
-            mercado (str, optional): Mercado específico a consultar. Si es None, prueba una lista predefinida.
-            fecha_desde (str, optional): Fecha de inicio 'YYYY-MM-DD'. Por defecto, un año atrás.
-            fecha_hasta (str, optional): Fecha de fin 'YYYY-MM-DD'. Por defecto, hoy.
+            simbolo (str): Símbolo del activo (ej: 'AL30', 'AAPL').
+            mercado (str, optional): Mercado específico ('BCBA', 'NYSE', etc.). 
+                                     Si es None, se intentarán varios mercados.
+            fecha_desde (str, optional): Fecha de inicio 'YYYY-MM-DD'. Default: un año atrás.
+            fecha_hasta (str, optional): Fecha de fin 'YYYY-MM-DD'. Default: hoy.
             ajustada (str, optional): Si la serie debe ser 'Ajustada' o 'SinAjustar'.
 
         Returns:
-            pd.DataFrame: DataFrame con la serie histórica, o None si no se encuentran datos.
+            pd.DataFrame: Un DataFrame con la serie histórica (columnas: 'apertura', 
+                          'cierre', 'maximo', 'minimo', 'volumen'), o None si falla.
         """
-        # Validar y establecer fechas
-        if fecha_hasta is None:
-            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-        if fecha_desde is None:
-            fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
-            fecha_desde = (fecha_hasta_dt - timedelta(days=365)).strftime('%Y-%m-%d')
-
         if not self.token_portador:
-            st.error("El token de autenticación no está disponible. Por favor, inicie sesión de nuevo.")
+            st.error("Error de autenticación: El token no está disponible.")
             return None
 
+        # 1. Validar y formatear las fechas
+        try:
+            if fecha_hasta:
+                fecha_hasta_dt = pd.to_datetime(fecha_hasta)
+            else:
+                fecha_hasta_dt = pd.to_datetime(date.today())
+            
+            if fecha_desde:
+                fecha_desde_dt = pd.to_datetime(fecha_desde)
+            else:
+                fecha_desde_dt = fecha_hasta_dt - timedelta(days=365)
+            
+            fecha_desde_str = fecha_desde_dt.strftime('%Y-%m-%d')
+            fecha_hasta_str = fecha_hasta_dt.strftime('%Y-%m-%d')
+        except (ValueError, TypeError) as e:
+            st.error(f"Error en el formato de fecha para {simbolo}: {e}")
+            return None
+
+        # 2. Determinar los mercados a consultar
         mercados_a_probar = [mercado] if mercado else ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
         
-        st.info(f"Buscando serie histórica para {simbolo}...")
-        for mercado_intento in mercados_a_probar:
-            url = f"https://api.invertironline.com/api/v2/{mercado_intento}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-            headers = self.obtener_encabezado_autorizacion()
+        headers = self.obtener_encabezado_autorizacion()
+        if not headers:
+            return None # El error ya se muestra en el método de obtención de encabezado
 
-            print(f"Intentando en mercado: {mercado_intento}...")
-            response = requests.get(url, headers=headers)
+        # 3. Iterar y consultar la API
+        for mercado_intento in mercados_a_probar:
+            url = f"https://api.invertironline.com/api/v2/{mercado_intento}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde_str}/{fecha_hasta_str}/{ajustada}"
             
-            if response.status_code == 200:
-                datos = response.json()
-                if datos and isinstance(datos, list):
-                    df = pd.DataFrame(datos)
-                    st.success(f"Datos obtenidos para {simbolo} en {mercado_intento} ({len(df)} registros).")
+            try:
+                print(f"🔄 Consultando IOL API para {simbolo} en mercado {mercado_intento}...")
+                response = requests.get(url, headers=headers, timeout=25)
+                
+                # 4. Manejar la respuesta de la API
+                if response.status_code == 200:
+                    data = response.json()
+                    if not data:
+                        print(f"⚠️ No se encontraron datos para {simbolo} en {mercado_intento} (respuesta vacía).")
+                        continue
                     
-                    # Procesamiento del DataFrame
-                    df.rename(columns={'ultimoPrecio': 'cierre', 'montoOperado': 'volumen'}, inplace=True)
+                    print(f"✅ Datos recibidos para {simbolo} desde {mercado_intento}.")
+                    
+                    # 5. Procesar y limpiar los datos
+                    df = pd.DataFrame(data)
+                    
+                    if 'fecha' not in df.columns:
+                        print(f"❌ Error de formato: la respuesta para {simbolo} no contiene la columna 'fecha'.")
+                        continue
+                        
                     df['fecha'] = pd.to_datetime(df['fecha'])
                     df.set_index('fecha', inplace=True)
+                    
+                    # Renombrar y seleccionar columnas para consistencia
+                    df.rename(columns={
+                        'precioApertura': 'apertura',
+                        'ultimoPrecio': 'cierre',
+                        'maximo': 'maximo',
+                        'minimo': 'minimo',
+                        'volumen': 'volumen'
+                    }, inplace=True)
                     
                     columnas_deseadas = ['apertura', 'cierre', 'maximo', 'minimo', 'volumen']
                     columnas_presentes = [col for col in columnas_deseadas if col in df.columns]
                     
+                    if not columnas_presentes:
+                        print(f"❌ Error de formato: no se encontraron columnas de precios válidas para {simbolo}.")
+                        continue
+                        
+                    # Rellenar valores faltantes si es necesario
+                    df[columnas_presentes] = df[columnas_presentes].fillna(method='ffill')
+                    
+                    st.success(f"Serie histórica para '{simbolo}' obtenida del mercado '{mercado_intento}'.")
                     return df[columnas_presentes]
-            else:
-                print(f"No se encontraron datos para {simbolo} en {mercado_intento} (Status: {response.status_code}).")
 
-        st.warning(f"No se pudo obtener la serie histórica para {simbolo} en ninguno de los mercados probados.")
+                elif response.status_code == 401:
+                    st.error("Error de autenticación (401). El token puede haber expirado.")
+                    # No continuar intentando si el token es inválido
+                    return None
+                else:
+                    print(f"❌ Falló la consulta para {simbolo} en {mercado_intento} (Status: {response.status_code}). Mensaje: {response.text}")
+
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Error de conexión al consultar {simbolo} en {mercado_intento}: {e}")
+                # Continuar al siguiente mercado si hay un error de red
+                continue
+
+        # 6. Manejar el caso de fallo en todos los mercados
+        st.warning(f"No se pudo obtener la serie histórica para '{simbolo}' en ninguno de los mercados probados: {', '.join(mercados_a_probar)}.")
         return None
 
     def seleccionar_activos_aleatorios(
