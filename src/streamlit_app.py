@@ -565,38 +565,69 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
-    Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
+    Obtiene series históricas para diferentes tipos de activos con detección automática de mercado
+    basado en el tipo de activo proporcionado por la API de InvertirOnline.
     """
     try:
-        # Primero intentamos con el endpoint específico del mercado
-        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-        if not url:
-            st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
-            return None
+        # Obtenemos información detallada del título
+        url_info = f"https://api.invertironline.com/api/v2/Cotizaciones/{simbolo}/Titulo"
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
         
-        headers = obtener_encabezado_autorizacion(token_portador)
-        
-        # Configurar un timeout más corto para no bloquear la interfaz
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        # Verificar si la respuesta es exitosa
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict) and data.get('status') == 'error':
-                st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
-                return None
-                
-            # Procesar la respuesta según el tipo de activo
-            return procesar_respuesta_historico(data, mercado)
-        else:
-            st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
+        response_info = requests.get(url_info, headers=headers, timeout=10)
+        if response_info.status_code != 200:
+            st.warning(f"No se pudo obtener información para {simbolo}. Código: {response_info.status_code}")
             return None
             
+        info_titulo = response_info.json()
+        tipo_activo = info_titulo.get('tipo', '').lower()
+        pais_activo = info_titulo.get('pais', '').lower()
+        
+        # Determinamos el mercado basado en el tipo de activo y país
+        if 'accion' in tipo_activo or 'cedear' in tipo_activo or 'adr' in tipo_activo:
+            if 'argentina' in pais_activo:
+                mercado = 'BCBA'
+            else:
+                # Para activos internacionales, intentamos determinar el mercado
+                if 'nasdaq' in tipo_activo.lower():
+                    mercado = 'NASDAQ'
+                else:
+                    mercado = 'NYSE'  # Por defecto NYSE para internacional
+        elif 'bono' in tipo_activo or 'obligacion' in tipo_activo or 'titulo' in tipo_activo:
+            mercado = 'BCBA'  # Títulos públicos y obligaciones negociables
+        elif 'futuro' in tipo_activo or 'opcion' in tipo_activo:
+            mercado = 'ROFEX'  # Derivados
+        else:
+            # Si no se puede determinar, usamos el mercado proporcionado
+            pass
+            
+        st.info(f"Obteniendo datos para {simbolo} en mercado {mercado} (Tipo: {tipo_activo}, País: {pais_activo})")
+        
+        # Obtenemos la serie histórica con el mercado determinado
+        endpoint = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+        
+        if not endpoint:
+            st.warning(f"No se pudo determinar el endpoint para {simbolo} en el mercado {mercado}")
+            return None
+            
+        response = requests.get(endpoint, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            st.warning(f"Error al obtener datos para {simbolo}. Código: {response.status_code}")
+            return None
+            
+        data = response.json()
+        return procesar_respuesta_historico(data, tipo_activo)
+        
     except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión para {simbolo}: {str(e)}")
+        st.error(f"Error de conexión al obtener datos para {simbolo}: {str(e)}")
         return None
     except Exception as e:
         st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
