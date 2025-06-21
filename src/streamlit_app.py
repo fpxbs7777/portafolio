@@ -2459,40 +2459,100 @@ class PortfolioOptimizer:
                     response = requests.get(url, headers=headers)
                     
                     if response.status_code == 200:
-                        data = response.json()
-                        if isinstance(data, list) and len(data) > 0:
-                            # Convertir datos a DataFrame
-                            df = pd.DataFrame(data)
-                            # Reorganizar columnas para consistencia
-                            df = df.rename(columns={
-                                'fecha': 'fecha',
-                                'ultimoPrecio': 'cierre',
-                                'apertura': 'apertura',
-                                'maximo': 'maximo',
-                                'minimo': 'minimo',
-                                'montoOperado': 'volumen'
-                            })
-                            df['fecha'] = pd.to_datetime(df['fecha'])
-                            df = df.set_index('fecha')
-                            print(f"✅ Datos obtenidos de IOL para {simbolo} en {mercado_intento} ({len(df)} registros)")
-                            return df
-                        else:
-                            print(f"⚠️ Respuesta vacía de IOL para {simbolo} en {mercado_intento}")
+                        try:
+                            data = response.json()
+                            if isinstance(data, list) and len(data) > 0:
+                                # Convertir datos a DataFrame
+                                df = pd.DataFrame(data)
+                                # Verificar que todas las columnas necesarias existen
+                                required_columns = ['fecha', 'ultimoPrecio', 'apertura', 'maximo', 'minimo', 'montoOperado']
+                                missing_columns = [col for col in required_columns if col not in df.columns]
+                                
+                                if missing_columns:
+                                    print(f"⚠️ Columnas faltantes en respuesta IOL: {missing_columns}")
+                                    continue
+                                
+                                # Reorganizar columnas para consistencia
+                                df = df.rename(columns={
+                                    'fecha': 'fecha',
+                                    'ultimoPrecio': 'cierre',
+                                    'apertura': 'apertura',
+                                    'maximo': 'maximo',
+                                    'minimo': 'minimo',
+                                    'montoOperado': 'volumen'
+                                })
+                                
+                                # Validar formato de fechas
+                                try:
+                                    df['fecha'] = pd.to_datetime(df['fecha'])
+                                except Exception as e:
+                                    print(f"❌ Error al procesar fechas: {str(e)}")
+                                    print(f"Valores de fecha en la respuesta: {df['fecha'].head().tolist()}")
+                                    continue
+                                
+                                df = df.set_index('fecha')
+                                print(f"✅ Datos obtenidos de IOL para {simbolo} en {mercado_intento} ({len(df)} registros)")
+                                return df
+                            else:
+                                print(f"⚠️ Respuesta vacía o formato incorrecto de IOL para {simbolo} en {mercado_intento}")
+                                print(f"Contenido de la respuesta: {data}")
+                        except Exception as e:
+                            print(f"❌ Error al procesar datos IOL: {str(e)}")
+                            print(f"Status: {response.status_code}, Headers: {response.headers}")
+                            print(f"Contenido de la respuesta: {response.text}")
                     else:
                         print(f"❌ Error IOL API para {simbolo} en {mercado_intento}: {response.status_code}")
+                        print(f"Headers: {response.headers}")
+                        print(f"Contenido: {response.text}")
                     
                     # Si IOL falla, intentar con yfinance
                     print(f"Intentando obtener datos para {simbolo} en {mercado_intento} usando yfinance...")
                     
                     # Descargar datos usando yfinance
-                    df = yf.download(
-                        simbolo_yf, 
-                        start=fecha_desde, 
-                        end=fecha_hasta, 
-                        progress=False,
-                        threads=True,
-                        timeout=10  # Timeout de 10 segundos
-                    )
+                    try:
+                        df = yf.download(
+                            simbolo_yf, 
+                            start=fecha_desde, 
+                            end=fecha_hasta, 
+                            progress=False,
+                            threads=True,
+                            timeout=10  # Timeout de 10 segundos
+                        )
+                        
+                        if df.empty:
+                            print(f"⚠️ DataFrame vacío para {simbolo} en {mercado_intento} usando yfinance")
+                            continue
+                            
+                        # Verificar que todas las columnas necesarias están presentes
+                        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        missing_columns = [col for col in required_columns if col not in df.columns]
+                        
+                        if missing_columns:
+                            print(f"⚠️ Columnas faltantes en yfinance: {missing_columns}")
+                            print(f"Columnas disponibles: {df.columns.tolist()}")
+                            continue
+                            
+                        # Renombrar columnas para consistencia
+                        df = df.rename(columns={
+                            'Open': 'apertura',
+                            'High': 'maximo',
+                            'Low': 'minimo',
+                            'Close': 'cierre',
+                            'Volume': 'volumen',
+                            'Adj Close': 'cierreAjustado'
+                        })
+                        
+                        # Verificar que el índice sea datetime
+                        if not isinstance(df.index, pd.DatetimeIndex):
+                            print(f"⚠️ Índice no es datetime para {simbolo} en {mercado_intento}")
+                            continue
+                            
+                        print(f"✅ Datos obtenidos de yfinance para {simbolo} en {mercado_intento} ({len(df)} registros)")
+                        return df
+                        
+                    except Exception as e:
+                        print(f"❌ Error al obtener datos de yfinance para {simbolo} en {mercado_intento}: {str(e)}")
+                        continue
                     
                     # Verificar que hay suficientes datos
                     if df.empty or len(df) < 5:  # Al menos 5 puntos de datos
