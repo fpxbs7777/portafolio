@@ -2461,6 +2461,304 @@ class PortfolioOptimizer:
         
         return pd.DataFrame(metricas)
 
+    def obtener_tickers_por_panel(self, paneles: List[str], pais: str = 'Argentina') -> Tuple[Dict[str, List[str]], pd.DataFrame]:
+        """
+        Obtiene los tickers disponibles para los paneles especificados.
+        
+        Args:
+            paneles: Lista de paneles a consultar (ej: ['acciones', 'cedears'])
+            pais: País de los instrumentos
+            
+        Returns:
+            Tuple[Dict[str, List[str]], pd.DataFrame]: 
+                - Diccionario con paneles como claves y listas de tickers como valores
+                - DataFrame con todos los tickers y sus paneles
+        """
+        tickers_por_panel = {}
+        tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
+        
+        for panel in paneles:
+            if panel not in self.paneles_disponibles:
+                st.warning(f"Panel no disponible: {panel}")
+                continue
+                
+            url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+            params = {
+                'cotizacionInstrumentoModel.instrumento': panel,
+                'cotizacionInstrumentoModel.pais': pais.lower()
+            }
+            
+            try:
+                respuesta = self._session.get(
+                    url,
+                    headers=self.obtener_encabezado_autorizacion(),
+                    params=params,
+                    timeout=30
+                )
+                respuesta.raise_for_status()
+                
+                datos = respuesta.json()
+                tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+                tickers_por_panel[panel] = tickers
+                
+                # Crear DataFrame con los tickers del panel
+                panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
+                tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
+                
+            except Exception as e:
+                st.error(f'Error al obtener tickers para el panel {panel}: {str(e)}')
+                continue
+                
+        return tickers_por_panel, tickers_df
+        
+    def construir_portafolio_aleatorio(
+        self,
+        paneles_seleccionados: List[str],
+        cantidad_activos: int,
+        capital_ars: float,
+        fecha_desde: str = None,
+        fecha_hasta: str = None,
+        ajustada: bool = False
+    ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+        """
+        Construye un portafolio aleatorio con restricción de capital.
+        
+        Args:
+            paneles_seleccionados: Lista de paneles a incluir
+            cantidad_activos: Número de activos por panel a seleccionar
+            capital_ars: Capital disponible en ARS
+            fecha_desde: Fecha de inicio en formato 'YYYY-MM-DD'
+            fecha_hasta: Fecha de fin en formato 'YYYY-MM-DD'
+            ajustada: Si es True, usa precios ajustados
+            
+        Returns:
+            Tuple[pd.DataFrame, Dict[str, List[str]]]: 
+                - DataFrame con las series históricas
+                - Diccionario con los activos seleccionados por panel
+        """
+        # Establecer fechas por defecto si no se especifican
+        if fecha_desde is None:
+            fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+        if fecha_hasta is None:
+            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+            
+        # Obtener tickers por panel
+        tickers_por_panel, _ = self.obtener_tickers_por_panel(paneles_seleccionados)
+        
+        series_historicas = pd.DataFrame()
+        seleccion_final = {}
+        
+        for panel in paneles_seleccionados:
+            if panel not in tickers_por_panel or not tickers_por_panel[panel]:
+                continue
+                
+            tickers = tickers_por_panel[panel]
+            random.shuffle(tickers)
+            seleccionados = []
+            
+            # Intentar obtener datos para los tickers hasta completar la cantidad deseada
+            for simbolo in tickers:
+                if len(seleccionados) >= cantidad_activos:
+                    break
+                    
+                try:
+                    # Crear solicitud de datos históricos
+                    req = HistoricalDataRequest(
+                        simbolo=simbolo,
+                        mercado='BCBA',
+                        fecha_desde=fecha_desde,
+                        fecha_hasta=fecha_hasta,
+                        ajustada=ajustada
+                    )
+                    
+                    # Obtener datos históricos
+                    resultados = self.obtener_serie_historica_universal(req)
+                    if not resultados or simbolo not in resultados:
+                        continue
+                        
+                    df = resultados[simbolo]
+                    if df.empty:
+                        continue
+                        
+                    # Buscar columna de precio
+                    col_precio = next((c for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre'] 
+                                    if c in df.columns), None)
+                    if not col_precio:
+                        continue
+                        
+                    # Obtener último precio disponible
+                    precio = df[col_precio].dropna().iloc[-1]
+                    if pd.isna(precio) or precio <= 0:
+                        continue
+                        
+                    # Verificar si el activo es asequible
+                    if precio > capital_ars and capital_ars > 0:
+                        continue
+                        
+                    # Agregar a la selección
+                    df['simbolo'] = simbolo
+                    df['panel'] = panel
+                    seleccionados.append((simbolo, df, precio))
+                    capital_ars -= precio
+                    
+                except Exception as e:
+                    st.warning(f"Error procesando {simbolo}: {str(e)}")
+                    continue
+            
+            # Guardar selección final
+            if seleccionados:
+                seleccion_final[panel] = [s[0] for s in seleccionados]
+                for _, df, _ in seleccionados:
+                    series_historicas = pd.concat([series_historicas, df], ignore_index=True)
+        
+        return series_historicas, seleccion_final
+    
+    def calcular_metricas_portafolio_aleatorio(
+        self,
+        series_historicas: pd.DataFrame,
+        seleccion_final: Dict[str, List[str]]
+    ) -> Dict[str, pd.Series]:
+        """
+        Calcula métricas de rendimiento para los portafolios aleatorios.
+        
+        Args:
+            series_historicas: DataFrame con las series históricas
+            seleccion_final: Diccionario con los activos seleccionados por panel
+            
+        Returns:
+            Dict[str, pd.Series]: Diccionario con las métricas de cada portafolio
+        """
+        portafolios_val = {}
+        
+        for panel, simbolos in seleccion_final.items():
+            if not simbolos:
+                continue
+                
+            df_panel = series_historicas[series_historicas['panel'] == panel].copy()
+            if df_panel.empty:
+                continue
+                
+            # Buscar columnas de fecha y precio
+            fecha_col = next((c for c in ['fecha', 'date', 'fechaHora', 'fechaCotizacion'] 
+                           if c in df_panel.columns), None)
+            col_precio = next((c for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre'] 
+                             if c in df_panel.columns), None)
+            
+            if not fecha_col or not col_precio:
+                continue
+                
+            try:
+                # Convertir a datetime si es necesario
+                if not pd.api.types.is_datetime64_any_dtype(df_panel[fecha_col]):
+                    df_panel[fecha_col] = pd.to_datetime(df_panel[fecha_col])
+                
+                # Pivotear para tener fechas como índice y columnas por símbolo
+                df_pivot = df_panel.pivot_table(
+                    index=fecha_col, 
+                    columns='simbolo', 
+                    values=col_precio,
+                    aggfunc='first'
+                )
+                
+                # Filtrar solo los símbolos seleccionados
+                df_pivot = df_pivot[df_pivot.columns.intersection(simbolos)]
+                
+                if df_pivot.empty:
+                    continue
+                    
+                # Normalizar para calcular retornos
+                df_normalized = df_pivot / df_pivot.iloc[0]
+                
+                # Calcular valor del portafolio (suma ponderada)
+                portafolio_val = df_normalized.sum(axis=1) / len(df_normalized.columns)
+                portafolios_val[panel] = portafolio_val
+                
+            except Exception as e:
+                st.error(f"Error al calcular métricas para {panel}: {str(e)}")
+                continue
+                
+        return portafolios_val
+    
+    def graficar_portafolio_aleatorio(
+        self,
+        portafolios_val: Dict[str, pd.Series],
+        titulo: str = "Evolución de Portafolios Aleatorios"
+    ) -> None:
+        """
+        Genera gráficos para visualizar los portafolios aleatorios.
+        
+        Args:
+            portafolios_val: Diccionario con las series de valor de los portafolios
+            titulo: Título del gráfico principal
+        """
+        if not portafolios_val:
+            st.warning("No hay datos para graficar")
+            return
+            
+        # Crear figura para el gráfico de líneas
+        fig_line = go.Figure()
+        
+        for panel, serie in portafolios_val.items():
+            fig_line.add_trace(go.Scatter(
+                x=serie.index,
+                y=serie.values,
+                mode='lines',
+                name=f'Portafolio {panel}'
+            ))
+        
+        # Configurar diseño del gráfico
+        fig_line.update_layout(
+            title=titulo,
+            xaxis_title='Fecha',
+            yaxis_title='Valor Normalizado',
+            legend_title='Paneles',
+            hovermode='x',
+            template='plotly_white'
+        )
+        
+        # Mostrar gráfico en Streamlit
+        st.plotly_chart(fig_line, use_container_width=True)
+        
+        # Calcular y mostrar métricas para cada portafolio
+        for panel, serie in portafolios_val.items():
+            if len(serie) < 2:
+                continue
+                
+            with st.expander(f"Métricas - {panel}"):
+                col1, col2, col3 = st.columns(3)
+                
+                # Calcular retornos
+                retornos = serie.pct_change().dropna()
+                
+                # Métricas básicas
+                retorno_total = (serie.iloc[-1] / serie.iloc[0] - 1) * 100
+                volatilidad = retornos.std() * np.sqrt(252) * 100  # Anualizada
+                sharpe = (retornos.mean() / retornos.std()) * np.sqrt(252) if retornos.std() > 0 else 0
+                
+                col1.metric("Retorno Total", f"{retorno_total:.2f}%")
+                col2.metric("Volatilidad Anual", f"{volatilidad:.2f}%")
+                col3.metric("Ratio de Sharpe", f"{sharpe:.2f}")
+                
+                # Gráfico de distribución de retornos
+                fig_hist = go.Figure()
+                fig_hist.add_trace(go.Histogram(
+                    x=retornos * 100,
+                    nbinsx=50,
+                    name='Frecuencia',
+                    marker_color='#1f77b4',
+                    opacity=0.75
+                ))
+                
+                fig_hist.update_layout(
+                    title=f'Distribución de Retornos - {panel}',
+                    xaxis_title='Retorno (%)',
+                    yaxis_title='Frecuencia',
+                    template='plotly_white',
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig_hist, use_container_width=True)
+    
     def obtener_serie_historica_universal(self, request: Union[HistoricalDataRequest, List[HistoricalDataRequest]]) -> Dict[str, pd.DataFrame]:
         """
         Obtiene series históricas de precios para uno o múltiples activos.
