@@ -1089,9 +1089,6 @@ class manager:
         else:
             st.error(f"Error en la optimización: {result.message}")
             return None
-            'volatilities': np.sqrt(np.diag(self.cov_matrix)),
-            'returns': self.mean_returns
-        })
         
         return port_output
 
