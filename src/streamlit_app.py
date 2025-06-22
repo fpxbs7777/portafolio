@@ -2064,20 +2064,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         weights_df = weights_df.sort_values('Peso (%)', ascending=False)
                         st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
                 
-                with col2:
-                    st.markdown("#### 📈 Métricas del Portafolio")
-                    try:
-                        metricas = portfolio_result.get_metrics_dict()
-                        
-                        # Mostrar métricas clave
-                        st.metric("Retorno Anualizado", f"{metricas.get('return_annual', 0):.2%}")
-                        st.metric("Volatilidad Anual", f"{metricas.get('volatility_annual', 0):.2%}")
-                        st.metric("Ratio de Sharpe", f"{metricas.get('sharpe_ratio', 0):.2f}")
-                        st.metric("VaR 95% (1 día)", f"{metricas.get('var_95', 0):.2%}")
-                        
-                    except Exception as e:
-                        st.error(f"Error al obtener métricas: {str(e)}")
-                
                 # Mostrar resultados de la optimización
                 if portfolio_result:
                     st.success("✅ Optimización completada")
@@ -2103,7 +2089,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 st.metric("Retorno Anual", f"{metricas.get('Annual Return', 0):.2%}")
                                 st.metric("Volatilidad Anual", f"{metricas.get('Annual Volatility', 0):.2%}")
                                 st.metric("Ratio de Sharpe", f"{metricas.get('Sharpe Ratio', 0):.4f}")
-                                st.metric("VaR 95%", f"{metricas.get('VaR 95%', 0):.4f}")
+                                st.metric("VaR 95% (1 día)", f"{metricas.get('VaR 95%', 0):.4f}")
                             with col_b:
                                 st.metric("Skewness", f"{metricas.get('Skewness', 0):.4f}")
                                 st.metric("Kurtosis", f"{metricas.get('Kurtosis', 0):.4f}")
