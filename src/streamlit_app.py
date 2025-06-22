@@ -1695,7 +1695,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if portafolio is None:
         st.error("❌ No se pudo obtener el portafolio actual")
         return
-        
+    
     # Extraer activos para optimización
     activos_raw = portafolio.get('activos', [])
     activos_para_optimizacion = []
@@ -1712,7 +1712,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if not activos_para_optimizacion:
         st.error("❌ No se encontraron activos válidos para optimización")
         return
-        
+    
     # Configuración de fechas
     col1, col2 = st.columns(2)
     with col1:
@@ -1744,7 +1744,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'min-variance-l2': 'Mínima Varianza L2',
                 'long-only': 'Solo Posiciones Largas',
                 'rebalanceo-aleatorio': 'Rebalanceo Aleatorio'
-            }
+            }[x]
         )
     
     with col2:
@@ -1932,105 +1932,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                     st.plotly_chart(fig, use_container_width=True)
                                 else:
                                     st.warning("⚠️ No se pudieron obtener datos históricos suficientes para comparar portafolios")
-                                    
                             except Exception as e:
                                 st.error(f"❌ Error al calcular la frontera eficiente: {str(e)}")
-                                        marker=dict(color='green', size=10)
-                                    ))
-                                    
-                                    # Portafolio actual
-                                    fig.add_trace(go.Scatter(
-                                        x=[volatilidad_anual_actual],
-{{ ... }}
-                                        y=[retorno_anual_actual],
-                                        mode='markers',
-                                        name='Portafolio Actual',
-                                        marker=dict(color='red', size=10)
-                                    ))
-                                    
-                                    fig.update_layout(
-                                        title='Frontera Eficiente y Portafolios',
-                                        xaxis_title='Volatilidad Anual',
-                                        yaxis_title='Retorno Anual',
-                                        template='plotly_white'
-                                    )
-                                    
-                                    st.plotly_chart(fig, use_container_width=True)
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
-                return
-                # Crear manager de portafolio con la lista de activos (símbolo y mercado)
-                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
-                
-                # Cargar datos
-                if manager_inst.load_data():
-                    # Computar optimización
-                    use_target = target_return if estrategia == 'markowitz' else None
-                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
-                    
-                    if portfolio_result:
-                        st.success("✅ Optimización completada")
-                        
-                        # Mostrar resultados extendidos
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            if portfolio_result.dataframe_allocation is not None:
-                                weights_df = portfolio_result.dataframe_allocation.copy()
-                                weights_df['Peso (%)'] = weights_df['weights'] * 100
-                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                        
-                        with col2:
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            metricas = portfolio_result.get_metrics_dict()
-                            
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                                st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                            with col_b:
-                                st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                                st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                                st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                                normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                                st.metric("Normalidad", normalidad)
-                        
-                        # Gráfico de distribución de retornos
-                        if portfolio_result.returns is not None:
-                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                            fig = portfolio_result.plot_histogram_streamlit()
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Gráfico de pesos
-                        if portfolio_result.weights is not None:
-                            st.markdown("#### 🥧 Distribución de Pesos")
-                            fig_pie = go.Figure(data=[go.Pie(
-                                labels=portfolio_result.dataframe_allocation['rics'],
-                                values=portfolio_result.weights,
-                                textinfo='label+percent',
-                                hole=0.4,
-                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                            )])
-                            fig_pie.update_layout(
-                                title="Distribución Optimizada de Activos",
-                                template='plotly_white'
-                            )
-                            st.plotly_chart(fig_pie, use_container_width=True)
-                        
-                    else:
-                        st.error("❌ Error en la optimización")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-                    
-            except Exception as e:
-                st.error(f"❌ Error durante la optimización: {str(e)}")
+
     
-    if ejecutar_frontier and show_frontier:
-        with st.spinner("Calculando frontera eficiente..."):
             try:
                 manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
                 
