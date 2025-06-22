@@ -418,32 +418,16 @@ def mostrar_tasas_caucion(token_portador):
             # Mostrar resumen estadístico
             if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
                 col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+                with col2:
+                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+                    
+    except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
-            continue
-
-    try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
-    except Exception:
-        return None
 
 # Función para obtener datos históricos usando Yahoo Finance
 def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta):
@@ -604,6 +588,36 @@ def obtener_serie_historica_fci_yahoo(simbolo, fecha_desde, fecha_hasta):
     Obtiene datos históricos de fondos comunes usando Yahoo Finance
     """
     return obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta)
+
+
+def parse_datetime(datetime_string):
+    """
+    Intenta parsear una cadena de fecha/hora con múltiples formatos
+    """
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "ISO8601",
+        "mixed"
+    ]
+    
+    for fmt in formats_to_try:
+        try:
+            if fmt == "ISO8601":
+                return pd.to_datetime(datetime_string, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(datetime_string, format='mixed')
+            else:
+                return pd.to_datetime(datetime_string, format=fmt)
+        except Exception:
+            continue
+
+    try:
+        return pd.to_datetime(datetime_string, infer_datetime_format=True)
+    except Exception:
+        return None
 
 
 def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, use_iol=False, bearer_token=None):
