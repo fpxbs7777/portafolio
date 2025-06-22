@@ -1185,7 +1185,7 @@ class PortfolioManager:
                                 normalidad = "✅ Normal" if metricas.get('Is Normal', False) else "❌ No Normal"
                                 st.metric("Normalidad", normalidad)
                         except Exception as e:
-                            st.error(f"Error al obtener métricas: {str(e)}")
+                            st.error(f"❌ Error al obtener métricas: {str(e)}")
                     
                     # Gráfico de distribución de retornos
                     if hasattr(portfolio_result, 'returns') and portfolio_result.returns is not None:
