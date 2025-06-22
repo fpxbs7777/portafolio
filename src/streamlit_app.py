@@ -501,18 +501,16 @@ def calcular_metricas_portafolio(activos_data, valor_total):
             'probabilidades': {
                 'ganancia': prob_ganancia,
                 'perdida': prob_perdida,
-                'perdida_mayor_10': prob_perdida_mayor_10,
-                'ganancia_mayor_10': prob_ganancia_mayor_10
+                'ganancia_mayor_10': prob_ganancia_mayor_10,
+                'perdida_mayor_10': prob_perdida_mayor_10
             },
             'fcis': {
-                'total_invertido': total_fci,
-                'porcentaje_portafolio': porcentaje_fci,
-                'cantidad': len(fcis)
+                'total': total_fci,
+                'porcentaje': porcentaje_fci
             }
         }
-        
     except Exception as e:
-        st.error(f"Error al calcular métricas del portafolio: {str(e)}")
+        st.error(f"Error calculando métricas del portafolio: {str(e)}")
         return None
 
 # --- Enhanced Portfolio Management Classes ---
