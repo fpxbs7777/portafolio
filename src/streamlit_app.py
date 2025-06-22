@@ -960,6 +960,13 @@ class PortfolioManager:
                         if precio_col:
                             df = df[['fecha', precio_col]].copy()
                             df.columns = ['fecha', 'precio']  # Normalizar el nombre de la columna
+                            
+                            # Convertir fechaHora a fecha y asegurar que sea única
+                            df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+                            
+                            # Eliminar duplicados manteniendo el último valor
+                            df = df.drop_duplicates(subset=['fecha'], keep='last')
+                            
                             df.set_index('fecha', inplace=True)
                             data_frames[simbolo] = df
                         else:
@@ -975,6 +982,13 @@ class PortfolioManager:
             df_precios = pd.concat(data_frames.values(), axis=1, keys=data_frames.keys())
             
             # Limpiar datos
+            # Primero verificar si hay fechas duplicadas
+            if not df_precios.index.is_unique:
+                st.warning("⚠️ Se encontraron fechas duplicadas en los datos")
+                # Eliminar duplicados manteniendo el último valor de cada fecha
+                df_precios = df_precios.groupby(df_precios.index).last()
+            
+            # Luego llenar y eliminar valores faltantes
             df_precios = df_precios.fillna(method='ffill')
             df_precios = df_precios.dropna()
             
