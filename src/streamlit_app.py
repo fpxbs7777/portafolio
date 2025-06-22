@@ -614,13 +614,13 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
         return None
 
-def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
     """
-    Obtiene datos históricos para optimización
+    Obtiene datos históricos para optimización usando el mercado específico de cada activo.
     
     Args:
         token_portador: Token de autenticación Bearer
-        simbolos: Lista de símbolos
+        activos: Lista de diccionarios, cada uno con {'simbolo': str, 'mercado': str}
         fecha_desde: Fecha inicio (YYYY-MM-DD)
         fecha_hasta: Fecha fin (YYYY-MM-DD)
     
@@ -628,22 +628,28 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         Dict con DataFrames históricos por símbolo
     """
     datos_historicos = {}
-    mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
     
     with st.spinner('Obteniendo datos históricos...'):
-        for simbolo in simbolos:
-            for mercado in mercados:
-                df = obtener_serie_historica_iol(
-                    token_portador,
-                    mercado,
-                    simbolo,
-                    fecha_desde,
-                    fecha_hasta
-                )
-                
-                if df is not None and not df.empty:
-                    datos_historicos[simbolo] = df
-                    break
+        for activo in activos:
+            simbolo = activo.get('simbolo')
+            mercado = activo.get('mercado')
+
+            if not simbolo or not mercado:
+                st.warning(f"Activo inválido, se omite: {activo}")
+                continue
+
+            df = obtener_serie_historica_iol(
+                token_portador,
+                mercado.upper(),
+                simbolo,
+                fecha_desde,
+                fecha_hasta
+            )
+            
+            if df is not None and not df.empty:
+                datos_historicos[simbolo] = df
+            else:
+                st.warning(f"No se pudieron obtener datos para {simbolo} en el mercado {mercado}")
                 
     return datos_historicos if datos_historicos else None
 
@@ -991,7 +997,7 @@ class PortfolioManager:
         
         try:
             portfolios, returns, volatilities = compute_efficient_frontier(
-                self.symbols, self.notional, target_return, include_min_variance, 
+                self.manager.rics, self.notional, target_return, include_min_variance, 
                 self.prices.to_dict('series')
             )
             return portfolios, returns, volatilities
@@ -1038,38 +1044,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         return None
 
 
-def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
-    """
-    Obtiene datos históricos para optimización
-    
-    Args:
-        token_portador: Token de autenticación Bearer
-        simbolos: Lista de símbolos
-        fecha_desde: Fecha inicio (YYYY-MM-DD)
-        fecha_hasta: Fecha fin (YYYY-MM-DD)
-    
-    Returns:
-        Dict con DataFrames históricos por símbolo
-    """
-    datos_historicos = {}
-    mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
-    
-    with st.spinner('Obteniendo datos históricos...'):
-        for simbolo in simbolos:
-            for mercado in mercados:
-                df = obtener_serie_historica_iol(
-                    token_portador,
-                    mercado,
-                    simbolo,
-                    fecha_desde,
-                    fecha_hasta
-                )
-                
-                if df is not None and not df.empty:
-                    datos_historicos[simbolo] = df
-                    break
-                
-    return datos_historicos if datos_historicos else None
+
 
 # --- Portfolio Metrics Function ---
 def calcular_metricas_portafolio(portafolio, valor_total):
@@ -1583,7 +1558,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if ejecutar_frontier and show_frontier:
         with st.spinner("Calculando frontera eficiente..."):
             try:
-                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
                 
                 if manager_inst.load_data():
                     portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
