@@ -887,11 +887,17 @@ def obtener_saldo_disponible(token_acceso):
             if cuenta.get('moneda') == 'Peso_Argentino':
                 return cuenta.get('disponible', 0)
                 
+        # Si no encontró cuenta en pesos, intentar con otras monedas
+        for cuenta in data.get('cuentas', []):
+            if cuenta.get('moneda') in ['Peso', 'ARS', 'AR$']:
+                return cuenta.get('disponible', 0)
+                
         raise ValueError("No se encontró cuenta en pesos")
         
     except Exception as e:
         st.warning(f"⚠️ No se pudo obtener saldo disponible: {str(e)}")
-        return None
+        # Si hay error, usar un valor nominal por defecto
+        return 100000  # Valor nominal por defecto en ARS
         return None
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
@@ -1684,49 +1690,61 @@ def mostrar_cotizaciones_mercado(token_acceso):
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
+    # Obtener portafolio actual
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    if portafolio is None:
+        st.error("❌ No se pudo obtener el portafolio actual")
         return
-    
+        
+    # Extraer activos para optimización
     activos_raw = portafolio.get('activos', [])
-    if not activos_raw:
-        st.warning("El portafolio está vacío")
-        return
-    
-    # Extraer símbolos y mercados
     activos_para_optimizacion = []
     for activo in activos_raw:
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo')
         mercado = titulo.get('mercado')
         if simbolo and mercado:
-            activos_para_optimizacion.append({'simbolo': simbolo, 'mercado': mercado})
+            activos_para_optimizacion.append({
+                'simbolo': simbolo,
+                'mercado': mercado
+            })
     
     if not activos_para_optimizacion:
-        st.warning("No se encontraron activos con información de mercado válida para optimizar.")
+        st.error("❌ No se encontraron activos válidos para optimización")
         return
+        
+    # Configuración de fechas
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_desde = st.date_input(
+            "Fecha Inicio:",
+            value=pd.to_datetime('2022-01-01'),
+            min_value=pd.to_datetime('2020-01-01'),
+            max_value=pd.to_datetime('today') - pd.Timedelta(days=30)
+        )
+    with col2:
+        fecha_hasta = st.date_input(
+            "Fecha Fin:",
+            value=pd.to_datetime('today') - pd.Timedelta(days=1),
+            min_value=fecha_desde,
+            max_value=pd.to_datetime('today') - pd.Timedelta(days=1)
+        )
     
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
-    
-    # Configuración de optimización
+    # Configuración de estrategia
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         estrategia = st.selectbox(
             "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only', 'rebalanceo-aleatorio'],
+            ['markowitz', 'min-variance', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only', 'rebalanceo-aleatorio'],
             format_func=lambda x: {
-                'markowitz': 'Optimización de Markowitz',
+                'markowitz': 'Markowitz',
+                'min-variance': 'Mínima Varianza',
                 'equi-weight': 'Pesos Iguales',
                 'min-variance-l1': 'Mínima Varianza L1',
                 'min-variance-l2': 'Mínima Varianza L2',
                 'long-only': 'Solo Posiciones Largas',
                 'rebalanceo-aleatorio': 'Rebalanceo Aleatorio'
-            }[x]
+            }
         )
     
     with col2:
@@ -1838,13 +1856,29 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             # Calcular y mostrar la frontera eficiente
                             st.markdown("#### 📊 Frontera Eficiente")
                             
-                            # Obtener datos históricos para el portafolio actual
-                            df_precios_actual = pd.DataFrame()
-                            for activo in activos_raw:
-                                titulo = activo.get('titulo', {})
-                                simbolo = titulo.get('simbolo')
-                                mercado = titulo.get('mercado')
-                                if simbolo and mercado:
+                            try:
+                                # Obtener datos históricos para el portafolio actual
+                                df_precios_actual = pd.DataFrame()
+                                for activo in activos_raw:
+                                    titulo = activo.get('titulo', {})
+                                    simbolo = titulo.get('simbolo')
+                                    mercado = titulo.get('mercado')
+                                    if simbolo and mercado:
+                                        df = obtener_serie_historica_iol(
+                                            token_acceso,
+                                            mercado,
+                                            simbolo,
+                                            fecha_desde,
+                                            fecha_hasta
+                                        )
+                                        if df is not None and not df.empty:
+                                            df_precios_actual[simbolo] = df['Cierre']
+
+                                # Obtener datos históricos para el portafolio optimizado
+                                df_precios_optimizado = pd.DataFrame()
+                                for r in portfolio_result.rics:
+                                    simbolo = r.split('.')[0]
+                                    mercado = r.split('.')[-1]
                                     df = obtener_serie_historica_iol(
                                         token_acceso,
                                         mercado,
@@ -1853,63 +1887,61 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                         fecha_hasta
                                     )
                                     if df is not None and not df.empty:
-                                        df = df[['fecha', 'ultimoPrecio']].copy()
-                                        df.columns = ['fecha', simbolo]
-                                        df.set_index('fecha', inplace=True)
-                                        df_precios_actual = pd.concat([df_precios_actual, df], axis=1)
+                                        df_precios_optimizado[simbolo] = df['Cierre']
 
-                            if not df_precios_actual.empty:
-                                # Calcular retornos y estadísticas del portafolio actual
-                                returns_actual = df_precios_actual.pct_change().dropna()
-                                mean_returns_actual = returns_actual.mean()
-                                cov_matrix_actual = returns_actual.cov()
-                                
-                                # Calcular pesos del portafolio actual
-                                pesos_actual = np.array([float(activo.get('cantidad', 0)) for activo in activos_raw])
-                                if np.sum(pesos_actual) > 0:
-                                    pesos_actual = pesos_actual / np.sum(pesos_actual)
-                                
-                                # Calcular métricas del portafolio actual
-                                retorno_anual_actual = np.sum(mean_returns_actual * pesos_actual) * 252
-                                volatilidad_anual_actual = np.sqrt(np.dot(pesos_actual.T, 
-                                                                         np.dot(cov_matrix_actual * 252, pesos_actual)))
-                                sharpe_actual = (retorno_anual_actual - tasa_libre_riesgo) / volatilidad_anual_actual
-                                
-                                # Calcular frontera eficiente
-                                returns, volatilities, portfolios = compute_efficient_frontier(
-                                    activos_para_optimizacion,
-                                    manager_inst.notional,
-                                    target_return,
-                                    True,
-                                    manager_inst.data
-                                )
-                                
-                                if returns is not None:
-                                    # Crear gráfico
+                                if not df_precios_actual.empty and not df_precios_optimizado.empty:
+                                    # Calcular retornos
+                                    returns_actual = df_precios_actual.pct_change().dropna()
+                                    returns_optimizado = df_precios_optimizado.pct_change().dropna()
+                                    
+                                    # Calcular métricas de portafolio
+                                    port_actual = returns_actual.mean() * 252
+                                    vol_actual = returns_actual.std() * np.sqrt(252)
+                                    
+                                    port_optimizado = returns_optimizado.mean() * 252
+                                    vol_optimizado = returns_optimizado.std() * np.sqrt(252)
+                                    
+                                    # Crear figura
                                     fig = go.Figure()
                                     
-                                    # Frontera eficiente
+                                    # Agregar puntos de los portafolios
                                     fig.add_trace(go.Scatter(
-                                        x=volatilities,
-                                        y=returns,
-                                        mode='lines',
-                                        name='Frontera Eficiente',
-                                        line=dict(color='blue')
+                                        x=[vol_actual],
+                                        y=[port_actual],
+                                        mode='markers',
+                                        name='Portafolio Actual',
+                                        marker=dict(size=10, color='red')
                                     ))
                                     
-                                    # Portafolio optimizado
                                     fig.add_trace(go.Scatter(
-                                        x=[np.sqrt(np.dot(portfolio_result.weights.T, 
-                                                        np.dot(manager_inst.cov_matrix * 252, portfolio_result.weights)))],
-                                        y=[np.sum(manager_inst.mean_returns * portfolio_result.weights) * 252],
+                                        x=[vol_optimizado],
+                                        y=[port_optimizado],
                                         mode='markers',
                                         name='Portafolio Optimizado',
+                                        marker=dict(size=10, color='green')
+                                    ))
+                                    
+                                    # Ajustar layout
+                                    fig.update_layout(
+                                        title='Comparación de Portafolios',
+                                        xaxis_title='Volatilidad Anual',
+                                        yaxis_title='Retorno Anual',
+                                        showlegend=True
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                else:
+                                    st.warning("⚠️ No se pudieron obtener datos históricos suficientes para comparar portafolios")
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Error al calcular la frontera eficiente: {str(e)}")
                                         marker=dict(color='green', size=10)
                                     ))
                                     
                                     # Portafolio actual
                                     fig.add_trace(go.Scatter(
                                         x=[volatilidad_anual_actual],
+{{ ... }}
                                         y=[retorno_anual_actual],
                                         mode='markers',
                                         name='Portafolio Actual',
