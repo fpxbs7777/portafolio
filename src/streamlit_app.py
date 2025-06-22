@@ -148,6 +148,134 @@ def obtener_tokens(usuario, contraseña):
         return None, None
     except Exception as e:
         st.error(f'Error inesperado al obtener tokens: {str(e)}')
+
+# Funciones de obtención de series históricas
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Obtiene la serie histórica de un activo
+    
+    Args:
+        simbolo (str): Símbolo del activo
+        mercado (str): Mercado del activo (BCBA, NYSE, NASDAQ, ROFEX)
+        fecha_desde (str): Fecha inicial (formato YYYY-MM-DD)
+        fecha_hasta (str): Fecha final (formato YYYY-MM-DD)
+        ajustada (str): 'SinAjustar' o 'Ajustada'
+        bearer_token (str): Token de autorización
+        
+    Returns:
+        pd.DataFrame: DataFrame con la serie histórica o None en caso de error
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            # Convertir la fecha a datetime
+            if 'fechaHora' in df.columns:
+                df['fechaHora'] = pd.to_datetime(df['fechaHora'])
+            return df
+        else:
+            st.warning(f"No se encontraron datos para {simbolo} en {mercado}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener serie histórica para {simbolo} en {mercado}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error procesando datos de {simbolo}: {str(e)}")
+        return None
+
+# Función auxiliar para procesar series históricas
+def procesar_serie_historica(df, simbolo):
+    """
+    Procesa un DataFrame de serie histórica para optimización
+    
+    Args:
+        df (pd.DataFrame): DataFrame con datos históricos
+        simbolo (str): Símbolo del activo
+        
+    Returns:
+        pd.Series: Serie con precios ajustados
+    """
+    if df is None or df.empty:
+        return None
+        
+    try:
+        # Tomar el precio de cierre o el último precio disponible
+        if 'cierre' in df.columns:
+            precios = df['cierre']
+        elif 'ultimoPrecio' in df.columns:
+            precios = df['ultimoPrecio']
+        else:
+            st.warning(f"No se encontraron precios válidos para {simbolo}")
+            return None
+            
+        # Crear una Serie con el índice de fechas
+        serie = pd.Series(precios.values, index=df['fechaHora'], name=simbolo)
+        serie = serie.sort_index()
+        return serie
+    except Exception as e:
+        st.error(f"Error procesando serie histórica para {simbolo}: {str(e)}")
+        return None
+
+# Función para obtener datos históricos para múltiples activos
+def obtener_datos_historicos(token, simbolos, mercado, fecha_desde, fecha_hasta, ajustada='SinAjustar'):
+    """
+    Obtiene datos históricos para múltiples activos
+    
+    Args:
+        token (str): Token de autorización
+        simbolos (list): Lista de símbolos
+        mercado (str): Mercado
+        fecha_desde (str): Fecha inicial
+        fecha_hasta (str): Fecha final
+        ajustada (str): Tipo de ajuste
+        
+    Returns:
+        pd.DataFrame: DataFrame con datos históricos
+    """
+    series = {}
+    errores = []
+    
+    with st.spinner("Obteniendo datos históricos..."):
+        progress_bar = st.progress(0)
+        total = len(simbolos)
+        
+        for i, simbolo in enumerate(simbolos):
+            progress = (i + 1) / total
+            progress_bar.progress(progress, text=f"Procesando {simbolo} ({i+1}/{total})")
+            
+            # Obtener y procesar la serie histórica
+            df = obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, token)
+            serie = procesar_serie_historica(df, simbolo)
+            
+            if serie is not None and not serie.empty:
+                series[simbolo] = serie
+            else:
+                errores.append(simbolo)
+                
+            # Pequeña pausa para no sobrecargar el servidor
+            time.sleep(0.5)
+        
+        progress_bar.empty()
+        
+        if errores:
+            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
+            
+        if not series:
+            st.error("❌ No se pudieron cargar los datos históricos")
+            return None
+            
+        # Crear DataFrame con todas las series
+        df_precios = pd.DataFrame(series)
+        return df_precios
         return None, None
 
 def obtener_lista_clientes(token_portador):
