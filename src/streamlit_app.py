@@ -279,7 +279,6 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
     except Exception as e:
         st.error(f"Error de conexión: {str(e)}")
         return None
-         None
 
 def obtener_tasas_caucion(token_portador):
     """
