@@ -715,39 +715,6 @@ def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, use
     except Exception as e:
         st.error(f"Error en get_historical_data_for_optimization: {str(e)}")
         return None, None, None
-            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
-        
-        if precios:
-            st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
-            
-            # Asegurarse de que todas las series tengan la misma longitud
-            min_length = min(len(s) for s in precios.values()) if precios else 0
-            if min_length < 5:  # Mínimo razonable de datos para optimización
-                st.error("Los datos históricos son insuficientes para la optimización")
-                return None, None, None
-                
-            # Crear DataFrame con las series alineadas
-            df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
-            
-            # Calcular retornos y validar
-            returns = df_precios.pct_change().dropna()
-            
-            if returns.empty or len(returns) < 30:
-                st.warning("No hay suficientes datos para el análisis")
-                return None, None, None
-                
-            # Eliminar columnas con desviación estándar cero
-            if (returns.std() == 0).any():
-                columnas_constantes = returns.columns[returns.std() == 0].tolist()
-                returns = returns.drop(columns=columnas_constantes)
-                df_precios = df_precios.drop(columns=columnas_constantes)
-                
-                if returns.empty or len(returns.columns) < 2:
-                    st.warning("No hay suficientes activos válidos para la optimización")
-                    return None, None, None
-                    
-            mean_returns = returns.mean()
-            cov_matrix = returns.cov()
             return mean_returns, cov_matrix, df_precios
         
     st.error("❌ No se pudieron cargar los datos históricos")
