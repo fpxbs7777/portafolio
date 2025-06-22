@@ -869,7 +869,7 @@ def obtener_saldo_disponible(token_acceso):
         Saldo disponible en ARS o None si hay error
     """
     try:
-        url = "https://api.invertironline.com/api/v2/cuentas/Argentina"
+        url = "https://api.invertironline.com/api/v2/estadocuenta"
         headers = {
             'Authorization': f'Bearer {token_acceso}',
             'Accept': 'application/json'
@@ -878,21 +878,20 @@ def obtener_saldo_disponible(token_acceso):
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         
-        cuentas = response.json()
-        if not cuentas:
-            raise ValueError("No se encontraron cuentas en la respuesta")
+        data = response.json()
+        if not data or not isinstance(data, dict):
+            raise ValueError("Respuesta inválida de la API")
             
-        # Usar la primera cuenta (asumimos que es la principal)
-        cuenta = cuentas[0]
-        saldo_disponible = cuenta.get('saldoDisponible', 0)
-        
-        if saldo_disponible is None:
-            raise ValueError("No se encontró saldo disponible en la cuenta")
-            
-        return saldo_disponible
+        # Buscar la primera cuenta en pesos
+        for cuenta in data.get('cuentas', []):
+            if cuenta.get('moneda') == 'Peso_Argentino':
+                return cuenta.get('disponible', 0)
+                
+        raise ValueError("No se encontró cuenta en pesos")
         
     except Exception as e:
         st.warning(f"⚠️ No se pudo obtener saldo disponible: {str(e)}")
+        return None
         return None
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
@@ -1752,8 +1751,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 )
     
     with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
-        
         # Configuración de tasa libre de riesgo
         tasa_libre_riesgo = st.number_input(
             "Tasa Libre de Riesgo (% anual):",
@@ -1763,8 +1760,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     col1, col2 = st.columns(2)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
-    with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
@@ -1840,6 +1835,96 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 with col_b:
                                     st.metric("Sharpe Ratio Ajustado", f"{metricas['Sharpe Ratio'] - tasa_libre_riesgo:.4f}")
                                     st.metric("Tasa Libre de Riesgo", f"{tasa_libre_riesgo:.2%}")
+
+                            # Calcular y mostrar la frontera eficiente
+                            st.markdown("#### 📊 Frontera Eficiente")
+                            
+                            # Obtener datos históricos para el portafolio actual
+                            df_precios_actual = pd.DataFrame()
+                            for activo in activos_raw:
+                                titulo = activo.get('titulo', {})
+                                simbolo = titulo.get('simbolo')
+                                mercado = titulo.get('mercado')
+                                if simbolo and mercado:
+                                    df = obtener_serie_historica_iol(
+                                        token_acceso,
+                                        mercado,
+                                        simbolo,
+                                        fecha_desde,
+                                        fecha_hasta
+                                    )
+                                    if df is not None and not df.empty:
+                                        df = df[['fecha', 'ultimoPrecio']].copy()
+                                        df.columns = ['fecha', simbolo]
+                                        df.set_index('fecha', inplace=True)
+                                        df_precios_actual = pd.concat([df_precios_actual, df], axis=1)
+
+                            if not df_precios_actual.empty:
+                                # Calcular retornos y estadísticas del portafolio actual
+                                returns_actual = df_precios_actual.pct_change().dropna()
+                                mean_returns_actual = returns_actual.mean()
+                                cov_matrix_actual = returns_actual.cov()
+                                
+                                # Calcular pesos del portafolio actual
+                                pesos_actual = np.array([float(activo.get('cantidad', 0)) for activo in activos_raw])
+                                if np.sum(pesos_actual) > 0:
+                                    pesos_actual = pesos_actual / np.sum(pesos_actual)
+                                
+                                # Calcular métricas del portafolio actual
+                                retorno_anual_actual = np.sum(mean_returns_actual * pesos_actual) * 252
+                                volatilidad_anual_actual = np.sqrt(np.dot(pesos_actual.T, 
+                                                                         np.dot(cov_matrix_actual * 252, pesos_actual)))
+                                sharpe_actual = (retorno_anual_actual - tasa_libre_riesgo) / volatilidad_anual_actual
+                                
+                                # Calcular frontera eficiente
+                                returns, volatilities, portfolios = compute_efficient_frontier(
+                                    activos_para_optimizacion,
+                                    manager_inst.notional,
+                                    target_return,
+                                    True,
+                                    manager_inst.data
+                                )
+                                
+                                if returns is not None:
+                                    # Crear gráfico
+                                    fig = go.Figure()
+                                    
+                                    # Frontera eficiente
+                                    fig.add_trace(go.Scatter(
+                                        x=volatilities,
+                                        y=returns,
+                                        mode='lines',
+                                        name='Frontera Eficiente',
+                                        line=dict(color='blue')
+                                    ))
+                                    
+                                    # Portafolio optimizado
+                                    fig.add_trace(go.Scatter(
+                                        x=[np.sqrt(np.dot(portfolio_result.weights.T, 
+                                                        np.dot(manager_inst.cov_matrix * 252, portfolio_result.weights)))],
+                                        y=[np.sum(manager_inst.mean_returns * portfolio_result.weights) * 252],
+                                        mode='markers',
+                                        name='Portafolio Optimizado',
+                                        marker=dict(color='green', size=10)
+                                    ))
+                                    
+                                    # Portafolio actual
+                                    fig.add_trace(go.Scatter(
+                                        x=[volatilidad_anual_actual],
+                                        y=[retorno_anual_actual],
+                                        mode='markers',
+                                        name='Portafolio Actual',
+                                        marker=dict(color='red', size=10)
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title='Frontera Eficiente y Portafolios',
+                                        xaxis_title='Volatilidad Anual',
+                                        yaxis_title='Retorno Anual',
+                                        template='plotly_white'
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
                 return
