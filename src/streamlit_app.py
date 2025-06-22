@@ -694,71 +694,102 @@ class manager:
         return self.cov_matrix, self.mean_returns
 
     def compute_portfolio(self, portfolio_type=None, target_return=None):
-        if self.cov_matrix is None:
-            self.compute_covariance()
-            
-        n_assets = len(self.rics)
-        bounds = tuple((0, 1) for _ in range(n_assets))
+        """
+        Calcula los pesos óptimos del portafolio según la estrategia especificada.
         
-        if portfolio_type == 'min-variance-l1':
-            # Minimizar varianza con restricción L1
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
-            ]
+        Args:
+            portfolio_type (str): Tipo de optimización a realizar. Opciones:
+                - 'min-variance-l1': Mínima varianza con restricción L1
+                - 'min-variance-l2': Mínima varianza con restricción L2
+                - 'equi-weight': Pesos iguales
+                - 'long-only': Optimización con pesos positivos
+                - 'markowitz': Optimización de Markowitz (máximo ratio de Sharpe o retorno objetivo)
+            target_return (float, optional): Retorno objetivo para la optimización
             
-        elif portfolio_type == 'min-variance-l2':
-            # Minimizar varianza con restricción L2
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
-            ]
-            
-        elif portfolio_type == 'equi-weight':
-            # Pesos iguales
-            weights = np.ones(n_assets) / n_assets
-            return self._create_output(weights)
-            
-        elif portfolio_type == 'long-only':
-            # Optimización long-only estándar
-            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-            
-        elif portfolio_type == 'markowitz':
-            if target_return is not None:
-                # Optimización con retorno objetivo
-                constraints = [
-                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
-                ]
-            else:
-                # Maximizar Sharpe Ratio
-                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-                def neg_sharpe_ratio(weights):
-                    port_ret = np.sum(self.mean_returns * weights)
-                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-                    if port_vol == 0:
-                        return np.inf
-                    return -(port_ret - self.risk_free_rate) / port_vol
+        Returns:
+            output: Objeto con los resultados de la optimización o None en caso de error
+        """
+        try:
+            if self.cov_matrix is None or self.mean_returns is None:
+                self.compute_covariance()
                 
-                result = op.minimize(
-                    neg_sharpe_ratio, 
-                    x0=np.ones(n_assets)/n_assets,
-                    method='SLSQP',
-                    bounds=bounds,
-                    constraints=constraints
-                )
-                return self._create_output(result.x)
-        
-        # Optimización general de varianza mínima
-        result = op.minimize(
-            lambda x: portfolio_variance(x, self.cov_matrix),
-            x0=np.ones(n_assets)/n_assets,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-        
-        return self._create_output(result.x)
+            n_assets = len(self.rics)
+            bounds = tuple((0.0, 1.0) for _ in range(n_assets))  # Pesos entre 0 y 1
+            
+            # Función objetivo: varianza del portafolio
+            def portfolio_variance_obj(weights):
+                return portfolio_variance(weights, self.cov_matrix)
+            
+            # Configuración de restricciones
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1.0}]  # Suma de pesos = 1
+            
+            # Caso: Pesos iguales
+            if portfolio_type == 'equi-weight':
+                weights = np.ones(n_assets) / n_assets
+                return self._create_output(weights)
+                
+            # Caso: Mínima varianza con restricción L1 (menos sensible a outliers)
+            elif portfolio_type == 'min-variance-l1':
+                constraints.append({'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(np.abs(x))})
+                
+            # Caso: Mínima varianza con restricción L2 (más estable numéricamente)
+            elif portfolio_type == 'min-variance-l2':
+                constraints.append({'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(x**2)})
+                
+            # Caso: Optimización de Markowitz
+            elif portfolio_type == 'markowitz':
+                if target_return is not None:
+                    # Optimización con retorno objetivo
+                    constraints.append({
+                        'type': 'eq',
+                        'fun': lambda x: np.sum(self.mean_returns * x) - target_return
+                    })
+                else:
+                    # Maximizar ratio de Sharpe
+                    def neg_sharpe_ratio(weights):
+                        port_ret = np.sum(self.mean_returns * weights)
+                        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                        if port_vol < 1e-10:  # Evitar división por cero
+                            return np.inf
+                        return -(port_ret - self.risk_free_rate) / port_vol
+                    
+                    # Optimizar ratio de Sharpe
+                    result = op.minimize(
+                        neg_sharpe_ratio,
+                        x0=np.ones(n_assets) / n_assets,
+                        method='SLSQP',
+                        bounds=bounds,
+                        constraints=constraints,
+                        options={'maxiter': 1000, 'ftol': 1e-9}
+                    )
+                    
+                    if not result.success:
+                        st.warning(f"Optimización fallida: {result.message}")
+                        return None
+                        
+                    return self._create_output(result.x)
+            
+            # Optimización de varianza mínima
+            result = op.minimize(
+                portfolio_variance_obj,
+                x0=np.ones(n_assets) / n_assets,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                options={'maxiter': 1000, 'ftol': 1e-9}
+            )
+            
+            if not result.success:
+                st.warning(f"Optimización fallida: {result.message}")
+                return None
+                
+            return self._create_output(result.x)
+            
+        except Exception as e:
+            st.error(f"Error en compute_portfolio: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def _create_output(self, weights):
         """Crea un objeto output con los pesos optimizados"""
@@ -859,102 +890,125 @@ def portfolio_variance(x, mtx_var_covar):
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
-    # special portfolios    
+    # Inicializar el gestor de portafolios
     port_mgr = manager(rics, notional, data)
-    port_mgr.compute_covariance()
     
-    # compute vectors of returns and volatilities for Markowitz portfolios
-    min_returns = np.min(port_mgr.mean_returns)
-    max_returns = np.max(port_mgr.mean_returns)
+    # Calcular matriz de covarianza y retornos medios
+    cov_matrix, mean_returns = port_mgr.compute_covariance()
     
-    # Aumentar el número de puntos para una frontera más suave
-    returns = np.linspace(min_returns, max_returns, 100)
-    volatilities = []
-    valid_returns = []
+    # Si no hay datos suficientes, retornar error
+    if cov_matrix is None or mean_returns is None or len(mean_returns) == 0:
+        st.error("No hay suficientes datos para calcular la frontera eficiente")
+        return None, {}
     
-    for ret in returns:
+    # Calcular límites de retorno
+    min_ret = np.min(mean_returns)
+    max_ret = np.max(mean_returns)
+    
+    # Crear puntos para la frontera eficiente
+    target_rets = np.linspace(min_ret, max_ret, 50)
+    
+    # Calcular la frontera eficiente
+    frontier_vol = []
+    frontier_ret = []
+    
+    for ret in target_rets:
         try:
+            # Optimizar portafolio para el retorno objetivo
             port = port_mgr.compute_portfolio('markowitz', ret)
-            volatilities.append(port.volatility_annual)
-            valid_returns.append(ret)
+            if port is not None and hasattr(port, 'volatility_annual') and hasattr(port, 'return_annual'):
+                frontier_vol.append(port.volatility_annual)
+                frontier_ret.append(port.return_annual)
         except Exception as e:
-            print(f"Error calculando portafolio con retorno {ret}: {str(e)}")
+            st.warning(f"No se pudo calcular el portafolio para retorno {ret:.2%}: {str(e)}")
             continue
     
-    # compute special portfolios
+    # Calcular portafolios especiales
     portfolios = {}
-    try:
-        portfolios['min-variance'] = port_mgr.compute_portfolio('min-variance')
-    except Exception as e:
-        print(f"Error calculando portafolio min-variance: {str(e)}")
-        portfolios['min-variance'] = None
-        
-    try:
-        portfolios['equi-weight'] = port_mgr.compute_portfolio('equi-weight')
-    except Exception as e:
-        print(f"Error calculando portafolio equi-weight: {str(e)}")
-        portfolios['equi-weight'] = None
-        
-    try:
-        portfolios['long-only'] = port_mgr.compute_portfolio('long-only')
-    except Exception as e:
-        print(f"Error calculando portafolio long-only: {str(e)}")
-        portfolios['long-only'] = None
-        
-    try:
-        portfolios['markowitz'] = port_mgr.compute_portfolio('markowitz')
-    except Exception as e:
-        print(f"Error calculando portafolio markowitz: {str(e)}")
-        portfolios['markowitz'] = None
-        
-    try:
-        portfolios['target-return'] = port_mgr.compute_portfolio('markowitz', target_return)
-    except Exception as e:
-        print(f"Error calculando portafolio con retorno objetivo: {str(e)}")
-        portfolios['target-return'] = None
     
-    # Crear DataFrame para la frontera eficiente
-    frontier_df = pd.DataFrame({
-        'retorno_anual': valid_returns,
-        'volatilidad_anual': volatilities
-    })
+    # 1. Portafolio de mínima varianza
+    try:
+        min_var_port = port_mgr.compute_portfolio('min-variance-l1')
+        if min_var_port is not None:
+            portfolios['min-var'] = min_var_port
+    except Exception as e:
+        st.warning(f"No se pudo calcular el portafolio de mínima varianza: {str(e)}")
     
-    # Graficar la frontera eficiente
+    # 2. Portafolio de máximo ratio de Sharpe
+    try:
+        sharpe_port = port_mgr.compute_portfolio('markowitz')
+        if sharpe_port is not None:
+            portfolios['max-sharpe'] = sharpe_port
+    except Exception as e:
+        st.warning(f"No se pudo calcular el portafolio de máximo Sharpe: {str(e)}")
+    
+    # 3. Portafolio con pesos iguales
+    try:
+        eq_port = port_mgr.compute_portfolio('equi-weight')
+        if eq_port is not None:
+            portfolios['equal-weight'] = eq_port
+    except Exception as e:
+        st.warning(f"No se pudo calcular el portafolio de pesos iguales: {str(e)}")
+    
+    # 4. Portafolio con retorno objetivo
+    if target_return is not None and min_ret <= target_return <= max_ret:
+        try:
+            target_port = port_mgr.compute_portfolio('markowitz', target_return)
+            if target_port is not None:
+                portfolios['target'] = target_port
+        except Exception as e:
+            st.warning(f"No se pudo calcular el portafolio con retorno objetivo: {str(e)}")
+    
+    # Crear gráfico de la frontera eficiente
     fig = go.Figure()
     
-    # Frontera eficiente
-    fig.add_trace(go.Scatter(
-        x=frontier_df['volatilidad_anual'],
-        y=frontier_df['retorno_anual'],
-        mode='lines',
-        name='Frontera Eficiente',
-        line=dict(color='blue', width=2)
-    ))
+    # Agregar frontera eficiente
+    if len(frontier_vol) > 0 and len(frontier_ret) > 0:
+        # Ordenar por volatilidad para una línea suave
+        sorted_idx = np.argsort(frontier_vol)
+        frontier_vol = np.array(frontier_vol)[sorted_idx]
+        frontier_ret = np.array(frontier_ret)[sorted_idx]
+        
+        fig.add_trace(go.Scatter(
+            x=frontier_vol,
+            y=frontier_ret,
+            mode='lines',
+            name='Frontera Eficiente',
+            line=dict(color='blue', width=2)
+        ))
     
-    # Agregar puntos de los portafolios especiales
+    # Agregar activos individuales
+    for i, ric in enumerate(rics):
+        fig.add_trace(go.Scatter(
+            x=[np.sqrt(cov_matrix.iloc[i,i])],
+            y=[mean_returns[i]],
+            mode='markers',
+            name=ric,
+            marker=dict(size=10)
+        ))
+    
+    # Agregar portafolios especiales
     for label, port in portfolios.items():
-        if port is not None:
-            fig.add_trace(go.Scatter(
-                x=[port.volatility_annual],
-                y=[port.return_annual],
-                mode='markers',
-                name=f'Portafolio {label.replace("-", " ").title()}',
-                marker=dict(size=10)
-            ))
+        fig.add_trace(go.Scatter(
+            x=[port.volatility_annual],
+            y=[port.return_annual],
+            mode='markers',
+            name=label.replace('-', ' ').title(),
+            marker=dict(size=12, symbol='star')
+        ))
     
-    # Configurar el layout
+    # Configurar diseño del gráfico
     fig.update_layout(
         title='Frontera Eficiente de Portafolios',
         xaxis_title='Volatilidad Anual',
         yaxis_title='Retorno Anual',
         showlegend=True,
-        width=800,
-        height=600
+        width=900,
+        height=600,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
     )
     
     return fig, portfolios
-    
-    return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
     def __init__(self, activos, token, fecha_desde, fecha_hasta):
