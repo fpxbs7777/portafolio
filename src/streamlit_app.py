@@ -219,16 +219,16 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
             resultado = respuesta.json()
             # Asegurarse de que siempre devolvemos un diccionario
             if isinstance(resultado, (int, float)):
-                 {'precio': resultado, 'simbolo': simbolo}
+                return {'precio': resultado, 'simbolo': simbolo}
             elif isinstance(resultado, dict):
-                 resultado
-            
-                 {'precio': None, 'simbolo': simbolo, 'error': 'Formato de respuesta inesperado'}
-        
-             {'precio': None, 'simbolo': simbolo, 'error': f'Error HTTP {respuesta.status_code}'}
+                return resultado
+            else:
+                return {'precio': None, 'simbolo': simbolo, 'error': 'Formato de respuesta inesperado'}
+        else:
+            return {'precio': None, 'simbolo': simbolo, 'error': f'Error HTTP {respuesta.status_code}'}
     except Exception as e:
         st.error(f'Error al obtener cotización MEP: {str(e)}')
-         {'precio': None, 'simbolo': simbolo, 'error': str(e)}
+        return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
