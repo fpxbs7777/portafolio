@@ -2230,10 +2230,18 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         'Skewness': '{:.4f}',
                         'Kurtosis': '{:.4f}'
                     }
-                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+                    # Aplicar formato al DataFrame
+                    for col, fmt in format_dict.items():
+                        if col in df_comparison.columns:
+                            df_comparison[col] = df_comparison[col].apply(lambda x: fmt.format(x) if pd.notnull(x) else '')
+                    
+                    # Mostrar la tabla de comparación
+                    st.dataframe(df_comparison, use_container_width=True)
                     
             except Exception as e:
                 st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+                st.error("❌ No se pudieron cargar los datos históricos")
     
     # Información adicional extendida
     with st.expander("ℹ️ Información sobre las Estrategias"):
