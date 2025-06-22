@@ -1056,6 +1056,16 @@ class PortfolioManager:
                 self.manager.rics, self.notional, target_return, include_min_variance, 
                 self.prices.to_dict('series')
             )
+            
+            # Visualización de la frontera eficiente
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot(volatilities, returns, 'b-')
+            ax.scatter(volatilities, returns, c=returns, cmap='RdYlGn')
+            ax.set_title('Frontera Eficiente')
+            ax.set_xlabel('Volatilidad')
+            ax.set_ylabel('Retorno')
+            st.pyplot(fig)
+            
             return portfolios, returns, volatilities
         except Exception as e:
             return None, None, None
@@ -1598,6 +1608,53 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 st.metric("Skewness", f"{metricas['Skewness']:.4f}")
                                 st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
                                 st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+
+                        # Mostrar Frontera Eficiente si está habilitada
+                        if show_frontier:
+                            with st.spinner("Calculando frontera eficiente..."):
+                                try:
+                                    # Obtener datos necesarios para la frontera
+                                    rics = [a['simbolo'] for a in activos_para_optimizacion]
+                                    notional = 100000  # Valor nominal para cálculos
+                                    
+                                    # Calcular frontera eficiente
+                                    portfolios, returns, volatilities = compute_efficient_frontier(
+                                        rics, notional, target_return, True, manager_inst.prices
+                                    )
+                                    
+                                    # Crear gráfico de la frontera eficiente
+                                    fig = go.Figure()
+                                    
+                                    # Puntos de la frontera eficiente
+                                    fig.add_trace(go.Scatter(
+                                        x=volatilities,
+                                        y=returns,
+                                        mode='lines',
+                                        name='Frontera Eficiente',
+                                        line=dict(color='blue')
+                                    ))
+                                    
+                                    # Punto del portafolio optimizado
+                                    fig.add_trace(go.Scatter(
+                                        x=[portfolio_result.volatility_annual],
+                                        y=[portfolio_result.return_annual],
+                                        mode='markers',
+                                        name='Portafolio Optimizado',
+                                        marker=dict(color='red', size=10)
+                                    ))
+                                    
+                                    # Configuración del gráfico
+                                    fig.update_layout(
+                                        title='Frontera Eficiente del Portafolio',
+                                        xaxis_title='Volatilidad Anual',
+                                        yaxis_title='Retorno Anual',
+                                        template='plotly_white',
+                                        showlegend=True
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                except Exception as e:
+                                    st.error(f"Error al calcular la frontera eficiente: {str(e)}")
                                 normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
                                 st.metric("Normalidad", normalidad)
                         
