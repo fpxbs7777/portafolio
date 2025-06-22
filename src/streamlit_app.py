@@ -1160,13 +1160,14 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
 
 
 # --- Portfolio Metrics Function ---
-def calcular_metricas_portafolio(portafolio, valor_total):
+def calcular_metricas_portafolio(portafolio, valor_total, returns=None):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión.
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
         valor_total (float): Valor total del portafolio
+        returns (DataFrame): DataFrame con retornos históricos de los activos
         
     Returns:
         dict: Diccionario con las métricas calculadas
@@ -1184,6 +1185,75 @@ def calcular_metricas_portafolio(portafolio, valor_total):
             'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
             'riesgo_anual': 0
         }
+
+    # 1. Calcular concentración del portafolio
+    concentracion = 0
+    for activo in portafolio.values():
+        peso = activo.get('Valuación', 0) / valor_total
+        concentracion += peso ** 2
+    
+    # 2. Calcular volatilidad usando retornos históricos
+    if returns is not None and not returns.empty:
+        # Calcular volatilidad anualizada
+        std_dev_activo = returns.std() * np.sqrt(252)
+        # Calcular volatilidad ponderada del portafolio
+        volatilidad_portafolio = np.sqrt(np.sum(std_dev_activo ** 2 * (valor_total / returns.sum().sum()) ** 2))
+    else:
+        volatilidad_portafolio = 0
+    
+    # 3. Calcular retorno esperado usando datos históricos
+    if returns is not None and not returns.empty:
+        retorno_esperado_anual = returns.mean().mean() * 252
+        # Calcular escenarios optimistas y pesimistas
+        pl_esperado_min = retorno_esperado_anual - 2 * volatilidad_portafolio
+        pl_esperado_max = retorno_esperado_anual + 2 * volatilidad_portafolio
+    else:
+        retorno_esperado_anual = 0
+        pl_esperado_min = 0
+        pl_esperado_max = 0
+    
+    # 4. Calcular probabilidades usando distribución normal
+    if volatilidad_portafolio > 0:
+        from scipy.stats import norm
+        
+        # Probabilidad de pérdida (rendimiento < 0)
+        prob_perdida = norm.cdf(0, retorno_esperado_anual, volatilidad_portafolio)
+        
+        # Probabilidad de ganancia (rendimiento > 0)
+        prob_ganancia = 1 - prob_perdida
+        
+        # Probabilidad de pérdida > 10%
+        prob_perdida_mayor_10 = norm.cdf(-0.10, retorno_esperado_anual, volatilidad_portafolio)
+        
+        # Probabilidad de ganancia > 10%
+        prob_ganancia_mayor_10 = 1 - norm.cdf(0.10, retorno_esperado_anual, volatilidad_portafolio)
+        
+        probabilidades = {
+            'perdida': prob_perdida * 100,
+            'ganancia': prob_ganancia * 100,
+            'perdida_mayor_10': prob_perdida_mayor_10 * 100,
+            'ganancia_mayor_10': prob_ganancia_mayor_10 * 100
+        }
+    else:
+        probabilidades = {
+            'perdida': 0,
+            'ganancia': 0,
+            'perdida_mayor_10': 0,
+            'ganancia_mayor_10': 0
+        }
+    
+    # 5. Calcular riesgo anual
+    riesgo_anual = volatilidad_portafolio
+    
+    return {
+        'concentracion': concentracion,
+        'std_dev_activo': volatilidad_portafolio,
+        'retorno_esperado_anual': retorno_esperado_anual,
+        'pl_esperado_min': pl_esperado_min,
+        'pl_esperado_max': pl_esperado_max,
+        'probabilidades': probabilidades,
+        'riesgo_anual': riesgo_anual
+    }
 
     # 1. Calcular concentración del portafolio
     concentracion = 0
@@ -1623,18 +1693,37 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
-                            metricas = portfolio_result.get_metrics_dict()
+                            # Calcular métricas usando los retornos históricos
+                            metricas = calcular_metricas_portafolio(
+                                portafolio=portfolio_result.dataframe_allocation.to_dict('records'),
+                                valor_total=portfolio_result.portfolio_value,
+                                returns=manager_inst.returns
+                            )
+                            
+                            # Mostrar métricas en un formato más legible
+                            metricas_df = pd.DataFrame([{
+                                'Concentración': f"{metricas['concentracion']:.4f}",
+                                'Volatilidad': f"{metricas['std_dev_activo']:.2%}",
+                                'Retorno Esperado': f"{metricas['retorno_esperado_anual']:.2%}",
+                                'Escenario Optimista': f"{metricas['pl_esperado_max']:.2%}",
+                                'Escenario Pesimista': f"{metricas['pl_esperado_min']:.2%}",
+                                'Prob. Ganancia': f"{metricas['probabilidades']['ganancia']:.1f}%",
+                                'Prob. Pérdida': f"{metricas['probabilidades']['perdida']:.1f}%",
+                                'Prob. >10% Ganancia': f"{metricas['probabilidades']['ganancia_mayor_10']:.1f}%",
+                                'Prob. >10% Pérdida': f"{metricas['probabilidades']['perdida_mayor_10']:.1f}%"
+                            }])
+                            st.dataframe(metricas_df, use_container_width=True)
                             
                             col_a, col_b = st.columns(2)
                             with col_a:
-                                st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                                st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                                st.metric("Retorno Anual", f"{metricas['retorno_esperado_anual']:.2%}")
+                                st.metric("Volatilidad Anual", f"{metricas['std_dev_activo']:.2%}")
+                                st.metric("Ratio de Sharpe", f"{metricas['sharpe_ratio']:.4f}")
+                                st.metric("VaR 95%", f"{metricas['var_95']:.4f}")
                             with col_b:
-                                st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                                st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                                st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+                                st.metric("Skewness", f"{metricas['skewness']:.4f}")
+                                st.metric("Kurtosis", f"{metricas['kurtosis']:.4f}")
+                                st.metric("JB Statistic", f"{metricas['jb_statistic']:.4f}")
 
                         # Mostrar Frontera Eficiente si está habilitada
                         if show_frontier:
