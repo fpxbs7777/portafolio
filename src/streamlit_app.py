@@ -15,6 +15,7 @@ from functools import lru_cache
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from bayes_opt import BayesianOptimization
+from scipy import optimize as op
 
 warnings.filterwarnings('ignore')
 
@@ -1136,6 +1137,252 @@ def optimize_portfolio_advanced(returns, target_return=None, strategy='markowitz
     
     return result.x
 
+class EnhancedPortfolioManager:
+    def __init__(self, token_acceso, portafolio_data, fecha_desde, fecha_hasta):
+        """
+        Inicializa el manager de portafolio mejorado
+        
+        Args:
+            token_acceso (str): Token de acceso a la API de IOL
+            portafolio_data (dict): Datos del portafolio obtenidos de la API
+            fecha_desde (date): Fecha inicio para datos históricos
+            fecha_hasta (date): Fecha fin para datos históricos
+        """
+        self.token = token_acceso
+        self.portafolio_data = portafolio_data
+        self.fecha_desde = fecha_desde
+        self.fecha_hasta = fecha_hasta
+        self.activos = self._procesar_activos()
+        self.data_loaded = False
+        self.returns = None
+        self.prices = None
+        self.mean_returns = None
+        self.cov_matrix = None
+        self.risk_free_rate = 0.40  # Tasa libre de riesgo para Argentina
+        
+    def _procesar_activos(self):
+        """Procesa los activos del portafolio para optimización"""
+        activos = []
+        for activo in self.portafolio_data.get('activos', []):
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo')
+            mercado = titulo.get('mercado', 'bCBA')  # Default a BCBA
+            
+            if simbolo and mercado:
+                activos.append({
+                    'simbolo': simbolo,
+                    'mercado': mercado,
+                    'raw_data': activo  # Guardar datos originales
+                })
+        return activos
+    
+    def load_data(self):
+        """Carga y preprocesa datos históricos para optimización"""
+        try:
+            simbolos = [a['simbolo'] for a in self.activos]
+            mercados = [a['mercado'] for a in self.activos]
+            
+            # Obtener datos históricos
+            data = {}
+            with st.spinner('Obteniendo datos históricos...'):
+                for simbolo, mercado in zip(simbolos, mercados):
+                    serie = obtener_serie_historica_iol(
+                        self.token,
+                        mercado,
+                        simbolo,
+                        self.fecha_desde.strftime('%Y-%m-%d'),
+                        self.fecha_hasta.strftime('%Y-%m-%d')
+                    )
+                    if serie is not None:
+                        data[simbolo] = serie
+            
+            if not data:
+                st.error("No se pudieron obtener datos históricos")
+                return False
+                
+            # Convertir a DataFrame
+            self.prices = pd.DataFrame(data)
+            self.prices = self.prices.ffill().bfill().dropna()
+            
+            if self.prices.empty:
+                st.error("No hay suficientes datos después del preprocesamiento")
+                return False
+                
+            # Calcular retornos
+            self.returns = self.prices.pct_change().dropna()
+            self.mean_returns = self.returns.mean() * 252  # Anualizar
+            self.cov_matrix = self.returns.cov() * 252     # Anualizar
+            
+            self.data_loaded = True
+            return True
+            
+        except Exception as e:
+            st.error(f"Error cargando datos: {str(e)}")
+            return False
+            
+    def get_account_balance(self):
+        """Obtiene el saldo disponible de la cuenta"""
+        url = "https://api.invertironline.com/api/v2/estadocuenta"
+        headers = {
+            'Authorization': f'Bearer {self.token}',
+            'Accept': 'application/json'
+        }
+        
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Buscar saldo disponible en pesos
+                for cuenta in data.get('cuentas', []):
+                    if cuenta.get('moneda', '').upper() in ['PESO ARGENTINO', 'PESO', 'ARS']:
+                        disponible = cuenta.get('disponible')
+                        if disponible is not None:
+                            return float(disponible)
+                
+                # Si no encuentra en pesos, devolver primer saldo disponible
+                for cuenta in data.get('cuentas', []):
+                    disponible = cuenta.get('disponible')
+                    if disponible is not None:
+                        return float(disponible)
+                        
+                return 0.0
+            else:
+                st.warning(f"No se pudo obtener saldo. Código: {response.status_code}")
+                return 0.0
+        except Exception as e:
+            st.warning(f"Error obteniendo saldo: {str(e)}")
+            return 0.0
+    
+    def optimize_portfolio(self, strategy='markowitz', target_return=None):
+        """
+        Optimiza el portafolio según la estrategia seleccionada
+        
+        Args:
+            strategy (str): Estrategia de optimización
+                - 'markowitz': Optimización de Markowitz (max Sharpe ratio)
+                - 'min_var': Minimiza varianza
+                - 'risk_parity': Paridad de riesgo
+                - 'equi_weight': Pesos iguales
+            target_return (float): Retorno objetivo anual (solo para Markowitz)
+        
+        Returns:
+            dict: Resultados de la optimización
+        """
+        if not self.data_loaded:
+            if not self.load_data():
+                return None
+                
+        n_assets = len(self.returns.columns)
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        # Función para calcular volatilidad del portafolio
+        def portfolio_volatility(weights):
+            return np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
+        
+        # Configurar según estrategia
+        if strategy == 'markowitz':
+            if target_return is not None:
+                # Optimización con retorno objetivo
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                ]
+                objective = portfolio_volatility
+            else:
+                # Maximizar Sharpe Ratio
+                def neg_sharpe(weights):
+                    ret = np.sum(self.mean_returns * weights)
+                    vol = portfolio_volatility(weights)
+                    return -(ret - self.risk_free_rate) / vol if vol > 0 else np.inf
+                objective = neg_sharpe
+                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                
+        elif strategy == 'min_var':
+            # Minimizar varianza
+            objective = portfolio_volatility
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
+        elif strategy == 'risk_parity':
+            # Paridad de riesgo
+            def risk_parity_objective(weights):
+                marginal_risk = np.dot(self.cov_matrix, weights)
+                risk_contributions = weights * marginal_risk
+                target_rc = np.ones(n_assets) / n_assets
+                return np.sum((risk_contributions - target_rc)**2)
+            objective = risk_parity_objective
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
+        elif strategy == 'equi_weight':
+            # Pesos iguales
+            weights = np.ones(n_assets) / n_assets
+            return self._create_result(weights)
+            
+        else:
+            st.error("Estrategia no reconocida")
+            return None
+            
+        # Optimización
+        initial_weights = np.ones(n_assets) / n_assets
+        result = op.minimize(
+            objective,
+            x0=initial_weights,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+        
+        if result.success:
+            return self._create_result(result.x)
+        else:
+            st.warning("La optimización no convergió. Usando pesos iguales.")
+            return self._create_result(initial_weights)
+    
+    def _create_result(self, weights):
+        """Crea el diccionario de resultados con métricas"""
+        port_return = np.sum(self.mean_returns * weights)
+        port_vol = np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
+        sharpe = (port_return - self.risk_free_rate) / port_vol if port_vol > 0 else 0
+        
+        # DataFrame con asignación
+        df_allocation = pd.DataFrame({
+            'Activo': self.returns.columns,
+            'Peso': weights,
+            'Retorno Esperado': self.mean_returns,
+            'Volatilidad': np.sqrt(np.diag(self.cov_matrix))
+        }).sort_values('Peso', ascending=False)
+        
+        return {
+            'weights': weights,
+            'return': port_return,
+            'volatility': port_vol,
+            'sharpe': sharpe,
+            'allocation': df_allocation,
+            'returns': self.returns.dot(weights)  # Retornos diarios del portafolio
+        }
+    
+    def compute_efficient_frontier(self, n_points=20):
+        """Calcula la frontera eficiente"""
+        if not self.data_loaded:
+            if not self.load_data():
+                return None, None
+                
+        min_ret = np.min(self.mean_returns)
+        max_ret = np.max(self.mean_returns)
+        target_returns = np.linspace(min_ret, max_ret, n_points)
+        
+        frontiers = []
+        volatilities = []
+        
+        for ret in target_returns:
+            result = self.optimize_portfolio('markowitz', ret)
+            if result:
+                frontiers.append(result['return'])
+                volatilities.append(result['volatility'])
+        
+        return frontiers, volatilities
+
+
 class PortfolioManager:
     def __init__(self, activos, token, fecha_desde, fecha_hasta, saldo_disponible=None, tasa_libre_riesgo=0.02):
         """
@@ -1729,6 +1976,138 @@ class PortfolioManager:
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
+def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Muestra la interfaz de optimización de portafolio usando la clase mejorada
+    """
+    st.markdown("### 🎯 Optimización Avanzada de Portafolio")
+    
+    # Configuración de la optimización
+    col1, col2 = st.columns(2)
+    with col1:
+        estrategia = st.selectbox(
+            "Estrategia de Optimización",
+            options=['markowitz', 'min_var', 'risk_parity', 'equi_weight'],
+            format_func=lambda x: {
+                'markowitz': 'Markowitz (Max Sharpe)',
+                'min_var': 'Mínima Varianza',
+                'risk_parity': 'Paridad de Riesgo',
+                'equi_weight': 'Pesos Iguales'
+            }[x]
+        )
+    
+    with col2:
+        target_return = None
+        if estrategia == 'markowitz':
+            target_return = st.slider(
+                "Retorno Objetivo Anual",
+                min_value=0.0, max_value=1.0, value=0.08, step=0.01
+            )
+    
+    if st.button("🚀 Optimizar Portafolio"):
+        with st.spinner("Optimizando portafolio..."):
+            try:
+                # Crear instancia del manager mejorado
+                manager = EnhancedPortfolioManager(
+                    token_acceso,
+                    portafolio,
+                    fecha_desde,
+                    fecha_hasta
+                )
+                
+                # Cargar datos y optimizar
+                if manager.load_data():
+                    result = manager.optimize_portfolio(estrategia, target_return)
+                    
+                    if result:
+                        st.success("✅ Optimización completada")
+                        
+                        # Mostrar resultados
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("#### 📊 Asignación de Activos")
+                            st.dataframe(
+                                result['allocation'].style.format({
+                                    'Peso': '{:.2%}',
+                                    'Retorno Esperado': '{:.2%}',
+                                    'Volatilidad': '{:.2%}'
+                                }),
+                                use_container_width=True
+                            )
+                        
+                        with col2:
+                            st.markdown("#### 📈 Métricas del Portafolio")
+                            st.metric("Retorno Esperado", f"{result['return']:.2%}")
+                            st.metric("Volatilidad", f"{result['volatility']:.2%}")
+                            st.metric("Ratio de Sharpe", f"{result['sharpe']:.2f}")
+                        
+                        # Gráfico de distribución de pesos
+                        st.markdown("#### 📊 Distribución de Pesos")
+                        fig = go.Figure(go.Pie(
+                            labels=result['allocation']['Activo'],
+                            values=result['allocation']['Peso'],
+                            textinfo='label+percent'
+                        ))
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Calcular frontera eficiente si es Markowitz
+                        if estrategia == 'markowitz':
+                            st.markdown("#### 🌐 Frontera Eficiente")
+                            frontiers, volatilities = manager.compute_efficient_frontier()
+                            
+                            if frontiers and volatilities:
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    x=volatilities,
+                                    y=frontiers,
+                                    mode='lines',
+                                    name='Frontera Eficiente'
+                                ))
+                                fig.add_trace(go.Scatter(
+                                    x=[result['volatility']],
+                                    y=[result['return']],
+                                    mode='markers',
+                                    marker=dict(size=12, color='red'),
+                                    name='Portafolio Óptimo'
+                                ))
+                                fig.update_layout(
+                                    title='Frontera Eficiente',
+                                    xaxis_title='Volatilidad',
+                                    yaxis_title='Retorno Esperado'
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.error("❌ No se pudieron cargar los datos para optimización")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+    
+    # Explicación de estrategias
+    with st.expander("ℹ️ Explicación de Estrategias"):
+        st.markdown("""
+        **Markowitz (Max Sharpe Ratio):**
+        - Maximiza el ratio de retorno/riesgo
+        - Considera correlaciones entre activos
+        - Puede especificar retorno objetivo
+        
+        **Mínima Varianza:**
+        - Minimiza la volatilidad del portafolio
+        - No considera retornos esperados
+        - Bueno para inversores conservadores
+        
+        **Paridad de Riesgo:**
+        - Distribuye el riesgo equitativamente
+        - No requiere estimación de retornos
+        - Popular en estrategias institucionales
+        
+        **Pesos Iguales:**
+        - Asignación simple e igualitaria
+        - No requiere optimización
+        - Buen benchmark para comparación
+        """)
+
+
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
@@ -1906,52 +2285,73 @@ def mostrar_movimientos_asesor():
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
 def mostrar_analisis_portafolio():
-    cliente = st.session_state.cliente_seleccionado
-    token_acceso = st.session_state.token_acceso
-
-    if not cliente:
+    if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
         st.error("No hay cliente seleccionado")
         return
 
+    cliente = st.session_state.cliente_seleccionado
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
 
-    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+    st.title(f"Análisis de Portafolio - {nombre_cliente}")
+    
+    # Obtener datos del cliente una sola vez
+    portafolio = obtener_portafolio(st.session_state.token_acceso, id_cliente)
+    estado_cuenta = obtener_estado_cuenta(st.session_state.token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🔄 Optimización"
+    tab1, tab2, tab3 = st.tabs([
+        "Portafolio", 
+        "Optimización",
+        "Estado de Cuenta"
     ])
-
+    
     with tab1:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        if portafolio:
+            mostrar_optimizacion_portafolio(
+                portafolio,
+                st.session_state.token_acceso,
+                st.session_state.fecha_desde,
+                st.session_state.fecha_hasta
+            )
+        else:
+            st.warning("No se puede optimizar sin datos del portafolio")
+    
+    with tab3:
         if estado_cuenta:
+            # Usar la clase mejorada para mostrar saldos
+            manager = EnhancedPortfolioManager(
+                st.session_state.token_acceso,
+                portafolio or {},
+                st.session_state.fecha_desde,
+                st.session_state.fecha_hasta
+            )
+            
+            # Mostrar saldo disponible
+            with st.container():
+                st.subheader("Saldos Disponibles")
+                saldo_disponible = manager.get_account_balance()
+                st.metric("Saldo Disponible", f"${saldo_disponible:,.2f}")
+                
+                # Botón para actualizar saldo
+                if st.button("Actualizar Saldo", key="actualizar_saldo"):
+                    saldo_actualizado = manager.get_account_balance()
+                    st.rerun()
+            
+            # Mostrar estado de cuenta completo
+            st.subheader("Estado de Cuenta")
             mostrar_estado_cuenta(estado_cuenta)
         else:
             st.warning("No se pudo obtener el estado de cuenta")
-    
-    with tab3:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
-    
-    with tab4:
-        mostrar_cotizaciones_mercado(token_acceso)
-    
-    with tab5:
-        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
-    st.title("📊 IOL Portfolio Analyzer")
+    st.title("IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
     
     # Inicializar session state
