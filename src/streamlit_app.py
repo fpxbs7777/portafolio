@@ -1897,6 +1897,8 @@ class EnhancedPortfolioManager:
         return drawdowns.min()
 
 # ... (rest of the code remains the same)
+# Alias para compatibilidad con código existente
+PortfolioManager = EnhancedPortfolioManager
 # Removed stray error handling code that was causing indentation issues
 
     try:
