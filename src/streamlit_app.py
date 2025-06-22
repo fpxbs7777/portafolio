@@ -1693,26 +1693,42 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
-                            # Calcular métricas usando los retornos históricos
+                            # Calcular métricas usando los retornos históricos y precios
                             metricas = calcular_metricas_portafolio(
                                 portafolio=portfolio_result.dataframe_allocation.to_dict('records'),
-                                valor_total=portfolio_result.portfolio_value,
-                                returns=manager_inst.returns
+                                valor_total=valor_total,
+                                returns=manager_inst.returns,
+                                prices=manager_inst.prices
                             )
                             
-                            # Mostrar métricas en un formato más legible
-                            metricas_df = pd.DataFrame([{
-                                'Concentración': f"{metricas['concentracion']:.4f}",
-                                'Volatilidad': f"{metricas['std_dev_activo']:.2%}",
-                                'Retorno Esperado': f"{metricas['retorno_esperado_anual']:.2%}",
-                                'Escenario Optimista': f"{metricas['pl_esperado_max']:.2%}",
-                                'Escenario Pesimista': f"{metricas['pl_esperado_min']:.2%}",
-                                'Prob. Ganancia': f"{metricas['probabilidades']['ganancia']:.1f}%",
-                                'Prob. Pérdida': f"{metricas['probabilidades']['perdida']:.1f}%",
-                                'Prob. >10% Ganancia': f"{metricas['probabilidades']['ganancia_mayor_10']:.1f}%",
-                                'Prob. >10% Pérdida': f"{metricas['probabilidades']['perdida_mayor_10']:.1f}%"
-                            }])
-                            st.dataframe(metricas_df, use_container_width=True)
+                            if metricas:
+                                # Mostrar métricas en un formato más legible
+                                metricas_df = pd.DataFrame([{
+                                    'Concentración': f"{metricas['concentracion']:.4f}",
+                                    'Volatilidad Anual': f"{metricas['volatilidad_anual']:.2%}",
+                                    'Retorno Esperado': f"{metricas['retorno_esperado_anual']:.2%}",
+                                    'Sharpe Ratio': f"{metricas['sharpe_ratio']:.2f}",
+                                    'Drawdown Máximo': f"{metricas['max_drawdown']:.2%}",
+                                    'Retorno Total': f"{metricas['retorno_total']:.2%}",
+                                    'Escenario Optimista': f"{metricas['pl_esperado_max']:.2%}",
+                                    'Escenario Pesimista': f"{metricas['pl_esperado_min']:.2%}",
+                                    'Prob. Ganancia': f"{metricas['probabilidades']['ganancia']:.1f}%",
+                                    'Prob. Pérdida': f"{metricas['probabilidades']['perdida']:.1f}%",
+                                    'Prob. >10% Ganancia': f"{metricas['probabilidades']['ganancia_mayor_10']:.1f}%",
+                                    'Prob. >10% Pérdida': f"{metricas['probabilidades']['perdida_mayor_10']:.1f}%"
+                                }])
+                                st.dataframe(metricas_df, use_container_width=True)
+                                
+                                # Mostrar métricas individuales
+                                col_a, col_b = st.columns(2)
+                                with col_a:
+                                    st.metric("Volatilidad Anual", f"{metricas['volatilidad_anual']:.2%}")
+                                    st.metric("Retorno Esperado", f"{metricas['retorno_esperado_anual']:.2%}")
+                                    st.metric("Sharpe Ratio", f"{metricas['sharpe_ratio']:.2f}")
+                                with col_b:
+                                    st.metric("Drawdown Máximo", f"{metricas['max_drawdown']:.2%}")
+                                    st.metric("Retorno Total", f"{metricas['retorno_total']:.2%}")
+                                    st.metric("Concentración", f"{metricas['concentracion']:.4f}")
                             
                             col_a, col_b = st.columns(2)
                             with col_a:
