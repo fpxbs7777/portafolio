@@ -923,81 +923,108 @@ class PortfolioManager:
     
     def load_data(self):
         try:
+            if not self.activos:
+                st.error("❌ No se proporcionaron activos para analizar")
+                return False
+
             # Convertir lista de activos a formato adecuado
             symbols = []
             markets = []
+            activos_info = []  # Para mantener información adicional de los activos
             
             for activo in self.activos:
                 if isinstance(activo, dict):
                     symbols.append(activo.get('simbolo', ''))
-                    markets.append(activo.get('mercado', '').upper())
+                    markets.append(activo.get('mercado', 'BCBA').upper())
+                    activos_info.append(activo)
                 else:
                     symbols.append(activo)
-                    markets.append('BCBA')  # Default market
-            
+                    markets.append('BCBA')
+                    activos_info.append({'simbolo': activo, 'mercado': 'BCBA'})
+
             if not symbols:
                 st.error("❌ No se encontraron símbolos válidos para procesar")
                 return False
-            
+
             # Obtener datos históricos
             data_frames = {}
+            valid_assets = 0
             
             with st.spinner("Obteniendo datos históricos..."):
-                for simbolo, mercado in zip(symbols, markets):
-                    df = obtener_serie_historica_iol(
-                        self.token,
-                        mercado,
-                        simbolo,
-                        self.fecha_desde,
-                        self.fecha_hasta
-                    )
-                    
-                    if df is not None and not df.empty:
-                        # Usar la columna de último precio si está disponible
-                        precio_columns = ['ultimoPrecio', 'ultimo_precio', 'precio']
-                        precio_col = next((col for col in precio_columns if col in df.columns), None)
+                for i, (simbolo, mercado) in enumerate(zip(symbols, markets)):
+                    try:
+                        df = obtener_serie_historica_iol(
+                            self.token,
+                            mercado,
+                            simbolo,
+                            self.fecha_desde,
+                            self.fecha_hasta
+                        )
                         
-                        if precio_col:
-                            df = df[['fecha', precio_col]].copy()
-                            df.columns = ['fecha', 'precio']  # Normalizar el nombre de la columna
+                        if df is not None and not df.empty:
+                            # Debug: Mostrar las columnas disponibles
+                            st.write(f"Columnas disponibles para {simbolo}: {df.columns.tolist()}")
                             
-                            # Convertir fechaHora a fecha y asegurar que sea única
-                            df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+                            # Intentar diferentes nombres de columnas de precio
+                            precio_cols = ['ultimoPrecio', 'ultimo_precio', 'precio', 'cierre', 'close', 'last']
+                            precio_col = next((col for col in precio_cols if col in df.columns), None)
                             
-                            # Eliminar duplicados manteniendo el último valor
-                            df = df.drop_duplicates(subset=['fecha'], keep='last')
-                            
-                            df.set_index('fecha', inplace=True)
-                            data_frames[simbolo] = df
+                            if precio_col:
+                                # Crear DataFrame con solo fecha y precio
+                                temp_df = df[['fecha', precio_col]].copy()
+                                temp_df.columns = ['fecha', 'precio']
+                                
+                                # Convertir fecha a datetime y establecer como índice
+                                temp_df['fecha'] = pd.to_datetime(temp_df['fecha'])
+                                temp_df = temp_df.set_index('fecha')
+                                
+                                # Eliminar duplicados manteniendo el último valor
+                                temp_df = temp_df[~temp_df.index.duplicated(keep='last')]
+                                
+                                # Ordenar por fecha
+                                temp_df = temp_df.sort_index()
+                                
+                                # Guardar datos
+                                data_frames[simbolo] = temp_df
+                                valid_assets += 1
+                                st.success(f"✅ Datos cargados para {simbolo} ({mercado})")
+                            else:
+                                st.warning(f"⚠️ No se encontró columna de precio válida para {simbolo}")
                         else:
-                            st.warning(f"⚠️ No se encontró columna de precio válida para {simbolo}")
-                    else:
-                        st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
-            
+                            st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
+
+                    except Exception as e:
+                        st.error(f"❌ Error al procesar {simbolo}: {str(e)}")
+                        continue
+
             if not data_frames:
                 st.error("❌ No se pudieron obtener datos históricos para ningún activo")
                 return False
-            
+
             # Combinar todos los DataFrames
-            df_precios = pd.concat(data_frames.values(), axis=1, keys=data_frames.keys())
+            df_precios = pd.concat(data_frames, axis=1)
             
-            # Limpiar datos
-            # Primero verificar si hay fechas duplicadas
-            if not df_precios.index.is_unique:
-                st.warning("⚠️ Se encontraron fechas duplicadas en los datos")
-                # Eliminar duplicados manteniendo el último valor de cada fecha
-                df_precios = df_precios.groupby(df_precios.index).last()
+            # Llenar valores faltantes hacia adelante y luego hacia atrás
+            df_precios = df_precios.ffill().bfill()
             
-            # Luego llenar y eliminar valores faltantes
-            df_precios = df_precios.fillna(method='ffill')
+            # Eliminar filas con valores faltantes
             df_precios = df_precios.dropna()
             
             if df_precios.empty:
                 st.error("❌ No hay datos suficientes después del preprocesamiento")
                 return False
+
+            # Calcular retornos logarítmicos diarios
+            self.returns = np.log(df_precios / df_precios.shift(1)).dropna()
+            self.prices = df_precios
+            self.data_loaded = True
             
-            # Calcular retornos
-            self.returns = df_precios.pct_change().dropna()
+            st.success(f"✅ Datos cargados correctamente para {valid_assets} de {len(symbols)} activos")
+            return True
+
+        except Exception as e:
+            st.error(f"❌ Error en load_data: {str(e)}")
+            return False
             
             # Calcular estadísticas
             self.mean_returns = self.returns.mean()
@@ -1619,7 +1646,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                     
                                     # Calcular frontera eficiente
                                     portfolios, returns, volatilities = compute_efficient_frontier(
-                                        rics, notional, target_return, True, manager_inst.prices
+                                        rics, notional, target_return, True, manager_inst.prices.to_dict('series')
                                     )
                                     
                                     # Crear gráfico de la frontera eficiente
