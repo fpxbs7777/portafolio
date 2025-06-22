@@ -995,26 +995,168 @@ class PortfolioManager:
         if isinstance(self.fecha_hasta, str):
             self.fecha_hasta = datetime.strptime(self.fecha_hasta, '%Y-%m-%d').date()
         
-        # Rest of the code...
-
+        # Validar fechas
+        if self.fecha_desde >= self.fecha_hasta:
+            st.error("❌ La fecha de inicio debe ser anterior a la fecha de fin")
+            return False
+                    
+        # Limitar el rango de fechas a un máximo de 5 años para optimización
+        max_days = 365 * 5
+        if (self.fecha_hasta - self.fecha_desde).days > max_days:
+            self.fecha_desde = self.fecha_hasta - timedelta(days=max_days)
+            st.warning(f"⚠️ El rango de fechas se ha limitado a los últimos {max_days//365} años para optimización")
+        
     def load_data(self):
-        # Method implementation...
-
+        # Convertir lista de activos a formato adecuado
+        symbols = []
+        markets = []
+        
+        for activo in self.activos:
+            if isinstance(activo, dict):
+                symbols.append(activo.get('simbolo', ''))
+                markets.append(activo.get('mercado', '').upper())
+            else:
+                symbols.append(activo)
+                markets.append('BCBA')  # Default market
+        
+        if not symbols:
+            st.error("❌ No se encontraron símbolos válidos para procesar")
+            return False
+        
+        st.info(f"📅 Período de análisis: {self.fecha_desde} a {self.fecha_hasta}")
+        
+        # Obtener datos históricos
+        data_frames = {}
+        success_count = 0
+        
+        with st.spinner("⏳ Obteniendo datos históricos..."):
+            progress_bar = st.progress(0)
+            total_symbols = len(symbols)
+            
+            for i, (simbolo, mercado) in enumerate(zip(symbols, markets)):
+                try:
+                    progress = (i + 1) / total_symbols
+                    progress_bar.progress(min(int(progress * 100), 100))
+                    
+                    df = obtener_serie_historica_iol(
+                        self.token,
+                        mercado,
+                        simbolo,
+                        self.fecha_desde.strftime('%Y-%m-%d'),
+                        self.fecha_hasta.strftime('%Y-%m-%d')
+                    )
+                    
+                    if df is not None and not df.empty:
+                        # Usar la columna de último precio si está disponible
+                        precio_columns = ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'last']
+                        precio_col = next((col for col in precio_columns if col in df.columns), None)
+                        
+                        if precio_col:
+                            df = df[['fecha', precio_col]].copy()
+                            df.columns = ['fecha', 'precio']  # Normalizar el nombre de la columna
+                            
+                            # Convertir fecha a datetime y asegurar que sea única
+                            df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+                            
+                            # Filtrar por rango de fechas exacto
+                            df = df[(df['fecha'] >= self.fecha_desde) & 
+                                  (df['fecha'] <= self.fecha_hasta)]
+                            
+                            if not df.empty:
+                                # Eliminar duplicados manteniendo el último valor
+                                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                                
+                                # Ordenar por fecha
+                                df = df.sort_values('fecha')
+                                
+                                # Reindexar para asegurar fechas continuas
+                                date_range = pd.date_range(start=self.fecha_desde, end=self.fecha_hasta, freq='D')
+                                df = df.set_index('fecha').reindex(date_range.date).ffill()
+                                
+                                data_frames[simbolo] = df
+                                success_count += 1
+                            else:
+                                st.warning(f"⚠️ No hay datos en el rango de fechas para {simbolo}")
+                        else:
+                            st.warning(f"⚠️ No se encontró columna de precio válida para {simbolo}")
+                    else:
+                        st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
+                except Exception as e:
+                    st.error(f"❌ Error procesando {simbolo}: {str(e)}")
+                    continue
+                
+            progress_bar.empty()
+            
+            if not data_frames:
+                st.error("❌ No se pudieron obtener datos históricos para ningún activo")
+                return False
+                
+            st.success(f"✅ Datos obtenidos para {success_count} de {total_symbols} activos")
+            
+            # Verificar que tengamos suficientes datos para continuar
+            if success_count < 2:  # Necesitamos al menos 2 activos para optimización
+                st.error("❌ Se requieren al menos 2 activos con datos para la optimización")
+                return False
+            
+            # Combinar todos los DataFrames
+            df_precios = pd.concat(data_frames.values(), axis=1, keys=data_frames.keys())
+            
+            # Limpiar datos
+            # Primero verificar si hay fechas duplicadas
+            if not df_precios.index.is_unique:
+                st.warning("⚠️ Se encontraron fechas duplicadas en los datos")
+                # Eliminar duplicados manteniendo el último valor de cada fecha
+                df_precios = df_precios.groupby(df_precios.index).last()
+            
+            # Luego llenar y eliminar valores faltantes
+            df_precios = df_precios.fillna(method='ffill')
+            df_precios = df_precios.dropna()
+            
+            if df_precios.empty:
+                st.error("❌ No hay datos suficientes después del preprocesamiento")
+                return False
+            
+            # Calcular retornos
+            self.returns = df_precios.pct_change().dropna()
+            
+            # Calcular estadísticas
+            self.mean_returns = self.returns.mean()
+            self.cov_matrix = self.returns.cov()
+            self.data_loaded = True
+            
+            # Crear manager para optimización avanzada
+            self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
+            
+            return True
+        except Exception as e:
+            st.error(f"❌ Error en load_data: {str(e)}")
+            return False
+    
     def compute_portfolio(self, strategy='markowitz', target_return=None):
-        # Method implementation...
-
-    def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
-        # Method implementation...
-
-# --- Historical Data Methods ---
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
-    # Function implementation...
-
+        if not self.data_loaded or self.returns is None:
+            return None
+            
+        try:
+            if self.manager:
+                # Usar el manager avanzado
+                portfolio_output = self.manager.compute_portfolio(strategy, target_return)
+                return portfolio_output
+            else:
+                # Fallback a optimización básica
+                n_assets = len(self.returns.columns)
+                
+                if strategy == 'equi-weight':
+                    weights = np.array([1/n_assets] * n_assets)
+                
+                if strategy == 'markowitz':
+                    weights = markowitz_optimization(self.mean_returns, self.cov_matrix, target_return)
+                
+                portfolio_result = PortfolioResult(weights, self.returns, self.mean_returns, self.cov_matrix)
+                
                 if portfolio_result:
                     st.success("✅ Optimización completada")
                     
                     # Mostrar resultados extendidos
-{{ ... }}
                     col1, col2 = st.columns(2)
                     
                     with col1:
@@ -1204,8 +1346,8 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                             st.plotly_chart(fig, use_container_width=True)
                     except Exception as e:
                         st.error(f"❌ Error durante el cálculo de la frontera eficiente: {str(e)}")
-    except Exception as e:
-        st.error(f"❌ Error durante la optimización: {str(e)}")
+        except Exception as e:
+            st.error(f"❌ Error durante la optimización: {str(e)}")
 
 # --- Historical Data Methods ---
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
