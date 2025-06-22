@@ -1749,7 +1749,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         st.error("❌ Error en la optimización")
                 else:
                     st.error("❌ No se pudieron cargar los datos históricos")
- 　　　　　　　　　
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
     
