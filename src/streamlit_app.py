@@ -927,113 +927,54 @@ class PortfolioManager:
                 st.error("❌ No se proporcionaron activos para analizar")
                 return False
 
-            # Convertir lista de activos a formato adecuado
-            symbols = []
-            markets = []
-            activos_info = []  # Para mantener información adicional de los activos
-            
+            # Crear DataFrame vacío para almacenar precios
+            df_precios = pd.DataFrame()
+            activos_con_datos = []
+
+            # Obtener los precios históricos para cada activo usando cargar_serie_tiempo
             for activo in self.activos:
-                if isinstance(activo, dict):
-                    symbols.append(activo.get('simbolo', ''))
-                    markets.append(activo.get('mercado', 'BCBA').upper())
-                    activos_info.append(activo)
-                else:
-                    symbols.append(activo)
-                    markets.append('BCBA')
-                    activos_info.append({'simbolo': activo, 'mercado': 'BCBA'})
-
-            if not symbols:
-                st.error("❌ No se encontraron símbolos válidos para procesar")
-                return False
-
-            # Obtener datos históricos
-            data_frames = {}
-            valid_assets = 0
-            
-            with st.spinner("Obteniendo datos históricos..."):
-                for i, (simbolo, mercado) in enumerate(zip(symbols, markets)):
-                    try:
-                        df = obtener_serie_historica_iol(
-                            self.token,
-                            mercado,
-                            simbolo,
-                            self.fecha_desde,
-                            self.fecha_hasta
-                        )
+                try:
+                    # Usar nuestra función existente para cargar datos
+                    serie_tiempo = cargar_serie_tiempo(activo)
+                    
+                    if not serie_tiempo.empty:
+                        # Convertir a DataFrame con fecha como índice
+                        df = pd.DataFrame({
+                            'fecha': serie_tiempo['fecha'],
+                            activo: serie_tiempo['cierre']
+                        }).set_index('fecha')
                         
-                        if df is not None and not df.empty:
-                            # Debug: Mostrar las columnas disponibles
-                            st.write(f"Columnas disponibles para {simbolo}: {df.columns.tolist()}")
-                            
-                            # Intentar diferentes nombres de columnas de precio
-                            precio_cols = ['ultimoPrecio', 'ultimo_precio', 'precio', 'cierre', 'close', 'last']
-                            precio_col = next((col for col in precio_cols if col in df.columns), None)
-                            
-                            if precio_col:
-                                # Crear DataFrame con solo fecha y precio
-                                temp_df = df[['fecha', precio_col]].copy()
-                                temp_df.columns = ['fecha', 'precio']
-                                
-                                # Convertir fecha a datetime y establecer como índice
-                                temp_df['fecha'] = pd.to_datetime(temp_df['fecha'])
-                                temp_df = temp_df.set_index('fecha')
-                                
-                                # Eliminar duplicados manteniendo el último valor
-                                temp_df = temp_df[~temp_df.index.duplicated(keep='last')]
-                                
-                                # Ordenar por fecha
-                                temp_df = temp_df.sort_index()
-                                
-                                # Guardar datos
-                                data_frames[simbolo] = temp_df
-                                valid_assets += 1
-                                st.success(f"✅ Datos cargados para {simbolo} ({mercado})")
-                            else:
-                                st.warning(f"⚠️ No se encontró columna de precio válida para {simbolo}")
+                        # Añadir al DataFrame principal
+                        if df_precios.empty:
+                            df_precios = df
                         else:
-                            st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
+                            df_precios = df_precios.merge(df, left_index=True, right_index=True, how='outer')
+                        
+                        activos_con_datos.append(activo)
+                    else:
+                        st.warning(f"⚠️ No se pudieron obtener datos para {activo}")
+                except Exception as e:
+                    st.error(f"❌ Error al procesar {activo}: {str(e)}")
+                    return False
 
-                    except Exception as e:
-                        st.error(f"❌ Error al procesar {simbolo}: {str(e)}")
-                        continue
-
-            if not data_frames:
-                st.error("❌ No se pudieron obtener datos históricos para ningún activo")
-                return False
-
-            # Combinar todos los DataFrames
-            df_precios = pd.concat(data_frames, axis=1)
-            
-            # Llenar valores faltantes hacia adelante y luego hacia atrás
-            df_precios = df_precios.ffill().bfill()
-            
-            # Eliminar filas con valores faltantes
-            df_precios = df_precios.dropna()
-            
+            # Asegurarse de que hay datos
             if df_precios.empty:
-                st.error("❌ No hay datos suficientes después del preprocesamiento")
+                st.error("❌ No se pudieron obtener datos para ninguno de los activos")
                 return False
 
-            # Calcular retornos logarítmicos diarios
+            # Eliminar duplicados
+            df_precios = df_precios[~df_precios.index.duplicated(keep='first')]
+
+            # Rellenar valores faltantes
+            df_precios = df_precios.fillna(method='ffill').fillna(method='bfill')
+
+            # Calcular retornos usando log returns
             self.returns = np.log(df_precios / df_precios.shift(1)).dropna()
             self.prices = df_precios
             self.data_loaded = True
-            
-            st.success(f"✅ Datos cargados correctamente para {valid_assets} de {len(symbols)} activos")
-            return True
 
-        except Exception as e:
-            st.error(f"❌ Error en load_data: {str(e)}")
-            return False
-            
-            # Calcular estadísticas
-            self.mean_returns = self.returns.mean()
-            self.cov_matrix = self.returns.cov()
-            self.data_loaded = True
-            
-            # Crear manager para optimización avanzada
-            self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
-            
+            # Mostrar mensaje de éxito
+            st.success(f"✅ Datos históricos cargados exitosamente para {len(activos_con_datos)} activos")
             return True
         except Exception as e:
             st.error(f"❌ Error en load_data: {str(e)}")
