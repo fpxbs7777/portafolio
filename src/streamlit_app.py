@@ -530,7 +530,7 @@ def procesar_respuesta_historico(data, tipo_activo):
                     continue
             
             if precios and fechas:
-                serie = pd.Series(precios, index=fechas, name='precio')
+                serie = pd.Series(precios, index=fechas, name='Cierre')
                 serie = serie[~serie.index.duplicated(keep='last')]
                 return serie.sort_index()
         
