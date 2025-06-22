@@ -919,8 +919,18 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         if not data or not isinstance(data, dict):
             raise ValueError("Los datos deben ser un diccionario")
             
+        # Filtrar RICs con datos válidos
+        valid_rics = []
+        for ric in rics:
+            df = data.get(ric)
+            if df is not None and not df.empty:
+                valid_rics.append(ric)
+        
+        if not valid_rics:
+            raise ValueError("No hay datos válidos para ningún RIC")
+            
         # Inicializar manager
-        port_mgr = manager(rics, notional, data)
+        port_mgr = manager(valid_rics, notional, data)
         
         # Verificar datos de entrada
         if port_mgr.returns is None or port_mgr.returns.empty:
@@ -936,6 +946,11 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         # Validar rango de retornos
         if min_returns >= max_returns:
             raise ValueError("El rango de retornos no es válido")
+            
+        # Ajustar rango de retornos según el retorno objetivo
+        if target_return is not None:
+            min_returns = max(min_returns, target_return - 0.05)  # No menos del 5% por debajo del objetivo
+            max_returns = min(max_returns, target_return + 0.05)  # No más del 5% por encima del objetivo
             
         # Generar puntos para la frontera eficiente
         returns = np.linspace(min_returns, max_returns, 50)
@@ -961,11 +976,11 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         
         # Lista de estrategias a calcular
         strategies = [
-            ('min-variance-l1', 'min-variance-l1'),
-            ('min-variance-l2', 'min-variance-l2'),
-            ('equi-weight', 'equi-weight'),
+            ('min-varianza-l1', 'min-variance-l1'),
+            ('min-varianza-l2', 'min-variance-l2'),
+            ('pesos-iguales', 'equi-weight'),
             ('long-only', 'long-only'),
-            ('markowitz-none', 'markowitz'),
+            ('markowitz', 'markowitz'),
             ('markowitz-target', 'markowitz', target_return)
         ]
         
