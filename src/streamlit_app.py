@@ -720,59 +720,104 @@ def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, use
     st.error("❌ No se pudieron cargar los datos históricos")
     return None, None, None
 
-def calcular_metricas_portafolio(activos_data, valor_total):
+def calcular_metricas_portafolio(activos_data, valor_total, token_acceso=None, fecha_desde=None, fecha_hasta=None):
     """
-    Calcula métricas detalladas del portafolio
+    Calcula métricas detalladas del portafolio usando datos históricos de InvertirOnline
+    
+    Args:
+        activos_data (list): Lista de diccionarios con datos de los activos
+        valor_total (float): Valor total del portafolio
+        token_acceso (str, optional): Token de autenticación para la API de InvertirOnline
+        fecha_desde (str, optional): Fecha de inicio para datos históricos (YYYY-MM-DD)
+        fecha_hasta (str, optional): Fecha de fin para datos históricos (YYYY-MM-DD)
     """
     try:
         # Obtener valores de los activos
         try:
-            valores = [activo.get('Valuación', activo.get('valor_actual', 0)) for activo in activos_data 
-                     if activo.get('Valuación', activo.get('valor_actual', 0)) > 0]
-        except (KeyError, AttributeError):
-            valores = []
-        
-        if not valores:
-            return None
+            activos_filtrados = [
+                activo for activo in activos_data 
+                if activo.get('Valuación', activo.get('valor_actual', 0)) > 0
+            ]
             
-        valores_array = np.array(valores)
-        
-        # Cálculo de métricas básicas
-        media = np.mean(valores_array)
-        mediana = np.median(valores_array)
-        std_dev = np.std(valores_array)
-        var_95 = np.percentile(valores_array, 5)
-        var_99 = np.percentile(valores_array, 1)
-        
-        # Cálculo de cuantiles
-        q25 = np.percentile(valores_array, 25)
-        q50 = np.percentile(valores_array, 50)
-        q75 = np.percentile(valores_array, 75)
-        q90 = np.percentile(valores_array, 90)
-        q95 = np.percentile(valores_array, 95)
-        
-        # Cálculo de concentración
-        pesos = valores_array / valor_total if valor_total > 0 else np.zeros_like(valores_array)
-        concentracion = np.sum(pesos ** 2)
-        
-        # Cálculo de retorno y riesgo esperados
-        retorno_esperado_anual = 0.08  # Tasa de retorno anual esperada
-        volatilidad_anual = 0.20  # Volatilidad anual esperada
-        
-        retorno_esperado_pesos = valor_total * retorno_esperado_anual
-        riesgo_anual_pesos = valor_total * volatilidad_anual
-        
-        # Simulación de Monte Carlo para calcular métricas de riesgo
-        np.random.seed(42)
-        num_simulaciones = 1000
-        retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
-        pl_simulado = valor_total * retornos_simulados
-        
-        # Cálculo de probabilidades
-        prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
-        prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
-        prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
-        prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
+            if not activos_filtrados:
+                return None
+                
+            # Extraer símbolos y valores
+            simbolos = [activo.get('simbolo', '') for activo in activos_filtrados]
+            valores = [activo.get('Valuación', activo.get('valor_actual', 0)) 
+                     for activo in activos_filtrados]
+                     
+            valores_array = np.array(valores)
+            
+            # Calcular pesos
+            pesos = valores_array / valor_total if valor_total > 0 else np.zeros_like(valores_array)
+            
+            # Obtener datos históricos si se proporciona token_acceso
+            if token_acceso and fecha_desde and fecha_hasta:
+                try:
+                    # Obtener datos históricos usando la API de InvertirOnline
+                    mean_returns, cov_matrix, _ = get_historical_data_for_optimization(
+                        simbolos=simbolos,
+                        fecha_desde=fecha_desde,
+                        fecha_hasta=fecha_hasta,
+                        use_iol=True,
+                        bearer_token=token_acceso
+                    )
+                    
+                    if mean_returns is not None and cov_matrix is not None:
+                        # Calcular retorno y riesgo esperados del portafolio
+                        retorno_esperado_anual = np.dot(mean_returns, pesos) * 252  # Anualizado
+                        volatilidad_anual = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix * 252, pesos)))  # Anualizado
+                    else:
+                        # Si no se pueden obtener datos históricos, usar valores por defecto
+                        retorno_esperado_anual = 0.08
+                        volatilidad_anual = 0.20
+                        st.warning("No se pudieron obtener datos históricos completos. Usando valores por defecto.")
+                except Exception as e:
+                    st.error(f"Error al obtener datos históricos: {str(e)}")
+                    retorno_esperado_anual = 0.08
+                    volatilidad_anual = 0.20
+            else:
+                # Sin token de acceso, usar valores por defecto
+                retorno_esperado_anual = 0.08
+                volatilidad_anual = 0.20
+            
+            # Cálculo de métricas básicas
+            media = np.mean(valores_array)
+            mediana = np.median(valores_array)
+            std_dev = np.std(valores_array)
+            var_95 = np.percentile(valores_array, 5)
+            var_99 = np.percentile(valores_array, 1)
+            
+            # Cálculo de cuantiles
+            q25 = np.percentile(valores_array, 25)
+            q50 = np.percentile(valores_array, 50)
+            q75 = np.percentile(valores_array, 75)
+            q90 = np.percentile(valores_array, 90)
+            q95 = np.percentile(valores_array, 95)
+            
+            # Cálculo de concentración
+            concentracion = np.sum(pesos ** 2)
+            
+            # Cálculo de retorno y riesgo esperados en pesos
+            retorno_esperado_pesos = valor_total * retorno_esperado_anual
+            riesgo_anual_pesos = valor_total * volatilidad_anual
+            
+            # Simulación de Monte Carlo para calcular métricas de riesgo
+            np.random.seed(42)
+            num_simulaciones = 1000
+            retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
+            pl_simulado = valor_total * retornos_simulados
+            
+            # Cálculo de probabilidades
+            prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
+            prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
+            prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
+            prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
+            
+        except (KeyError, AttributeError) as e:
+            st.error(f"Error al procesar datos del portafolio: {str(e)}")
+            return None
         
         # Retornar métricas en un diccionario
         return {
