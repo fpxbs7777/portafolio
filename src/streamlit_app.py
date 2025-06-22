@@ -857,6 +857,44 @@ def portfolio_variance(x, mtx_var_covar):
     variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
     return variance
 
+
+def obtener_saldo_disponible(token_acceso):
+    """
+    Obtiene el saldo disponible en la cuenta
+    
+    Args:
+        token_acceso: Token de acceso IOL
+        
+    Returns:
+        Saldo disponible en ARS o None si hay error
+    """
+    try:
+        url = "https://api.invertironline.com/api/v2/cuentas"
+        headers = {
+            'Authorization': f'Bearer {token_acceso}',
+            'Accept': 'application/json'
+        }
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        cuentas = response.json()
+        if not cuentas:
+            raise ValueError("No se encontraron cuentas en la respuesta")
+            
+        # Usar la primera cuenta (asumimos que es la principal)
+        cuenta = cuentas[0]
+        saldo_disponible = cuenta.get('saldoDisponible', 0)
+        
+        if saldo_disponible is None:
+            raise ValueError("No se encontró saldo disponible en la cuenta")
+            
+        return saldo_disponible
+        
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo obtener saldo disponible: {str(e)}")
+        return None
+
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
     try:
@@ -972,7 +1010,18 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
-    def __init__(self, activos, token, fecha_desde, fecha_hasta):
+    def __init__(self, activos, token, fecha_desde, fecha_hasta, saldo_disponible=None, tasa_libre_riesgo=0.02):
+        """
+        Inicializa el manager de portafolio
+        
+        Args:
+            activos: Lista de activos con sus mercados
+            token: Token de acceso IOL
+            fecha_desde: Fecha inicio de datos
+            fecha_hasta: Fecha fin de datos
+            saldo_disponible: Saldo disponible en cuenta (opcional)
+            tasa_libre_riesgo: Tasa libre de riesgo anual (default 2%)
+        """
         self.activos = activos
         self.token = token
         self.fecha_desde = fecha_desde
@@ -980,8 +1029,86 @@ class PortfolioManager:
         self.data_loaded = False
         self.returns = None
         self.prices = None
-        self.notional = 100000  # Valor nominal por defecto
+        self.notional = saldo_disponible or 100000  # Usar saldo disponible si se proporciona
         self.manager = None
+        self.tasa_libre_riesgo = tasa_libre_riesgo
+        
+    def rebalanceo_aleatorio(self, panel='BCBA', cantidad_activos=5):
+        """
+        Realiza un rebalanceo aleatorio del portafolio
+        
+        Args:
+            panel: Panel de cotizaciones (BCBA, NYSE, etc.)
+            cantidad_activos: Número de activos a seleccionar
+        
+        Returns:
+            DataFrame con los activos seleccionados y sus precios
+        """
+        try:
+            # Obtener todos los tickers del panel
+            tickers = self._obtener_tickers_panel(panel)
+            
+            if not tickers:
+                raise ValueError(f"No se encontraron tickers para el panel {panel}")
+                
+            # Seleccionar activos aleatoriamente
+            tickers_seleccionados = random.sample(tickers, min(cantidad_activos, len(tickers)))
+            
+            # Obtener datos históricos para los activos seleccionados
+            data_frames = {}
+            
+            for simbolo in tickers_seleccionados:
+                df = obtener_serie_historica_iol(
+                    self.token,
+                    panel,
+                    simbolo,
+                    self.fecha_desde,
+                    self.fecha_hasta
+                )
+                
+                if df is not None and not df.empty:
+                    # Usar el último precio para verificar si se puede comprar
+                    precio_final = df['ultimoPrecio'].iloc[-1]
+                    if precio_final <= self.notional / cantidad_activos:
+                        df = df[['fecha', 'ultimoPrecio']].copy()
+                        df.columns = ['fecha', 'precio']
+                        df.set_index('fecha', inplace=True)
+                        data_frames[simbolo] = df
+            
+            if not data_frames:
+                raise ValueError("No se pudieron obtener datos válidos para ningún activo")
+                
+            # Combinar todos los DataFrames
+            df_precios = pd.concat(data_frames.values(), axis=1, keys=data_frames.keys())
+            
+            # Calcular retornos y estadísticas
+            self.returns = df_precios.pct_change().dropna()
+            self.mean_returns = self.returns.mean()
+            self.cov_matrix = self.returns.cov()
+            
+            # Calcular pesos iguales
+            n_activos = len(df_precios.columns)
+            self.weights = np.array([1/n_activos] * n_activos)
+            
+            return df_precios
+            
+        except Exception as e:
+            st.error(f"❌ Error en rebalanceo aleatorio: {str(e)}")
+            return None
+            
+    def _obtener_tickers_panel(self, panel):
+        """Obtiene la lista de tickers disponibles para un panel"""
+        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/Argentina/Operables'
+        headers = {'Authorization': f'Bearer {self.token}'}
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            datos = response.json()
+            return [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+        except Exception as e:
+            st.warning(f"⚠️ Error obteniendo tickers para {panel}: {str(e)}")
+            return []
     
     def load_data(self):
         try:
@@ -1586,21 +1713,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
     
-    st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
-    
-    # Configuración de optimización extendida
+    # Configuración de optimización
     col1, col2, col3 = st.columns(3)
     
     with col1:
         estrategia = st.selectbox(
             "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
+            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only', 'rebalanceo-aleatorio'],
             format_func=lambda x: {
                 'markowitz': 'Optimización de Markowitz',
                 'equi-weight': 'Pesos Iguales',
                 'min-variance-l1': 'Mínima Varianza L1',
                 'min-variance-l2': 'Mínima Varianza L2',
-                'long-only': 'Solo Posiciones Largas'
+                'long-only': 'Solo Posiciones Largas',
+                'rebalanceo-aleatorio': 'Rebalanceo Aleatorio'
             }[x]
         )
     
@@ -1610,15 +1736,110 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             min_value=0.0, max_value=1.0, value=0.08, step=0.01,
             help="Solo aplica para estrategia Markowitz"
         )
+        
+        # Configuración para rebalanceo aleatorio
+        if estrategia == 'rebalanceo-aleatorio':
+            col2_1, col2_2 = st.columns(2)
+            with col2_1:
+                panel = st.selectbox(
+                    "Panel de Cotizaciones:",
+                    ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
+                )
+            with col2_2:
+                cantidad_activos = st.number_input(
+                    "Cantidad de Activos:",
+                    min_value=1, max_value=20, value=5, step=1
+                )
     
     with col3:
         show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+        
+        # Configuración de tasa libre de riesgo
+        tasa_libre_riesgo = st.number_input(
+            "Tasa Libre de Riesgo (% anual):",
+            min_value=0.0, max_value=10.0, value=2.0, step=0.1
+        ) / 100
     
     col1, col2 = st.columns(2)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+    
+    if ejecutar_optimizacion:
+        with st.spinner("Ejecutando optimización..."):
+            try:
+                # Obtener saldo disponible
+                saldo_disponible = obtener_saldo_disponible(token_acceso)
+                
+                # Crear manager de portafolio
+                manager_inst = PortfolioManager(
+                    activos_para_optimizacion,
+                    token_acceso,
+                    fecha_desde,
+                    fecha_hasta,
+                    saldo_disponible=saldo_disponible,
+                    tasa_libre_riesgo=tasa_libre_riesgo
+                )
+                
+                # Cargar datos
+                if manager_inst.load_data():
+                    if estrategia == 'rebalanceo-aleatorio':
+                        # Realizar rebalanceo aleatorio
+                        df_precios = manager_inst.rebalanceo_aleatorio(panel, cantidad_activos)
+                        if df_precios is not None:
+                            st.success("✅ Rebalanceo aleatorio completado")
+                            
+                            # Mostrar activos seleccionados
+                            st.markdown("#### 📊 Activos Seleccionados")
+                            st.dataframe(df_precios.head())
+                            
+                            # Calcular y mostrar métricas
+                            metricas = {
+                                'Retorno Anual': manager_inst.mean_returns.mean() * 252,
+                                'Volatilidad Anual': np.sqrt(np.diag(manager_inst.cov_matrix) * 252).mean(),
+                                'Sharpe Ratio': (manager_inst.mean_returns.mean() * 252 - tasa_libre_riesgo) / 
+                                                (np.sqrt(np.diag(manager_inst.cov_matrix) * 252).mean())
+                            }
+                            
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Retorno Anual", f"{metricas['Retorno Anual']:.2%}")
+                                st.metric("Sharpe Ratio", f"{metricas['Sharpe Ratio']:.4f}")
+                            with col_b:
+                                st.metric("Volatilidad Anual", f"{metricas['Volatilidad Anual']:.2%}")
+                                st.metric("Tasa Libre de Riesgo", f"{tasa_libre_riesgo:.2%}")
+                    else:
+                        # Computar optimización normal
+                        use_target = target_return if estrategia == 'markowitz' else None
+                        portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+                        
+                        if portfolio_result:
+                            st.success("✅ Optimización completada")
+                            
+                            # Mostrar resultados
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("#### 📊 Pesos Optimizados")
+                                if portfolio_result.dataframe_allocation is not None:
+                                    weights_df = portfolio_result.dataframe_allocation.copy()
+                                    weights_df['Peso (%)'] = weights_df['weights'] * 100
+                                    weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                                    st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                            
+                            with col2:
+                                st.markdown("#### 📈 Métricas del Portafolio")
+                                metricas = portfolio_result.get_metrics_dict()
+                                
+                                col_a, col_b = st.columns(2)
+                                with col_a:
+                                    st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
+                                    st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
+                                    st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                                with col_b:
+                                    st.metric("Sharpe Ratio Ajustado", f"{metricas['Sharpe Ratio'] - tasa_libre_riesgo:.4f}")
+                                    st.metric("Tasa Libre de Riesgo", f"{tasa_libre_riesgo:.2%}")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
