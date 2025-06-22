@@ -1012,7 +1012,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     Args:
         token_portador: Token de autenticación Bearer
         mercado: Mercado (BCBA, NYSE, NASDAQ, ROFEX)
-        simbolo: Símbolo del activo
+        simbolo: Símbolo del activo (puede ser string o dict con clave 'simbolo')
         fecha_desde: Fecha inicio (YYYY-MM-DD)
         fecha_hasta: Fecha fin (YYYY-MM-DD)
         ajustada: "Ajustada" o "SinAjustar"
@@ -1020,7 +1020,18 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     Returns:
         DataFrame con datos históricos o None si hay error
     """
+    # Manejar caso donde simbolo es un diccionario
+    if isinstance(simbolo, dict):
+        simbolo = simbolo.get('simbolo', '')
+    
+    if not simbolo:
+        st.warning("No se proporcionó un símbolo válido")
+        return None
+        
+    # Asegurarse de que el mercado esté en mayúsculas
+    mercado = mercado.upper() if mercado else 'BCBA'
     try:
+        # Construir la URL de la API
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
         headers = {
             'Accept': 'application/json',
