@@ -927,35 +927,35 @@ class PortfolioManager:
                 st.error("❌ No se proporcionaron activos para analizar")
                 return False
 
-            # Crear DataFrame vacío para almacenar precios
+            # Obtener datos históricos usando la función existente
+            historical_data = get_historical_data_for_optimization(
+                token_portador=self.token,
+                activos=self.activos,
+                fecha_desde=self.fecha_desde,
+                fecha_hasta=self.fecha_hasta
+            )
+
+            if not historical_data:
+                st.error("❌ No se pudieron obtener datos históricos")
+                return False
+
+            # Crear DataFrame de precios
             df_precios = pd.DataFrame()
             activos_con_datos = []
 
-            # Obtener los precios históricos para cada activo usando cargar_serie_tiempo
-            for activo in self.activos:
-                try:
-                    # Usar nuestra función existente para cargar datos
-                    serie_tiempo = cargar_serie_tiempo(activo)
+            for activo, data in historical_data.items():
+                if not data.empty:
+                    df = pd.DataFrame({
+                        'fecha': data.index,
+                        activo: data['cierre']
+                    }).set_index('fecha')
                     
-                    if not serie_tiempo.empty:
-                        # Convertir a DataFrame con fecha como índice
-                        df = pd.DataFrame({
-                            'fecha': serie_tiempo['fecha'],
-                            activo: serie_tiempo['cierre']
-                        }).set_index('fecha')
-                        
-                        # Añadir al DataFrame principal
-                        if df_precios.empty:
-                            df_precios = df
-                        else:
-                            df_precios = df_precios.merge(df, left_index=True, right_index=True, how='outer')
-                        
-                        activos_con_datos.append(activo)
+                    if df_precios.empty:
+                        df_precios = df
                     else:
-                        st.warning(f"⚠️ No se pudieron obtener datos para {activo}")
-                except Exception as e:
-                    st.error(f"❌ Error al procesar {activo}: {str(e)}")
-                    return False
+                        df_precios = df_precios.merge(df, left_index=True, right_index=True, how='outer')
+                    
+                    activos_con_datos.append(activo)
 
             # Asegurarse de que hay datos
             if df_precios.empty:
@@ -976,6 +976,9 @@ class PortfolioManager:
             # Mostrar mensaje de éxito
             st.success(f"✅ Datos históricos cargados exitosamente para {len(activos_con_datos)} activos")
             return True
+        except Exception as e:
+            st.error(f"❌ Error en load_data: {str(e)}")
+            return False
         except Exception as e:
             st.error(f"❌ Error en load_data: {str(e)}")
             return False
@@ -1146,6 +1149,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, returns=None, prices=N
             'retorno_total': 0,
             'pl_esperado_max': 0,
             'pl_esperado_min': 0,
+            'riesgo_anual': 0,
             'probabilidades': {
                 'ganancia': 0,
                 'perdida': 0,
@@ -1155,6 +1159,93 @@ def calcular_metricas_portafolio(portafolio, valor_total, returns=None, prices=N
         }
 
     try:
+        # 1. Calcular concentración del portafolio
+        concentracion = 0
+        for activo in portafolio:
+            peso = activo.get('weights', 0)
+            concentracion += peso ** 2
+        
+        # 2. Calcular volatilidad anualizada del portafolio
+        if returns is not None and not returns.empty:
+            # Calcular volatilidad anualizada usando la matriz de covarianza
+            cov_matrix = returns.cov() * 252
+            weights = np.array(portafolio[0]['weights'])
+            volatilidad_anual = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+            riesgo_anual = volatilidad_anual  # Riesgo anual es la misma que volatilidad
+        else:
+            volatilidad_anual = 0
+            riesgo_anual = 0
+        
+        # 3. Calcular retorno esperado anualizado
+        if returns is not None and not returns.empty:
+            retorno_esperado_anual = np.sum(portafolio[0]['weights'] * returns.mean() * 252)
+        else:
+            retorno_esperado_anual = 0
+        
+        # 4. Calcular Sharpe Ratio
+        sharpe_ratio = retorno_esperado_anual / volatilidad_anual if volatilidad_anual > 0 else 0
+        
+        # 5. Calcular drawdown máximo
+        if prices is not None and not prices.empty:
+            max_drawdown = (prices / prices.cummax() - 1).min()
+            max_drawdown = max_drawdown.min() if isinstance(max_drawdown, pd.Series) else max_drawdown
+        else:
+            max_drawdown = 0
+        
+        # 6. Calcular retorno total
+        if returns is not None and not returns.empty:
+            retorno_total = (1 + returns).prod() - 1
+            retorno_total = retorno_total.sum() if isinstance(retorno_total, pd.Series) else retorno_total
+        else:
+            retorno_total = 0
+        
+        # 7. Calcular escenarios optimistas y pesimistas
+        pl_esperado_min = retorno_esperado_anual - 2 * volatilidad_anual
+        pl_esperado_max = retorno_esperado_anual + 2 * volatilidad_anual
+        
+        # 8. Calcular probabilidades usando distribución normal
+        if volatilidad_anual > 0:
+            from scipy.stats import norm
+            
+            # Probabilidad de pérdida (rendimiento < 0)
+            prob_perdida = norm.cdf(0, retorno_esperado_anual, volatilidad_anual)
+            
+            # Probabilidad de ganancia (rendimiento > 0)
+            prob_ganancia = 1 - prob_perdida
+            
+            # Probabilidad de pérdida > 10%
+            prob_perdida_mayor_10 = norm.cdf(-0.10, retorno_esperado_anual, volatilidad_anual)
+            
+            # Probabilidad de ganancia > 10%
+            prob_ganancia_mayor_10 = 1 - norm.cdf(0.10, retorno_esperado_anual, volatilidad_anual)
+            
+            probabilidades = {
+                'ganancia': prob_ganancia * 100,
+                'perdida': prob_perdida * 100,
+                'ganancia_mayor_10': prob_ganancia_mayor_10 * 100,
+                'perdida_mayor_10': prob_perdida_mayor_10 * 100
+            }
+        else:
+            probabilidades = {
+                'ganancia': 0,
+                'perdida': 0,
+                'ganancia_mayor_10': 0,
+                'perdida_mayor_10': 0
+            }
+        
+        return {
+            'concentracion': concentracion,
+            'volatilidad_anual': volatilidad_anual,
+            'std_dev_activo': volatilidad_anual,
+            'retorno_esperado_anual': retorno_esperado_anual,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown': max_drawdown,
+            'retorno_total': retorno_total,
+            'pl_esperado_max': pl_esperado_max,
+            'pl_esperado_min': pl_esperado_min,
+            'riesgo_anual': riesgo_anual,
+            'probabilidades': probabilidades
+        }
         # 1. Calcular concentración del portafolio
         concentracion = 0
         for activo in portafolio:
