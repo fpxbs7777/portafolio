@@ -919,8 +919,18 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         if not data or not isinstance(data, dict):
             raise ValueError("Los datos deben ser un diccionario")
             
-        # Inicializar manager
-        port_mgr = manager(rics, notional, data)
+        # Filtrar RICs con datos válidos
+        valid_rics = []
+        for ric in rics:
+            df = data.get(ric)
+            if df is not None and not df.empty and 'Cierre' in df.columns:
+                valid_rics.append(ric)
+        
+        if not valid_rics:
+            raise ValueError("No hay datos válidos con columna 'Cierre' para ningún RIC")
+            
+        # Inicializar manager con RICs válidos
+        port_mgr = manager(valid_rics, notional, data)
         
         # Verificar datos de entrada
         if port_mgr.returns is None or port_mgr.returns.empty:
@@ -929,33 +939,23 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         if port_mgr.cov_matrix is None:
             raise ValueError("No se pudo calcular la matriz de covarianza")
             
-        # Calcular rango de retornos
-        min_returns = np.nanmin(port_mgr.mean_returns)
-        max_returns = np.nanmax(port_mgr.mean_returns)
-        
-        # Validar rango de retornos
-        if min_returns >= max_returns:
-            raise ValueError("El rango de retornos no es válido")
-            
         # Crear figura de Plotly
         fig = go.Figure()
         
         # Agregar puntos de los activos individuales
-        for ric in rics:
-            if ric in data:
-                df = data[ric]
-                if 'Cierre' in df.columns:
-                    returns = df['Cierre'].pct_change().dropna()
-                    if not returns.empty:
-                        annual_return = returns.mean() * 252
-                        annual_volatility = returns.std() * np.sqrt(252)
-                        fig.add_trace(go.Scatter(
-                            x=[annual_volatility],
-                            y=[annual_return],
-                            mode='markers',
-                            name=ric,
-                            marker=dict(size=10)
-                        ))
+        for ric in valid_rics:
+            df = data[ric]
+            returns = df['Cierre'].pct_change().dropna()
+            if not returns.empty:
+                annual_return = returns.mean() * 252
+                annual_volatility = returns.std() * np.sqrt(252)
+                fig.add_trace(go.Scatter(
+                    x=[annual_volatility],
+                    y=[annual_return],
+                    mode='markers',
+                    name=ric,
+                    marker=dict(size=10)
+                ))
         
         # Agregar portafolio optimizado
         if target_return is not None:
