@@ -1005,13 +1005,20 @@ class PortfolioManager:
                 portfolio_output.dataframe_allocation = pd.DataFrame({
                     'rics': list(self.returns.columns),
                     'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
                 })
+                
+                # Calcular métricas del portafolio
+                portfolio_output.metrics = calcular_metricas_portafolio(
+                    portafolio=portfolio_output.dataframe_allocation.to_dict('records'),
+                    valor_total=self.notional,
+                    returns=self.returns,
+                    prices=self.prices
+                )
                 
                 return portfolio_output
             
         except Exception as e:
+            st.error(f"❌ Error en compute_portfolio: {str(e)}")
             return None
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
@@ -1635,15 +1642,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
                             # Calcular métricas usando los retornos históricos y precios
-                            metricas = calcular_metricas_portafolio(
-                                portafolio=portfolio_result.dataframe_allocation.to_dict('records'),
-                                valor_total=valor_total,
-                                returns=manager_inst.returns,
-                                prices=manager_inst.prices
-                            )
-                            
-                            if metricas:
-                                # Mostrar métricas en un formato más legible
+                            if portfolio_result.metrics:
+                                metricas = portfolio_result.metrics
+                                
                                 metricas_df = pd.DataFrame([{
                                     'Concentración': f"{metricas['concentracion']:.4f}",
                                     'Volatilidad Anual': f"{metricas['volatilidad_anual']:.2%}",
@@ -1670,16 +1671,26 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                     st.metric("Drawdown Máximo", f"{metricas['max_drawdown']:.2%}")
                                     st.metric("Retorno Total", f"{metricas['retorno_total']:.2%}")
                                     st.metric("Concentración", f"{metricas['concentracion']:.4f}")
-                            
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                st.metric("Retorno Anual", f"{metricas['retorno_esperado_anual']:.2%}")
-                                st.metric("Volatilidad Anual", f"{metricas['std_dev_activo']:.2%}")
-                                st.metric("Ratio de Sharpe", f"{metricas['sharpe_ratio']:.4f}")
-                                st.metric("VaR 95%", f"{metricas['var_95']:.4f}")
-                            with col_b:
-                                st.metric("Skewness", f"{metricas['skewness']:.4f}")
-                                st.metric("Kurtosis", f"{metricas['kurtosis']:.4f}")
+                            else:
+                                st.warning("⚠️ No se pudieron calcular las métricas del portafolio")
+                                
+                                # Mostrar métricas básicas del output
+                                col_a, col_b = st.columns(2)
+                                with col_a:
+                                    st.metric("Retorno Anual", f"{portfolio_result.return_annual:.2%}")
+                                    st.metric("Volatilidad Anual", f"{portfolio_result.volatility_annual:.2%}")
+                                    st.metric("Ratio de Sharpe", f"{portfolio_result.sharpe_ratio:.4f}")
+                                    st.metric("VaR 95%", f"{portfolio_result.var_95:.4f}")
+                                with col_b:
+                                    st.metric("Skewness", f"{portfolio_result.skewness:.4f}")
+                                    st.metric("Kurtosis", f"{portfolio_result.kurtosis:.4f}")
+                                    st.metric("JB Statistic", f"{portfolio_result.jb_statistic:.4f}")
+                                    st.metric("Ratio de Sharpe", f"{metricas['sharpe_ratio']:.4f}")
+                                    st.metric("VaR 95%", f"{metricas['var_95']:.4f}")
+                                with col_b:
+                                    st.metric("Skewness", f"{metricas['skewness']:.4f}")
+                                    st.metric("Kurtosis", f"{metricas['kurtosis']:.4f}")
+                                    st.metric("JB Statistic", f"{metricas['jb_statistic']:.4f}")
                                 st.metric("JB Statistic", f"{metricas['jb_statistic']:.4f}")
 
                         # Mostrar Frontera Eficiente si está habilitada
