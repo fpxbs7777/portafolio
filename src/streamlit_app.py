@@ -2238,10 +2238,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     
                     # Mostrar la tabla de comparación
                     st.dataframe(df_comparison, use_container_width=True)
-                    
-            except Exception as e:
-                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
-                st.error("❌ No se pudieron cargar los datos históricos")
+            
+        except Exception as e:
+            st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+            st.error("❌ No se pudieron cargar los datos históricos")
     
     # Información adicional extendida
     with st.expander("ℹ️ Información sobre las Estrategias"):
