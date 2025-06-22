@@ -1653,81 +1653,46 @@ class PortfolioManager:
 # ... (rest of the code remains the same)
 # Removed stray error handling code that was causing indentation issues
 
-    
+    try:
+        manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
+        
+        if manager_inst.load_data():
             try:
-                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
+                portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
+                    target_return=target_return, include_min_variance=True
+                )
                 
-                if manager_inst.load_data():
-                    portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
-                        target_return=target_return, include_min_variance=True
-                    )
-                    
-                    if portfolios and returns and volatilities:
-                        st.success("✅ Frontera eficiente calculada")
-                        
-                        # Crear gráfico de frontera eficiente
-                        fig = go.Figure()
-                        
-                        # Línea de frontera eficiente
-                        fig.add_trace(go.Scatter(
-                            x=volatilities, y=returns,
-                            mode='lines+markers',
-                            name='Frontera Eficiente',
-                            line=dict(color='#0d6efd', width=3),
-                            marker=dict(size=6)
-                        ))
-                        
-                        # Portafolios especiales
-                        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
-                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
-                        
-                        for i, (label, portfolio) in enumerate(portfolios.items()):
-                            if portfolio is not None:
-                                fig.add_trace(go.Scatter(
-                                    x=[portfolio.volatility_annual], 
-                                    y=[portfolio.return_annual],
-                                    mode='markers',
-                                    name=labels[i] if i < len(labels) else label,
-                                    marker=dict(size=12, color=colors[i % len(colors)])
-                                ))
-                        
-                        fig.update_layout(
-                            title='Frontera Eficiente del Portafolio',
-                            xaxis_title='Volatilidad Anual',
-                            yaxis_title='Retorno Anual',
-                            showlegend=True,
-                            template='plotly_white',
-                            height=500
-                        )
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Tabla comparativa de portafolios
+                if portfolios and returns and volatilities:
+                    st.success("✅ Frontera eficiente calculada")
                         st.markdown("#### 📊 Comparación de Estrategias")
-                        comparison_data = []
-                        for label, portfolio in portfolios.items():
-                            if portfolio is not None:
-                                comparison_data.append({
-                                    'Estrategia': label,
-                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                    'VaR 95%': f"{portfolio.var_95:.4f}",
-                                    'Skewness': f"{portfolio.skewness:.4f}",
-                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
-                                })
-                        
-                        if comparison_data:
-                            df_comparison = pd.DataFrame(comparison_data)
-                            st.dataframe(df_comparison, use_container_width=True)
                     
-                    else:
-                        st.error("❌ No se pudo calcular la frontera eficiente")
+                    st.markdown("#### 📊 Comparación de Estrategias")
+                    comparison_data = []
+                    for label, portfolio in portfolios.items():
+                        comparison_data.append({
+                            'Estrategia': label,
+                            'Retorno Anual': portfolio.return_annual,
+                            'Volatilidad Anual': portfolio.volatility_annual,
+                            'Ratio de Sharpe': portfolio.sharpe_ratio,
+                            'Pesos': portfolio.weights
+                        })
+                    
+                    df_comparison = pd.DataFrame(comparison_data)
+                    st.dataframe(df_comparison, use_container_width=True)
+                
                 else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-                    
+                    st.error("❌ No se pudo calcular la frontera eficiente")
+                
             except Exception as e:
-                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+                st.error(f"❌ Error en el cálculo de la frontera eficiente: {str(e)}")
+                st.error(f"Detalles: {str(e)}")
+            
+        else:
+            st.error("❌ No se pudieron cargar los datos históricos")
+            
+    except Exception as e:
+        st.error(f"❌ Error general en el proceso de optimización: {str(e)}")
+        st.error(f"Detalles: {str(e)}")
     
     # Información adicional extendida
     with st.expander("ℹ️ Información sobre las Estrategias"):
