@@ -1383,7 +1383,7 @@ class EnhancedPortfolioManager:
         return frontiers, volatilities
 
 
-class PortfolioManager:
+class EnhancedPortfolioManager:
     def __init__(self, activos, token, fecha_desde, fecha_hasta, saldo_disponible=None, tasa_libre_riesgo=0.02):
         """
         Inicializa el manager de portafolio
