@@ -141,7 +141,7 @@ def obtener_tokens(usuario, contraseña):
         respuesta = requests.post(url_login, data=datos, timeout=15)
         respuesta.raise_for_status()
         respuesta_json = respuesta.json()
-         respuesta_json['access_token'], respuesta_json['refresh_token']
+         return respuesta_json['access_token'], respuesta_json['refresh_token']
     except requests.exceptions.HTTPError as http_err:
         st.error(f'Error HTTP al obtener tokens: {http_err}')
         if respuesta.status_code == 400:
@@ -1365,7 +1365,7 @@ class EnhancedPortfolioManager:
         """Calcula la frontera eficiente"""
         if not self.data_loaded:
             if not self.load_data():
-                 None, None
+               return None, None
                 
         min_ret = np.min(self.mean_s)
         max_ret = np.max(self.mean_s)
@@ -1487,7 +1487,7 @@ class EnhancedPortfolioManager:
     def _preprocess_data(self, data_dict):
         """Preprocesa los datos históricos"""
         if not data_dict:
-             None, None
+           return None, None
             
         # Unir todos los datos en un solo DataFrame
         prices = pd.concat(data_dict.values(), axis=1, keys=data_dict.keys())
