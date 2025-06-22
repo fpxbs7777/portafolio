@@ -552,6 +552,32 @@ def obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta):
         return None
 
 
+def obtener_serie_historica_iol(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Obtiene datos históricos usando la API de InvertirOnline
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                df = pd.DataFrame(data)
+                df['fecha'] = pd.to_datetime(df['fechaHoraCotizacion'])
+                df = df.sort_values('fecha')
+                return df
+        else:
+            st.warning(f"Error al obtener datos para {simbolo} en {mercado}: {response.status_code}")
+        return None
+    except Exception as e:
+        st.error(f"Error en la solicitud de {simbolo}: {str(e)}")
+        return None
+
+
 def obtener_fondos_comunes_yahoo():
     """
     Obtiene datos de fondos comunes usando Yahoo Finance
@@ -580,14 +606,101 @@ def obtener_serie_historica_fci_yahoo(simbolo, fecha_desde, fecha_hasta):
     return obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta)
 
 
-def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta):
+def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, use_iol=False, bearer_token=None):
     """
-    Obtiene datos históricos para optimización usando Yahoo Finance
-            time.sleep(0.5)
+    Obtiene datos históricos para optimización
+    
+    Args:
+        simbolos (list): Lista de símbolos a consultar
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
+        use_iol (bool): Si es True, usa la API de InvertirOnline
+        bearer_token (str): Token de autenticación para IOL (requerido si use_iol=True)
         
-        progress_bar.empty()
+    Returns:
+        tuple: (mean_returns, cov_matrix, df_precios) o (None, None, None) en caso de error
+    """
+    data = {}
+    max_retries = 3
+    retry_delay = 2  # segundos
+    
+    if use_iol and not bearer_token:
+        st.error("Se requiere un token de autenticación para usar la API de InvertirOnline")
+        return None, None, None
+
+    try:
+        # Configuración para IOL si es necesario
+        if use_iol:
+            mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
+            ajustada = 'SinAjustar'
         
-        if errores:
+        # Obtener datos históricos para cada símbolo
+        for simbolo in simbolos:
+            retries = 0
+            while retries < max_retries:
+                try:
+                    if use_iol:
+                        # Intentar con diferentes mercados para IOL
+                        for mercado in mercados:
+                            df = obtener_serie_historica_iol(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token)
+                            if df is not None and not df.empty:
+                                data[simbolo] = df
+                                break
+                    else:
+                        # Usar Yahoo Finance
+                        df = obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta)
+                        if df is not None and not df.empty:
+                            data[simbolo] = df
+                            break
+                    
+                    retries += 1
+                    if retries < max_retries:
+                        time.sleep(retry_delay)
+                        
+                except Exception as e:
+                    retries += 1
+                    if retries < max_retries:
+                        time.sleep(retry_delay)
+                        
+            if retries == max_retries and simbolo not in data:
+                st.error(f'No se pudo obtener datos históricos para {simbolo} después de {max_retries} intentos')
+                
+        # Verificar si hay datos suficientes
+        if not data:
+            st.error("No se pudieron obtener datos históricos para ningún símbolo")
+            return None, None, None
+            
+        # Asegurarse de que todas las series tengan la misma longitud
+        min_length = min(len(s) for s in data.values()) if data else 0
+        if min_length < 5:  # Mínimo razonable de datos para optimización
+            st.error("Los datos históricos son insuficientes para la optimización")
+            return None, None, None
+            
+        # Crear DataFrame con las series alineadas
+        precio_cierre = 'cierre' if use_iol else 'Close'
+        df_precios = pd.DataFrame({k: v.set_index('fecha')[precio_cierre] for k, v in data.items()})
+        
+        # Calcular retornos y validar
+        returns = df_precios.pct_change().dropna()
+        
+        if returns.empty or len(returns) < 30:
+            st.warning("No hay suficientes datos para el análisis")
+            return None, None, None
+            
+        # Eliminar columnas con desviación estándar cero
+        returns = returns.loc[:, returns.std() > 0]
+        
+        # Calcular matriz de covarianza
+        cov_matrix = returns.cov()
+        
+        # Calcular retornos medios
+        mean_returns = returns.mean()
+        
+        return mean_returns, cov_matrix, df_precios
+        
+    except Exception as e:
+        st.error(f"Error en get_historical_data_for_optimization: {str(e)}")
+        return None, None, None
             st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
         
         if precios:
