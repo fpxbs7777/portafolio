@@ -953,13 +953,17 @@ class PortfolioManager:
                     )
                     
                     if df is not None and not df.empty:
-                        # Asegurarse de que la columna de precios existe
-                        if 'precio' in df.columns:
-                            df = df[['fecha', 'precio']].copy()
+                        # Usar la columna de último precio si está disponible
+                        precio_columns = ['ultimoPrecio', 'ultimo_precio', 'precio']
+                        precio_col = next((col for col in precio_columns if col in df.columns), None)
+                        
+                        if precio_col:
+                            df = df[['fecha', precio_col]].copy()
+                            df.columns = ['fecha', 'precio']  # Normalizar el nombre de la columna
                             df.set_index('fecha', inplace=True)
                             data_frames[simbolo] = df
                         else:
-                            st.warning(f"⚠️ No se encontró columna de precio para {simbolo}")
+                            st.warning(f"⚠️ No se encontró columna de precio válida para {simbolo}")
                     else:
                         st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
             
