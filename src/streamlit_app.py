@@ -1664,7 +1664,7 @@ class PortfolioManager:
                 
                 if portfolios and returns and volatilities:
                     st.success("✅ Frontera eficiente calculada")
-                        st.markdown("#### 📊 Comparación de Estrategias")
+                    st.markdown("#### 📊 Comparación de Estrategias")
                     
                     st.markdown("#### 📊 Comparación de Estrategias")
                     comparison_data = []
