@@ -148,12 +148,11 @@ def obtener_tokens(usuario, contraseña):
             st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
         elif respuesta.status_code == 401:
             st.warning("No autorizado. Verifique sus credenciales o permisos.")
-        
-            st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
-         None, None
+        st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
+        return None, None
     except Exception as e:
         st.error(f'Error inesperado al obtener tokens: {str(e)}')
-         None, None
+        return None, None
 
 def obtener_lista_clientes(token_portador):
     url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
@@ -163,36 +162,35 @@ def obtener_lista_clientes(token_portador):
         if respuesta.status_code == 200:
             clientes_data = respuesta.json()
             if isinstance(clientes_data, list):
-                 clientes_data
+                return clientes_data
             elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
-                 clientes_data['clientes']
-            
-                 []
-        
+                return clientes_data['clientes']
+            else:
+                return []
+        else:
             st.error(f'Error al obtener la lista de clientes: {respuesta.status_code}')
-             []
+            return []
     except Exception as e:
         st.error(f'Error de conexión al obtener clientes: {str(e)}')
-         []
+        return []
 
 def obtener_estado_cuenta(token_portador, id_cliente=None):
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
-    
+    else:
         url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
-    
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
         respuesta = requests.get(url_estado_cuenta, headers=encabezados)
         if respuesta.status_code == 200:
-             respuesta.json()
+            return respuesta.json()
         elif respuesta.status_code == 401:
-             obtener_estado_cuenta(token_portador, None)
-        
-             None
+            return obtener_estado_cuenta(token_portador, None)
+        else:
+            return None
     except Exception as e:
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
-         None
+        return None
 
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
@@ -200,12 +198,12 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     try:
         respuesta = requests.get(url_portafolio, headers=encabezados)
         if respuesta.status_code == 200:
-             respuesta.json()
-        
-             None
+            return respuesta.json()
+        else:
+            return None
     except Exception as e:
         st.error(f'Error al obtener portafolio: {str(e)}')
-         None
+        return None
 
 def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
     url_cotizacion_mep = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
