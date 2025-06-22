@@ -712,77 +712,120 @@ class manager:
         try:
             if self.cov_matrix is None or self.mean_returns is None:
                 self.compute_covariance()
-                
+            
             n_assets = len(self.rics)
-            bounds = tuple((0.0, 1.0) for _ in range(n_assets))  # Pesos entre 0 y 1
+            
+            # Calcular límites de retorno alcanzables
+            min_ret = np.min(self.mean_returns)
+            max_ret = np.max(self.mean_returns)
+            
+            # Verificar si el retorno objetivo es alcanzable
+            if target_return is not None:
+                if target_return > max_ret + 1e-6:  # Pequeña tolerancia numérica
+                    st.warning(f"El retorno objetivo ({target_return:.1%}) excede el máximo alcanzable ({max_ret:.1%}). "
+                              f"Usando el máximo retorno posible.")
+                    target_return = max_ret
+                elif target_return < min_ret - 1e-6:
+                    st.warning(f"El retorno objetivo ({target_return:.1%}) está por debajo del mínimo alcanzable ({min_ret:.1%}). "
+                              f"Usando el mínimo retorno posible.")
+                    target_return = min_ret
+            
+            # Configuración de la optimización
+            bounds = tuple((0.0, 1.0) for _ in range(n_assets))
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1.0}]
             
             # Función objetivo: varianza del portafolio
             def portfolio_variance_obj(weights):
                 return portfolio_variance(weights, self.cov_matrix)
             
-            # Configuración de restricciones
-            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1.0}]  # Suma de pesos = 1
-            
-            # Caso: Pesos iguales
+            # Caso: Pesos iguales (rápido, sin optimización)
             if portfolio_type == 'equi-weight':
                 weights = np.ones(n_assets) / n_assets
                 return self._create_output(weights)
-                
+            
             # Caso: Mínima varianza con restricción L1 (menos sensible a outliers)
             elif portfolio_type == 'min-variance-l1':
                 constraints.append({'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(np.abs(x))})
-                
+            
             # Caso: Mínima varianza con restricción L2 (más estable numéricamente)
             elif portfolio_type == 'min-variance-l2':
                 constraints.append({'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(x**2)})
-                
+            
             # Caso: Optimización de Markowitz
             elif portfolio_type == 'markowitz':
                 if target_return is not None:
                     # Optimización con retorno objetivo
                     constraints.append({
                         'type': 'eq',
-                        'fun': lambda x: np.sum(self.mean_returns * x) - target_return
+                        'fun': lambda x: np.sum(self.mean_returns * x) - target_return,
+                        'jac': lambda x: self.mean_returns  # Gradiente para mejor convergencia
                     })
                 else:
                     # Maximizar ratio de Sharpe
                     def neg_sharpe_ratio(weights):
                         port_ret = np.sum(self.mean_returns * weights)
                         port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-                        if port_vol < 1e-10:  # Evitar división por cero
+                        if port_vol < 1e-10:
                             return np.inf
                         return -(port_ret - self.risk_free_rate) / port_vol
+                    
+                    # Usar un punto inicial más inteligente
+                    if hasattr(self, 'last_weights') and self.last_weights is not None:
+                        x0 = self.last_weights
+                    else:
+                        x0 = np.ones(n_assets) / n_assets
                     
                     # Optimizar ratio de Sharpe
                     result = op.minimize(
                         neg_sharpe_ratio,
-                        x0=np.ones(n_assets) / n_assets,
+                        x0=x0,
                         method='SLSQP',
                         bounds=bounds,
                         constraints=constraints,
-                        options={'maxiter': 1000, 'ftol': 1e-9}
+                        options={
+                            'maxiter': 500,
+                            'ftol': 1e-8,
+                            'disp': False,
+                            'eps': 1e-10
+                        }
                     )
                     
                     if not result.success:
                         st.warning(f"Optimización fallida: {result.message}")
                         return None
-                        
+                    
+                    self.last_weights = result.x  # Guardar para la próxima iteración
                     return self._create_output(result.x)
+            
+            # Configuración de la optimización
+            opt_options = {
+                'maxiter': 1000,
+                'ftol': 1e-8,
+                'disp': False,
+                'eps': 1e-10
+            }
+            
+            # Punto inicial mejorado
+            if hasattr(self, 'last_weights') and self.last_weights is not None:
+                x0 = self.last_weights
+            else:
+                x0 = np.ones(n_assets) / n_assets
             
             # Optimización de varianza mínima
             result = op.minimize(
                 portfolio_variance_obj,
-                x0=np.ones(n_assets) / n_assets,
+                x0=x0,
                 method='SLSQP',
                 bounds=bounds,
                 constraints=constraints,
-                options={'maxiter': 1000, 'ftol': 1e-9}
+                options=opt_options
             )
             
             if not result.success:
                 st.warning(f"Optimización fallida: {result.message}")
                 return None
-                
+            
+            self.last_weights = result.x  # Guardar para la próxima iteración
             return self._create_output(result.x)
             
         except Exception as e:
