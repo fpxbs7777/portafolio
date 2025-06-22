@@ -1951,6 +1951,28 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format="%.2f"
         ) / 100  # Convertir a decimal
     
+    # Fila 2: Simulaciones y opciones avanzadas
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        # Número de simulaciones Monte Carlo
+        n_simulations = st.number_input(
+            "Número de Simulaciones", 
+            min_value=100, 
+            max_value=10000, 
+            value=1000,
+            step=100,
+            help="Número de simulaciones para el análisis de Monte Carlo"
+        )
+    
+    with col2:
+        # Opción para usar Monte Carlo
+        use_monte_carlo = st.checkbox(
+            "Usar Monte Carlo", 
+            value=True,
+            help="Usar simulación de Monte Carlo para inicialización"
+        )
+    
     # Fila 2: Opciones específicas de estrategia
     if estrategia == "markowitz":
         target_return = st.sidebar.number_input(
@@ -1978,22 +2000,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         risk_aversion = 1.0
     
     # Opciones avanzadas en un expander
-    with st.sidebar.expander("⚙️ Opciones Avanzadas"):
-        # Mostrar opción de simulación Monte Carlo
-        use_monte_carlo = st.checkbox(
-            "Usar Monte Carlo para inicialización", 
-            value=True,
-            help="Usa simulación de Monte Carlo para encontrar un buen punto inicial"
-        )
-        
-        n_simulations = st.number_input(
-            "Número de simulaciones", 
-            min_value=100, 
-            max_value=10000, 
-            value=1000,
-            step=100,
-            help="Número de simulaciones para Monte Carlo"
-        )
+    with st.sidebar.expander("⚙️ Otras Opciones"):
+        # Mostrar opciones adicionales aquí si es necesario
+        st.info("Ajusta el número de simulaciones y la opción de Monte Carlo en la sección principal.")
     
     # Mostrar opción de frontera eficiente
     show_frontier = st.sidebar.checkbox(
@@ -2069,6 +2078,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     except Exception as e:
                         st.error(f"Error al obtener métricas: {str(e)}")
                 
+                # Mostrar resultados de la optimización
                 if portfolio_result:
                     st.success("✅ Optimización completada")
                     
@@ -2085,51 +2095,59 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     
                     with col2:
                         st.markdown("#### 📈 Métricas del Portafolio")
-                        metricas = portfolio_result.get_metrics_dict()
-                        
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                            st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                        with col_b:
-                            st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                            st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                            st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                            normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                            st.metric("Normalidad", normalidad)
-                        
+                        try:
+                            metricas = portfolio_result.get_metrics_dict()
+                            
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Retorno Anual", f"{metricas.get('Annual Return', 0):.2%}")
+                                st.metric("Volatilidad Anual", f"{metricas.get('Annual Volatility', 0):.2%}")
+                                st.metric("Ratio de Sharpe", f"{metricas.get('Sharpe Ratio', 0):.4f}")
+                                st.metric("VaR 95%", f"{metricas.get('VaR 95%', 0):.4f}")
+                            with col_b:
+                                st.metric("Skewness", f"{metricas.get('Skewness', 0):.4f}")
+                                st.metric("Kurtosis", f"{metricas.get('Kurtosis', 0):.4f}")
+                                st.metric("JB Statistic", f"{metricas.get('JB Statistic', 0):.4f}")
+                                normalidad = "✅ Normal" if metricas.get('Is Normal', False) else "❌ No Normal"
+                                st.metric("Normalidad", normalidad)
+                        except Exception as e:
+                            st.error(f"Error al obtener métricas: {str(e)}")
+                    
                     # Gráfico de distribución de retornos
-                    if portfolio_result.returns is not None:
+                    if hasattr(portfolio_result, 'returns') and portfolio_result.returns is not None:
                         st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                        fig = portfolio_result.plot_histogram_streamlit()
-                        st.plotly_chart(fig, use_container_width=True)
+                        try:
+                            fig = portfolio_result.plot_histogram_streamlit()
+                            st.plotly_chart(fig, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error al generar el gráfico de distribución: {str(e)}")
                     
                     # Gráfico de pesos
-                    if portfolio_result.weights is not None and portfolio_result.dataframe_allocation is not None:
+                    if (hasattr(portfolio_result, 'weights') and portfolio_result.weights is not None and 
+                        hasattr(portfolio_result, 'dataframe_allocation') and portfolio_result.dataframe_allocation is not None):
                         st.markdown("#### 🥧 Distribución de Pesos")
-                        fig_pie = go.Figure(data=[go.Pie(
-                            labels=portfolio_result.dataframe_allocation['rics'],
-                            values=portfolio_result.weights,
-                            textinfo='label+percent',
-                            hole=0.4,
-                            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                        )])
-                        fig_pie.update_layout(
-                            title="Distribución Optimizada de Activos",
-                            template='plotly_white'
-                        )
-                        st.plotly_chart(fig_pie, use_container_width=True)
-                        
-                    else:
-                        st.error("❌ Error en la optimización")
+                        try:
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=portfolio_result.dataframe_allocation['rics'],
+                                values=portfolio_result.weights,
+                                textinfo='label+percent',
+                                hole=0.4,
+                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                            )])
+                            fig_pie.update_layout(
+                                title="Distribución Optimizada de Activos",
+                                template='plotly_white'
+                            )
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error al generar el gráfico de pesos: {str(e)}")
                 else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
+                    st.error("❌ No se obtuvieron resultados de la optimización")
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
     
+    # Mostrar frontera eficiente si está habilitado
     if show_frontier and ejecutar_optimizacion:
         with st.spinner("Calculando frontera eficiente..."):
             try:
