@@ -869,7 +869,7 @@ def obtener_saldo_disponible(token_acceso):
         Saldo disponible en ARS o None si hay error
     """
     try:
-        url = "https://api.invertironline.com/api/v2/cuentas"
+        url = "https://api.invertironline.com/api/v2/cuentas/Argentina"
         headers = {
             'Authorization': f'Bearer {token_acceso}',
             'Accept': 'application/json'
@@ -1843,8 +1843,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
                 return
-        with st.spinner("Ejecutando optimización..."):
-            try:
                 # Crear manager de portafolio con la lista de activos (símbolo y mercado)
                 manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
                 
