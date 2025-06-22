@@ -483,6 +483,21 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
     
     return endpoints.get(mercado)
 
+def parse_datetime_flexible(date_str: str):
+    """
+    Parses a datetime string that may or may not include microseconds or timezone info.
+    Uses pandas.to_datetime for robust parsing.
+    """
+    if not isinstance(date_str, str):
+        return None
+    try:
+        # pd.to_datetime is very robust and can handle various formats, including ISO 8601
+        # with or without microseconds and timezone information.
+        # errors='coerce' will return NaT (Not a Time) for strings that cannot be parsed.
+        return pd.to_datetime(date_str, errors='coerce', utc=True)
+    except Exception:
+        return None
+
 def procesar_respuesta_historico(data, tipo_activo):
     """
     Procesa la respuesta de la API según el tipo de activo
@@ -508,7 +523,7 @@ def procesar_respuesta_historico(data, tipo_activo):
                         
                         if precio is not None and precio > 0 and fecha_str:
                             fecha_parsed = parse_datetime_flexible(fecha_str)
-                            if fecha_parsed is not None:
+                            if pd.notna(fecha_parsed):
                                 precios.append(float(precio))
                                 fechas.append(fecha_parsed)
                 except (ValueError, AttributeError) as e:
@@ -521,7 +536,7 @@ def procesar_respuesta_historico(data, tipo_activo):
         
         # Para respuestas que son un solo valor (ej: MEP)
         elif isinstance(data, (int, float)):
-            return pd.Series([float(data)], index=[pd.Timestamp.now()], name='precio')
+            return pd.Series([float(data)], index=[pd.Timestamp.now(tz='UTC')], name='precio')
             
         return None
         
@@ -889,8 +904,8 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
-    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
-        self.symbols = symbols
+    def __init__(self, activos, token, fecha_desde, fecha_hasta):
+        self.activos = activos
         self.token = token
         self.fecha_desde = fecha_desde
         self.fecha_hasta = fecha_hasta
@@ -902,25 +917,37 @@ class PortfolioManager:
     
     def load_data(self):
         try:
-            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
-                self.token, self.symbols, self.fecha_desde, self.fecha_hasta
+            # Modificado para pasar la lista de activos con sus mercados
+            datos_historicos = get_historical_data_for_optimization(
+                self.token, self.activos, self.fecha_desde, self.fecha_hasta
             )
             
-            if mean_returns is not None and cov_matrix is not None and df_precios is not None:
-                self.returns = df_precios.pct_change().dropna()
-                self.prices = df_precios
-                self.mean_returns = mean_returns
-                self.cov_matrix = cov_matrix
-                self.data_loaded = True
-                
-                # Crear manager para optimización avanzada
-                self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
-                
-                return True
-            else:
+            if not datos_historicos:
+                st.error("No se pudieron cargar datos históricos para ningún activo.")
                 return False
+
+            # Combinar los dataframes en uno solo
+            df_precios = pd.concat(datos_historicos.values(), axis=1, keys=datos_historicos.keys())
+            df_precios.columns = df_precios.columns.droplevel(1) # Quitar nivel extra de columna
+            df_precios = df_precios.ffill().dropna()
+
+            if df_precios.empty:
+                st.error("Los datos históricos están vacíos después del preprocesamiento.")
+                return False
+
+            self.returns = df_precios.pct_change().dropna()
+            self.prices = df_precios
+            self.mean_returns = self.returns.mean() * 252
+            self.cov_matrix = self.returns.cov() * 252
+            self.data_loaded = True
+            
+            # Crear manager para optimización avanzada
+            self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
+            
+            return True
                 
         except Exception as e:
+            st.error(f"Error en load_data: {e}")
             return False
     
     def compute_portfolio(self, strategy='markowitz', target_return=None):
@@ -1425,26 +1452,28 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         st.warning("No se pudo obtener el portafolio del cliente")
         return
     
-    activos = portafolio.get('activos', [])
-    if not activos:
+    activos_raw = portafolio.get('activos', [])
+    if not activos_raw:
         st.warning("El portafolio está vacío")
         return
     
-    simbolos = []
-    for activo in activos:
+    # Extraer símbolos y mercados
+    activos_para_optimizacion = []
+    for activo in activos_raw:
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo')
-        if simbolo:
-            simbolos.append(simbolo)
+        mercado = titulo.get('mercado')
+        if simbolo and mercado:
+            activos_para_optimizacion.append({'simbolo': simbolo, 'mercado': mercado})
     
-    if not simbolos:
-        st.warning("No se encontraron símbolos válidos")
+    if not activos_para_optimizacion:
+        st.warning("No se encontraron activos con información de mercado válida para optimizar.")
         return
     
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
     
-    st.info(f"Analizando {len(simbolos)} activos desde {fecha_desde} hasta {fecha_hasta}")
+    st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
     
     # Configuración de optimización extendida
     col1, col2, col3 = st.columns(3)
@@ -1481,8 +1510,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
-                # Crear manager de portafolio
-                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                # Crear manager de portafolio con la lista de activos (símbolo y mercado)
+                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
                 
                 # Cargar datos
                 if manager_inst.load_data():
