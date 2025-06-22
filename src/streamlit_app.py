@@ -1757,9 +1757,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             min_value=0.0, max_value=10.0, value=2.0, step=0.1
         ) / 100
     
-    col1, col2 = st.columns(2)
-    with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
+    # Botón único para optimizar
+    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
