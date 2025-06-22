@@ -601,104 +601,36 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
 
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
-    Obtiene datos históricos para optimización con manejo mejorado de errores,
-    reintentos automáticos y soporte para FCIs
-    """
-    precios = {}
-    errores = []
-    max_retries = 2
+    Obtiene datos históricos para optimización
     
-    with st.spinner("Obteniendo datos históricos..."):
-        progress_bar = st.progress(0)
-        total_symbols = len(simbolos)
-        
-        for idx, (simbolo, mercado) in enumerate(simbolos):
-            progress = (idx + 1) / total_symbols
-            progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
-            
-            # Manejo especial para FCIs
-            if mercado.lower() == 'fci':
-                data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
-                    try:
-                        df = pd.DataFrame({
-                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
-                            'cierre': [data['ultimaCotizacion']['precio']]
-                        })
-                        df.set_index('fecha', inplace=True)
-                        precios[simbolo] = df['cierre']
-                    except Exception as e:
-                        st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
-                        errores.append(simbolo)
-                else:
-                    st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
-                    errores.append(simbolo)
-                continue
+    Args:
+        token_portador: Token de autenticación Bearer
+        simbolos: Lista de símbolos
+        fecha_desde: Fecha inicio (YYYY-MM-DD)
+        fecha_hasta: Fecha fin (YYYY-MM-DD)
+    
+    Returns:
+        Dict con DataFrames históricos por símbolo
+    """
+    datos_historicos = {}
+    mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
+    
+    with st.spinner('Obteniendo datos históricos...'):
+        for simbolo in simbolos:
+            for mercado in mercados:
+                df = obtener_serie_historica_iol(
+                    token_portador,
+                    mercado,
+                    simbolo,
+                    fecha_desde,
+                    fecha_hasta
+                )
                 
-            for attempt in range(max_retries):
-                try:
-                    # Intentar obtener datos de IOL
-                    serie = obtener_serie_historica_iol(
-                        token_portador=token_portador,
-                        mercado=mercado,
-                        simbolo=simbolo,
-                        fecha_desde=fecha_desde,
-                        fecha_hasta=fecha_hasta
-                    )
-                    
-                    if serie is not None and not serie.empty:
-                        precios[simbolo] = serie
-                        break  # Salir del bucle de reintentos si tiene éxito
-                    
-                except Exception as e:
-                    if attempt == max_retries - 1:  # Último intento
-                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
-                        errores.append(simbolo)
-                    continue
-            
-            # Pequeña pausa entre solicitudes para no saturar el servidor
-            time.sleep(0.5)
-        
-        progress_bar.empty()
-        
-        if errores:
-            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
-        
-        if precios:
-            st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
-            
-            # Asegurarse de que todas las series tengan la misma longitud
-            min_length = min(len(s) for s in precios.values()) if precios else 0
-            if min_length < 5:  # Mínimo razonable de datos para optimización
-                st.error("Los datos históricos son insuficientes para la optimización")
-                return None, None, None
+                if df is not None and not df.empty:
+                    datos_historicos[simbolo] = df
+                    break
                 
-            # Crear DataFrame con las series alineadas
-            df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
-            
-            # Calcular retornos y validar
-            returns = df_precios.pct_change().dropna()
-            
-            if returns.empty or len(returns) < 30:
-                st.warning("No hay suficientes datos para el análisis")
-                return None, None, None
-                
-            # Eliminar columnas con desviación estándar cero
-            if (returns.std() == 0).any():
-                columnas_constantes = returns.columns[returns.std() == 0].tolist()
-                returns = returns.drop(columns=columnas_constantes)
-                df_precios = df_precios.drop(columns=columnas_constantes)
-                
-                if returns.empty or len(returns.columns) < 2:
-                    st.warning("No hay suficientes activos válidos para la optimización")
-                    return None, None, None
-                    
-            mean_returns = returns.mean()
-            cov_matrix = returns.cov()
-            return mean_returns, cov_matrix, df_precios
-        
-    st.error("❌ No se pudieron cargar los datos históricos")
-    return None, None, None
+    return datos_historicos if datos_historicos else None
 
 # --- Enhanced Portfolio Management Classes ---
 class manager:
@@ -1112,6 +1044,68 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 
     return datos_historicos if datos_historicos else None
 
+# --- Portfolio Metrics Function ---
+def calcular_metricas_portafolio(portafolio, valor_total):
+    """
+    Calcula métricas clave de desempeño para un portafolio de inversión.
+    
+    Args:
+        portafolio (dict): Diccionario con los activos y sus cantidades
+        valor_total (float): Valor total del portafolio
+        
+    Returns:
+        dict: Diccionario con las métricas calculadas
+    """
+    # 1. Calcular concentración del portafolio
+    concentracion = 0
+    for activo in portafolio:
+        concentracion += (activo['Valuación'] / valor_total) ** 2
+    
+    # 2. Calcular volatilidad de los activos
+    std_dev_activo = 0
+    for activo in portafolio:
+        std_dev_activo += activo['Valuación'] * activo.get('volatilidad', 0)
+    
+    # 3. Calcular retorno esperado
+    retorno_esperado_anual = 0
+    for activo in portafolio:
+        retorno_esperado_anual += activo['Valuación'] * activo.get('retorno_esperado', 0)
+    
+    # 4. Calcular escenarios de pérdida y ganancia
+    pl_esperado_min = 0
+    pl_esperado_max = 0
+    for activo in portafolio:
+        pl_esperado_min += activo['Valuación'] * activo.get('pl_min', 0)
+        pl_esperado_max += activo['Valuación'] * activo.get('pl_max', 0)
+    
+    # 5. Calcular probabilidades de pérdida y ganancia
+    probabilidades = {
+        'perdida': 0,
+        'ganancia': 0,
+        'perdida_mayor_10': 0,
+        'ganancia_mayor_10': 0
+    }
+    for activo in portafolio:
+        probabilidades['perdida'] += activo['Valuación'] * activo.get('probabilidad_perdida', 0)
+        probabilidades['ganancia'] += activo['Valuación'] * activo.get('probabilidad_ganancia', 0)
+        probabilidades['perdida_mayor_10'] += activo['Valuación'] * activo.get('probabilidad_perdida_mayor_10', 0)
+        probabilidades['ganancia_mayor_10'] += activo['Valuación'] * activo.get('probabilidad_ganancia_mayor_10', 0)
+    
+    # 6. Calcular riesgo anual
+    riesgo_anual = 0
+    for activo in portafolio:
+        riesgo_anual += activo['Valuación'] * activo.get('riesgo', 0)
+    
+    return {
+        'concentracion': concentracion,
+        'std_dev_activo': std_dev_activo,
+        'retorno_esperado_anual': retorno_esperado_anual,
+        'pl_esperado_min': pl_esperado_min,
+        'pl_esperado_max': pl_esperado_max,
+        'probabilidades': probabilidades,
+        'riesgo_anual': riesgo_anual
+    }
+
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio):
     st.markdown("### 📈 Resumen del Portafolio")
@@ -1211,7 +1205,9 @@ def mostrar_resumen_portafolio(portafolio):
     
     if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
-        metricas = calcular_metricas_portafolio(datos_activos, valor_total)
+        # Convert list to dictionary with symbols as keys
+        portafolio_dict = {row['Símbolo']: row for row in datos_activos}
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total)
         
         # Información General
         cols = st.columns(4)
