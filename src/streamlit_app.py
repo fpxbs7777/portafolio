@@ -2104,6 +2104,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     'VaR 95%': '{:.4f}',
                     'Skewness': '{:.4f}',
                     'Kurtosis': '{:.4f}'
+                }
+                
+                # Aplicar formato al DataFrame
+                for col, fmt in format_dict.items():
+                    if col in df_comparison.columns:
+                        df_comparison[col] = df_comparison[col].apply(lambda x: fmt.format(x) if pd.notnull(x) else '')
+                
+                # Mostrar la tabla de comparación
+                st.dataframe(df_comparison, use_container_width=True)
                 
                 # Línea de frontera eficiente con sombreado
                 fig.add_trace(go.Scatter(
