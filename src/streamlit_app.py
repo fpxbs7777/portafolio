@@ -719,48 +719,43 @@ def portfolio_variance(x, mtx_var_covar):
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
-    # special portfolios    
-    label1 = 'min-variance-l1'
-    label2 = 'min-variance-l2'
-    label3 = 'equi-weight'
-    label4 = 'long-only'
-    label5 = 'markowitz-none'
-    label6 = 'markowitz-target'
-    
-    # compute covariance matrix
-    port_mgr = manager(rics, notional, data)
-    port_mgr.compute_covariance()
-    
-    # compute vectors of returns and volatilities for Markowitz portfolios
-    min_returns = np.min(port_mgr.mean_returns)
-    max_returns = np.max(port_mgr.mean_returns)
-    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
-    volatilities = []
-    valid_returns = []
-    
-    for ret in returns:
-        try:
-            port = port_mgr.compute_portfolio('markowitz', ret)
-            volatilities.append(port.volatility_annual)
-            valid_returns.append(ret)
-        except:
-    
-    # Riesgo anual
-    metricas['riesgo_anual'] = np.std([a['Valuación'] for a in datos_activos])
-    
-    # Probabilidades
-    metricas['probabilidades'] = {
-        'ganancia': np.mean([a['Valuación'] > 0 for a in datos_activos]),
-        'perdida': np.mean([a['Valuación'] < 0 for a in datos_activos]),
-        'ganancia_mayor_10': np.mean([a['Valuación'] > 0.1 * valor_total for a in datos_activos]),
-        'perdida_mayor_10': np.mean([a['Valuación'] < -0.1 * valor_total for a in datos_activos]),
-    }
-    
-    # Proyecciones
-    metricas['pl_percentil_95'] = np.percentile([a['Valuación'] for a in datos_activos], 95)
-    metricas['pl_percentil_5'] = np.percentile([a['Valuación'] for a in datos_activos], 5)
-    
-    return metricas
+    try:
+        # special portfolios    
+        label1 = 'min-variance-l1'
+        label2 = 'min-variance-l2'
+        label3 = 'equi-weight'
+        label4 = 'long-only'
+        label5 = 'markowitz-none'
+        label6 = 'markowitz-target'
+        
+        # compute covariance matrix
+        port_mgr = manager(rics, notional, data)
+        port_mgr.compute_covariance()
+        
+        # compute vectors of returns and volatilities for Markowitz portfolios
+        min_returns = np.min(port_mgr.mean_returns)
+        max_returns = np.max(port_mgr.mean_returns)
+        returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
+        volatilities = []
+        valid_returns = []
+        
+        for ret in returns:
+            try:
+                port = port_mgr.compute_portfolio('markowitz', ret)
+                volatilities.append(port.volatility_annual)
+                valid_returns.append(ret)
+            except Exception as e:
+                st.error(f"Error al calcular portafolio: {str(e)}")
+                continue
+        
+        return {
+            'volatilities': volatilities,
+            'returns': valid_returns,
+            'labels': [label1, label2, label3, label4, label5, label6]
+        }
+    except Exception as e:
+        st.error(f"Error al calcular frontera eficiente: {str(e)}")
+        return None
 
 def mostrar_resumen_portafolio(portafolio):
     st.markdown("### 📈 Resumen del Portafolio")
