@@ -909,46 +909,53 @@ def obtener_saldo_disponible(token_acceso):
         # Si hay error, usar un valor nominal por defecto
         return 100000  # Valor nominal por defecto en ARS
 
-def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
-    """Grafica la frontera eficiente basada en los datos existentes"""
+def compute_efficient_frontier(rics, notional, target_returns, data):
+    """
+    Grafica la frontera eficiente con múltiples portafolios optimizados
+    
+    Args:
+        rics: Lista de activos
+        notional: Capital total a invertir
+        target_returns: Lista de retornos objetivos para los portafolios
+        data: Datos históricos de precios
+    """
     try:
-        # Verificar datos de entrada
         if not rics or not isinstance(rics, list):
             raise ValueError("Los RICs deben ser una lista no vacía")
             
         if not data or not isinstance(data, dict):
             raise ValueError("Los datos deben ser un diccionario")
-            
+        
         # Filtrar RICs con datos válidos
         valid_rics = []
         for ric in rics:
             df = data.get(ric)
             if df is not None and not df.empty:
-                # Buscar columna de cierre (case insensitive)
                 price_col = next((col for col in df.columns if col.lower() in ['cierre', 'close', 'precio', 'price', 'ultimoprecio']), None)
                 if price_col is not None:
-                    # Renombrar la columna a 'Cierre' para consistencia
                     df = df.rename(columns={price_col: 'Cierre'})
-                    data[ric] = df  # Actualizar el DataFrame en el diccionario
+                    data[ric] = df
                     valid_rics.append(ric)
         
         if not valid_rics:
-            raise ValueError("No se encontraron datos de precios válidos en ninguna columna reconocida (cierre, close, precio, price, ultimoprecio)")
-            
-        # Inicializar manager con RICs válidos
+            raise ValueError("No se encontraron datos de precios válidos")
+        
+        # Inicializar manager
         port_mgr = manager(valid_rics, notional, data)
         
-        # Verificar datos de entrada
         if port_mgr.returns is None or port_mgr.returns.empty:
             raise ValueError("No hay datos de retornos válidos")
             
         if port_mgr.cov_matrix is None:
             raise ValueError("No se pudo calcular la matriz de covarianza")
-            
+        
         # Crear figura de Plotly
         fig = go.Figure()
         
         # Agregar puntos de los activos individuales
+        asset_returns = []
+        asset_volatilities = []
+        
         for ric in valid_rics:
             df = data[ric]
             if 'Cierre' not in df.columns:
@@ -957,39 +964,105 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
             returns = df['Cierre'].pct_change().dropna()
             if not returns.empty:
                 annual_return = returns.mean() * 252
-                annual_volatility = returns.std() * np.sqrt(252)
+                annual_vol = returns.std() * np.sqrt(252)
+                asset_returns.append(annual_return)
+                asset_volatilities.append(annual_vol)
+        
+        # Agregar activos individuales al gráfico
+        fig.add_trace(go.Scatter(
+            x=asset_volatilities,
+            y=asset_returns,
+            mode='markers+text',
+            text=valid_rics,
+            textposition="top center",
+            name="Activos",
+            marker=dict(size=10, color='blue'),
+            opacity=0.7,
+            hoverinfo='text+name',
+            hovertext=[f"{ric}<br>Retorno: {ret:.2%}<br>Volatilidad: {vol:.2%}" 
+                      for ric, ret, vol in zip(valid_rics, asset_returns, asset_volatilities)]
+        ))
+        
+        # Calcular y agregar portafolios optimizados
+        portfolio_data = []
+        
+        for i, target in enumerate(target_returns):
+            try:
+                port = port_mgr.compute_portfolio('markowitz', target)
+                if port and hasattr(port, 'volatility_annual') and hasattr(port, 'return_annual'):
+                    portfolio_data.append({
+                        'Retorno': port.return_annual,
+                        'Volatilidad': port.volatility_annual,
+                        'Sharpe': port.sharpe_ratio if hasattr(port, 'sharpe_ratio') else 0,
+                        'Pesos': port.weights if hasattr(port, 'weights') else {}
+                    })
+            except Exception as e:
+                st.warning(f"No se pudo calcular el portafolio para retorno objetivo {target}: {str(e)}")
+        
+        # Ordenar portafolios por volatilidad
+        portfolio_data.sort(key=lambda x: x['Volatilidad'])
+        
+        # Agregar portafolios al gráfico
+        if portfolio_data:
+            # Línea de la frontera eficiente
+            fig.add_trace(go.Scatter(
+                x=[p['Volatilidad'] for p in portfolio_data],
+                y=[p['Retorno'] for p in portfolio_data],
+                mode='lines',
+                name='Frontera Eficiente',
+                line=dict(color='green', width=2, dash='dash'),
+                hoverinfo='none'
+            ))
+            
+            # Puntos de los portafolios
+            for i, port in enumerate(portfolio_data):
                 fig.add_trace(go.Scatter(
-                    x=[annual_volatility],
-                    y=[annual_return],
+                    x=[port['Volatilidad']],
+                    y=[port['Retorno']],
                     mode='markers',
-                    name=ric,
-                    marker=dict(size=10)
+                    name=f'Portafolio {i+1}',
+                    marker=dict(size=12, color='red'),
+                    text=f"Retorno: {port['Retorno']:.2%}<br>"
+                         f"Volatilidad: {port['Volatilidad']:.2%}<br>"
+                         f"Sharpe: {port['Sharpe']:.2f}<br>"
+                         f"Pesos: {', '.join([f'{k}: {v:.1%}' for k, v in port['Pesos'].items()])}",
+                    hoverinfo='text+name',
+                    visible='legendonly'  # Inicialmente ocultos, se muestran desde la leyenda
                 ))
         
-        # Agregar portafolio optimizado
-        if target_return is not None:
-            port = port_mgr.compute_portfolio('markowitz', target_return)
-            if port and hasattr(port, 'volatility_annual'):
-                fig.add_trace(go.Scatter(
-                    x=[port.volatility_annual],
-                    y=[port.return_annual],
-                    mode='markers',
-                    name='Portafolio Optimizado',
-                    marker=dict(size=15, color='red')
-                ))
-        
-        # Configurar layout
+        # Configuración del layout
         fig.update_layout(
             title='Frontera Eficiente del Portafolio',
             xaxis_title='Volatilidad Anual',
             yaxis_title='Retorno Anual',
             showlegend=True,
             template='plotly_white',
-            height=500
+            height=600,
+            hovermode='closest',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
         
-        # Mostrar gráfico
+        # Mostrar el gráfico
         st.plotly_chart(fig, use_container_width=True)
+        
+        # Mostrar tabla con los portafolios
+        if portfolio_data:
+            st.subheader("Resumen de Portafolios")
+            portfolio_df = pd.DataFrame([{
+                'Portafolio': f'Portafolio {i+1}',
+                'Retorno Anual': f"{p['Retorno']:.2%}",
+                'Volatilidad Anual': f"{p['Volatilidad']:.2%}",
+                'Ratio de Sharpe': f"{p['Sharpe']:.2f}",
+                'Activos': ', '.join([f'{k} ({v:.1%})' for k, v in p['Pesos'].items()])
+            } for i, p in enumerate(portfolio_data)])
+            
+            st.dataframe(portfolio_df, use_container_width=True, hide_index=True)
         
         return None, None, None
             
