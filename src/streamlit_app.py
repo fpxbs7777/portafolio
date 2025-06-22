@@ -693,18 +693,59 @@ class manager:
         
         return self.cov_matrix, self.mean_returns
 
-    def compute_portfolio(self, portfolio_type=None, target_return=None):
+    def monte_carlo_simulation(self, n_simulations=1000):
+        """
+        Realiza una simulación de Monte Carlo para generar portafolios aleatorios.
+        
+        Args:
+            n_simulations (int): Número de simulaciones a realizar
+            
+        Returns:
+            tuple: (retornos, volatilidades, pesos, sharpe_ratios)
+        """
+        if self.cov_matrix is None or self.mean_returns is None:
+            self.compute_covariance()
+            
+        n_assets = len(self.rics)
+        results = np.zeros((4, n_simulations))
+        weights_record = []
+        
+        for i in range(n_simulations):
+            # Generar pesos aleatorios
+            weights = np.random.random(n_assets)
+            weights /= np.sum(weights)
+            weights_record.append(weights)
+            
+            # Calcular métricas
+            port_ret = np.sum(self.mean_returns * weights)
+            port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+            sharpe = (port_ret - self.risk_free_rate) / port_vol if port_vol > 0 else 0
+            
+            results[0, i] = port_ret
+            results[1, i] = port_vol
+            results[2, i] = sharpe
+            results[3, i] = i  # Índice para referencia
+            
+        return results[0], results[1], np.array(weights_record), results[2]
+
+    def compute_portfolio(self, portfolio_type=None, target_return=None, risk_aversion=1.0, n_simulations=1000, use_monte_carlo=False):
         """
         Calcula los pesos óptimos del portafolio según la estrategia especificada.
         
         Args:
             portfolio_type (str): Tipo de optimización a realizar. Opciones:
+                - 'min-variance': Mínima varianza
                 - 'min-variance-l1': Mínima varianza con restricción L1
                 - 'min-variance-l2': Mínima varianza con restricción L2
                 - 'equi-weight': Pesos iguales
                 - 'long-only': Optimización con pesos positivos
                 - 'markowitz': Optimización de Markowitz (máximo ratio de Sharpe o retorno objetivo)
+                - 'risk-parity': Asignación de riesgo equitativa
+                - 'mean-variance': Media-varianza con aversión al riesgo ajustable
             target_return (float, optional): Retorno objetivo para la optimización
+            risk_aversion (float): Parámetro de aversión al riesgo (solo para mean-variance)
+            n_simulations (int): Número de simulaciones para Monte Carlo
+            use_monte_carlo (bool): Usar simulación de Monte Carlo para encontrar punto inicial
             
         Returns:
             output: Objeto con los resultados de la optimización o None en caso de error
@@ -715,51 +756,156 @@ class manager:
             
             n_assets = len(self.rics)
             
-            # Calcular límites de retorno alcanzables
-            min_ret = np.min(self.mean_returns)
-            max_ret = np.max(self.mean_returns)
-            
-            # Verificar si el retorno objetivo es alcanzable
-            if target_return is not None:
-                if target_return > max_ret + 1e-6:  # Pequeña tolerancia numérica
-                    st.warning(f"El retorno objetivo ({target_return:.1%}) excede el máximo alcanzable ({max_ret:.1%}). "
-                              f"Usando el máximo retorno posible.")
-                    target_return = max_ret
-                elif target_return < min_ret - 1e-6:
-                    st.warning(f"El retorno objetivo ({target_return:.1%}) está por debajo del mínimo alcanzable ({min_ret:.1%}). "
-                              f"Usando el mínimo retorno posible.")
-                    target_return = min_ret
-            
             # Configuración de la optimización
             bounds = tuple((0.0, 1.0) for _ in range(n_assets))
             constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1.0}]
             
+            # Manejar retorno objetivo
+            if target_return is not None:
+                # Forzar el retorno objetivo como restricción fuerte
+                constraints.append({
+                    'type': 'eq',
+                    'fun': lambda x: np.sum(self.mean_returns * x) - target_return,
+                    'jac': lambda x: self.mean_returns
+                })
+            
             # Función objetivo: varianza del portafolio
             def portfolio_variance_obj(weights):
                 return portfolio_variance(weights, self.cov_matrix)
+                
+            # Función objetivo: media-varianza con aversión al riesgo
+            def mean_variance_obj(weights):
+                port_ret = np.sum(self.mean_returns * weights)
+                port_var = portfolio_variance(weights, self.cov_matrix)
+                return -port_ret + risk_aversion * port_var  # Maximizar retorno, minimizar varianza
+            
+            # Configuración común de la optimización
+            opt_options = {
+                'maxiter': 1000,
+                'ftol': 1e-6,  # Tolerancia más ajustada para mejor precisión
+                'disp': False,
+                'eps': 1e-10,
+                'iprint': 0  # Sin salida de depuración para mayor velocidad
+            }
+            
+            # Encontrar mejor punto inicial usando Monte Carlo si está habilitado
+            if use_monte_carlo and n_simulations > 0:
+                try:
+                    # Realizar simulación de Monte Carlo
+                    returns, vols, weights, sharpes = self.monte_carlo_simulation(
+                        min(n_simulations, 10000)  # Límite razonable
+                    )
+                    
+                    # Encontrar el mejor portafolio según el tipo de optimización
+                    if target_return is not None:
+                        # Para optimización con retorno objetivo, buscar el de menor varianza
+                        valid_idx = returns >= target_return
+                        if np.any(valid_idx):
+                            best_idx = np.argmin(vols[valid_idx])
+                            x0 = weights[valid_idx][best_idx]
+                        else:
+                            x0 = np.ones(n_assets) / n_assets
+                    else:
+                        # Para optimización general, usar el mejor ratio de Sharpe
+                        best_idx = np.argmax(sharpes)
+                        x0 = weights[best_idx]
+                        
+                    # Mezclar con el último punto conocido si existe
+                    if hasattr(self, 'last_weights') and self.last_weights is not None:
+                        x0 = 0.7 * x0 + 0.3 * self.last_weights
+                        x0 /= np.sum(x0)  # Normalizar
+                        
+                except Exception as e:
+                    st.warning(f"Advertencia en simulación Monte Carlo: {str(e)}")
+                    x0 = np.ones(n_assets) / n_assets
+            else:
+                # Usar último punto conocido o inicialización uniforme
+                if hasattr(self, 'last_weights') and self.last_weights is not None:
+                    x0 = self.last_weights
+                else:
+                    x0 = np.ones(n_assets) / n_assets
             
             # Caso: Pesos iguales (rápido, sin optimización)
             if portfolio_type == 'equi-weight':
                 weights = np.ones(n_assets) / n_assets
                 return self._create_output(weights)
             
+            # Caso: Mínima varianza estándar
+            elif portfolio_type == 'min-variance':
+                result = op.minimize(
+                    portfolio_variance_obj,
+                    x0=x0,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options=opt_options
+                )
+            
             # Caso: Mínima varianza con restricción L1 (menos sensible a outliers)
             elif portfolio_type == 'min-variance-l1':
                 constraints.append({'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(np.abs(x))})
+                result = op.minimize(
+                    portfolio_variance_obj,
+                    x0=x0,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options=opt_options
+                )
             
             # Caso: Mínima varianza con restricción L2 (más estable numéricamente)
             elif portfolio_type == 'min-variance-l2':
                 constraints.append({'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(x**2)})
+                result = op.minimize(
+                    portfolio_variance_obj,
+                    x0=x0,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options=opt_options
+                )
             
-            # Caso: Optimización de Markowitz
+            # Caso: Risk Parity (Asignación de riesgo equitativa)
+            elif portfolio_type == 'risk-parity':
+                def risk_parity_obj(weights):
+                    port_var = portfolio_variance(weights, self.cov_matrix)
+                    risk_contrib = (weights * (self.cov_matrix @ weights)) / port_var
+                    target_risk = np.ones(n_assets) / n_assets
+                    return np.sum((risk_contrib - target_risk) ** 2)
+                
+                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1.0}]
+                result = op.minimize(
+                    risk_parity_obj,
+                    x0=x0,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options=opt_options
+                )
+            
+            # Caso: Media-varianza con aversión al riesgo ajustable
+            elif portfolio_type == 'mean-variance':
+                result = op.minimize(
+                    mean_variance_obj,
+                    x0=x0,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options=opt_options
+                )
+            
+            # Caso: Markowitz (máximo ratio de Sharpe o retorno objetivo)
             elif portfolio_type == 'markowitz':
                 if target_return is not None:
-                    # Optimización con retorno objetivo
-                    constraints.append({
-                        'type': 'eq',
-                        'fun': lambda x: np.sum(self.mean_returns * x) - target_return,
-                        'jac': lambda x: self.mean_returns  # Gradiente para mejor convergencia
-                    })
+                    # Ya tenemos la restricción de retorno objetivo
+                    result = op.minimize(
+                        portfolio_variance_obj,
+                        x0=x0,
+                        method='SLSQP',
+                        bounds=bounds,
+                        constraints=constraints,
+                        options=opt_options
+                    )
                 else:
                     # Maximizar ratio de Sharpe
                     def neg_sharpe_ratio(weights):
@@ -769,33 +915,29 @@ class manager:
                             return np.inf
                         return -(port_ret - self.risk_free_rate) / port_vol
                     
-                    # Usar un punto inicial más inteligente
-                    if hasattr(self, 'last_weights') and self.last_weights is not None:
-                        x0 = self.last_weights
-                    else:
-                        x0 = np.ones(n_assets) / n_assets
-                    
-                    # Optimizar ratio de Sharpe
                     result = op.minimize(
                         neg_sharpe_ratio,
                         x0=x0,
                         method='SLSQP',
                         bounds=bounds,
                         constraints=constraints,
-                        options={
-                            'maxiter': 500,
-                            'ftol': 1e-8,
-                            'disp': False,
-                            'eps': 1e-10
-                        }
+                        options=opt_options
                     )
-                    
-                    if not result.success:
-                        st.warning(f"Optimización fallida: {result.message}")
-                        return None
-                    
-                    self.last_weights = result.x  # Guardar para la próxima iteración
-                    return self._create_output(result.x)
+            
+            # Verificar resultado de la optimización
+            if not result.success:
+                st.warning(f"Optimización fallida: {result.message}")
+                return None
+            
+            # Asegurar que los pesos sumen 1 (por posibles errores numéricos)
+            weights = result.x
+            weights = np.maximum(weights, 0)  # Asegurar pesos no negativos
+            weights = weights / np.sum(weights)  # Normalizar a 1
+            
+            # Guardar pesos para la próxima iteración
+            self.last_weights = weights
+            
+            return self._create_output(weights)
             
             # Configuración de la optimización
             opt_options = {
