@@ -980,19 +980,41 @@ class PortfolioManager:
             
         if fecha_hasta is None and 'fecha_hasta' in st.session_state:
             self.fecha_hasta = st.session_state.fecha_hasta
-            try:
-                portfolio_result = manager_inst.compute_portfolio(
-                    strategy=estrategia,
-                    target_return=target_return,
-                    risk_aversion=risk_aversion,
-                    n_simulations=n_simulations,
-                    use_monte_carlo=use_monte_carlo
-                )
+        else:
+            self.fecha_hasta = fecha_hasta or date.today()
+                
+        self.data_loaded = False
+        self.returns = None
+        self.prices = None
+        self.notional = 100000  # Valor nominal por defecto
+        self.manager = None
+                
+        # Asegurarse de que las fechas sean objetos date
+        if isinstance(self.fecha_desde, str):
+            self.fecha_desde = datetime.strptime(self.fecha_desde, '%Y-%m-%d').date()
+        if isinstance(self.fecha_hasta, str):
+            self.fecha_hasta = datetime.strptime(self.fecha_hasta, '%Y-%m-%d').date()
+        
+        # Rest of the code...
+
+    def load_data(self):
+        # Method implementation...
+
+    def compute_portfolio(self, strategy='markowitz', target_return=None):
+        # Method implementation...
+
+    def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
+        # Method implementation...
+
+# --- Historical Data Methods ---
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    # Function implementation...
 
                 if portfolio_result:
                     st.success("✅ Optimización completada")
                     
                     # Mostrar resultados extendidos
+{{ ... }}
                     col1, col2 = st.columns(2)
                     
                     with col1:
