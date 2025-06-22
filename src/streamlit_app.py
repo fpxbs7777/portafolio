@@ -1404,7 +1404,6 @@ class EnhancedPortfolioManager:
         self.returns = None
         self.prices = None
         self.notional = saldo_disponible or 100000  # Usar saldo disponible si se proporciona
-        self.manager = None
         self.tasa_libre_riesgo = tasa_libre_riesgo
         self.data = None
         
