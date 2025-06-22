@@ -1021,23 +1021,43 @@ class PortfolioManager:
             st.error(f"Detalles del error: {traceback.format_exc()}")
             return False
     
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
+    def compute_portfolio(self, strategy='markowitz', target_return=None, risk_params=None):
         if not self.data_loaded or self.returns is None:
             return None
         
+        # Configurar parámetros de riesgo por defecto si no se proporcionan
+        if risk_params is None:
+            risk_params = {}
+            
+        max_volatility = risk_params.get('max_volatility', 0.5)  # 50% por defecto
+        max_var_95 = risk_params.get('max_var_95', 0.1)  # 10% por defecto
+        max_weight = risk_params.get('max_weight', 1.0)  # 100% por defecto
+        
         try:
             if self.manager:
-                # Usar el manager avanzado
+                # Aplicar restricciones de riesgo al manager
+                self.manager.max_volatility = max_volatility
+                self.manager.max_var_95 = max_var_95
+                self.manager.max_weight = max_weight
+                
+                # Usar el manager avanzado con las restricciones
                 portfolio_output = self.manager.compute_portfolio(strategy, target_return)
                 return portfolio_output
             else:
-                # Fallback a optimización básica
+                # Fallback a optimización básica con restricciones
                 n_assets = len(self.returns.columns)
                 
                 if strategy == 'equi-weight':
                     weights = np.array([1/n_assets] * n_assets)
                 else:
-                    weights = optimize_portfolio(self.returns, target_return=target_return)
+                    # Aplicar restricciones de riesgo en la optimización básica
+                    weights = optimize_portfolio(
+                        self.returns, 
+                        target_return=target_return,
+                        max_volatility=max_volatility,
+                        max_var_95=max_var_95,
+                        max_weight=max_weight
+                    )
                 
                 # Crear objeto de resultado básico
                 portfolio_returns = (self.returns * weights).sum(axis=1)
@@ -1055,13 +1075,15 @@ class PortfolioManager:
         except Exception as e:
             return None
 
-    def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
+    def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True, max_volatility=None, max_var_95=None):
         """
-        Computa la frontera eficiente del portafolio.
+        Computa la frontera eficiente del portafolio con restricciones de riesgo.
         
         Args:
             target_return (float): Retorno objetivo para el portafolio (anualizado)
             include_min_variance (bool): Incluir portafolio de mínima varianza
+            max_volatility (float, optional): Volatilidad máxima permitida (0-1)
+            max_var_95 (float, optional): Valor en Riesgo (VaR) máximo al 95% (0-1)
             
         Returns:
             tuple: (portfolios, valid_returns, volatilities) o (None, None, None) en caso de error
@@ -1079,6 +1101,12 @@ class PortfolioManager:
             return None, None, None
             
         try:
+            # Aplicar restricciones de riesgo al manager
+            if max_volatility is not None:
+                self.manager.max_volatility = max_volatility
+            if max_var_95 is not None:
+                self.manager.max_var_95 = max_var_95
+                
             # Convertir precios a formato de series temporales
             if not hasattr(self, 'prices') or self.prices is None:
                 st.error("❌ No se encontraron datos de precios")
@@ -1099,13 +1127,15 @@ class PortfolioManager:
                 st.error("❌ No hay datos de precios válidos")
                 return None, None, None
                 
-            # Calcular la frontera eficiente
+            # Calcular la frontera eficiente con restricciones
             portfolios, returns, volatilities = compute_efficient_frontier(
                 list(prices_dict.keys()), 
                 self.notional, 
                 target_return, 
                 include_min_variance,
-                prices_dict
+                prices_dict,
+                max_volatility=max_volatility,
+                max_var_95=max_var_95
             )
             
             if not returns or not volatilities:
@@ -1606,17 +1636,38 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         target_return = st.number_input(
             "Retorno Objetivo (anual):",
             min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para estrategia Markowitz"
+            help="Retorno anual objetivo para la optimización"
         )
     
     with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+        max_volatility = st.number_input(
+            "Volatilidad Máxima (%):", 
+            min_value=0.1, max_value=100.0, value=30.0, step=0.5,
+            help="Límite de volatilidad anual para la optimización"
+        ) / 100.0  # Convertir a decimal
     
-    col1, col2 = st.columns(2)
-    with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
-    with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+    # Restricciones de riesgo adicionales
+    with st.expander("⚙️ Restricciones de Riesgo Avanzadas", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            max_var_95 = st.number_input(
+                "VaR 95% Máximo (%):",
+                min_value=0.1, max_value=50.0, value=10.0, step=0.5,
+                help="Valor en Riesgo (VaR) diario máximo al 95% de confianza"
+            ) / 100.0  # Convertir a decimal
+        
+        with col2:
+            max_weight = st.number_input(
+                "Peso Máximo por Activo (%):",
+                min_value=5.0, max_value=100.0, value=50.0, step=5.0,
+                help="Peso máximo permitido para cualquier activo individual"
+            ) / 100.0  # Convertir a decimal
+    
+    # Opción para mostrar la frontera eficiente
+    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    
+    # Un solo botón para ejecutar la optimización
+    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
@@ -1626,9 +1677,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 
                 # Cargar datos
                 if manager_inst.load_data():
-                    # Computar optimización
-                    use_target = target_return if estrategia == 'markowitz' else None
-                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+                    # Configurar restricciones de riesgo
+                    risk_params = {
+                        'max_volatility': max_volatility,
+                        'max_var_95': max_var_95,
+                        'max_weight': max_weight,
+                        'target_return': target_return if estrategia == 'markowitz' else None
+                    }
+                    
+                    # Computar optimización con restricciones de riesgo
+                    portfolio_result = manager_inst.compute_portfolio(
+                        strategy=estrategia, 
+                        target_return=target_return if estrategia == 'markowitz' else None,
+                        risk_params=risk_params
+                    )
                     
                     if portfolio_result:
                         st.success("✅ Optimización completada")
@@ -1691,21 +1753,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
     
-    if ejecutar_frontier and show_frontier:
+    # Mostrar la frontera eficiente si está habilitado y se ha ejecutado la optimización
+    if show_frontier and ejecutar_optimizacion and 'manager_inst' in locals():
         with st.spinner("Calculando frontera eficiente..."):
             try:
-                # Crear una nueva instancia del administrador de portafolio
-                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
-                
-                # Cargar los datos primero
-                if not manager_inst.load_data():
-                    st.error("❌ No se pudieron cargar los datos para el cálculo de la frontera eficiente")
-                    return
-                
-                # Calcular la frontera eficiente con manejo de errores mejorado
+                # Calcular la frontera eficiente con las restricciones configuradas
                 portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
-                    target_return=target_return, 
-                    include_min_variance=True
+                    target_return=target_return,
+                    include_min_variance=True,
+                    max_volatility=max_volatility,
+                    max_var_95=max_var_95
                 )
                 
                 # Verificar que se obtuvieron resultados válidos
