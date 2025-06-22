@@ -1045,7 +1045,16 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         df = pd.DataFrame(data)
         
         if 'fechaHora' in df.columns:
-            df['fecha'] = pd.to_datetime(df['fechaHora']).dt.date
+            # Handle different datetime formats
+            df['fecha'] = pd.to_datetime(
+                df['fechaHora'], 
+                format='mixed',  # Automatically infer format for each element
+                utc=True,        # Ensure timezone awareness
+                errors='coerce'  # Convert parsing errors to NaT
+            ).dt.tz_convert(None).dt.date  # Convert to naive date
+            
+            # Drop rows where date parsing failed
+            df = df.dropna(subset=['fecha'])
             df = df.sort_values('fecha')
             
         return df
