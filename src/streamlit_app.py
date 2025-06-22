@@ -923,37 +923,75 @@ class PortfolioManager:
     
     def load_data(self):
         try:
-            # Modificado para pasar la lista de activos con sus mercados
-            datos_historicos = get_historical_data_for_optimization(
-                self.token, self.activos, self.fecha_desde, self.fecha_hasta
-            )
+            # Convertir lista de activos a formato adecuado
+            symbols = []
+            markets = []
             
-            if not datos_historicos:
-                st.error("No se pudieron cargar datos históricos para ningún activo.")
+            for activo in self.activos:
+                if isinstance(activo, dict):
+                    symbols.append(activo.get('simbolo', ''))
+                    markets.append(activo.get('mercado', '').upper())
+                else:
+                    symbols.append(activo)
+                    markets.append('BCBA')  # Default market
+            
+            if not symbols:
+                st.error("❌ No se encontraron símbolos válidos para procesar")
                 return False
-
-            # Combinar los dataframes en uno solo
-            df_precios = pd.concat(datos_historicos.values(), axis=1, keys=datos_historicos.keys())
-            df_precios.columns = df_precios.columns.droplevel(1) # Quitar nivel extra de columna
-            df_precios = df_precios.ffill().dropna()
-
+            
+            # Obtener datos históricos
+            data_frames = {}
+            
+            with st.spinner("Obteniendo datos históricos..."):
+                for simbolo, mercado in zip(symbols, markets):
+                    df = obtener_serie_historica_iol(
+                        self.token,
+                        mercado,
+                        simbolo,
+                        self.fecha_desde,
+                        self.fecha_hasta
+                    )
+                    
+                    if df is not None and not df.empty:
+                        # Asegurarse de que la columna de precios existe
+                        if 'precio' in df.columns:
+                            df = df[['fecha', 'precio']].copy()
+                            df.set_index('fecha', inplace=True)
+                            data_frames[simbolo] = df
+                        else:
+                            st.warning(f"⚠️ No se encontró columna de precio para {simbolo}")
+                    else:
+                        st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
+            
+            if not data_frames:
+                st.error("❌ No se pudieron obtener datos históricos para ningún activo")
+                return False
+            
+            # Combinar todos los DataFrames
+            df_precios = pd.concat(data_frames.values(), axis=1, keys=data_frames.keys())
+            
+            # Limpiar datos
+            df_precios = df_precios.fillna(method='ffill')
+            df_precios = df_precios.dropna()
+            
             if df_precios.empty:
-                st.error("Los datos históricos están vacíos después del preprocesamiento.")
+                st.error("❌ No hay datos suficientes después del preprocesamiento")
                 return False
-
+            
+            # Calcular retornos
             self.returns = df_precios.pct_change().dropna()
-            self.prices = df_precios
-            self.mean_returns = self.returns.mean() * 252
-            self.cov_matrix = self.returns.cov() * 252
+            
+            # Calcular estadísticas
+            self.mean_returns = self.returns.mean()
+            self.cov_matrix = self.returns.cov()
             self.data_loaded = True
             
             # Crear manager para optimización avanzada
             self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
             
             return True
-                
         except Exception as e:
-            st.error(f"Error en load_data: {e}")
+            st.error(f"❌ Error en load_data: {str(e)}")
             return False
     
     def compute_portfolio(self, strategy='markowitz', target_return=None):
