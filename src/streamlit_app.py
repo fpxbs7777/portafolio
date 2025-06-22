@@ -1056,27 +1056,41 @@ def calcular_metricas_portafolio(portafolio, valor_total):
     Returns:
         dict: Diccionario con las métricas calculadas
     """
+    if not isinstance(portafolio, dict):
+        return {}
+
+    if valor_total == 0:
+        return {
+            'concentracion': 0,
+            'std_dev_activo': 0,
+            'retorno_esperado_anual': 0,
+            'pl_esperado_min': 0,
+            'pl_esperado_max': 0,
+            'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
+            'riesgo_anual': 0
+        }
+
     # 1. Calcular concentración del portafolio
     concentracion = 0
-    for activo in portafolio:
-        concentracion += (activo['Valuación'] / valor_total) ** 2
+    for activo in portafolio.values():
+        concentracion += (activo.get('Valuación', 0) / valor_total) ** 2
     
     # 2. Calcular volatilidad de los activos
     std_dev_activo = 0
-    for activo in portafolio:
-        std_dev_activo += activo['Valuación'] * activo.get('volatilidad', 0)
+    for activo in portafolio.values():
+        std_dev_activo += activo.get('Valuación', 0) * activo.get('volatilidad', 0)
     
     # 3. Calcular retorno esperado
     retorno_esperado_anual = 0
-    for activo in portafolio:
-        retorno_esperado_anual += activo['Valuación'] * activo.get('retorno_esperado', 0)
+    for activo in portafolio.values():
+        retorno_esperado_anual += activo.get('Valuación', 0) * activo.get('retorno_esperado', 0)
     
     # 4. Calcular escenarios de pérdida y ganancia
     pl_esperado_min = 0
     pl_esperado_max = 0
-    for activo in portafolio:
-        pl_esperado_min += activo['Valuación'] * activo.get('pl_min', 0)
-        pl_esperado_max += activo['Valuación'] * activo.get('pl_max', 0)
+    for activo in portafolio.values():
+        pl_esperado_min += activo.get('Valuación', 0) * activo.get('pl_min', 0)
+        pl_esperado_max += activo.get('Valuación', 0) * activo.get('pl_max', 0)
     
     # 5. Calcular probabilidades de pérdida y ganancia
     probabilidades = {
@@ -1085,16 +1099,16 @@ def calcular_metricas_portafolio(portafolio, valor_total):
         'perdida_mayor_10': 0,
         'ganancia_mayor_10': 0
     }
-    for activo in portafolio:
-        probabilidades['perdida'] += activo['Valuación'] * activo.get('probabilidad_perdida', 0)
-        probabilidades['ganancia'] += activo['Valuación'] * activo.get('probabilidad_ganancia', 0)
-        probabilidades['perdida_mayor_10'] += activo['Valuación'] * activo.get('probabilidad_perdida_mayor_10', 0)
-        probabilidades['ganancia_mayor_10'] += activo['Valuación'] * activo.get('probabilidad_ganancia_mayor_10', 0)
+    for activo in portafolio.values():
+        probabilidades['perdida'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida', 0)
+        probabilidades['ganancia'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia', 0)
+        probabilidades['perdida_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida_mayor_10', 0)
+        probabilidades['ganancia_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia_mayor_10', 0)
     
     # 6. Calcular riesgo anual
     riesgo_anual = 0
-    for activo in portafolio:
-        riesgo_anual += activo['Valuación'] * activo.get('riesgo', 0)
+    for activo in portafolio.values():
+        riesgo_anual += activo.get('Valuación', 0) * activo.get('riesgo', 0)
     
     return {
         'concentracion': concentracion,
