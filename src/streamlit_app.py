@@ -859,32 +859,94 @@ def portfolio_variance(x, mtx_var_covar):
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
-    # special portfolios    
-    label1 = 'min-variance-l1'
-    label2 = 'min-variance-l2'
-    label3 = 'equi-weight'
-    label4 = 'long-only'
-    label5 = 'markowitz-none'
-    label6 = 'markowitz-target'
-    
-    # compute covariance matrix
-    port_mgr = manager(rics, notional, data)
-    port_mgr.compute_covariance()
-    
-    # compute vectors of returns and volatilities for Markowitz portfolios
-    min_returns = np.min(port_mgr.mean_returns)
-    max_returns = np.max(port_mgr.mean_returns)
-    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
-    volatilities = []
-    valid_returns = []
-    
-    for ret in returns:
+    try:
+        # Verificar datos de entrada
+        if not rics or not isinstance(rics, list):
+            raise ValueError("Los RICs deben ser una lista no vacía")
+            
+        if not data or not isinstance(data, dict):
+            raise ValueError("Los datos deben ser un diccionario")
+            
+        # Inicializar manager
+        port_mgr = manager(rics, notional, data)
+        
+        # Calcular matriz de covarianza
+        port_mgr.compute_covariance()
+        
+        # Verificar si hay datos suficientes
+        if not hasattr(port_mgr, 'mean_returns') or len(port_mgr.mean_returns) == 0:
+            raise ValueError("No se pudieron calcular los retornos medios")
+            
+        # Calcular rango de retornos
+        min_returns = np.nanmin(port_mgr.mean_returns)
+        max_returns = np.nanmax(port_mgr.mean_returns)
+        
+        # Validar rango de retornos
+        if min_returns >= max_returns:
+            raise ValueError("El rango de retornos no es válido")
+            
+        # Generar puntos para la frontera eficiente
+        returns = np.linspace(min_returns, max_returns, 50)
+        volatilities = []
+        valid_returns = []
+        
+        # Calcular portafolios para cada retorno objetivo
+        for ret in returns:
+            try:
+                port = port_mgr.compute_portfolio('markowitz', ret)
+                if port and hasattr(port, 'volatility_annual'):
+                    volatilities.append(port.volatility_annual)
+                    valid_returns.append(ret)
+            except Exception as e:
+                continue
+                
+        # Verificar si se obtuvieron suficientes puntos
+        if len(valid_returns) < 2:
+            raise ValueError("No se pudieron calcular suficientes puntos para la frontera eficiente")
+            
+        # Calcular portafolios especiales
+        portfolios = {}
         try:
-            port = port_mgr.compute_portfolio('markowitz', ret)
-            volatilities.append(port.volatility_annual)
-            valid_returns.append(ret)
-        except:
-            continue
+            portfolios['min-variance-l1'] = port_mgr.compute_portfolio('min-variance-l1')
+        except Exception as e:
+            st.warning(f"⚠️ No se pudo calcular portafolio min-variance-l1: {str(e)}")
+            portfolios['min-variance-l1'] = None
+            
+        try:
+            portfolios['min-variance-l2'] = port_mgr.compute_portfolio('min-variance-l2')
+        except Exception as e:
+            st.warning(f"⚠️ No se pudo calcular portafolio min-variance-l2: {str(e)}")
+            portfolios['min-variance-l2'] = None
+            
+        try:
+            portfolios['equi-weight'] = port_mgr.compute_portfolio('equi-weight')
+        except Exception as e:
+            st.warning(f"⚠️ No se pudo calcular portafolio equi-weight: {str(e)}")
+            portfolios['equi-weight'] = None
+            
+        try:
+            portfolios['long-only'] = port_mgr.compute_portfolio('long-only')
+        except Exception as e:
+            st.warning(f"⚠️ No se pudo calcular portafolio long-only: {str(e)}")
+            portfolios['long-only'] = None
+            
+        try:
+            portfolios['markowitz-none'] = port_mgr.compute_portfolio('markowitz')
+        except Exception as e:
+            st.warning(f"⚠️ No se pudo calcular portafolio markowitz-none: {str(e)}")
+            portfolios['markowitz-none'] = None
+            
+        try:
+            portfolios['markowitz-target'] = port_mgr.compute_portfolio('markowitz', target_return)
+        except Exception as e:
+            st.warning(f"⚠️ No se pudo calcular portafolio markowitz-target: {str(e)}")
+            portfolios['markowitz-target'] = None
+            
+        return portfolios, valid_returns, volatilities
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando la frontera eficiente: {str(e)}")
+        return None, None, None
     
     # compute special portfolios
     portfolios = {}
