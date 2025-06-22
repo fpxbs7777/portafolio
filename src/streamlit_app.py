@@ -1002,6 +1002,14 @@ class PortfolioManager:
                 portfolio_returns = (self.returns * weights).sum(axis=1)
                 portfolio_output = output(portfolio_returns, self.notional)
                 portfolio_output.weights = weights
+                
+                # Formatear portafolio para calcular métricas
+                portafolio_metrics = [{
+                    'rics': list(self.returns.columns),
+                    'weights': weights,
+                    'valor_total': self.notional
+                }]
+                
                 portfolio_output.dataframe_allocation = pd.DataFrame({
                     'rics': list(self.returns.columns),
                     'weights': weights,
@@ -1009,7 +1017,7 @@ class PortfolioManager:
                 
                 # Calcular métricas del portafolio
                 portfolio_output.metrics = calcular_metricas_portafolio(
-                    portafolio=portfolio_output.dataframe_allocation.to_dict('records'),
+                    portafolio=portafolio_metrics,
                     valor_total=self.notional,
                     returns=self.returns,
                     prices=self.prices
@@ -1121,13 +1129,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, returns=None, prices=N
     Returns:
         dict: Diccionario con las métricas calculadas
     """
-    if not isinstance(portafolio, dict):
+    # Convertir portafolio a formato consistente si es necesario
+    if isinstance(portafolio, dict):
+        portafolio = [portafolio]
+    elif not isinstance(portafolio, list):
         return {}
 
     if valor_total == 0:
         return {
             'concentracion': 0,
             'volatilidad_anual': 0,
+            'std_dev_activo': 0,
             'retorno_esperado_anual': 0,
             'sharpe_ratio': 0,
             'max_drawdown': 0,
@@ -1217,6 +1229,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, returns=None, prices=N
         return {
             'concentracion': concentracion,
             'volatilidad_anual': volatilidad_anual,
+            'std_dev_activo': volatilidad_anual,  # Agregar este para compatibilidad
             'retorno_esperado_anual': retorno_esperado_anual,
             'sharpe_ratio': sharpe_ratio,
             'max_drawdown': max_drawdown,
