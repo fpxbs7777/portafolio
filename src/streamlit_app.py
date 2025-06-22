@@ -2284,6 +2284,69 @@ def mostrar_movimientos_asesor():
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
+def mostrar_resumen_portafolio(portafolio):
+    """
+    Muestra un resumen del portafolio con métricas y gráficos
+    
+    Args:
+        portafolio (dict): Datos del portafolio obtenidos de la API
+    """
+    st.subheader("📊 Resumen del Portafolio")
+    
+    # Convertir a DataFrame para facilitar el manejo
+    if 'activos' in portafolio and portafolio['activos']:
+        df = pd.DataFrame(portafolio['activos'])
+        
+        # Mostrar métricas principales
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            valor_total = df['valorMercado'].sum()
+            st.metric("Valor Total", f"${valor_total:,.2f}")
+        with col2:
+            ganancia_perdida = df['gananciaPerdida'].sum()
+            st.metric("Ganancia/Pérdida", 
+                     f"${ganancia_perdida:,.2f}",
+                     f"{(ganancia_perdida/(valor_total-ganancia_perdida)*100):.2f}%" if valor_total > ganancia_perdida else "0.00%")
+        with col3:
+            st.metric("N° de Activos", len(df))
+        
+        # Mostrar tabla de activos
+        st.subheader("📋 Activos en Cartera")
+        st.dataframe(
+            df[['simbolo', 'descripcion', 'cantidad', 'ultimoPrecio', 'variacion', 'gananciaPerdida', 'valorMercado']]
+            .rename(columns={
+                'simbolo': 'Símbolo',
+                'descripcion': 'Descripción',
+                'cantidad': 'Cantidad',
+                'ultimoPrecio': 'Precio',
+                'variacion': 'Variación %',
+                'gananciaPerdida': 'Ganancia/Pérdida',
+                'valorMercado': 'Valor Mercado'
+            })
+            .style.format({
+                'Precio': '${:,.2f}',
+                'Variación %': '{:,.2f}%',
+                'Ganancia/Pérdida': '${:,.2f}',
+                'Valor Mercado': '${:,.2f}'
+            }),
+            use_container_width=True,
+            height=400
+        )
+        
+        # Gráfico de distribución por activo
+        st.subheader("📈 Distribución del Portafolio")
+        fig = px.pie(
+            df, 
+            values='valorMercado', 
+            names='simbolo',
+            title='Distribución por Activo',
+            hole=0.3
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+    else:
+        st.warning("No hay activos en el portafolio")
+
 def mostrar_analisis_portafolio():
     if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
         st.error("No hay cliente seleccionado")
