@@ -1039,6 +1039,79 @@ class PortfolioManager:
         except Exception as e:
             return None, None, None
 
+# --- Historical Data Methods ---
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene series históricas desde la API de IOL
+    
+    Args:
+        token_portador: Token de autenticación Bearer
+        mercado: Mercado (BCBA, NYSE, NASDAQ, ROFEX)
+        simbolo: Símbolo del activo
+        fecha_desde: Fecha inicio (YYYY-MM-DD)
+        fecha_hasta: Fecha fin (YYYY-MM-DD)
+        ajustada: "Ajustada" o "SinAjustar"
+    
+    Returns:
+        DataFrame con datos históricos o None si hay error
+    """
+    try:
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {token_portador}'
+        }
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        data = response.json()
+        df = pd.DataFrame(data)
+        
+        if 'fechaHora' in df.columns:
+            df['fecha'] = pd.to_datetime(df['fechaHora']).dt.date
+            df = df.sort_values('fecha')
+            
+        return df
+        
+    except Exception as e:
+        st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
+        return None
+
+
+def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos históricos para optimización
+    
+    Args:
+        token_portador: Token de autenticación Bearer
+        simbolos: Lista de símbolos
+        fecha_desde: Fecha inicio (YYYY-MM-DD)
+        fecha_hasta: Fecha fin (YYYY-MM-DD)
+    
+    Returns:
+        Dict con DataFrames históricos por símbolo
+    """
+    datos_historicos = {}
+    mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
+    
+    with st.spinner('Obteniendo datos históricos...'):
+        for simbolo in simbolos:
+            for mercado in mercados:
+                df = obtener_serie_historica_iol(
+                    token_portador,
+                    mercado,
+                    simbolo,
+                    fecha_desde,
+                    fecha_hasta
+                )
+                
+                if df is not None and not df.empty:
+                    datos_historicos[simbolo] = df
+                    break
+                
+    return datos_historicos if datos_historicos else None
+
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio):
     st.markdown("### 📈 Resumen del Portafolio")
@@ -1451,7 +1524,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 labels=portfolio_result.dataframe_allocation['rics'],
                                 values=portfolio_result.weights,
                                 textinfo='label+percent',
-                                marker_color_discrete_sequence=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+                                hole=0.4,
+                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
                             )])
                             fig_pie.update_layout(
                                 title="Distribución Optimizada de Activos",
