@@ -860,21 +860,15 @@ def portfolio_variance(x, mtx_var_covar):
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
     # special portfolios    
-    label1 = 'min-variance-l1'
-    label2 = 'min-variance-l2'
-    label3 = 'equi-weight'
-    label4 = 'long-only'
-    label5 = 'markowitz-none'
-    label6 = 'markowitz-target'
-    
-    # compute covariance matrix
     port_mgr = manager(rics, notional, data)
     port_mgr.compute_covariance()
     
     # compute vectors of returns and volatilities for Markowitz portfolios
     min_returns = np.min(port_mgr.mean_returns)
     max_returns = np.max(port_mgr.mean_returns)
-    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
+    
+    # Aumentar el número de puntos para una frontera más suave
+    returns = np.linspace(min_returns, max_returns, 100)
     volatilities = []
     valid_returns = []
     
@@ -883,29 +877,82 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
             port = port_mgr.compute_portfolio('markowitz', ret)
             volatilities.append(port.volatility_annual)
             valid_returns.append(ret)
-        except:
+        except Exception as e:
+            print(f"Error calculando portafolio con retorno {ret}: {str(e)}")
             continue
     
     # compute special portfolios
     portfolios = {}
     try:
-        portfolios[label1] = port_mgr.compute_portfolio(label1)
-    except:
-        portfolios[label1] = None
+        portfolios['min-variance'] = port_mgr.compute_portfolio('min-variance')
+    except Exception as e:
+        print(f"Error calculando portafolio min-variance: {str(e)}")
+        portfolios['min-variance'] = None
         
     try:
-        portfolios[label2] = port_mgr.compute_portfolio(label2)
-    except:
-        portfolios[label2] = None
+        portfolios['equi-weight'] = port_mgr.compute_portfolio('equi-weight')
+    except Exception as e:
+        print(f"Error calculando portafolio equi-weight: {str(e)}")
+        portfolios['equi-weight'] = None
         
-    portfolios[label3] = port_mgr.compute_portfolio(label3)
-    portfolios[label4] = port_mgr.compute_portfolio(label4)
-    portfolios[label5] = port_mgr.compute_portfolio('markowitz')
+    try:
+        portfolios['long-only'] = port_mgr.compute_portfolio('long-only')
+    except Exception as e:
+        print(f"Error calculando portafolio long-only: {str(e)}")
+        portfolios['long-only'] = None
+        
+    try:
+        portfolios['markowitz'] = port_mgr.compute_portfolio('markowitz')
+    except Exception as e:
+        print(f"Error calculando portafolio markowitz: {str(e)}")
+        portfolios['markowitz'] = None
+        
+    try:
+        portfolios['target-return'] = port_mgr.compute_portfolio('markowitz', target_return)
+    except Exception as e:
+        print(f"Error calculando portafolio con retorno objetivo: {str(e)}")
+        portfolios['target-return'] = None
     
-    try:
-        portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
-    except:
-        portfolios[label6] = None
+    # Crear DataFrame para la frontera eficiente
+    frontier_df = pd.DataFrame({
+        'retorno_anual': valid_returns,
+        'volatilidad_anual': volatilities
+    })
+    
+    # Graficar la frontera eficiente
+    fig = go.Figure()
+    
+    # Frontera eficiente
+    fig.add_trace(go.Scatter(
+        x=frontier_df['volatilidad_anual'],
+        y=frontier_df['retorno_anual'],
+        mode='lines',
+        name='Frontera Eficiente',
+        line=dict(color='blue', width=2)
+    ))
+    
+    # Agregar puntos de los portafolios especiales
+    for label, port in portfolios.items():
+        if port is not None:
+            fig.add_trace(go.Scatter(
+                x=[port.volatility_annual],
+                y=[port.return_annual],
+                mode='markers',
+                name=f'Portafolio {label.replace("-", " ").title()}',
+                marker=dict(size=10)
+            ))
+    
+    # Configurar el layout
+    fig.update_layout(
+        title='Frontera Eficiente de Portafolios',
+        xaxis_title='Volatilidad Anual',
+        yaxis_title='Retorno Anual',
+        showlegend=True,
+        width=800,
+        height=600
+    )
+    
+    return fig, portfolios
     
     return portfolios, valid_returns, volatilities
 
