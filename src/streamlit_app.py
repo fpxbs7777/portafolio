@@ -1901,6 +1901,8 @@ class EnhancedPortfolioManager:
 PortfolioManager = EnhancedPortfolioManager
 # Removed stray error handling code that was causing indentation issues
 
+def ejecutar_optimizacion(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta, target_return):
+    """Ejecuta la optimización y muestra resultados en Streamlit"""
     try:
         manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
         
