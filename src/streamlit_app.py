@@ -1108,7 +1108,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
 
 
 # --- Portfolio Metrics Function ---
-def calcular_metricas_portafolio(portafolio, valor_total, returns=None):
+def calcular_metricas_portafolio(portafolio, valor_total, returns=None, prices=None):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión.
     
@@ -1116,6 +1116,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, returns=None):
         portafolio (dict): Diccionario con los activos y sus cantidades
         valor_total (float): Valor total del portafolio
         returns (DataFrame): DataFrame con retornos históricos de los activos
+        prices (DataFrame): DataFrame con precios históricos de los activos
         
     Returns:
         dict: Diccionario con las métricas calculadas
@@ -1126,82 +1127,123 @@ def calcular_metricas_portafolio(portafolio, valor_total, returns=None):
     if valor_total == 0:
         return {
             'concentracion': 0,
-            'std_dev_activo': 0,
+            'volatilidad_anual': 0,
             'retorno_esperado_anual': 0,
-            'pl_esperado_min': 0,
+            'sharpe_ratio': 0,
+            'max_drawdown': 0,
+            'retorno_total': 0,
             'pl_esperado_max': 0,
-            'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
-            'riesgo_anual': 0
+            'pl_esperado_min': 0,
+            'probabilidades': {
+                'ganancia': 0,
+                'perdida': 0,
+                'ganancia_mayor_10': 0,
+                'perdida_mayor_10': 0
+            }
         }
 
-    # 1. Calcular concentración del portafolio
-    concentracion = 0
-    for activo in portafolio.values():
-        peso = activo.get('Valuación', 0) / valor_total
-        concentracion += peso ** 2
-    
-    # 2. Calcular volatilidad usando retornos históricos
-    if returns is not None and not returns.empty:
-        # Calcular volatilidad anualizada
-        std_dev_activo = returns.std() * np.sqrt(252)
-        # Calcular volatilidad ponderada del portafolio
-        volatilidad_portafolio = np.sqrt(np.sum(std_dev_activo ** 2 * (valor_total / returns.sum().sum()) ** 2))
-    else:
-        volatilidad_portafolio = 0
-    
-    # 3. Calcular retorno esperado usando datos históricos
-    if returns is not None and not returns.empty:
-        retorno_esperado_anual = returns.mean().mean() * 252
-        # Calcular escenarios optimistas y pesimistas
-        pl_esperado_min = retorno_esperado_anual - 2 * volatilidad_portafolio
-        pl_esperado_max = retorno_esperado_anual + 2 * volatilidad_portafolio
-    else:
-        retorno_esperado_anual = 0
-        pl_esperado_min = 0
-        pl_esperado_max = 0
-    
-    # 4. Calcular probabilidades usando distribución normal
-    if volatilidad_portafolio > 0:
-        from scipy.stats import norm
+    try:
+        # 1. Calcular concentración del portafolio
+        concentracion = 0
+        for activo in portafolio:
+            peso = activo.get('weights', 0)
+            concentracion += peso ** 2
         
-        # Probabilidad de pérdida (rendimiento < 0)
-        prob_perdida = norm.cdf(0, retorno_esperado_anual, volatilidad_portafolio)
+        # 2. Calcular volatilidad anualizada del portafolio
+        if returns is not None and not returns.empty:
+            # Calcular volatilidad anualizada
+            volatilidad_anual = np.sqrt(np.dot(portafolio[0]['weights'], 
+                                           np.dot(returns.cov() * 252, portafolio[0]['weights'])))
+        else:
+            volatilidad_anual = 0
         
-        # Probabilidad de ganancia (rendimiento > 0)
-        prob_ganancia = 1 - prob_perdida
+        # 3. Calcular retorno esperado anualizado
+        if returns is not None and not returns.empty:
+            retorno_esperado_anual = np.sum(portafolio[0]['weights'] * returns.mean() * 252)
+        else:
+            retorno_esperado_anual = 0
         
-        # Probabilidad de pérdida > 10%
-        prob_perdida_mayor_10 = norm.cdf(-0.10, retorno_esperado_anual, volatilidad_portafolio)
+        # 4. Calcular Sharpe Ratio
+        sharpe_ratio = retorno_esperado_anual / volatilidad_anual if volatilidad_anual > 0 else 0
         
-        # Probabilidad de ganancia > 10%
-        prob_ganancia_mayor_10 = 1 - norm.cdf(0.10, retorno_esperado_anual, volatilidad_portafolio)
+        # 5. Calcular drawdown máximo
+        if prices is not None and not prices.empty:
+            max_drawdown = (prices / prices.cummax() - 1).min()
+            max_drawdown = max_drawdown.min() if isinstance(max_drawdown, pd.Series) else max_drawdown
+        else:
+            max_drawdown = 0
         
-        probabilidades = {
-            'perdida': prob_perdida * 100,
-            'ganancia': prob_ganancia * 100,
-            'perdida_mayor_10': prob_perdida_mayor_10 * 100,
-            'ganancia_mayor_10': prob_ganancia_mayor_10 * 100
+        # 6. Calcular retorno total
+        if returns is not None and not returns.empty:
+            retorno_total = (1 + returns).prod() - 1
+            retorno_total = retorno_total.sum() if isinstance(retorno_total, pd.Series) else retorno_total
+        else:
+            retorno_total = 0
+        
+        # 7. Calcular escenarios optimistas y pesimistas
+        pl_esperado_min = retorno_esperado_anual - 2 * volatilidad_anual
+        pl_esperado_max = retorno_esperado_anual + 2 * volatilidad_anual
+        
+        # 8. Calcular probabilidades usando distribución normal
+        if volatilidad_anual > 0:
+            from scipy.stats import norm
+            
+            # Probabilidad de pérdida (rendimiento < 0)
+            prob_perdida = norm.cdf(0, retorno_esperado_anual, volatilidad_anual)
+            
+            # Probabilidad de ganancia (rendimiento > 0)
+            prob_ganancia = 1 - prob_perdida
+            
+            # Probabilidad de pérdida > 10%
+            prob_perdida_mayor_10 = norm.cdf(-0.10, retorno_esperado_anual, volatilidad_anual)
+            
+            # Probabilidad de ganancia > 10%
+            prob_ganancia_mayor_10 = 1 - norm.cdf(0.10, retorno_esperado_anual, volatilidad_anual)
+            
+            probabilidades = {
+                'ganancia': prob_ganancia * 100,
+                'perdida': prob_perdida * 100,
+                'ganancia_mayor_10': prob_ganancia_mayor_10 * 100,
+                'perdida_mayor_10': prob_perdida_mayor_10 * 100
+            }
+        else:
+            probabilidades = {
+                'ganancia': 0,
+                'perdida': 0,
+                'ganancia_mayor_10': 0,
+                'perdida_mayor_10': 0
+            }
+        
+        return {
+            'concentracion': concentracion,
+            'volatilidad_anual': volatilidad_anual,
+            'retorno_esperado_anual': retorno_esperado_anual,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown': max_drawdown,
+            'retorno_total': retorno_total,
+            'pl_esperado_max': pl_esperado_max,
+            'pl_esperado_min': pl_esperado_min,
+            'probabilidades': probabilidades
         }
-    else:
-        probabilidades = {
-            'perdida': 0,
-            'ganancia': 0,
-            'perdida_mayor_10': 0,
-            'ganancia_mayor_10': 0
+        
+    except Exception as e:
+        st.error(f"Error calculando métricas: {str(e)}")
+        return {
+            'concentracion': 0,
+            'volatilidad_anual': 0,
+            'retorno_esperado_anual': 0,
+            'sharpe_ratio': 0,
+            'max_drawdown': 0,
+            'retorno_total': 0,
+            'pl_esperado_max': 0,
+            'pl_esperado_min': 0,
+            'probabilidades': {
+                'ganancia': 0,
+                'perdida': 0,
+                'ganancia_mayor_10': 0,
+                'perdida_mayor_10': 0
+            }
         }
-    
-    # 5. Calcular riesgo anual
-    riesgo_anual = volatilidad_portafolio
-    
-    return {
-        'concentracion': concentracion,
-        'std_dev_activo': volatilidad_portafolio,
-        'retorno_esperado_anual': retorno_esperado_anual,
-        'pl_esperado_min': pl_esperado_min,
-        'pl_esperado_max': pl_esperado_max,
-        'probabilidades': probabilidades,
-        'riesgo_anual': riesgo_anual
-    }
 
     # 1. Calcular concentración del portafolio
     concentracion = 0
