@@ -715,10 +715,6 @@ def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, use
     except Exception as e:
         st.error(f"Error en get_historical_data_for_optimization: {str(e)}")
         return None, None, None
-            return mean_returns, cov_matrix, df_precios
-        
-    st.error("❌ No se pudieron cargar los datos históricos")
-    return None, None, None
 
 def calcular_metricas_portafolio(activos_data, valor_total, token_acceso=None, fecha_desde=None, fecha_hasta=None):
     """
