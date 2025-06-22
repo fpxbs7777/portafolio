@@ -910,7 +910,7 @@ def obtener_saldo_disponible(token_acceso):
         return 100000  # Valor nominal por defecto en ARS
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
-    """Computa la frontera eficiente y portafolios especiales"""
+    """Grafica la frontera eficiente basada en los datos existentes"""
     try:
         # Verificar datos de entrada
         if not rics or not isinstance(rics, list):
@@ -919,18 +919,8 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         if not data or not isinstance(data, dict):
             raise ValueError("Los datos deben ser un diccionario")
             
-        # Filtrar RICs con datos válidos
-        valid_rics = []
-        for ric in rics:
-            df = data.get(ric)
-            if df is not None and not df.empty:
-                valid_rics.append(ric)
-        
-        if not valid_rics:
-            raise ValueError("No hay datos válidos para ningún RIC")
-            
         # Inicializar manager
-        port_mgr = manager(valid_rics, notional, data)
+        port_mgr = manager(rics, notional, data)
         
         # Verificar datos de entrada
         if port_mgr.returns is None or port_mgr.returns.empty:
@@ -947,61 +937,52 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         if min_returns >= max_returns:
             raise ValueError("El rango de retornos no es válido")
             
-        # Ajustar rango de retornos según el retorno objetivo
+        # Crear figura de Plotly
+        fig = go.Figure()
+        
+        # Agregar puntos de los activos individuales
+        for ric in rics:
+            if ric in data:
+                df = data[ric]
+                if 'Cierre' in df.columns:
+                    returns = df['Cierre'].pct_change().dropna()
+                    if not returns.empty:
+                        annual_return = returns.mean() * 252
+                        annual_volatility = returns.std() * np.sqrt(252)
+                        fig.add_trace(go.Scatter(
+                            x=[annual_volatility],
+                            y=[annual_return],
+                            mode='markers',
+                            name=ric,
+                            marker=dict(size=10)
+                        ))
+        
+        # Agregar portafolio optimizado
         if target_return is not None:
-            min_returns = max(min_returns, target_return - 0.05)  # No menos del 5% por debajo del objetivo
-            max_returns = min(max_returns, target_return + 0.05)  # No más del 5% por encima del objetivo
-            
-        # Generar puntos para la frontera eficiente
-        returns = np.linspace(min_returns, max_returns, 50)
-        volatilities = []
-        valid_returns = []
+            port = port_mgr.compute_portfolio('markowitz', target_return)
+            if port and hasattr(port, 'volatility_annual'):
+                fig.add_trace(go.Scatter(
+                    x=[port.volatility_annual],
+                    y=[port.return_annual],
+                    mode='markers',
+                    name='Portafolio Optimizado',
+                    marker=dict(size=15, color='red')
+                ))
         
-        # Calcular portafolios para cada retorno objetivo
-        for ret in returns:
-            try:
-                port = port_mgr.compute_portfolio('markowitz', ret)
-                if port and hasattr(port, 'volatility_annual'):
-                    volatilities.append(port.volatility_annual)
-                    valid_returns.append(ret)
-            except Exception as e:
-                continue
-                
-        # Verificar si se obtuvieron suficientes puntos
-        if len(valid_returns) < 2:
-            raise ValueError("No se pudieron calcular suficientes puntos para la frontera eficiente")
-            
-        # Calcular portafolios especiales
-        portfolios = {}
+        # Configurar layout
+        fig.update_layout(
+            title='Frontera Eficiente del Portafolio',
+            xaxis_title='Volatilidad Anual',
+            yaxis_title='Retorno Anual',
+            showlegend=True,
+            template='plotly_white',
+            height=500
+        )
         
-        # Lista de estrategias a calcular
-        strategies = [
-            ('min-varianza-l1', 'min-variance-l1'),
-            ('min-varianza-l2', 'min-variance-l2'),
-            ('pesos-iguales', 'equi-weight'),
-            ('long-only', 'long-only'),
-            ('markowitz', 'markowitz'),
-            ('markowitz-target', 'markowitz', target_return)
-        ]
+        # Mostrar gráfico
+        st.plotly_chart(fig, use_container_width=True)
         
-        # Calcular cada estrategia
-        for label, strategy, *args in strategies:
-            try:
-                if args:
-                    port = port_mgr.compute_portfolio(strategy, *args)
-                else:
-                    port = port_mgr.compute_portfolio(strategy)
-                    
-                if port:
-                    portfolios[label] = port
-                else:
-                    portfolios[label] = None
-                    
-            except Exception as e:
-                st.warning(f"⚠️ No se pudo calcular portafolio {label}: {str(e)}")
-                portfolios[label] = None
-                
-        return portfolios, valid_returns, volatilities
+        return None, None, None
             
     except Exception as e:
         st.error(f"❌ Error calculando la frontera eficiente: {str(e)}")
