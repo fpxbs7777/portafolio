@@ -1091,18 +1091,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'markowitz': 'Optimización de Markowitz',
                 'equi-weight': 'Pesos Iguales',
                 'min-variance-l1': 'Mínima Varianza L1',
-                        
-                        if comparison_data:
-                            df_comparison = pd.DataFrame(comparison_data)
-                            st.dataframe(df_comparison, use_container_width=True)
-                    
-                    else:
-                        st.error("❌ No se pudo calcular la frontera eficiente")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-                    
-            except Exception as e:
-                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+                'min-variance-l2': 'Mínima Varianza L2',
+                'long-only': 'Solo Posiciones Largas'
+            }.get(x, x))  # Valor por defecto si no se encuentra la clave
     
     # Información adicional extendida
     with st.expander("ℹ️ Información sobre las Estrategias"):
