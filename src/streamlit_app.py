@@ -1840,8 +1840,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 with col_b:
                                     st.metric("Sharpe Ratio Ajustado", f"{metricas['Sharpe Ratio'] - tasa_libre_riesgo:.4f}")
                                     st.metric("Tasa Libre de Riesgo", f"{tasa_libre_riesgo:.2%}")
-    
-    if ejecutar_optimizacion:
+            except Exception as e:
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+                return
         with st.spinner("Ejecutando optimización..."):
             try:
                 # Crear manager de portafolio con la lista de activos (símbolo y mercado)
