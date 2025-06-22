@@ -923,11 +923,17 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         valid_rics = []
         for ric in rics:
             df = data.get(ric)
-            if df is not None and not df.empty and 'Cierre' in df.columns:
-                valid_rics.append(ric)
+            if df is not None and not df.empty:
+                # Buscar columna de cierre (case insensitive)
+                price_col = next((col for col in df.columns if col.lower() in ['cierre', 'close', 'precio', 'price', 'ultimoprecio']), None)
+                if price_col is not None:
+                    # Renombrar la columna a 'Cierre' para consistencia
+                    df = df.rename(columns={price_col: 'Cierre'})
+                    data[ric] = df  # Actualizar el DataFrame en el diccionario
+                    valid_rics.append(ric)
         
         if not valid_rics:
-            raise ValueError("No hay datos válidos con columna 'Cierre' para ningún RIC")
+            raise ValueError("No se encontraron datos de precios válidos en ninguna columna reconocida (cierre, close, precio, price, ultimoprecio)")
             
         # Inicializar manager con RICs válidos
         port_mgr = manager(valid_rics, notional, data)
@@ -945,6 +951,9 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
         # Agregar puntos de los activos individuales
         for ric in valid_rics:
             df = data[ric]
+            if 'Cierre' not in df.columns:
+                continue
+                
             returns = df['Cierre'].pct_change().dropna()
             if not returns.empty:
                 annual_return = returns.mean() * 252
@@ -986,6 +995,8 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
             
     except Exception as e:
         st.error(f"❌ Error calculando la frontera eficiente: {str(e)}")
+        import traceback
+        st.error(f"Detalles: {traceback.format_exc()}")
         return None, None, None
 
 class PortfolioManager:
