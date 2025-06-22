@@ -664,6 +664,9 @@ class manager:
         self.cov_matrix = None
         self.mean_returns = None
         self.risk_free_rate = 0.40  # Tasa libre de riesgo anual para Argentina
+        self.max_volatility = None  # Volatilidad máxima permitida
+        self.max_var_95 = None  # VaR máximo al 95%
+        self.max_weight = 1.0  # Peso máximo por activo
 
     def load_intraday_timeseries(self, ticker):
         return self.data[ticker]
@@ -698,21 +701,36 @@ class manager:
             self.compute_covariance()
             
         n_assets = len(self.rics)
-        bounds = tuple((0, 1) for _ in range(n_assets))
+        bounds = tuple((0, self.max_weight) for _ in range(n_assets))
         
+        # Restricciones base
+        constraints = [
+            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}  # Suma de pesos = 1
+        ]
+        
+        # Aplicar restricción de volatilidad si está definida
+        if self.max_volatility is not None:
+            def volatility_constraint(weights):
+                port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                return self.max_volatility - port_vol  # Debe ser <= 0 para ser factible
+                
+            constraints.append({'type': 'ineq', 'fun': volatility_constraint})
+        
+        # Aplicar restricción de VaR si está definida
+        if self.max_var_95 is not None:
+            def var_constraint(weights):
+                port_returns = self.returns.dot(weights)
+                var_95 = np.percentile(port_returns, 5)
+                return -var_95 - self.max_var_95  # Queremos que -VaR <= max_var_95
+                
+            constraints.append({'type': 'ineq', 'fun': var_constraint})
+        
+        # Aplicar restricciones específicas por tipo de portafolio
         if portfolio_type == 'min-variance-l1':
-            # Minimizar varianza con restricción L1
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
-            ]
+            constraints.append({'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))})
             
         elif portfolio_type == 'min-variance-l2':
-            # Minimizar varianza con restricción L2
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
-            ]
+            constraints.append({'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)})
             
         elif portfolio_type == 'equi-weight':
             # Pesos iguales
@@ -720,19 +738,28 @@ class manager:
             return self._create_output(weights)
             
         elif portfolio_type == 'long-only':
-            # Optimización long-only estándar
-            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            # No se necesitan restricciones adicionales más allá de las básicas
+            pass
             
         elif portfolio_type == 'markowitz':
             if target_return is not None:
                 # Optimización con retorno objetivo
-                constraints = [
-                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                constraints.append(
                     {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
-                ]
+                )
+                
+                # Minimizar la varianza para el retorno objetivo
+                result = op.minimize(
+                    lambda x: portfolio_variance(x, self.cov_matrix),
+                    x0=np.ones(n_assets)/n_assets,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints
+                )
+                return self._create_output(result.x)
+                
             else:
                 # Maximizar Sharpe Ratio
-                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
                 def neg_sharpe_ratio(weights):
                     port_ret = np.sum(self.mean_returns * weights)
                     port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
