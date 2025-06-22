@@ -428,172 +428,6 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-
-# Función para obtener datos históricos usando Yahoo Finance
-def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta):
-    """
-    Obtiene datos históricos para optimización usando Yahoo Finance
-    """
-    data = {}
-    max_retries = 3
-    retry_delay = 2  # segundos
-    
-    try:
-        # Obtener datos históricos para cada símbolo
-        for simbolo in simbolos:
-            retries = 0
-            while retries < max_retries:
-                try:
-                    df = obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta)
-                    
-                    if df is not None and not df.empty:
-                        data[simbolo] = df
-                        break
-                    
-                    retries += 1
-                    if retries < max_retries:
-                        time.sleep(retry_delay)
-                        
-                except Exception as e:
-                    retries += 1
-                    if retries < max_retries:
-                        time.sleep(retry_delay)
-                        
-            if retries == max_retries:
-                st.error(f'No se pudo obtener datos históricos para {simbolo} después de {max_retries} intentos')
-                
-        # Verificar si hay datos suficientes
-        if not data:
-            st.error("No se pudieron obtener datos históricos para ningún símbolo")
-            return None, None, None
-            
-        # Asegurarse de que todas las series tengan la misma longitud
-        min_length = min(len(s) for s in data.values()) if data else 0
-        if min_length < 5:  # Mínimo razonable de datos para optimización
-            st.error("Los datos históricos son insuficientes para la optimización")
-            return None, None, None
-            
-        # Crear DataFrame con las series alineadas
-        df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in data.items()})
-        
-        # Calcular retornos y validar
-        returns = df_precios.pct_change().dropna()
-        
-        if returns.empty or len(returns) < 30:
-            st.warning("No hay suficientes datos para el análisis")
-            return None, None, None
-            
-        # Eliminar columnas con desviación estándar cero
-        returns = returns.loc[:, returns.std() > 0]
-        
-        # Calcular matriz de covarianza
-        cov_matrix = returns.cov()
-        
-        # Calcular retornos medios
-        mean_returns = returns.mean()
-        
-        return mean_returns, cov_matrix, df_precios
-        
-    except Exception as e:
-        st.error(f"Error en get_historical_data_for_optimization: {str(e)}")
-        return None, None, None
-
-def obtener_fondos_comunes_yahoo():
-    """
-    Obtiene datos de fondos comunes usando Yahoo Finance
-    """
-    try:
-        # Lista de fondos comunes disponibles en Yahoo Finance
-        fondos = [
-            {'simbolo': 'MERV', 'nombre': 'Merval'},
-            {'simbolo': 'MERV.PA', 'nombre': 'Merval Francia'},
-            {'simbolo': 'MERV.L', 'nombre': 'Merval Londres'},
-            {'simbolo': 'MERV.GR', 'nombre': 'Merval Alemania'},
-            {'simbolo': 'MERV.SA', 'nombre': 'Merval España'},
-            {'simbolo': 'MERV.MX', 'nombre': 'Merval México'},
-            {'simbolo': 'MERV.BR', 'nombre': 'Merval Brasil'}
-        ]
-        return pd.DataFrame(fondos)
-    except Exception as e:
-        st.error(f'Error al obtener fondos comunes: {str(e)}')
-        return None
-
-
-# Función para obtener datos históricos usando Yahoo Finance
-def obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene datos históricos usando Yahoo Finance
-    """
-    try:
-        df = yf.download(simbolo, start=fecha_desde, end=fecha_hasta)
-        if not df.empty:
-            df.reset_index(inplace=True)
-            df['fecha'] = pd.to_datetime(df['Date'])
-            return df
-        return None
-    except Exception as e:
-        st.error(f'Error al obtener datos históricos: {str(e)}')
-        return None
-
-
-def obtener_serie_historica_iol(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
-    """
-    Obtiene datos históricos usando la API de InvertirOnline
-    """
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
-    }
-    try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                df = pd.DataFrame(data)
-                df['fecha'] = pd.to_datetime(df['fechaHoraCotizacion'])
-                df = df.sort_values('fecha')
-                return df
-        else:
-            st.warning(f"Error al obtener datos para {simbolo} en {mercado}: {response.status_code}")
-        return None
-    except Exception as e:
-        st.error(f"Error en la solicitud de {simbolo}: {str(e)}")
-        return None
-
-
-def obtener_fondos_comunes_yahoo():
-    """
-    Obtiene datos de fondos comunes usando Yahoo Finance
-    """
-    try:
-        # Lista de fondos comunes disponibles en Yahoo Finance
-        fondos = [
-            {'simbolo': 'MERV', 'nombre': 'Merval'},
-            {'simbolo': 'MERV.PA', 'nombre': 'Merval Francia'},
-            {'simbolo': 'MERV.L', 'nombre': 'Merval Londres'},
-            {'simbolo': 'MERV.GR', 'nombre': 'Merval Alemania'},
-            {'simbolo': 'MERV.SA', 'nombre': 'Merval España'},
-            {'simbolo': 'MERV.MX', 'nombre': 'Merval México'},
-            {'simbolo': 'MERV.BR', 'nombre': 'Merval Brasil'}
-        ]
-        return pd.DataFrame(fondos)
-    except Exception as e:
-        st.error(f'Error al obtener fondos comunes: {str(e)}')
-        return None
-
-
-def obtener_serie_historica_fci_yahoo(simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene datos históricos de fondos comunes usando Yahoo Finance
-    """
-    return obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta)
-
-
-def parse_datetime(datetime_string):
-    """
-    Intenta parsear una cadena de fecha/hora con múltiples formatos
-    """
     formats_to_try = [
         "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S",
@@ -619,319 +453,252 @@ def parse_datetime(datetime_string):
     except Exception:
         return None
 
-
-def get_historical_data_for_optimization(simbolos, fecha_desde, fecha_hasta, use_iol=False, bearer_token=None):
+def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
     """
-    Obtiene datos históricos para optimización
-    
-    Args:
-        simbolos (list): Lista de símbolos a consultar
-        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
-        use_iol (bool): Si es True, usa la API de InvertirOnline
-        bearer_token (str): Token de autenticación para IOL (requerido si use_iol=True)
-        
-    Returns:
-        tuple: (mean_returns, cov_matrix, df_precios) o (None, None, None) en caso de error
+    Devuelve el endpoint correcto según el tipo de activo
     """
-    data = {}
-    max_retries = 3
-    retry_delay = 2  # segundos
+    base_url = "https://api.invertironline.com/api/v2"
     
-    if use_iol and not bearer_token:
-        st.error("Se requiere un token de autenticación para usar la API de InvertirOnline")
-        return None, None, None
+    # Mapeo de mercados a sus respectivos endpoints
+    endpoints = {
+        'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'FCI': f"{base_url}/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
+        'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
+        'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+    }
+    
+    # Intentar determinar automáticamente el tipo de activo si no se especifica
+    if mercado not in endpoints:
+        if simbolo.endswith(('.BA', '.AR')):
+            return endpoints.get('Cedears')
+        elif any(ext in simbolo.upper() for ext in ['AL', 'GD', 'AY24', 'GD30', 'AL30']):
+            return endpoints.get('Bonos')
+        else:
+            # Por defecto, asumimos que es un título regular
+            return f"{base_url}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    
+    return endpoints.get(mercado)
 
+def procesar_respuesta_historico(data, tipo_activo):
+    """
+    Procesa la respuesta de la API según el tipo de activo
+    """
+    if not data:
+        return None
+    
     try:
-        # Configuración para IOL si es necesario
-        if use_iol:
-            mercados = ['BCBA', 'NYSE', 'NASDAQ', 'ROFEX']
-            ajustada = 'SinAjustar'
-        
-        # Obtener datos históricos para cada símbolo
-        for simbolo in simbolos:
-            retries = 0
-            while retries < max_retries:
+        # Para series históricas estándar
+        if isinstance(data, list):
+            precios = []
+            fechas = []
+            
+            for item in data:
                 try:
-                    if use_iol:
-                        # Intentar con diferentes mercados para IOL
-                        for mercado in mercados:
-                            df = obtener_serie_historica_iol(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token)
-                            if df is not None and not df.empty:
-                                data[simbolo] = df
-                                break
-                    else:
-                        # Usar Yahoo Finance
-                        df = obtener_serie_historica_yahoo(simbolo, fecha_desde, fecha_hasta)
-                        if df is not None and not df.empty:
-                            data[simbolo] = df
-                            break
-                    
-                    retries += 1
-                    if retries < max_retries:
-                        time.sleep(retry_delay)
+                    # Manejar diferentes estructuras de respuesta
+                    if isinstance(item, dict):
+                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
+                        if not precio or precio == 0:
+                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
                         
-                except Exception as e:
-                    retries += 1
-                    if retries < max_retries:
-                        time.sleep(retry_delay)
+                        fecha_str = item.get('fechaHora') or item.get('fecha')
                         
-            if retries == max_retries and simbolo not in data:
-                st.error(f'No se pudo obtener datos históricos para {simbolo} después de {max_retries} intentos')
-                
-        # Verificar si hay datos suficientes
-        if not data:
-            st.error("No se pudieron obtener datos históricos para ningún símbolo")
-            return None, None, None
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = parse_datetime_flexible(fecha_str)
+                            if fecha_parsed is not None:
+                                precios.append(float(precio))
+                                fechas.append(fecha_parsed)
+                except (ValueError, AttributeError) as e:
+                    continue
             
-        # Asegurarse de que todas las series tengan la misma longitud
-        min_length = min(len(s) for s in data.values()) if data else 0
-        if min_length < 5:  # Mínimo razonable de datos para optimización
-            st.error("Los datos históricos son insuficientes para la optimización")
-            return None, None, None
+            if precios and fechas:
+                serie = pd.Series(precios, index=fechas, name='precio')
+                serie = serie[~serie.index.duplicated(keep='last')]
+                return serie.sort_index()
+        
+        # Para respuestas que son un solo valor (ej: MEP)
+        elif isinstance(data, (int, float)):
+            return pd.Series([float(data)], index=[pd.Timestamp.now()], name='precio')
             
-        # Crear DataFrame con las series alineadas
-        precio_cierre = 'cierre' if use_iol else 'Close'
-        df_precios = pd.DataFrame({k: v.set_index('fecha')[precio_cierre] for k, v in data.items()})
-        
-        # Calcular retornos y validar
-        returns = df_precios.pct_change().dropna()
-        
-        if returns.empty or len(returns) < 30:
-            st.warning("No hay suficientes datos para el análisis")
-            return None, None, None
-            
-        # Eliminar columnas con desviación estándar cero
-        returns = returns.loc[:, returns.std() > 0]
-        
-        # Calcular matriz de covarianza
-        cov_matrix = returns.cov()
-        
-        # Calcular retornos medios
-        mean_returns = returns.mean()
-        
-        return mean_returns, cov_matrix, df_precios
+        return None
         
     except Exception as e:
-        st.error(f"Error en get_historical_data_for_optimization: {str(e)}")
-        return None, None, None
+        st.error(f"Error al procesar respuesta histórica: {str(e)}")
+        return None
 
-def calcular_metricas_portafolio(activos_data, valor_total, token_acceso=None, fecha_desde=None, fecha_hasta=None):
+def obtener_fondos_comunes(token_portador):
     """
-    Calcula métricas detalladas del portafolio usando datos históricos de InvertirOnline
+    Obtiene la lista de fondos comunes de inversión disponibles
+    """
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
     
-    Args:
-        activos_data (list): Lista de diccionarios con datos de los activos
-        valor_total (float): Valor total del portafolio
-        token_acceso (str, optional): Token de autenticación para la API de InvertirOnline
-        fecha_desde (str, optional): Fecha de inicio para datos históricos (YYYY-MM-DD)
-        fecha_hasta (str, optional): Fecha de fin para datos históricos (YYYY-MM-DD)
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener fondos comunes: {str(e)}")
+        return []
+
+def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """
+    Obtiene la serie histórica de un fondo común de inversión
+    """
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
+        return None
+
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+    """
+    Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
     """
     try:
-        # Obtener valores de los activos
-        try:
-            activos_filtrados = [
-                activo for activo in activos_data 
-                if activo.get('Valuación', activo.get('valor_actual', 0)) > 0
-            ]
-            
-            if not activos_filtrados:
+        # Primero intentamos con el endpoint específico del mercado
+        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+        if not url:
+            st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
+            return None
+        
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        # Configurar un timeout más corto para no bloquear la interfaz
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        # Verificar si la respuesta es exitosa
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and data.get('status') == 'error':
+                st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
                 return None
                 
-            # Extraer símbolos y valores
-            simbolos = [activo.get('simbolo', '') for activo in activos_filtrados]
-            valores = [activo.get('Valuación', activo.get('valor_actual', 0)) 
-                     for activo in activos_filtrados]
-                     
-            valores_array = np.array(valores)
+            # Procesar la respuesta según el tipo de activo
+            return procesar_respuesta_historico(data, mercado)
+        else:
+            st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
+            return None
             
-            # Calcular pesos
-            pesos = valores_array / valor_total if valor_total > 0 else np.zeros_like(valores_array)
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Error de conexión para {simbolo}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
+        return None
+
+def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos históricos para optimización con manejo mejorado de errores,
+    reintentos automáticos y soporte para FCIs
+    """
+    precios = {}
+    errores = []
+    max_retries = 2
+    
+    with st.spinner("Obteniendo datos históricos..."):
+        progress_bar = st.progress(0)
+        total_symbols = len(simbolos)
+        
+        for idx, (simbolo, mercado) in enumerate(simbolos):
+            progress = (idx + 1) / total_symbols
+            progress_bar.progress(progress, text=f"Procesando {simbolo} ({idx+1}/{total_symbols})")
             
-            # Obtener datos históricos si se proporciona token_acceso
-            if token_acceso and fecha_desde and fecha_hasta:
+            # Manejo especial para FCIs
+            if mercado.lower() == 'fci':
+                data = obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
+                if data and 'ultimaCotizacion' in data and 'fecha' in data['ultimaCotizacion']:
+                    try:
+                        df = pd.DataFrame({
+                            'fecha': [pd.to_datetime(data['ultimaCotizacion']['fecha'])],
+                            'cierre': [data['ultimaCotizacion']['precio']]
+                        })
+                        df.set_index('fecha', inplace=True)
+                        precios[simbolo] = df['cierre']
+                    except Exception as e:
+                        st.warning(f"Error al procesar datos del FCI {simbolo}: {str(e)}")
+                        errores.append(simbolo)
+                else:
+                    st.warning(f"No se encontraron datos válidos para el FCI {simbolo}")
+                    errores.append(simbolo)
+                continue
+                
+            for attempt in range(max_retries):
                 try:
-                    # Obtener datos históricos usando la API de InvertirOnline
-                    mean_returns, cov_matrix, _ = get_historical_data_for_optimization(
-                        simbolos=simbolos,
+                    # Intentar obtener datos de IOL
+                    serie = obtener_serie_historica_iol(
+                        token_portador=token_portador,
+                        mercado=mercado,
+                        simbolo=simbolo,
                         fecha_desde=fecha_desde,
-                        fecha_hasta=fecha_hasta,
-                        use_iol=True,
-                        bearer_token=token_acceso
+                        fecha_hasta=fecha_hasta
                     )
                     
-                    if mean_returns is not None and cov_matrix is not None:
-                        # Calcular retorno y riesgo esperados del portafolio
-                        retorno_esperado_anual = np.dot(mean_returns, pesos) * 252  # Anualizado
-                        volatilidad_anual = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix * 252, pesos)))  # Anualizado
-                    else:
-                        # Si no se pueden obtener datos históricos, usar valores por defecto
-                        retorno_esperado_anual = 0.08
-                        volatilidad_anual = 0.20
-                        st.warning("No se pudieron obtener datos históricos completos. Usando valores por defecto.")
+                    if serie is not None and not serie.empty:
+                        precios[simbolo] = serie
+                        break  # Salir del bucle de reintentos si tiene éxito
+                    
                 except Exception as e:
-                    st.error(f"Error al obtener datos históricos: {str(e)}")
-                    retorno_esperado_anual = 0.08
-                    volatilidad_anual = 0.20
-            else:
-                # Sin token de acceso, usar valores por defecto
-                retorno_esperado_anual = 0.08
-                volatilidad_anual = 0.20
+                    if attempt == max_retries - 1:  # Último intento
+                        st.warning(f"No se pudo obtener datos para {simbolo} después de {max_retries} intentos: {str(e)}")
+                        errores.append(simbolo)
+                    continue
             
-            # Cálculo de métricas básicas
-            media = np.mean(valores_array)
-            mediana = np.median(valores_array)
-            std_dev = np.std(valores_array)
-            var_95 = np.percentile(valores_array, 5)
-            var_99 = np.percentile(valores_array, 1)
+            # Pequeña pausa entre solicitudes para no saturar el servidor
+            time.sleep(0.5)
+        
+        progress_bar.empty()
+        
+        if errores:
+            st.warning(f"No se pudieron obtener datos para {len(errores)} de {len(simbolos)} activos")
+        
+        if precios:
+            st.success(f"✅ Datos obtenidos para {len(precios)} de {len(simbolos)} activos")
             
-            # Cálculo de cuantiles
-            q25 = np.percentile(valores_array, 25)
-            q50 = np.percentile(valores_array, 50)
-            q75 = np.percentile(valores_array, 75)
-            q90 = np.percentile(valores_array, 90)
-            q95 = np.percentile(valores_array, 95)
+            # Asegurarse de que todas las series tengan la misma longitud
+            min_length = min(len(s) for s in precios.values()) if precios else 0
+            if min_length < 5:  # Mínimo razonable de datos para optimización
+                st.error("Los datos históricos son insuficientes para la optimización")
+                return None, None, None
+                
+            # Crear DataFrame con las series alineadas
+            df_precios = pd.DataFrame({k: v.iloc[-min_length:] for k, v in precios.items()})
             
-            # Cálculo de concentración
-            concentracion = np.sum(pesos ** 2)
+            # Calcular retornos y validar
+            returns = df_precios.pct_change().dropna()
             
-            # Cálculo de retorno y riesgo esperados en pesos
-            retorno_esperado_pesos = valor_total * retorno_esperado_anual
-            riesgo_anual_pesos = valor_total * volatilidad_anual
-            
-            # Simulación de Monte Carlo para calcular métricas de riesgo
-            np.random.seed(42)
-            num_simulaciones = 1000
-            retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
-            pl_simulado = valor_total * retornos_simulados
-            
-            # Cálculo de probabilidades
-            prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
-            prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
-            prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
-            prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
-            
-        except (KeyError, AttributeError) as e:
-            st.error(f"Error al procesar datos del portafolio: {str(e)}")
-            return None
+            if returns.empty or len(returns) < 30:
+                st.warning("No hay suficientes datos para el análisis")
+                return None, None, None
+                
+            # Eliminar columnas con desviación estándar cero
+            if (returns.std() == 0).any():
+                columnas_constantes = returns.columns[returns.std() == 0].tolist()
+                returns = returns.drop(columns=columnas_constantes)
+                df_precios = df_precios.drop(columns=columnas_constantes)
+                
+                if returns.empty or len(returns.columns) < 2:
+                    st.warning("No hay suficientes activos válidos para la optimización")
+                    return None, None, None
+                    
+            mean_returns = returns.mean()
+            cov_matrix = returns.cov()
+            return mean_returns, cov_matrix, df_precios
         
-        # Retornar métricas en un diccionario
-        return {
-            'valor_total': valor_total,
-            'media_activo': media,
-            'mediana_activo': mediana,
-            'std_dev_activo': std_dev,
-            'var_95': var_95,
-            'var_99': var_99,
-            'quantiles': {
-                'q25': q25,
-                'q50': q50,
-                'q75': q75,
-                'q90': q90,
-                'q95': q95
-            },
-            'concentracion': concentracion,
-            'retorno_esperado_pesos': retorno_esperado_pesos,
-            'riesgo_anual_pesos': riesgo_anual_pesos,
-            'probabilidades': {
-                'ganancia': prob_ganancia,
-                'perdida': prob_perdida,
-                'perdida_mayor_10': prob_perdida_mayor_10,
-                'ganancia_mayor_10': prob_ganancia_mayor_10
-            }
-        }
-    except Exception as e:
-        st.error(f'Error al calcular métricas del portafolio: {str(e)}')
-        return None
-        
-        # Obtener valores de los activos
-        try:
-            valores = [activo.get('Valuación', activo.get('valor_actual', 0)) for activo in activos_data 
-                     if activo.get('Valuación', activo.get('valor_actual', 0)) > 0]
-        except (KeyError, AttributeError):
-            valores = []
-        
-        if not valores:
-            return None
-            
-        valores_array = np.array(valores)
-        
-        # Cálculo de métricas básicas
-        media = np.mean(valores_array)
-        mediana = np.median(valores_array)
-        std_dev = np.std(valores_array)
-        var_95 = np.percentile(valores_array, 5)
-        var_99 = np.percentile(valores_array, 1)
-        
-        # Cálculo de cuantiles
-        q25 = np.percentile(valores_array, 25)
-        q50 = np.percentile(valores_array, 50)
-        q75 = np.percentile(valores_array, 75)
-        q90 = np.percentile(valores_array, 90)
-        q95 = np.percentile(valores_array, 95)
-        
-        # Cálculo de concentración
-        pesos = valores_array / valor_total if valor_total > 0 else np.zeros_like(valores_array)
-        concentracion = np.sum(pesos ** 2)
-        
-        # Cálculo de retorno y riesgo esperados
-        retorno_esperado_anual = 0.08  # Tasa de retorno anual esperada
-        volatilidad_anual = 0.20  # Volatilidad anual esperada
-        
-        retorno_esperado_pesos = valor_total * retorno_esperado_anual
-        riesgo_anual_pesos = valor_total * volatilidad_anual
-        
-        # Simulación de Monte Carlo para calcular métricas de riesgo
-        np.random.seed(42)
-        num_simulaciones = 1000
-        retornos_simulados = np.random.normal(retorno_esperado_anual, volatilidad_anual, num_simulaciones)
-        pl_simulado = valor_total * retornos_simulados
-        
-        # Cálculo de probabilidades
-        prob_ganancia = np.sum(pl_simulado > 0) / num_simulaciones
-        prob_perdida = np.sum(pl_simulado < 0) / num_simulaciones
-        prob_perdida_mayor_10 = np.sum(pl_simulado < -valor_total * 0.10) / num_simulaciones
-        prob_ganancia_mayor_10 = np.sum(pl_simulado > valor_total * 0.10) / num_simulaciones
-        
-        # Retornar métricas en un diccionario
-        return {
-            'valor_total': valor_total,
-            'media_activo': media,
-            'mediana_activo': mediana,
-            'std_dev_activo': std_dev,
-            'var_95': var_95,
-            'var_99': var_99,
-            'quantiles': {
-                'q25': q25,
-                'q50': q50,
-                'q75': q75,
-                'q90': q90,
-                'q95': q95
-            },
-            'concentracion': concentracion,
-            'retorno_esperado_anual': retorno_esperado_pesos,
-            'riesgo_anual': riesgo_anual_pesos,
-            'pl_esperado_min': np.min(pl_simulado) if len(pl_simulado) > 0 else 0,
-            'pl_esperado_max': np.max(pl_simulado) if len(pl_simulado) > 0 else 0,
-            'pl_esperado_medio': np.mean(pl_simulado) if len(pl_simulado) > 0 else 0,
-            'pl_percentil_5': np.percentile(pl_simulado, 5) if len(pl_simulado) > 0 else 0,
-            'pl_percentil_95': np.percentile(pl_simulado, 95) if len(pl_simulado) > 0 else 0,
-            'probabilidades': {
-                'ganancia': prob_ganancia,
-                'perdida': prob_perdida,
-                'perdida_mayor_10': prob_perdida_mayor_10,
-                'ganancia_mayor_10': prob_ganancia_mayor_10
-            },
-            'fcis': {
-                'total_invertido': total_fci,
-                'porcentaje_portafolio': porcentaje_fci,
-                'cantidad': len(fcis)
-            }
-        }
-        
-    except Exception as e:
-        st.error(f"Error al calcular métricas del portafolio: {str(e)}")
-        return None
+    st.error("❌ No se pudieron cargar los datos históricos")
+    return None, None, None
 
 # --- Enhanced Portfolio Management Classes ---
 class manager:
@@ -1400,8 +1167,8 @@ def mostrar_resumen_portafolio(portafolio):
             st.subheader("📈 Proyecciones de Rendimiento")
             cols = st.columns(3)
             cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
-            cols[1].metric("Escenario Optimista", f"${metricas['pl_percentil_95']:,.0f}")
-            cols[2].metric("Escenario Pesimista", f"${metricas['pl_percentil_5']:,.0f}")
+            cols[1].metric("Escenario Optimista", f"${metricas['pl_esperado_max']:,.0f}")
+            cols[2].metric("Escenario Pesimista", f"${metricas['pl_esperado_min']:,.0f}")
             
             # Probabilidades
             st.subheader("🎯 Probabilidades")
