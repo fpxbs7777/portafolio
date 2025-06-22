@@ -272,12 +272,13 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
-             response.json()
-        
+            return response.json()
+        else:
             st.error(f"Error al obtener movimientos: {response.status_code} - {response.text}")
-             None
+            return None
     except Exception as e:
         st.error(f"Error de conexión: {str(e)}")
+        return None
          None
 
 def obtener_tasas_caucion(token_portador):
