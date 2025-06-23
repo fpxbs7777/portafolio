@@ -1117,7 +1117,42 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         
     except Exception as e:
         st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
-def calcular_metricas_portafolio(portafolio, valor_total):
+def obtener_tokens(username, password):
+    """Obtiene tokens de autenticación de la API de IOL"""
+    token_url = 'https://api.invertironline.com/token'
+    payload = {
+        'username': username,
+        'password': password,
+        'grant_type': 'password'
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    
+    try:
+        response = requests.post(token_url, data=payload, headers=headers)
+        response.raise_for_status()
+        tokens = response.json()
+        return tokens.get('access_token'), tokens.get('refresh_token')
+    except Exception as e:
+        st.error(f"Error al obtener tokens: {str(e)}")
+        return None, None
+
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, bearer_token):
+    """Obtiene datos históricos para un símbolo y mercado específicos"""
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.warning(f"No se pudieron obtener datos para {simbolo} en {mercado}: {str(e)}")
+        return None
+
+def calcular_metricas_portafolio(portafolio, valor_total, username=None, password=None):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión
     utilizando datos históricos de la API de IOL.
@@ -1125,27 +1160,46 @@ def calcular_metricas_portafolio(portafolio, valor_total):
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
         valor_total (float): Valor total del portafolio
+        username (str): Usuario de IOL (opcional, se puede configurar por variables de entorno)
+        password (str): Contraseña de IOL (opcional, se puede configurar por variables de entorno)
         
     Returns:
         dict: Diccionario con las métricas calculadas
     """
+    # Valores por defecto
+    default_metrics = {
+        'concentracion': 0,
+        'std_dev_activo': 0,
+        'retorno_esperado_anual': 0,
+        'pl_esperado_min': 0,
+        'pl_esperado_max': 0,
+        'probabilidades': {
+            'perdida': 0.0,
+            'ganancia': 0.0,
+            'perdida_mayor_10': 0.0,
+            'ganancia_mayor_10': 0.0
+        },
+        'riesgo_anual': 0
+    }
+    
     if not isinstance(portafolio, dict) or not portafolio or valor_total <= 0:
-        return {
-            'concentracion': 0,
-            'std_dev_activo': 0,
-            'retorno_esperado_anual': 0,
-            'pl_esperado_min': 0,
-            'pl_esperado_max': 0,
-            'probabilidades': {
-                'perdida': 0.0,
-                'ganancia': 0.0,
-                'perdida_mayor_10': 0.0,
-                'ganancia_mayor_10': 0.0
-            },
-            'riesgo_anual': 0
-        }
+        return default_metrics
 
     try:
+        # Obtener credenciales de variables de entorno si no se proporcionan
+        username = username or st.secrets.get('IOL_USERNAME')
+        password = password or st.secrets.get('IOL_PASSWORD')
+        
+        if not username or not password:
+            st.error("No se proporcionaron credenciales de IOL")
+            return default_metrics
+            
+        # Autenticación
+        bearer_token, _ = obtener_tokens(username, password)
+        if not bearer_token:
+            st.error("No se pudo autenticar con IOL")
+            return default_metrics
+            
         # Obtener fechas para el análisis (últimos 3 meses)
         fecha_hasta = date.today()
         fecha_desde = fecha_hasta - timedelta(days=90)
@@ -1157,36 +1211,46 @@ def calcular_metricas_portafolio(portafolio, valor_total):
         retornos = {}
         
         for simbolo, activo in portafolio.items():
-            # Verificar si tenemos token y mercado
-            if not all(k in activo for k in ['token', 'mercado']):
-                continue
-                
-            # Obtener datos históricos (últimos 3 meses)
-            df = obtener_serie_historica_iol(
-                token_portador=activo['token'],
-                mercado=activo['mercado'],
+            # Verificar si tenemos mercado definido
+            mercado = activo.get('mercado', 'BCBA')  # Por defecto BCBA
+            
+            # Obtener datos históricos
+            datos = obtener_serie_historica(
                 simbolo=simbolo,
+                mercado=mercado,
                 fecha_desde=fecha_desde_str,
-                fecha_hasta=fecha_hasta_str
+                fecha_hasta=fecha_hasta_str,
+                bearer_token=bearer_token
             )
             
-            if df is not None and not df.empty and 'ultimoPrecio' in df.columns:
-                # Obtener precios y calcular retornos diarios
-                precios[simbolo] = df['ultimoPrecio']
-                retornos[simbolo] = df['ultimoPrecio'].pct_change().dropna()
+            if datos and isinstance(datos, list) and len(datos) > 0:
+                # Convertir a DataFrame y procesar
+                df = pd.DataFrame(datos)
+                if 'ultimoPrecio' in df.columns and 'fechaHora' in df.columns:
+                    # Procesar fechas y precios
+                    df['fecha'] = pd.to_datetime(df['fechaHora']).dt.date
+                    df = df.sort_values('fecha')
+                    df = df[['fecha', 'ultimoPrecio']].drop_duplicates('fecha')
+                    df = df.set_index('fecha')
+                    
+                    # Almacenar precios y calcular retornos
+                    precios[simbolo] = df['ultimoPrecio']
+                    retornos[simbolo] = df['ultimoPrecio'].pct_change().dropna()
         
         if not precios:
             raise ValueError("No se pudieron obtener datos históricos para ningún activo")
-        
-        # Calcular métricas
+            
+        # Crear DataFrames con los datos obtenidos
         df_precios = pd.DataFrame(precios)
         df_retornos = pd.DataFrame(retornos)
         
-        # 1. Calcular concentración del portafolio (Índice de Herfindahl-Hirschman)
+        # Calcular pesos del portafolio
         pesos = np.array([activo.get('Valuación', 0) / valor_total for activo in portafolio.values()])
+        
+        # 1. Calcular concentración del portafolio (Índice de Herfindahl-Hirschman)
         concentracion = float(np.sum(pesos ** 2))
         
-        # 2. Calcular volatilidad (desviación estándar anualizada)
+        # 2. Calcular matriz de covarianza y volatilidad del portafolio
         cov_matrix = df_retornos.cov() * 252  # Anualizar
         port_vol = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
         riesgo_anual = float(port_vol * valor_total)  # Riesgo en términos monetarios
@@ -1210,6 +1274,7 @@ def calcular_metricas_portafolio(portafolio, valor_total):
         else:
             prob_ganancia = prob_perdida = prob_ganancia_10 = prob_perdida_10 = 0.0
         
+        # 6. Preparar métricas de retorno
         return {
             'concentracion': concentracion,
             'std_dev_activo': riesgo_anual,  # Volatilidad en términos monetarios
