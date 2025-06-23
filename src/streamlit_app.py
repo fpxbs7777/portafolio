@@ -926,17 +926,17 @@ class output:
             st.warning("No hay datos suficientes para mostrar el histograma")
             return None
             
-        # Create figure with secondary y-axis
+        # Create figure
         fig = go.Figure()
         
-        # Add histogram with probability density
+        # Add histogram
         fig.add_trace(go.Histogram(
             x=self.returns,
             histnorm='probability density',
             name='Densidad de Probabilidad',
             marker_color='#1f77b4',
             opacity=0.75,
-            nbinsx=50,  # Increase number of bins for smoother distribution
+            nbinsx=50,
             hovertemplate='Retorno: %{x:.2%}<br>Densidad: %{y:.4f}<extra></extra>'
         ))
         
@@ -959,7 +959,7 @@ class output:
         
         # Add shaded area for VaR
         fig.add_vrect(
-            x0=min(self.returns) - 0.01,  # Extend slightly beyond min return
+            x0=min(self.returns) - 0.01,
             x1=self.var_95,
             fillcolor="rgba(255, 0, 0, 0.1)",
             line_width=0,
@@ -970,20 +970,20 @@ class output:
         
         # Update layout
         fig.update_layout(
-            title=title,
+            title=dict(
+                text=title,
+                x=0.5,
+                y=0.95,
+                xanchor='center',
+                yanchor='top'
+            ),
             xaxis_title="Retorno Diario",
-            title={
-                'text': f"{title}<br><sup>Distribución de retornos diarios</sup>",
-                'x': 0.5,
-                'xanchor': 'center',
-                'yanchor': 'top'
-            },
             yaxis_title="Densidad de Probabilidad",
-            showlegend=False,
-            template='plotly_white',
-            hovermode='x unified',
-            height=500,
-            margin=dict(t=80, b=60, l=60, r=40),
+            showlegend=True,
+            legend_title="Métricas",
+            template="plotly_white",
+            hovermode="closest",
+            margin=dict(l=50, r=50, t=80, b=50),
             xaxis_tickformat=".1%",
             xaxis_showgrid=True,
             yaxis_showgrid=True,
