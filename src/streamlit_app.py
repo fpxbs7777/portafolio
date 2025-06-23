@@ -939,9 +939,12 @@ class output:
             'Nivel Concentración': self.concentration_level,
             
             # Return Projections (Proyecciones de Rendimiento)
-            'Retorno Esperado': f"${self.expected_return:.2%}",
-            'Escenario Optimista': f"${self.optimistic_scenario:.2%}",
-            'Escenario Pesimista': f"${self.pessimistic_scenario:.2%}",
+            'Retorno Esperado (%)': f"{self.expected_return:.2%}",
+            'Retorno Esperado ($)': f"${self.expected_return * self.notional:,.0f}",
+            'Escenario Optimista (%)': f"{self.optimistic_scenario:.2%}",
+            'Escenario Optimista ($)': f"${self.optimistic_scenario * self.notional:,.0f}",
+            'Escenario Pesimista (%)': f"{self.pessimistic_scenario:.2%}",
+            'Escenario Pesimista ($)': f"${self.pessimistic_scenario * self.notional:,.0f}",
             
             # Probabilities (Probabilidades)
             'Ganancia': f"{self.prob_gain:.1%}",
@@ -969,13 +972,13 @@ class output:
 
         with st.expander("📈 Proyecciones de Rendimiento"):
             st.markdown("### Retorno Esperado")
-            st.markdown(f"{metrics['Retorno Esperado']}")
+            st.markdown(f"{metrics['Retorno Esperado (%)']} ({metrics['Retorno Esperado ($)']})")
             
             st.markdown("### Escenario Optimista")
-            st.markdown(f"{metrics['Escenario Optimista']}")
+            st.markdown(f"{metrics['Escenario Optimista (%)']} ({metrics['Escenario Optimista ($)']})")
             
             st.markdown("### Escenario Pesimista")
-            st.markdown(f"{metrics['Escenario Pesimista']}")
+            st.markdown(f"{metrics['Escenario Pesimista (%)']} ({metrics['Escenario Pesimista ($)']})")
 
         with st.expander("🎯 Probabilidades"):
             st.markdown("### Ganancia")
@@ -989,6 +992,18 @@ class output:
             
             st.markdown("### Pérdida >10%")
             st.markdown(f"{metrics['Pérdida >10%']}")
+
+        # Asset allocation section
+        if self.dataframe_allocation is not None:
+            with st.expander("📊 Distribución de Activos"):
+                st.dataframe(self.dataframe_allocation, hide_index=True, use_container_width=True)
+                # Pie chart visualization
+                try:
+                    import plotly.express as px
+                    fig_alloc = px.pie(self.dataframe_allocation, names=self.dataframe_allocation.index, values='Peso', title='Distribución del Portafolio')
+                    st.plotly_chart(fig_alloc, use_container_width=True)
+                except Exception as e:
+                    st.write("No se pudo generar el gráfico de distribución: ", e)
 
             # Add explanations
             explanations = {
