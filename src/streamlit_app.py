@@ -1062,10 +1062,9 @@ class PortfolioManager:
                     
                     with col2:
                         st.markdown("#### 📈 Métricas del Portafolio")
-                        # Calcular métricas usando los retornos históricos y precios
+                        metricas = None  # Inicializar para evitar NameError
                         if portfolio_result.metrics:
                             metricas = portfolio_result.metrics
-                            
                             metricas_df = pd.DataFrame([{
                                 'Concentración': f"{metricas['concentracion']:.4f}",
                                 'Volatilidad Anual': f"{metricas['volatilidad_anual']:.2%}",
@@ -1092,23 +1091,20 @@ class PortfolioManager:
                                 st.metric("Drawdown Máximo", f"{metricas['max_drawdown']:.2%}")
                                 st.metric("Retorno Total", f"{metricas['retorno_total']:.2%}")
                                 st.metric("Concentración", f"{metricas['concentracion']:.4f}")
-                    
-                    # Si no hay métricas calculadas, mostrar las métricas básicas del output
-                    if not metricas:
-                        st.warning("⚠️ No se pudieron calcular las métricas del portafolio")
-                        
-                        # Mostrar métricas básicas del output
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.metric("Retorno Anual", f"{portfolio_result.return_annual:.2%}")
-                            st.metric("Volatilidad Anual", f"{portfolio_result.volatility_annual:.2%}")
-                            st.metric("Ratio de Sharpe", f"{portfolio_result.sharpe_ratio:.4f}")
-                            st.metric("VaR 95%", f"{portfolio_result.var_95:.4f}")
-                        with col_b:
-                            st.metric("Skewness", f"{portfolio_result.skewness:.4f}")
-                            st.metric("Kurtosis", f"{portfolio_result.kurtosis:.4f}")
-                            st.metric("JB Statistic", f"{portfolio_result.jb_stat:.4f}")
-                            st.metric("Normalidad", "Sí" if portfolio_result.is_normal else "No")
+                        else:
+                            # Métricas básicas cuando no se pudo calcular el dict completo
+                            st.warning("⚠️ No se pudieron calcular las métricas detalladas del portafolio")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Retorno Anual", f"{portfolio_result.return_annual:.2%}")
+                                st.metric("Volatilidad Anual", f"{portfolio_result.volatility_annual:.2%}")
+                                st.metric("Ratio de Sharpe", f"{portfolio_result.sharpe_ratio:.4f}")
+                                st.metric("VaR 95%", f"{portfolio_result.var_95:.4f}")
+                            with col_b:
+                                st.metric("Skewness", f"{portfolio_result.skewness:.4f}")
+                                st.metric("Kurtosis", f"{portfolio_result.kurtosis:.4f}")
+                                st.metric("JB Statistic", f"{portfolio_result.jb_stat:.4f}")
+                                st.metric("Normalidad", "Sí" if portfolio_result.is_normal else "No")
 
                     # Mostrar Frontera Eficiente si está habilitada
                     if show_frontier:
