@@ -1374,29 +1374,29 @@ def mostrar_resumen_portafolio(portafolio):
     # Recomendaciones
     st.subheader("💡 Recomendaciones")
     if metricas:
-        if metricas['sharpe_ratio'] < 0.5:
+        if metricas.get('sharpe_ratio', 0) < 0.5:
             st.warning("""
             ⚠️ Ratio de Sharpe Bajo
             El portafolio tiene un ratio de Sharpe bajo, lo que indica que el retorno ajustado al riesgo es insuficiente.
             Se recomienda revisar la composición del portafolio.
             """)
-        if metricas['volatility'] * np.sqrt(252) > 0.30:
+        if metricas.get('volatility', 0) * np.sqrt(252) > 0.30:
             st.warning("""
             ⚠️ Volatilidad Alta
             El portafolio tiene una volatilidad anual alta. Se recomienda considerar estrategias de reducción de riesgo.
             """)
-        if metricas['var_95'] > -0.10:
+        if metricas.get('var_95', 0) > -0.10:
             st.warning("""
             ⚠️ Riesgo de Pérdida
             El portafolio tiene un VaR 95% relativamente alto, lo que indica un riesgo significativo de pérdidas.
             Se recomienda revisar la exposición al riesgo.
             """)
-        if metricas['concentracion'] > 0.5:
+        if metricas.get('concentracion', 0) > 0.5:
             st.warning("""
             **⚠️ Portafolio Altamente Concentrado**  
             Considere diversificar sus inversiones para reducir el riesgo.
             """)
-        elif metricas['concentracion'] > 0.25:
+        elif metricas.get('concentracion', 0) > 0.25:
             st.info("""
             **ℹ️ Concentración Moderada**  
             Podría mejorar su diversificación para optimizar el riesgo.
@@ -1406,12 +1406,9 @@ def mostrar_resumen_portafolio(portafolio):
             **✅ Buena Diversificación**  
             Su portafolio está bien diversificado.
             """)
-            else:
-                st.success("""
-                **✅ Buena Diversificación**  
-                Su portafolio está bien diversificado.
-                """)
-            
+        
+        # Verificar relación riesgo-retorno si las métricas están disponibles
+        if all(k in metricas for k in ('retorno_esperado_anual', 'riesgo_anual')):
             ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
             if ratio_riesgo_retorno > 0.5:
                 st.success("""
