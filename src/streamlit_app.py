@@ -629,95 +629,139 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
-    Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
+    Obtiene la serie histórica de precios para un activo específico desde la API de InvertirOnline.
+    
+    Args:
+        token_portador (str): Token de autenticación de la API
+        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
+        simbolo (str): Símbolo del activo
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
+        ajustada (str): Tipo de ajuste ('Ajustada' o 'SinAjustar')
+        
+    Returns:
+        pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
     try:
-        # Para fondos comunes de inversión, usar la función específica
+        # Endpoint para FCIs (manejo especial)
         if mercado.upper() == 'FCI':
             return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-            
-        # Para otros tipos de activos, construir la URL adecuada
-        base_url = "https://api.invertironline.com/api/v2"
         
-        # Mapeo de mercados a sus respectivos endpoints
-        endpoints = {
-            'BCBA': f"{base_url}/BCBA/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'NYSE': f"{base_url}/NYC/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'NASDAQ': f"{base_url}/NAS/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'ROFEX': f"{base_url}/ROFEX/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'MERVAL': f"{base_url}/MERVAL/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'MERVAL_25': f"{base_url}/MERVAL_25/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'BCP': f"{base_url}/BCP/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'BYMA': f"{base_url}/BYMA/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'MERVAL_25': f"{base_url}/MERVAL_25/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-            'MERVAL_25': f"{base_url}/MERVAL_25/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        }
-        
-        # Obtener el endpoint adecuado para el mercado
-        url = endpoints.get(mercado.upper())
-        
-        if not url:
-            # Si no está en el mapeo, intentar con el formato estándar
-            url = f"{base_url}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        # Construir URL según el tipo de activo y mercado
+        if mercado.upper() in ['BCBA', 'ROFEX', 'BYMA', 'MAE']:
+            # Para mercados argentinos
+            url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        else:
+            # Para mercados internacionales (NYSE, NASDAQ, etc.)
+            url = f"https://api.invertironline.com/api/v2/cotizaciones-orleans-panel/acciones/{mercado}/Todos"
         
         headers = {
             'Authorization': f'Bearer {token_portador}',
             'Accept': 'application/json'
         }
         
-        # Realizar la petición
+        # Realizar la solicitud
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         
         # Procesar la respuesta
         data = response.json()
         
-        # Si es una lista, procesar como serie histórica
-        if isinstance(data, list):
-            fechas = []
-            precios = []
-            
-            for item in data:
-                try:
-                    # Manejar diferentes estructuras de respuesta
-                    if isinstance(item, dict):
-                        # Intentar obtener el precio de diferentes campos posibles
-                        precio = item.get('ultimoPrecio') or item.get('precioCierreAjustado') or item.get('precioApertura') or item.get('precioCierre')
-                        fecha_str = item.get('fecha') or item.get('fechaHora')
-                        
-                        if precio is not None and precio > 0 and fecha_str:
-                            fecha_parsed = pd.to_datetime(fecha_str, errors='coerce')
-                            if pd.notna(fecha_parsed):
-                                precios.append(float(precio))
-                                fechas.append(fecha_parsed)
-                except (ValueError, AttributeError, TypeError) as e:
-                    continue
-            
-            if fechas and precios:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                # Eliminar duplicados manteniendo el último
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                return df
+        # Si es un endpoint de cotizaciones, buscar el símbolo específico
+        if 'cotizaciones-orleans' in url and isinstance(data, list):
+            activo = next((item for item in data if item.get('simbolo') == simbolo), None)
+            if not activo:
+                return None
+            # Crear un DataFrame con el último precio disponible
+            fecha_actual = datetime.now().strftime('%Y-%m-%d')
+            return pd.DataFrame({
+                'fecha': [pd.to_datetime(fecha_actual)],
+                'precio': [activo.get('ultimoPrecio')]
+            })
         
-        # Si es un diccionario con datos de cotización
-        elif isinstance(data, dict):
-            precio = data.get('ultimoPrecio') or data.get('precioCierreAjustado') or data.get('precioApertura') or data.get('precioCierre')
-            if precio:
-                return pd.DataFrame({
-                    'fecha': [pd.Timestamp.now()],
-                    'precio': [float(precio)]
-                })
-        
-        # Si no se pudo procesar la respuesta
-        st.warning(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
+        # Para series históricas estándar
+        if isinstance(data, list) and data:
+            df = pd.DataFrame(data)
+            # Normalizar nombres de columnas
+            date_col = next((col for col in df.columns if 'fecha' in col.lower()), 'fecha')
+            price_col = next(
+                (col for col in df.columns 
+                 if any(x in col.lower() for x in ['ultimo', 'precio', 'cierre'])),
+                'precio'
+            )
+            
+            df = df.rename(columns={date_col: 'fecha', price_col: 'precio'})
+            df['fecha'] = pd.to_datetime(df['fecha'])
+            df = df[['fecha', 'precio']].dropna()
+            
+            # Si solo hay un dato, replicarlo para tener al menos 2 puntos
+            if len(df) == 1:
+                df = pd.concat([df, df], ignore_index=True)
+                df.at[1, 'fecha'] = df.at[0, 'fecha'] - pd.Timedelta(days=1)
+            
+            return df.sort_values('fecha')
+            
         return None
-            
+        
     except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión para {simbolo} en {mercado}: {str(e)}")
+        st.error(f"Error en la solicitud para {simbolo} ({mercado}): {str(e)}")
         return None
     except Exception as e:
-        st.error(f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}")
+        st.error(f"Error procesando datos para {simbolo} ({mercado}): {str(e)}")
+        return None
+
+def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """
+    Obtiene la serie histórica de un Fondo Común de Inversión.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo (str): Símbolo del FCI
+        fecha_desde (str): Fecha de inicio
+        fecha_hasta (str): Fecha de fin
+        
+    Returns:
+        pd.DataFrame: DataFrame con fechas y precios, o None si hay error
+    """
+    try:
+        # Obtener el ID del FCI
+        url_fci = f"https://api.invertironline.com/api/v2/Titulos/FCI"
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
+        
+        response = requests.get(url_fci, headers=headers, timeout=30)
+        response.raise_for_status()
+        fc_data = response.json()
+        
+        # Buscar el FCI por símbolo
+        fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
+        if not fci:
+            return None
+            
+        # Obtener serie histórica
+        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
+        params = {
+            'fechaDesde': fecha_desde,
+            'fechaHasta': fecha_hasta
+        }
+        
+        response = requests.get(url_serie, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        if isinstance(data, list) and data:
+            df = pd.DataFrame(data)
+            if 'fecha' in df.columns and 'valorCuota' in df.columns:
+                df = df.rename(columns={'fecha': 'fecha', 'valorCuota': 'precio'})
+                df['fecha'] = pd.to_datetime(df['fecha'])
+                return df[['fecha', 'precio']].sort_values('fecha')
+        
+        return None
+        
+    except Exception as e:
+        st.error(f"Error obteniendo datos de FCI {simbolo}: {str(e)}")
         return None
 
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
@@ -1033,34 +1077,20 @@ class PortfolioManager:
             symbols = []
             markets = []
             tipos = []
-            # Detectar mercado sin uso de tablas rígidas
             def detectar_mercado(tipo_raw: str, mercado_raw: str) -> str:
-                tipo_norm = tipo_raw.strip().upper()
-                mercado_norm = mercado_raw.strip().upper()
-
-                if not tipo_norm and mercado_norm:
-                    return mercado_norm.title()
-
-                # Casos especiales por prefijo o palabra clave en 'tipo'
-                if 'CED' in tipo_norm:
-                    return 'Cedears'
-                if 'FOND' in tipo_norm or 'FCI' in tipo_norm:
-                    return 'FCI'
-                if 'ADR' in tipo_norm:
-                    return 'ADRs'
-                if 'BONO' in tipo_norm or 'BONOS' in tipo_norm:
-                    return 'Bonos'
-                if 'OPCION' in tipo_norm:
-                    return 'Opciones'
-                if 'MEP' in tipo_norm:
-                    return 'MEP'
-                if 'CAUCION' in tipo_norm:
-                    return 'Caucion'
-                if 'TITULOS' in tipo_norm and 'PUBLIC' in tipo_norm:
-                    return 'TitulosPublicos'
-
-                # Fallback al mercado informado o BCBA
-                return mercado_norm.title() if mercado_norm else 'BCBA'
+                """
+                Determina el mercado basado en la información proporcionada.
+                
+                Args:
+                    tipo_raw: Tipo de activo (no utilizado en esta versión)
+                    mercado_raw: Mercado del activo
+                    
+                Returns:
+                    str: Nombre del mercado normalizado
+                """
+                # Usar el mercado proporcionado o BCBA como valor por defecto
+                mercado = mercado_raw.strip().title() if mercado_raw.strip() else 'BCBA'
+                return mercado
             
             for activo in self.activos:
                 if isinstance(activo, dict):
@@ -1263,23 +1293,97 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def calcular_metricas_portafolio(portafolio, valor_total):
+def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
-    Calcula métricas clave de desempeño para un portafolio de inversión.
+    Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
         valor_total (float): Valor total del portafolio
+        token_portador (str): Token de autenticación para la API de InvertirOnline
+        dias_historial (int): Número de días de histórico a considerar (por defecto: 252 días hábiles)
         
     Returns:
         dict: Diccionario con las métricas calculadas
     """
-    if not isinstance(portafolio, dict):
+    if not isinstance(portafolio, dict) or not portafolio or valor_total <= 0:
         return {}
 
-    if valor_total == 0:
+    # Obtener fechas para el histórico
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=dias_historial*1.5)).strftime('%Y-%m-%d')
+    
+    # 1. Calcular concentración del portafolio
+    concentracion = sum((activo.get('Valuación', 0) / valor_total) ** 2 
+                       for activo in portafolio.values())
+    
+    # Inicializar estructuras para cálculos
+    retornos_diarios = {}
+    metricas_activos = {}
+    
+    # 2. Obtener datos históricos y calcular métricas por activo
+    for simbolo, activo in portafolio.items():
+        try:
+            # Obtener datos históricos
+            mercado = activo.get('mercado', 'BCBA')
+            df_historico = obtener_serie_historica_iol(
+                token_portador, 
+                mercado, 
+                simbolo, 
+                fecha_desde, 
+                fecha_hasta
+            )
+            
+            if df_historico is None or df_historico.empty:
+                continue
+                
+            # Calcular retornos diarios
+            df_historico = df_historico.sort_values('fecha')
+            df_historico['retorno'] = df_historico['precio'].pct_change()
+            
+            # Filtrar valores atípicos
+            q_low = df_historico['retorno'].quantile(0.01)
+            q_high = df_historico['retorno'].quantile(0.99)
+            df_historico = df_historico[(df_historico['retorno'] >= q_low) & 
+                                      (df_historico['retorno'] <= q_high)]
+            
+            # Calcular métricas
+            retorno_medio = df_historico['retorno'].mean() * 252  # Anualizado
+            volatilidad = df_historico['retorno'].std() * np.sqrt(252)  # Anualizada
+            
+            # Calcular probabilidades
+            retornos_positivos = df_historico[df_historico['retorno'] > 0]['retorno']
+            retornos_negativos = df_historico[df_historico['retorno'] < 0]['retorno']
+            
+            prob_ganancia = len(retornos_positivos) / len(df_historico) if not df_historico.empty else 0
+            prob_perdida = len(retornos_negativos) / len(df_historico) if not df_historico.empty else 0
+            
+            prob_ganancia_10 = (len(retornos_positivos[retornos_positivos > 0.1]) / len(df_historico) 
+                              if not df_historico.empty else 0)
+            prob_perdida_10 = (len(retornos_negativos[retornos_negativos < -0.1]) / len(df_historico) 
+                             if not df_historico.empty else 0)
+            
+            # Guardar métricas
+            metricas_activos[simbolo] = {
+                'retorno_medio': retorno_medio,
+                'volatilidad': volatilidad,
+                'prob_ganancia': prob_ganancia,
+                'prob_perdida': prob_perdida,
+                'prob_ganancia_10': prob_ganancia_10,
+                'prob_perdida_10': prob_perdida_10,
+                'peso': activo.get('Valuación', 0) / valor_total
+            }
+            
+            # Guardar retornos para cálculo de correlaciones
+            retornos_diarios[simbolo] = df_historico.set_index('fecha')['retorno']
+            
+        except Exception as e:
+            print(f"Error procesando {simbolo}: {str(e)}")
+            continue
+    
+    if not metricas_activos:
         return {
-            'concentracion': 0,
+            'concentracion': concentracion,
             'std_dev_activo': 0,
             'retorno_esperado_anual': 0,
             'pl_esperado_min': 0,
@@ -1287,59 +1391,56 @@ def calcular_metricas_portafolio(portafolio, valor_total):
             'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
             'riesgo_anual': 0
         }
-
-    # 1. Calcular concentración del portafolio
-    concentracion = 0
-    for activo in portafolio.values():
-        concentracion += (activo.get('Valuación', 0) / valor_total) ** 2
     
-    # 2. Calcular volatilidad de los activos
-    std_dev_activo = 0
-    for activo in portafolio.values():
-        std_dev_activo += activo.get('Valuación', 0) * activo.get('volatilidad', 0)
+    # 3. Calcular métricas del portafolio
+    # Retorno esperado ponderado
+    retorno_esperado_anual = sum(
+        m['retorno_medio'] * m['peso'] 
+        for m in metricas_activos.values()
+    )
     
-    # 3. Calcular retorno esperado
-    retorno_esperado_anual = 0
-    for activo in portafolio.values():
-        retorno_esperado_anual += activo.get('Valuación', 0) * activo.get('retorno_esperado', 0)
+    # Volatilidad del portafolio (considerando correlaciones)
+    if len(retornos_diarios) > 1:
+        df_correlacion = pd.DataFrame(retornos_diarios).corr()
+        pesos = np.array([m['peso'] for m in metricas_activos.values()])
+        volatilidades = np.array([m['volatilidad'] for m in metricas_activos.values()])
+        matriz_cov = np.diag(volatilidades) @ df_correlacion.values @ np.diag(volatilidades)
+        varianza_portafolio = pesos.T @ matriz_cov @ pesos
+        volatilidad_portafolio = np.sqrt(varianza_portafolio)
+    else:
+        volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
     
-    # 4. Calcular escenarios de pérdida y ganancia
-    pl_esperado_min = 0
-    pl_esperado_max = 0
-    for activo in portafolio.values():
-        pl_esperado_min += activo.get('Valuación', 0) * activo.get('pl_min', 0)
-        pl_esperado_max += activo.get('Valuación', 0) * activo.get('pl_max', 0)
+    # Calcular percentiles para escenarios
+    retornos_simulados = []
+    for _ in range(1000):  # Simulación Monte Carlo simple
+        retorno_simulado = 0
+        for m in metricas_activos.values():
+            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
+        retornos_simulados.append(retorno_simulado * 252)  # Anualizado
     
-    # 5. Calcular probabilidades de pérdida y ganancia
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
+    
+    # Calcular probabilidades ponderadas
     probabilidades = {
-        'perdida': 0,
-        'ganancia': 0,
-        'perdida_mayor_10': 0,
-        'ganancia_mayor_10': 0
+        'perdida': sum(m['prob_perdida'] * m['peso'] for m in metricas_activos.values()),
+        'ganancia': sum(m['prob_ganancia'] * m['peso'] for m in metricas_activos.values()),
+        'perdida_mayor_10': sum(m['prob_perdida_10'] * m['peso'] for m in metricas_activos.values()),
+        'ganancia_mayor_10': sum(m['prob_ganancia_10'] * m['peso'] for m in metricas_activos.values())
     }
-    for activo in portafolio.values():
-        probabilidades['perdida'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida', 0)
-        probabilidades['ganancia'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia', 0)
-        probabilidades['perdida_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida_mayor_10', 0)
-        probabilidades['ganancia_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia_mayor_10', 0)
-    
-    # 6. Calcular riesgo anual
-    riesgo_anual = 0
-    for activo in portafolio.values():
-        riesgo_anual += activo.get('Valuación', 0) * activo.get('riesgo', 0)
     
     return {
         'concentracion': concentracion,
-        'std_dev_activo': std_dev_activo,
+        'std_dev_activo': volatilidad_portafolio,
         'retorno_esperado_anual': retorno_esperado_anual,
         'pl_esperado_min': pl_esperado_min,
         'pl_esperado_max': pl_esperado_max,
         'probabilidades': probabilidades,
-        'riesgo_anual': riesgo_anual
+        'riesgo_anual': volatilidad_portafolio  # Usamos la volatilidad como proxy de riesgo
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token):
+def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
