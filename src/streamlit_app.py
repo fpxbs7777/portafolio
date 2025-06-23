@@ -604,13 +604,25 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
     """
     url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
     headers = {
-        'Authorization': f'Bearer {token_portador}'
+        'Authorization': f'Bearer {token_portador}',
+        'Accept': 'application/json'
     }
     
     try:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        # Procesar la respuesta para convertirla al formato esperado
+        if isinstance(data, list):
+            fechas = []
+            precios = []
+            for item in data:
+                if 'fecha' in item and 'valorCuota' in item:
+                    fechas.append(pd.to_datetime(item['fecha']))
+                    precios.append(float(item['valorCuota']))
+            if fechas and precios:
+                return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
+        return None
     except requests.exceptions.RequestException as e:
         st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
         return None
@@ -620,35 +632,92 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     Obtiene series históricas para diferentes tipos de activos con manejo mejorado de errores
     """
     try:
-        # Primero intentamos con el endpoint específico del mercado
-        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+        # Para fondos comunes de inversión, usar la función específica
+        if mercado.upper() == 'FCI':
+            return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
+            
+        # Para otros tipos de activos, construir la URL adecuada
+        base_url = "https://api.invertironline.com/api/v2"
+        
+        # Mapeo de mercados a sus respectivos endpoints
+        endpoints = {
+            'BCBA': f"{base_url}/BCBA/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'NYSE': f"{base_url}/NYC/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'NASDAQ': f"{base_url}/NAS/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'ROFEX': f"{base_url}/ROFEX/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'MERVAL': f"{base_url}/MERVAL/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'MERVAL_25': f"{base_url}/MERVAL_25/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'BCP': f"{base_url}/BCP/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'BYMA': f"{base_url}/BYMA/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'MERVAL_25': f"{base_url}/MERVAL_25/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+            'MERVAL_25': f"{base_url}/MERVAL_25/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        }
+        
+        # Obtener el endpoint adecuado para el mercado
+        url = endpoints.get(mercado.upper())
+        
         if not url:
-            st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
-            return None
+            # Si no está en el mapeo, intentar con el formato estándar
+            url = f"{base_url}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
         
-        headers = obtener_encabezado_autorizacion(token_portador)
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
         
-        # Configurar un timeout más corto para no bloquear la interfaz
-        response = requests.get(url, headers=headers, timeout=10)
+        # Realizar la petición
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
         
-        # Verificar si la respuesta es exitosa
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, dict) and data.get('status') == 'error':
-                st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
-                return None
-                
-            # Procesar la respuesta según el tipo de activo
-            return procesar_respuesta_historico(data, mercado)
-        else:
-            st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
-            return None
+        # Procesar la respuesta
+        data = response.json()
+        
+        # Si es una lista, procesar como serie histórica
+        if isinstance(data, list):
+            fechas = []
+            precios = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes estructuras de respuesta
+                    if isinstance(item, dict):
+                        # Intentar obtener el precio de diferentes campos posibles
+                        precio = item.get('ultimoPrecio') or item.get('precioCierreAjustado') or item.get('precioApertura') or item.get('precioCierre')
+                        fecha_str = item.get('fecha') or item.get('fechaHora')
+                        
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = pd.to_datetime(fecha_str, errors='coerce')
+                            if pd.notna(fecha_parsed):
+                                precios.append(float(precio))
+                                fechas.append(fecha_parsed)
+                except (ValueError, AttributeError, TypeError) as e:
+                    continue
+            
+            if fechas and precios:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                # Eliminar duplicados manteniendo el último
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
+        
+        # Si es un diccionario con datos de cotización
+        elif isinstance(data, dict):
+            precio = data.get('ultimoPrecio') or data.get('precioCierreAjustado') or data.get('precioApertura') or data.get('precioCierre')
+            if precio:
+                return pd.DataFrame({
+                    'fecha': [pd.Timestamp.now()],
+                    'precio': [float(precio)]
+                })
+        
+        # Si no se pudo procesar la respuesta
+        st.warning(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
+        return None
             
     except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión para {simbolo}: {str(e)}")
+        st.warning(f"Error de conexión para {simbolo} en {mercado}: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"Error inesperado al procesar {simbolo}: {str(e)}")
+        st.error(f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}")
         return None
 
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
