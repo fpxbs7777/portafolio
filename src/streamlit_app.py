@@ -11,6 +11,9 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+from typing import Dict, List, Optional, Union, Any
+from dataclasses import dataclass
+import json
 
 warnings.filterwarnings('ignore')
 
@@ -119,85 +122,151 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def obtener_encabezado_autorizacion(token_portador):
-    return {
-        'Authorization': f'Bearer {token_portador}',
-        'Content-Type': 'application/json'
-    }
-
-def obtener_tokens(usuario, contraseña):
-    url_login = 'https://api.invertironline.com/token'
-    datos = {
-        'username': usuario,
-        'password': contraseña,
-        'grant_type': 'password'
-    }
-    try:
-        respuesta = requests.post(url_login, data=datos, timeout=15)
-        respuesta.raise_for_status()
-        respuesta_json = respuesta.json()
-        return respuesta_json['access_token'], respuesta_json['refresh_token']
-    except requests.exceptions.HTTPError as http_err:
-        st.error(f'Error HTTP al obtener tokens: {http_err}')
-        if respuesta.status_code == 400:
-            st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
-        elif respuesta.status_code == 401:
-            st.warning("No autorizado. Verifique sus credenciales o permisos.")
+@dataclass
+class InvertirOnlineAPI:
+    """Cliente para interactuar con la API de Invertir Online"""
+    
+    def __init__(self, token: str = None):
+        self.base_url = "https://api.invertironline.com/api/v2"
+        self.token = token
+        self.session = requests.Session()
+        if token:
+            self.session.headers.update({
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            })
+    
+    def login(self, usuario: str, contraseña: str) -> tuple:
+        """Inicia sesión y devuelve los tokens de acceso y actualización"""
+        url_login = 'https://api.invertironline.com/token'
+        datos = {
+            'username': usuario,
+            'password': contraseña,
+            'grant_type': 'password'
+        }
+        try:
+            respuesta = requests.post(url_login, data=datos, timeout=15)
+            respuesta.raise_for_status()
+            respuesta_json = respuesta.json()
+            self.token = respuesta_json['access_token']
+            self.session.headers.update({'Authorization': f'Bearer {self.token}'})
+            return self.token, respuesta_json.get('refresh_token')
+        except requests.exceptions.HTTPError as http_err:
+            error_msg = f'Error HTTP al obtener tokens: {http_err}'
+            if 'respuesta' in locals():
+                if respuesta.status_code == 400:
+                    error_msg += "\nVerifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'."
+                elif respuesta.status_code == 401:
+                    error_msg += "\nNo autorizado. Verifique sus credenciales o permisos."
+                else:
+                    error_msg += f"\nEl servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}."
+            raise Exception(error_msg)
+    
+    def obtener_perfil(self) -> Dict[str, Any]:
+        """Obtiene los datos del perfil del usuario autenticado"""
+        return self._get("/datos-perfil")
+    
+    def obtener_estado_cuenta(self, id_cliente: str = None) -> Dict[str, Any]:
+        """Obtiene el estado de cuenta"""
+        endpoint = f"/Asesores/EstadoDeCuenta/{id_cliente}" if id_cliente else "/estadocuenta"
+        return self._get(endpoint)
+    
+    def obtener_portafolio(self, pais: str = 'Argentina', id_cliente: str = None) -> Dict[str, Any]:
+        """Obtiene el portafolio para un país y cliente específicos"""
+        endpoint = f"/Asesores/Portafolio/{id_cliente}/{pais}" if id_cliente else f"/portafolio/{pais}"
+        return self._get(endpoint)
+    
+    def obtener_lista_clientes(self) -> List[Dict]:
+        """Obtiene la lista de clientes (para asesores)"""
+        clientes = self._get("/Asesores/Clientes")
+        if isinstance(clientes, list):
+            return clientes
+        return clientes.get('clientes', [])
+    
+    def obtener_serie_historica(self, mercado: str, simbolo: str, fecha_desde: str, 
+                              fecha_hasta: str, ajustada: str = "SinAjustar") -> pd.DataFrame:
+        """Obtiene la serie histórica de un activo"""
+        endpoint = self._obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+        data = self._get(endpoint)
+        return self._procesar_respuesta_historica(data, mercado)
+    
+    def _get(self, endpoint: str) -> Any:
+        """Método interno para realizar peticiones GET"""
+        url = f"{self.base_url}{endpoint}"
+        try:
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Error en la petición a {url}: {str(e)}")
+    
+    def _obtener_endpoint_historico(self, mercado: str, simbolo: str, fecha_desde: str, 
+                                  fecha_hasta: str, ajustada: str = "SinAjustar") -> str:
+        """Determina el endpoint correcto según el tipo de activo"""
+        mercado = mercado.upper()
+        if mercado in ['BCBA', 'ROFEX', 'BYMA']:
+            return f"/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        elif mercado in ['NYSE', 'NASDAQ', 'AMEX']:
+            return f"/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}"
         else:
-            st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
-        return None, None
-    except Exception as e:
-        st.error(f'Error inesperado al obtener tokens: {str(e)}')
-        return None, None
+            raise ValueError(f"Mercado no soportado: {mercado}")
+    
+    def _procesar_respuesta_historica(self, data: Dict, tipo_activo: str) -> pd.DataFrame:
+        """Procesa la respuesta de la API según el tipo de activo"""
+        if not data or 'titulo' not in data or 'historia' not in data:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(data['historia'])
+        
+        # Estandarizar nombres de columnas
+        column_mapping = {
+            'fechaHora': 'fecha',
+            'fecha': 'fecha',
+            'precioApertura': 'open',
+            'precioMaximo': 'high',
+            'precioMinimo': 'low',
+            'precioCierre': 'close',
+            'volumen': 'volume',
+            'montoOperado': 'monto',
+            'cantidadNominal': 'cantidad'
+        }
+        
+        # Renombrar columnas
+        df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+        
+        # Convertir fechas
+        if 'fecha' in df.columns:
+            df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+            df = df.sort_values('fecha')
+        
+        return df
 
 def obtener_lista_clientes(token_portador):
-    url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
-    encabezados = obtener_encabezado_autorizacion(token_portador)
+    """Obtiene la lista de clientes usando el cliente de la API"""
     try:
-        respuesta = requests.get(url_clientes, headers=encabezados)
-        if respuesta.status_code == 200:
-            clientes_data = respuesta.json()
-            if isinstance(clientes_data, list):
-                return clientes_data
-            elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
-                return clientes_data['clientes']
-            else:
-                return []
-        else:
-            st.error(f'Error al obtener la lista de clientes: {respuesta.status_code}')
-            return []
+        api = InvertirOnlineAPI(token_portador)
+        return api.obtener_lista_clientes()
     except Exception as e:
-        st.error(f'Error de conexión al obtener clientes: {str(e)}')
+        st.error(f'Error al obtener lista de clientes: {str(e)}')
         return []
 
 def obtener_estado_cuenta(token_portador, id_cliente=None):
-    if id_cliente:
-        url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
-    else:
-        url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
-    
-    encabezados = obtener_encabezado_autorizacion(token_portador)
+    """Obtiene el estado de cuenta usando el cliente de la API"""
     try:
-        respuesta = requests.get(url_estado_cuenta, headers=encabezados)
-        if respuesta.status_code == 200:
-            return respuesta.json()
-        elif respuesta.status_code == 401:
-            return obtener_estado_cuenta(token_portador, None)
-        else:
-            return None
+        api = InvertirOnlineAPI(token_portador)
+        return api.obtener_estado_cuenta(id_cliente)
     except Exception as e:
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
         return None
 
-def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
-    url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
-    encabezados = obtener_encabezado_autorizacion(token_portador)
+def obtener_portafolio(token_portador, id_cliente=None, pais='Argentina'):
+    """Obtiene el portafolio usando el cliente de la API"""
     try:
-        respuesta = requests.get(url_portafolio, headers=encabezados)
-        if respuesta.status_code == 200:
-            return respuesta.json()
-        else:
-            return None
+        api = InvertirOnlineAPI(token_portador)
+        return api.obtener_portafolio(pais, id_cliente)
+    except Exception as e:
+        st.error(f'Error al obtener portafolio: {str(e)}')
+        return None
     except Exception as e:
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
@@ -576,6 +645,17 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
+        return None
+
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+    """
+    Obtiene la serie histórica usando el cliente de la API
+    """
+    try:
+        api = InvertirOnlineAPI(token_portador)
+        return api.obtener_serie_historica(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+    except Exception as e:
+        st.error(f'Error al obtener datos históricos para {simbolo} en {mercado}: {str(e)}')
         return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
