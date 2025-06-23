@@ -1092,7 +1092,9 @@ class PortfolioManager:
                                 st.metric("Drawdown Máximo", f"{metricas['max_drawdown']:.2%}")
                                 st.metric("Retorno Total", f"{metricas['retorno_total']:.2%}")
                                 st.metric("Concentración", f"{metricas['concentracion']:.4f}")
-                    else:
+                    
+                    # Si no hay métricas calculadas, mostrar las métricas básicas del output
+                    if not metricas:
                         st.warning("⚠️ No se pudieron calcular las métricas del portafolio")
                         
                         # Mostrar métricas básicas del output
