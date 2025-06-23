@@ -483,66 +483,83 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
     
     return endpoints.get(mercado)
 
-def parse_datetime_flexible(datetime_string):
+def parse_datetime_flexible(date_str: str):
     """
-    Intenta parsear una fecha en múltiples formatos.
+    Parses a datetime string that may or may not include microseconds or timezone info.
+    Uses pandas.to_datetime for robust parsing.
+    """
+    if not isinstance(date_str, str):
+        return None
+    try:
+        # pd.to_datetime is very robust and can handle various formats, including ISO 8601
+        # with or without microseconds and timezone information.
+        # errors='coerce' will return NaT (Not a Time) for strings that cannot be parsed.
+        return pd.to_datetime(date_str, errors='coerce', utc=True)
+    except Exception:
+        return None
+
+def procesar_respuesta_historico(data, tipo_activo):
+    """
+    Procesa la respuesta de la API según el tipo de activo
+    """
+    if not data:
+        return None
     
-    Args:
-        datetime_string: Cadena de fecha a parsear
+    try:
+        # Para series históricas estándar
+        if isinstance(data, list):
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes estructuras de respuesta
+                    if isinstance(item, dict):
+                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
+                        if not precio or precio == 0:
+                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                        
+                        fecha_str = item.get('fechaHora') or item.get('fecha')
+                        
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = parse_datetime_flexible(fecha_str)
+                            if pd.notna(fecha_parsed):
+                                precios.append(float(precio))
+                                fechas.append(fecha_parsed)
+                except (ValueError, AttributeError) as e:
+                    continue
+            
+            if precios and fechas:
+                serie = pd.Series(precios, index=fechas, name='precio')
+                serie = serie[~serie.index.duplicated(keep='last')]
+                return serie.sort_index()
         
-    Returns:
-        pd.Timestamp o None si no se puede parsear
-    """
-    if not datetime_string or not isinstance(datetime_string, (str, int, float)):
+        # Para respuestas que son un solo valor (ej: MEP)
+        elif isinstance(data, (int, float)):
+            return pd.Series([float(data)], index=[pd.Timestamp.now(tz='UTC')], name='precio')
+            
         return None
         
-    # Si es un timestamp numérico
-    if isinstance(datetime_string, (int, float)):
-        try:
-            return pd.to_datetime(datetime_string, unit='ms', utc=True)
-        except:
-            return None
-    
-    # Lista de formatos a probar
-    formats = [
-        "%Y-%m-%dT%H:%M:%S.%fZ",  # ISO con microsegundos y Z
-        "%Y-%m-%dT%H:%M:%SZ",      # ISO sin microsegundos y Z
-        "%Y-%m-%dT%H:%M:%S.%f",    # ISO con microsegundos
-        "%Y-%m-%dT%H:%M:%S",       # ISO sin microsegundos
-        "%Y-%m-%d %H:%M:%S.%f",    # Formato estándar con microsegundos
-        "%Y-%m-%d %H:%M:%S",       # Formato estándar sin microsegundos
-        "%Y-%m-%d",                # Solo fecha
-        "%d/%m/%Y %H:%M:%S",       # Formato europeo con hora
-        "%d/%m/%Y",                # Formato europeo sin hora
-        "%m/%d/%Y %H:%M:%S",       # Formato americano con hora
-        "%m/%d/%Y"                 # Formato americano sin hora
-    ]
-    
-    # Primero intentar con los formatos definidos
-    for fmt in formats:
-        try:
-            return pd.to_datetime(datetime_string, format=fmt, utc=True)
-        except (ValueError, TypeError):
-            continue
-    
-    # Luego intentar con formatos especiales
-    try:
-        # Intentar con ISO8601
-        return pd.to_datetime(datetime_string, format='ISO8601')
-    except (ValueError, TypeError):
-        pass
-        
-    try:
-        # Intentar con formato mixto
-        return pd.to_datetime(datetime_string, format='mixed')
-    except (ValueError, TypeError):
-        pass
-    
-    # Finalmente, intentar con inferencia
-    try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True, utc=True)
-    except:
+    except Exception as e:
+        st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
+
+def obtener_fondos_comunes(token_portador):
+    """
+    Obtiene la lista de fondos comunes de inversión disponibles
+    """
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener fondos comunes: {str(e)}")
+        return []
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
@@ -1201,173 +1218,206 @@ def mostrar_resumen_portafolio(portafolio):
                 'valuacionEnMonedaOriginal',
                 'valuacionActual',
                 'valorNominalEnMonedaOriginal', 
-                'valorNominal'
+                'valorNominal',
+                'valuacionDolar',
+                'valuacion',
+                'valorActual',
+                'montoInvertido',
+                'valorMercado',
+                'valorTotal',
+                'importe'
             ]
             
-            # Obtener el valor del activo
-            valor_activo = 0
+            valuacion = 0
             for campo in campos_valuacion:
                 if campo in activo and activo[campo] is not None:
                     try:
-                        valor_activo = float(activo[campo])
-                        break
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
                     except (ValueError, TypeError):
                         continue
-                        
-            # Si no se pudo obtener el valor, intentar con el precio * cantidad
-            if valor_activo == 0 and 'ultimoPrecio' in titulo and cantidad > 0:
-                try:
-                    valor_activo = float(titulo['ultimoPrecio']) * cantidad
-                except (ValueError, TypeError):
-                    pass
-                    
-            valor_total += valor_activo
             
-            # Agregar a los datos del activo
+            if valuacion == 0 and cantidad:
+                campos_precio = [
+                    'precioPromedio',
+                    'precioCompra',
+                    'precioActual',
+                    'precio',
+                    'precioUnitario',
+                    'ultimoPrecio',
+                    'cotizacion'
+                ]
+                
+                precio_unitario = 0
+                for campo in campos_precio:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            precio = float(activo[campo])
+                            if precio > 0:
+                                precio_unitario = precio
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                if precio_unitario == 0:
+                    for campo in campos_precio:
+                        if campo in titulo and titulo[campo] is not None:
+                            try:
+                                precio = float(titulo[campo])
+                                if precio > 0:
+                                    precio_unitario = precio
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                
+                if precio_unitario > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        # Ajustar la valuación para bonos (precio por 100 nominal)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                        else:
+                            valuacion = cantidad_num * precio_unitario
+                    except (ValueError, TypeError) as e:
+                        st.warning(f"Error calculando valuación para {simbolo}: {str(e)}")
+            
             datos_activos.append({
-                'simbolo': simbolo,
-                'descripcion': descripcion,
-                'tipo': tipo,
-                'cantidad': cantidad,
-                'valor': valor_activo
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
             })
             
+            valor_total += valuacion
         except Exception as e:
-            st.warning(f"Error al procesar el activo {activo.get('simbolo', 'desconocido')}: {str(e)}")
             continue
     
-    # Crear DataFrame con los datos de los activos
-    if datos_activos:  # Solo si hay datos para mostrar
+    if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
+        # Convert list to dictionary with symbols as keys
+        portafolio_dict = {row['Símbolo']: row for row in datos_activos}
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total)
         
-        # Mostrar métricas si están disponibles (solo una vez, fuera del bucle)
-        if 'metricas' in portafolio and 'probabilidades' in portafolio['metricas']:
-            st.subheader("📊 Métricas del Portafolio")
+        # Información General
+        cols = st.columns(4)
+        cols[0].metric("Total de Activos", len(datos_activos))
+        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
+        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        
+        if metricas:
+            # Métricas de Riesgo
+            st.subheader("⚖️ Análisis de Riesgo")
+            cols = st.columns(3)
+            
+            cols[0].metric("Concentración", 
+                          f"{metricas['concentracion']:.3f}",
+                          help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
+            
+            cols[1].metric("Volatilidad", 
+                          f"${metricas['std_dev_activo']:,.0f}",
+                          help="Desviación estándar de los valores de activos")
+            
+            concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
+            cols[2].metric("Nivel Concentración", concentracion_status)
+            
+            # Proyecciones
+            st.subheader("📈 Proyecciones de Rendimiento")
+            cols = st.columns(3)
+            cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
+            cols[1].metric("Escenario Optimista", f"${metricas['pl_esperado_max']:,.0f}")
+            cols[2].metric("Escenario Pesimista", f"${metricas['pl_esperado_min']:,.0f}")
+            
+            # Probabilidades
+            st.subheader("🎯 Probabilidades")
             cols = st.columns(4)
-            probs = portafolio['metricas']['probabilidades']
-            cols[0].metric("Ganancia", f"{probs.get('ganancia', 0)*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs.get('perdida', 0)*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs.get('ganancia_mayor_10', 0)*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs.get('perdida_mayor_10', 0)*100:.1f}")
-        
-        # Mostrar tabla de activos
-        st.subheader("📋 Detalle de Activos")
-        st.dataframe(df_activos)
+            probs = metricas['probabilidades']
+            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
         col1, col2 = st.columns(2)
         
         with col1:
-            if 'tipo' in df_activos.columns and not df_activos.empty:
-                tipo_stats = df_activos.groupby('tipo')['valor'].sum().reset_index()
+            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
+                tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
                 fig_pie = go.Figure(data=[go.Pie(
-                    labels=tipo_stats['tipo'],
-                    values=tipo_stats['valor'],
+                    labels=tipo_stats['Tipo'],
+                    values=tipo_stats['Valuación'],
                     textinfo='label+percent',
                     hole=0.4,
-                    marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b'])
+                    marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
                 )])
                 fig_pie.update_layout(
                     title="Distribución por Tipo",
-                    height=400,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    height=400
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
         
         with col2:
-            if not df_activos.empty and 'valor' in df_activos.columns:
-                valores_activos = df_activos[df_activos['valor'] > 0]['valor'].tolist()
+            if len(datos_activos) > 1:
+                valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
                 if valores_activos:
                     fig_hist = go.Figure(data=[go.Histogram(
                         x=valores_activos,
                         nbinsx=min(20, len(valores_activos)),
-                        marker_color='#0d6efd',
-                        opacity=0.75
+                        marker_color='#0d6efd'
                     )])
                     fig_hist.update_layout(
                         title="Distribución de Valores",
                         xaxis_title="Valor ($)",
                         yaxis_title="Frecuencia",
-                        height=400,
-                        bargap=0.1
+                        height=400
                     )
                     st.plotly_chart(fig_hist, use_container_width=True)
         
-        # Formatear y mostrar tabla de activos
-        if not df_activos.empty and valor_total > 0:
-            df_display = df_activos.copy()
-            df_display['valor_formateado'] = df_display['valor'].apply(
-                lambda x: f"${x:,.2f}" if pd.notnull(x) and x > 0 else "N/A"
-            )
-            df_display['Peso (%)'] = (df_display['valor'] / valor_total * 100).round(2)
+        # Tabla de activos
+        st.subheader("📋 Detalle de Activos")
+        df_display = df_activos.copy()
+        df_display['Valuación'] = df_display['Valuación'].apply(
+            lambda x: f"${x:,.2f}" if x > 0 else "N/A"
+        )
+        df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
+        df_display = df_display.sort_values('Peso (%)', ascending=False)
+        
+        st.dataframe(df_display, use_container_width=True, height=400)
+        
+        # Recomendaciones
+        st.subheader("💡 Recomendaciones")
+        if metricas:
+            if metricas['concentracion'] > 0.5:
+                st.warning("""
+                **⚠️ Portafolio Altamente Concentrado**  
+                Considere diversificar sus inversiones para reducir el riesgo.
+                """)
+            elif metricas['concentracion'] > 0.25:
+                st.info("""
+                **ℹ️ Concentración Moderada**  
+                Podría mejorar su diversificación para optimizar el riesgo.
+                """)
+            else:
+                st.success("""
+                **✅ Buena Diversificación**  
+                Su portafolio está bien diversificado.
+                """)
             
-            # Ordenar por valor descendente
-            df_display = df_display.sort_values('valor', ascending=False)
-            
-            # Mostrar solo columnas relevantes
-            columnas_mostrar = ['simbolo', 'descripcion', 'tipo', 'cantidad', 'valor_formateado', 'Peso (%)']
-            df_display = df_activos[['simbolo', 'descripcion', 'tipo', 'cantidad', 'valor']].copy()
-            df_display['valor'] = df_display['valor'].apply(lambda x: f"${x:,.2f}" if pd.notnull(x) and x > 0 else "N/A")
-            df_display['Peso (%)'] = (df_activos['valor'] / valor_total * 100).round(2)
-            df_display = df_display.rename(columns={
-                'simbolo': 'Símbolo',
-                'descripcion': 'Descripción',
-                'tipo': 'Tipo',
-                'cantidad': 'Cantidad',
-                'valor': 'Valor',
-                'Peso (%)': 'Peso (%)'
-            })
-            # Mostrar la tabla con formato mejorado
-            st.dataframe(
-                df_display,
-                column_config={
-                    "Peso (%)": st.column_config.ProgressColumn(
-                        "Peso (%)",
-                        help="Porcentaje del portafolio",
-                        format="%.1f%%",
-                        min_value=0,
-                        max_value=100,
-                    ),
-                    "Cantidad": st.column_config.NumberColumn(
-                        "Cantidad",
-                        format="%.2f"
-                    )
-                },
-                hide_index=True,
-                use_container_width=True,
-                height=min(400, (len(df_display) + 1) * 35 + 3)  # Ajustar altura dinámicamente
-            )
-            
-            # Calcular métricas de riesgo-retorno
-            if valor_total > 0 and len(datos_activos) > 0:
-                # Calcular retorno esperado (simplificado como promedio de retornos individuales)
-                retorno_esperado = df_activos['valor'].pct_change().mean() * 252  # Anualizado
-                
-                # Calcular riesgo (desviación estándar de retornos)
-                riesgo = df_activos['valor'].pct_change().std() * np.sqrt(252)  # Anualizado
-                
-                # Mostrar métricas
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Retorno Anual Esperado", f"{retorno_esperado:.2%}" if not pd.isna(retorno_esperado) else "N/A")
-                with col2:
-                    st.metric("Riesgo Anual", f"{riesgo:.2%}" if not pd.isna(riesgo) else "N/A")
-                
-                # Mostrar recomendaciones basadas en riesgo-retorno
-                if not pd.isna(riesgo) and riesgo > 0:
-                    ratio_riesgo_retorno = retorno_esperado / riesgo if not pd.isna(retorno_esperado) else 0
-                    if ratio_riesgo_retorno > 0.5:
-                        st.success("""
-                        **✅ Buen Balance Riesgo-Retorno**  
-                        La relación entre riesgo y retorno es favorable.
-                        """)
-                    else:
-                        st.warning("""
-                        **⚠️ Revisar Balance Riesgo-Retorno**  
-                        El riesgo podría ser alto en relación al retorno esperado.
-                        Considera ajustar la asignación de activos.
-                        """)
+            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
+            if ratio_riesgo_retorno > 0.5:
+                st.success("""
+                **✅ Buen Balance Riesgo-Retorno**  
+                La relación entre riesgo y retorno es favorable.
+                """)
+            else:
+                st.warning("""
+                **⚠️ Revisar Balance Riesgo-Retorno**  
+                El riesgo podría ser alto en relación al retorno esperado.
+                """)
     else:
         st.warning("No se encontraron activos en el portafolio")
 
