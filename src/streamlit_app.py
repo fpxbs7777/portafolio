@@ -1583,19 +1583,45 @@ def mostrar_resumen_portafolio(portafolio):
         
         if metricas:
             # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
+            st.subheader("📊 Análisis de Riesgo y Rendimiento")
             
-            cols[0].metric("Concentración", 
-                          f"{metricas['concentracion']:.3f}",
-                          help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
+            # Primera fila de métricas
+            col1, col2, col3 = st.columns(3)
             
-            cols[1].metric("Volatilidad", 
-                          f"${metricas['std_dev_activo']:,.0f}",
-                          help="Desviación estándar de los valores de activos")
+            with col1:
+                st.metric("Valor Total del Portafolio", f"${valor_total:,.2f}")
+                st.metric("Retorno Esperado Anual", f"{metricas.get('retorno_esperado_anual', 0):.2%}")
+                st.metric("Volatilidad Anual", f"{metricas.get('volatilidad_anual', 0):.2%}")
+                
+            with col2:
+                st.metric("Ratio de Sharpe", f"{metricas.get('sharpe_ratio', 0):.2f}")
+                st.metric("Drawdown Máximo", f"{metricas.get('max_drawdown', 0):.2%}")
+                st.metric("VaR 95% (1 día)", f"{metricas.get('var_95', 0):.4f}")
+                
+            with col3:
+                concentracion_status = "🟢 Baja" if metricas.get('concentracion', 0) < 0.25 else "🟡 Media" if metricas.get('concentracion', 0) < 0.5 else "🔴 Alta"
+                st.metric("Nivel Concentración", concentracion_status, 
+                         help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
+                st.metric("Skewness", f"{metricas.get('skewness', 0):.4f}",
+                         help="Asimetría de la distribución de retornos")
+                st.metric("Kurtosis", f"{metricas.get('kurtosis', 0):.4f}",
+                         help="Curtosis de la distribución de retornos")
             
-            concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
-            cols[2].metric("Nivel Concentración", concentracion_status)
+            # Segunda fila con métricas adicionales
+            st.subheader("📈 Proyecciones y Probabilidades")
+            col4, col5 = st.columns(2)
+            
+            with col4:
+                st.markdown("##### 📊 Escenarios de Rendimiento")
+                st.metric("Escenario Optimista", f"{metricas.get('pl_esperado_max', 0):.2%}")
+                st.metric("Escenario Base", f"{metricas.get('retorno_esperado_anual', 0):.2%}")
+                st.metric("Escenario Pesimista", f"{metricas.get('pl_esperado_min', 0):.2%}")
+                
+            with col5:
+                st.markdown("##### 🎯 Probabilidades")
+                st.metric("Prob. Ganancia", f"{metricas.get('probabilidades', {}).get('ganancia', 0):.1f}%")
+                st.metric("Prob. Pérdida", f"{metricas.get('probabilidades', {}).get('perdida', 0):.1f}%")
+                st.metric("Prob. >10% Ganancia", f"{metricas.get('probabilidades', {}).get('ganancia_mayor_10', 0):.1f}%")
             
             # Proyecciones
             st.subheader("📈 Proyecciones de Rendimiento")
