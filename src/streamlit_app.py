@@ -933,35 +933,21 @@ class output:
         """Display portfolio metrics in a formatted Streamlit table with validations"""
         # Create metrics dictionary
         metrics = {
-            # Risk Analysis
-            'Concentración': self.concentration_level,
-            'Volatilidad': f"{self.volatility_daily:.2%}",
+            # Risk Analysis (Análisis de Riesgo)
+            'Concentración': f"{self.concentration:.3f}",
+            'Volatilidad': f"${self.volatility_daily:.2%}",
             'Nivel Concentración': self.concentration_level,
             
-            # Return Projections
-            'Retorno Esperado': f"{self.expected_return:.2%}",
-            'Escenario Optimista': f"{self.optimistic_scenario:.2%}",
-            'Escenario Pesimista': f"{self.pessimistic_scenario:.2%}",
+            # Return Projections (Proyecciones de Rendimiento)
+            'Retorno Esperado': f"${self.expected_return:.2%}",
+            'Escenario Optimista': f"${self.optimistic_scenario:.2%}",
+            'Escenario Pesimista': f"${self.pessimistic_scenario:.2%}",
             
-            # Probabilities
-            'Probabilidad de Ganancia': f"{self.prob_gain:.1%}",
-            'Probabilidad de Pérdida': f"{self.prob_loss:.1%}",
-            'Probabilidad Ganancia >10%': f"{self.prob_gain_10:.1%}",
-            'Probabilidad Pérdida >10%': f"{self.prob_loss_10:.1%}",
-            
-            # Traditional Metrics
-            'Retorno Anualizado': f"{self.annual_return:.2%}",
-            'Volatilidad Anualizada': f"{self.annual_volatility:.2%}",
-            'Ratio de Sharpe': f"{self.sharpe_ratio:.4f}",
-            'Ratio de Sortino': f"{self.sortino_ratio:.4f}",
-            'VaR 95% (Diario)': f"{self.var_95:.2%}",
-            'CVaR 95% (Diario)': f"{self.cvar_95:.2%}",
-            'Retorno Promedio (Diario)': f"{self.mean_daily:.4%}",
-            'Volatilidad (Diaria)': f"{self.volatility_daily:.4%}",
-            'Asimetría': f"{self.skewness:.4f}",
-            'Curtosis': f"{self.kurtosis:.4f}",
-            'Test de Normalidad (p-valor)': f"{self.jb_pvalue:.4f}",
-            'Distribución Normal': "Sí" if self.is_normal else "No"
+            # Probabilities (Probabilidades)
+            'Ganancia': f"{self.prob_gain:.1%}",
+            'Pérdida': f"{self.prob_loss:.1%}",
+            'Ganancia >10%': f"{self.prob_gain_10:.1%}",
+            'Pérdida >10%': f"{self.prob_loss_10:.1%}"
         }
 
         # Create DataFrame
@@ -970,17 +956,39 @@ class output:
             'Valor': list(metrics.values())
         })
 
-        # Display table with explanations
-        with st.expander("📊 Métricas del Portafolio (click para ver explicaciones)"):
-            st.dataframe(
-                df,
-                column_config={
-                    "Métrica": st.column_config.TextColumn("Métrica", width="medium"),
-                    "Valor": st.column_config.TextColumn("Valor", width="small")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
+        # Display sections with exact format
+        with st.expander("⚖️ Análisis de Riesgo"):
+            st.markdown("### Concentración")
+            st.markdown(f"{metrics['Concentración']}")
+            
+            st.markdown("### Volatilidad")
+            st.markdown(f"{metrics['Volatilidad']}")
+            
+            st.markdown("### Nivel Concentración")
+            st.markdown(f"{metrics['Nivel Concentración']}")
+
+        with st.expander("📈 Proyecciones de Rendimiento"):
+            st.markdown("### Retorno Esperado")
+            st.markdown(f"{metrics['Retorno Esperado']}")
+            
+            st.markdown("### Escenario Optimista")
+            st.markdown(f"{metrics['Escenario Optimista']}")
+            
+            st.markdown("### Escenario Pesimista")
+            st.markdown(f"{metrics['Escenario Pesimista']}")
+
+        with st.expander("🎯 Probabilidades"):
+            st.markdown("### Ganancia")
+            st.markdown(f"{metrics['Ganancia']}")
+            
+            st.markdown("### Pérdida")
+            st.markdown(f"{metrics['Pérdida']}")
+            
+            st.markdown("### Ganancia >10%")
+            st.markdown(f"{metrics['Ganancia >10%']}")
+            
+            st.markdown("### Pérdida >10%")
+            st.markdown(f"{metrics['Pérdida >10%']}")
 
             # Add explanations
             explanations = {
