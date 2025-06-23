@@ -1553,7 +1553,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total)
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
         # Información General
         cols = st.columns(4)
