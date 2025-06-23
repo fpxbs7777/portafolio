@@ -1125,86 +1125,125 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
 # --- Portfolio Metrics Function ---
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, fecha_desde, fecha_hasta):
     """
-    Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
+    Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos de IOL.
 
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
         valor_total (float): Valor total del portafolio
         token_portador (str): Token de autenticación para IOL
-        fecha_desde (str): Fecha inicio para los datos históricos
-        fecha_hasta (str): Fecha fin para los datos históricos
+        fecha_desde (str): Fecha inicio para los datos históricos (YYYY-MM-DD)
+        fecha_hasta (str): Fecha fin para los datos históricos (YYYY-MM-DD)
 
     Returns:
         dict: Diccionario con las métricas calculadas
     """
-
-    # Obtener datos históricos usando el método de optimización
-    activos = [{'simbolo': simbolo, 'mercado': 'BCBA'} for simbolo in portafolio.keys()]
     try:
-        data = get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta)
-
-        if not data:
-            raise ValueError('No se pudieron obtener datos históricos')
-
-        # Calcular retornos
-        returns = pd.DataFrame()
-        for simbolo in portafolio.keys():
-            if simbolo in data:
-                returns[simbolo] = data[simbolo]['Close'].pct_change().dropna()
-
-        if returns.empty:
-            raise ValueError('No hay datos de retornos disponibles')
-
-        # Calcular métricas
+        # Obtener datos históricos para cada activo en el portafolio
+        returns_data = {}
+        
+        for simbolo, activo in portafolio.items():
+            try:
+                # Obtener datos históricos para el activo
+                df = obtener_serie_historica_iol(
+                    token_portador=token_portador,
+                    mercado='BCBA',  # Por defecto BCBA, se puede parametrizar si es necesario
+                    simbolo=simbolo,
+                    fecha_desde=fecha_desde,
+                    fecha_hasta=fecha_hasta,
+                    ajustada='Ajustada'  # Usar datos ajustados por splits/dividendos
+                )
+                
+                if df is not None and not df.empty and 'ultimoPrecio' in df.columns:
+                    # Calcular retornos diarios
+                    df['retorno'] = df['ultimoPrecio'].pct_change()
+                    returns_data[simbolo] = df['retorno'].dropna()
+                
+            except Exception as e:
+                st.warning(f'Error procesando {simbolo}: {str(e)}')
+                continue
+        
+        if not returns_data:
+            raise ValueError('No se pudieron obtener datos para ningún activo')
+        
+        # Crear DataFrame de retornos
+        returns_df = pd.DataFrame(returns_data)
+        
+        # Calcular pesos del portafolio
+        pesos = {}
+        for simbolo, activo in portafolio.items():
+            if simbolo in returns_df.columns:
+                # Usar el valor del activo para ponderar
+                pesos[simbolo] = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
+        
+        # Calcular métricas del portafolio
         metrics = {}
-        metrics['mean_return'] = returns.mean().mean()
-        metrics['volatility'] = returns.std().mean()
-        metrics['sharpe_ratio'] = metrics['mean_return'] / metrics['volatility'] if metrics['volatility'] > 0 else 0
-        metrics['var_95'] = returns.quantile(0.05).mean()
-        metrics['skewness'] = returns.skew().mean()
-        metrics['kurtosis'] = returns.kurtosis().mean()
-        metrics['is_normal'] = stats.jarque_bera(returns.values.flatten())[1] > 0.05
-
-        # Calcular tasa libre de riesgo como media de retornos del mercado
-        metrics['risk_free_rate'] = returns.mean().mean()
-
-        return metrics
-    except Exception as e:
-        st.error(f'Error al calcular métricas: {str(e)}')
+        
+        # Retorno esperado del portafolio
+        if not returns_df.empty:
+            # Calcular retorno esperado ponderado
+            mean_returns = returns_df.mean()
+            metrics['mean_return'] = sum(mean_returns[simbolo] * peso 
+                                      for simbolo, peso in pesos.items() 
+                                      if simbolo in mean_returns)
+            
+            # Volatilidad del portafolio
+            cov_matrix = returns_df.cov()
+            portfolio_variance = 0
+            for i, simbolo1 in enumerate(pesos.keys()):
+                for j, simbolo2 in enumerate(pesos.keys()):
+                    if simbolo1 in cov_matrix.columns and simbolo2 in cov_matrix.columns:
+                        portfolio_variance += pesos[simbolo1] * pesos[simbolo2] * cov_matrix.loc[simbolo1, simbolo2]
+            
+            metrics['volatility'] = np.sqrt(portfolio_variance) if portfolio_variance > 0 else 0
+            
+            # Ratio de Sharpe (asumiendo tasa libre de riesgo = 0 para simplificar)
+            metrics['sharpe_ratio'] = (metrics['mean_return'] / metrics['volatility'] * np.sqrt(252) 
+                                     if metrics['volatility'] > 0 else 0)
+            
+            # Value at Risk (VaR) al 95% de confianza
+            portfolio_returns = (returns_df * pd.Series(pesos)).sum(axis=1)
+            metrics['var_95'] = np.percentile(portfolio_returns, 5)
+            
+            # Otras métricas de riesgo
+            metrics['skewness'] = portfolio_returns.skew()
+            metrics['kurtosis'] = portfolio_returns.kurtosis()
+            metrics['is_normal'] = stats.jarque_bera(portfolio_returns)[1] > 0.05
+            
+            # Calcular concentración del portafolio (índice Herfindahl-Hirschman)
+            hhi = sum(peso**2 for peso in pesos.values())
+            metrics['concentration'] = hhi
+            
+            # Calcular drawdown máximo
+            cum_returns = (1 + portfolio_returns).cumprod()
+            rolling_max = cum_returns.cummax()
+            drawdowns = (cum_returns - rolling_max) / rolling_max
+            metrics['max_drawdown'] = drawdowns.min()
+            
+            # Calcular ratio de Sortino (similar a Sharpe pero solo considera desviación negativa)
+            negative_returns = portfolio_returns[portfolio_returns < 0]
+            downside_std = np.sqrt((negative_returns**2).mean()) if not negative_returns.empty else 0
+            metrics['sortino_ratio'] = (metrics['mean_return'] * np.sqrt(252) / downside_std 
+                                      if downside_std > 0 else 0)
+            
+            # Calcular beta del portafolio (requeriría un índice de mercado)
+            # metrics['beta'] = calcular_beta(portfolio_returns, market_returns)
+            
+            # Calcular información de concentración por sector/activo
+            metrics['top_holdings'] = sorted(
+                [(simbolo, peso) for simbolo, peso in pesos.items() if peso > 0.01],
+                key=lambda x: x[1],
+                reverse=True
+            )
+            
+            return metrics
+        
         return {}
-
-    pl_esperado_max = 0
-    for activo in portafolio.values():
-        pl_esperado_min += activo.get('Valuación', 0) * activo.get('pl_min', 0)
-        pl_esperado_max += activo.get('Valuación', 0) * activo.get('pl_max', 0)
-    
-    # 5. Calcular probabilidades de pérdida y ganancia
-    probabilidades = {
-        'perdida': 0,
-        'ganancia': 0,
-        'perdida_mayor_10': 0,
-        'ganancia_mayor_10': 0
-    }
-    for activo in portafolio.values():
-        probabilidades['perdida'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida', 0)
-        probabilidades['ganancia'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia', 0)
-        probabilidades['perdida_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida_mayor_10', 0)
-        probabilidades['ganancia_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia_mayor_10', 0)
-    
-    # 6. Calcular riesgo anual
-    riesgo_anual = 0
-    for activo in portafolio.values():
-        riesgo_anual += activo.get('Valuación', 0) * activo.get('riesgo', 0)
-    
-    return {
-        'concentracion': concentracion,
-        'std_dev_activo': std_dev_activo,
-        'retorno_esperado_anual': retorno_esperado_anual,
-        'pl_esperado_min': pl_esperado_min,
-        'pl_esperado_max': pl_esperado_max,
-        'probabilidades': probabilidades,
-        'riesgo_anual': riesgo_anual
-    }
+        
+    except Exception as e:
+        st.error(f'Error al calcular métricas del portafolio: {str(e)}')
+        import traceback
+        st.error(traceback.format_exc())
+        return {}
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador, fecha_desde, fecha_hasta):
