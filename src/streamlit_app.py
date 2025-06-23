@@ -781,30 +781,73 @@ class manager:
         return port_output
 
 class output:
-    def __init__(self, returns, notional):
-        self.returns = returns
-        self.notional = notional
-        self.mean_daily = np.mean(returns)
-        self.volatility_daily = np.std(returns)
-        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
-        self.var_95 = np.percentile(returns, 5)
-        self.skewness = stats.skew(returns)
-        self.kurtosis = stats.kurtosis(returns)
-        self.jb_stat, self.p_value = stats.jarque_bera(returns)
-        self.is_normal = self.p_value > 0.05
-        self.decimals = 4
-        self.str_title = 'Portfolio Returns'
-        self.volatility_annual = self.volatility_daily * np.sqrt(252)
-        self.return_annual = self.mean_daily * 252
+    def __init__(self, returns, notional, risk_free_rate=0.40):
+        """
+        Inicializa el objeto de salida con métricas de rendimiento del portafolio.
         
-        # Placeholders que serán actualizados por el manager
+        Args:
+            returns (array-like): Array de retornos diarios del portafolio
+            notional (float): Valor nocional del portafolio
+            risk_free_rate (float, optional): Tasa libre de riesgo anual. Default 0.40 (40% para Argentina)
+        """
+        self.returns = np.array(returns)
+        self.notional = notional
+        self.risk_free_rate = risk_free_rate
+        self.daily_risk_free = (1 + risk_free_rate) ** (1/252) - 1  # Conversión a tasa diaria
+        
+        # Cálculo de métricas básicas
+        self.mean_daily = np.mean(self.returns)
+        self.median_daily = np.median(self.returns)
+        self.volatility_daily = np.std(self.returns)
+        self.min_return = np.min(self.returns)
+        self.max_return = np.max(self.returns)
+        
+        # Cálculo de métricas de riesgo
+        self.var_95 = np.percentile(self.returns, 5)
+        self.cvar_95 = np.mean(self.returns[self.returns <= self.var_95])  # Expected Shortfall
+        
+        # Cálculo de ratios de rendimiento
+        self.sharpe_ratio = self._calculate_sharpe_ratio()
+        self.sortino_ratio = self._calculate_sortino_ratio()
+        
+        # Análisis de distribución
+        self.skewness = stats.skew(self.returns)
+        self.kurtosis = stats.kurtosis(self.returns)
+        self.jb_stat, self.p_value = stats.jarque_bera(self.returns)
+        self.is_normal = self.p_value > 0.05
+        
+        # Métricas anualizadas
+        self.volatility_annual = self.volatility_daily * np.sqrt(252)
+        self.return_annual = (1 + self.mean_daily) ** 252 - 1
+        self.sharpe_annual = self.sharpe_ratio * np.sqrt(252) if self.sharpe_ratio else 0
+        
+        # Placeholders para información adicional
         self.weights = None
         self.dataframe_allocation = None
+        self.str_title = 'Portfolio Returns'
+        self.decimals = 4
+        
+    def _calculate_sharpe_ratio(self):
+        """Calcula el ratio de Sharpe diario"""
+        if self.volatility_daily == 0:
+            return 0
+        return (self.mean_daily - self.daily_risk_free) / self.volatility_daily
+    
+    def _calculate_sortino_ratio(self):
+        """Calcula el ratio de Sortino diario"""
+        downside_returns = self.returns[self.returns < self.daily_risk_free]
+        if len(downside_returns) == 0:
+            return 0
+        downside_volatility = np.std(downside_returns)
+        if downside_volatility == 0:
+            return 0
+        return (self.mean_daily - self.daily_risk_free) / downside_volatility
 
     def get_metrics_dict(self):
         """Retorna métricas del portafolio en formato diccionario"""
         return {
             'Mean Daily': self.mean_daily,
+            'Median Daily': self.median_daily,
             'Volatility Daily': self.volatility_daily,
             'Sharpe Ratio': self.sharpe_ratio,
             'VaR 95%': self.var_95,
@@ -816,6 +859,79 @@ class output:
             'Annual Return': self.return_annual,
             'Annual Volatility': self.volatility_annual
         }
+
+    def display_metrics_table(self):
+        """Muestra las métricas del portafolio en una tabla de Streamlit"""
+        if self.returns is None or len(self.returns) == 0:
+            st.warning("No hay datos suficientes para mostrar métricas")
+            return
+
+        # Crear métricas en formato para mostrar
+        metrics = {
+            'Métrica': [
+                'Retorno Diario Promedio',
+                'Retorno Anualizado',
+                'Volatilidad Diaria',
+                'Volatilidad Anualizada',
+                'Ratio de Sharpe (Anual)',
+                'Ratio de Sortino (Anual)',
+                'VaR 95% (1 día)',
+                'CVaR 95% (1 día)',
+                'Asimetría',
+                'Curtosis',
+                'Test de Normalidad (Jarque-Bera)',
+                'p-valor',
+                'Retorno Mínimo',
+                'Retorno Máximo',
+                'Mediana de Retornos'
+            ],
+            'Valor': [
+                f"{self.mean_daily:.4%}",
+                f"{self.return_annual:.2%}",
+                f"{self.volatility_daily:.4%}",
+                f"{self.volatility_annual:.2%}",
+                f"{self.sharpe_annual:.2f}",
+                f"{self.sortino_ratio * np.sqrt(252):.2f}",
+                f"{self.var_95:.2%}",
+                f"{self.cvar_95:.2%}",
+                f"{self.skewness:.4f}",
+                f"{self.kurtosis:.4f}",
+                "Normal" if self.is_normal else "No Normal",
+                f"{self.p_value:.4f}",
+                f"{self.min_return:.2%}",
+                f"{self.max_return:.2%}",
+                f"{self.median_daily:.4%}"
+            ]
+        }
+        
+        # Crear DataFrame para mostrar
+        df_metrics = pd.DataFrame(metrics)
+        
+        # Mostrar tabla con estilo
+        st.markdown("### 📊 Métricas de Rendimiento y Riesgo")
+        st.dataframe(
+            df_metrics,
+            column_config={
+                "Métrica": st.column_config.TextColumn("Métrica", width="medium"),
+                "Valor": st.column_config.TextColumn("Valor", width="small")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # Explicación de métricas
+        with st.expander("📝 Explicación de Métricas"):
+            st.markdown("""
+            - **Retorno Diario/Anual**: Rentabilidad promedio del portafolio en el período.
+            - **Volatilidad**: Desviación estándar de los retornos (medida de riesgo).
+            - **Ratio de Sharpe**: Retorno excedente por unidad de riesgo total (mayor es mejor).
+            - **Ratio de Sortino**: Similar al Sharpe pero solo considera la volatilidad a la baja.
+            - **VaR 95%**: Pérdida máxima esperada con 95% de confianza en un día.
+            - **CVaR 95%**: Pérdida promedio en el peor 5% de los casos.
+            - **Asimetría**: Medida de asimetría de la distribución de retornos.
+            - **Curtosis**: Medida de colas pesadas en la distribución.
+            - **Test de Normalidad**: Evalúa si los retornos siguen una distribución normal.
+            """)
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
@@ -829,25 +945,97 @@ class output:
             fig.update_layout(title=title)
             return fig
         
-        fig = go.Figure(data=[go.Histogram(
-            x=self.returns,
-            nbinsx=30,
-            name="Retornos del Portafolio",
-            marker_color='#0d6efd'
-        )])
+        # Calcular el rango para los bins
+        data_range = max(abs(self.returns.min()), abs(self.returns.max()))
+        bin_size = data_range / 20  # 20 bins para mejor resolución
+        
+        fig = go.Figure(data=[
+            go.Histogram(
+                x=self.returns,
+                xbins=dict(size=bin_size),
+                name="Retornos",
+                marker_color='#0d6efd',
+                opacity=0.8,
+                histnorm='probability density',
+                hovertemplate='Retorno: %{x:.2%}<br>Frecuencia: %{y:.2f}<extra></extra>'
+            )
+        ])
         
         # Agregar líneas de métricas importantes
-        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
-                     annotation_text=f"Media: {self.mean_daily:.4f}")
-        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
-                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
+        annotations = []
         
+        # Línea de media
+        fig.add_vline(
+            x=self.mean_daily, 
+            line_dash="dash", 
+            line_color="#28a745",
+            annotation_text=f"Media: {self.mean_daily:.2%}",
+            annotation_position="top right"
+        )
+        
+        # Línea de mediana
+        fig.add_vline(
+            x=self.median_daily,
+            line_dash="dot",
+            line_color="#6f42c1",
+            annotation_text=f"Mediana: {self.median_daily:.2%}",
+            annotation_position="top left"
+        )
+        
+        # Área de VaR 95%
+        fig.add_vrect(
+            x0=self.returns.min(),
+            x1=self.var_95,
+            fillcolor="rgba(255, 0, 0, 0.1)",
+            layer="below",
+            line_width=0,
+            annotation_text=f"Zona de Riesgo (5% de probabilidad)"
+        )
+        
+        # Ajustes del layout
         fig.update_layout(
-            title=f"{title}",
+            title={
+                'text': f"{title}<br><sup>Distribución de retornos diarios</sup>",
+                'x': 0.5,
+                'xanchor': 'center',
+                'yanchor': 'top'
+            },
             xaxis_title="Retorno",
-            yaxis_title="Frecuencia",
+            yaxis_title="Densidad de Probabilidad",
             showlegend=False,
-            template='plotly_white'
+            template='plotly_white',
+            hovermode='x unified',
+            height=500,
+            margin=dict(t=80, b=60, l=60, r=40),
+            xaxis_tickformat=".1%",
+            xaxis_showgrid=True,
+            yaxis_showgrid=True,
+            xaxis_zeroline=True,
+            yaxis_zeroline=True
+        )
+        
+        # Añadir anotación con métricas clave
+        metrics_text = (
+            f"<b>Estadísticas Clave:</b><br>"
+            f"Retorno Anual: {self.return_annual:,.2%}<br>"
+            f"Volatilidad Anual: {self.volatility_annual:,.2%}<br>"
+            f"Ratio de Sharpe: {self.sharpe_annual:.2f}<br>"
+            f"VaR 95% (1d): {self.var_95:,.2%}"
+        )
+        
+        fig.add_annotation(
+            x=0.98,
+            y=0.98,
+            xref='paper',
+            yref='paper',
+            text=metrics_text,
+            showarrow=False,
+            align='right',
+            bordercolor='#000000',
+            borderwidth=1,
+            borderpad=4,
+            bgcolor='rgba(255, 255, 255, 0.8)',
+            opacity=0.9
         )
         
         return fig
@@ -1117,195 +1305,86 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         
     except Exception as e:
         st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
-def obtener_tokens(username, password):
-    """Obtiene tokens de autenticación de la API de IOL"""
-    token_url = 'https://api.invertironline.com/token'
-    payload = {
-        'username': username,
-        'password': password,
-        'grant_type': 'password'
-    }
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-    
-    try:
-        response = requests.post(token_url, data=payload, headers=headers)
-        response.raise_for_status()
-        tokens = response.json()
-        return tokens.get('access_token'), tokens.get('refresh_token')
-    except Exception as e:
-        st.error(f"Error al obtener tokens: {str(e)}")
-        return None, None
-
-def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, bearer_token):
-    """Obtiene datos históricos para un símbolo y mercado específicos"""
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {bearer_token}'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.warning(f"No se pudieron obtener datos para {simbolo} en {mercado}: {str(e)}")
         return None
 
-def calcular_metricas_portafolio(portafolio, valor_total, username=None, password=None):
+
+
+
+# --- Portfolio Metrics Function ---
+def calcular_metricas_portafolio(portafolio, valor_total):
     """
-    Calcula métricas clave de desempeño para un portafolio de inversión
-    utilizando datos históricos de la API de IOL.
+    Calcula métricas clave de desempeño para un portafolio de inversión.
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
         valor_total (float): Valor total del portafolio
-        username (str): Usuario de IOL (opcional, se puede configurar por variables de entorno)
-        password (str): Contraseña de IOL (opcional, se puede configurar por variables de entorno)
         
     Returns:
         dict: Diccionario con las métricas calculadas
     """
-    # Valores por defecto
-    default_metrics = {
-        'concentracion': 0,
-        'std_dev_activo': 0,
-        'retorno_esperado_anual': 0,
-        'pl_esperado_min': 0,
-        'pl_esperado_max': 0,
-        'probabilidades': {
-            'perdida': 0.0,
-            'ganancia': 0.0,
-            'perdida_mayor_10': 0.0,
-            'ganancia_mayor_10': 0.0
-        },
-        'riesgo_anual': 0
-    }
-    
-    if not isinstance(portafolio, dict) or not portafolio or valor_total <= 0:
-        return default_metrics
+    if not isinstance(portafolio, dict):
+        return {}
 
-    try:
-        # Obtener credenciales de variables de entorno si no se proporcionan
-        username = username or st.secrets.get('IOL_USERNAME')
-        password = password or st.secrets.get('IOL_PASSWORD')
-        
-        if not username or not password:
-            st.error("No se proporcionaron credenciales de IOL")
-            return default_metrics
-            
-        # Autenticación
-        bearer_token, _ = obtener_tokens(username, password)
-        if not bearer_token:
-            st.error("No se pudo autenticar con IOL")
-            return default_metrics
-            
-        # Obtener fechas para el análisis (últimos 3 meses)
-        fecha_hasta = date.today()
-        fecha_desde = fecha_hasta - timedelta(days=90)
-        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
-        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
-        
-        # Obtener datos históricos para cada activo
-        precios = {}
-        retornos = {}
-        
-        for simbolo, activo in portafolio.items():
-            # Verificar si tenemos mercado definido
-            mercado = activo.get('mercado', 'BCBA')  # Por defecto BCBA
-            
-            # Obtener datos históricos
-            datos = obtener_serie_historica(
-                simbolo=simbolo,
-                mercado=mercado,
-                fecha_desde=fecha_desde_str,
-                fecha_hasta=fecha_hasta_str,
-                bearer_token=bearer_token
-            )
-            
-            if datos and isinstance(datos, list) and len(datos) > 0:
-                # Convertir a DataFrame y procesar
-                df = pd.DataFrame(datos)
-                if 'ultimoPrecio' in df.columns and 'fechaHora' in df.columns:
-                    # Procesar fechas y precios
-                    df['fecha'] = pd.to_datetime(df['fechaHora']).dt.date
-                    df = df.sort_values('fecha')
-                    df = df[['fecha', 'ultimoPrecio']].drop_duplicates('fecha')
-                    df = df.set_index('fecha')
-                    
-                    # Almacenar precios y calcular retornos
-                    precios[simbolo] = df['ultimoPrecio']
-                    retornos[simbolo] = df['ultimoPrecio'].pct_change().dropna()
-        
-        if not precios:
-            raise ValueError("No se pudieron obtener datos históricos para ningún activo")
-            
-        # Crear DataFrames con los datos obtenidos
-        df_precios = pd.DataFrame(precios)
-        df_retornos = pd.DataFrame(retornos)
-        
-        # Calcular pesos del portafolio
-        pesos = np.array([activo.get('Valuación', 0) / valor_total for activo in portafolio.values()])
-        
-        # 1. Calcular concentración del portafolio (Índice de Herfindahl-Hirschman)
-        concentracion = float(np.sum(pesos ** 2))
-        
-        # 2. Calcular matriz de covarianza y volatilidad del portafolio
-        cov_matrix = df_retornos.cov() * 252  # Anualizar
-        port_vol = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
-        riesgo_anual = float(port_vol * valor_total)  # Riesgo en términos monetarios
-        
-        # 3. Calcular retorno esperado anualizado
-        retorno_anual = df_retornos.mean() * 252  # Retorno anualizado
-        retorno_esperado_anual = float(np.dot(pesos, retorno_anual) * valor_total)
-        
-        # 4. Calcular escenarios usando percentiles históricos
-        pl_diario = df_retornos.dot(pesos) * valor_total
-        pl_esperado_min = float(np.percentile(pl_diario, 5))  # Percentil 5% como escenario pesimista
-        pl_esperado_max = float(np.percentile(pl_diario, 95))  # Percentil 95% como escenario optimista
-        
-        # 5. Calcular probabilidades basadas en retornos históricos
-        total_dias = len(pl_diario)
-        if total_dias > 0:
-            prob_ganancia = float((pl_diario > 0).sum() / total_dias)
-            prob_perdida = float((pl_diario < 0).sum() / total_dias)
-            prob_ganancia_10 = float((pl_diario > 0.1).sum() / total_dias)
-            prob_perdida_10 = float((pl_diario < -0.1).sum() / total_dias)
-        else:
-            prob_ganancia = prob_perdida = prob_ganancia_10 = prob_perdida_10 = 0.0
-        
-        # 6. Preparar métricas de retorno
-        return {
-            'concentracion': concentracion,
-            'std_dev_activo': riesgo_anual,  # Volatilidad en términos monetarios
-            'retorno_esperado_anual': retorno_esperado_anual,
-            'pl_esperado_min': pl_esperado_min,
-            'pl_esperado_max': pl_esperado_max,
-            'probabilidades': {
-                'perdida': prob_perdida,
-                'ganancia': prob_ganancia,
-                'perdida_mayor_10': prob_perdida_10,
-                'ganancia_mayor_10': prob_ganancia_10
-            },
-            'riesgo_anual': riesgo_anual
-        }
-        
-    except Exception as e:
-        st.error(f"Error calculando métricas del portafolio: {str(e)}")
+    if valor_total == 0:
         return {
             'concentracion': 0,
             'std_dev_activo': 0,
             'retorno_esperado_anual': 0,
             'pl_esperado_min': 0,
             'pl_esperado_max': 0,
-            'probabilidades': {
-                'perdida': 0.0,
-                'ganancia': 0.0,
-                'perdida_mayor_10': 0.0,
-                'ganancia_mayor_10': 0.0
-            },
+            'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
             'riesgo_anual': 0
         }
+
+    # 1. Calcular concentración del portafolio
+    concentracion = 0
+    for activo in portafolio.values():
+        concentracion += (activo.get('Valuación', 0) / valor_total) ** 2
+    
+    # 2. Calcular volatilidad de los activos
+    std_dev_activo = 0
+    for activo in portafolio.values():
+        std_dev_activo += activo.get('Valuación', 0) * activo.get('volatilidad', 0)
+    
+    # 3. Calcular retorno esperado
+    retorno_esperado_anual = 0
+    for activo in portafolio.values():
+        retorno_esperado_anual += activo.get('Valuación', 0) * activo.get('retorno_esperado', 0)
+    
+    # 4. Calcular escenarios de pérdida y ganancia
+    pl_esperado_min = 0
+    pl_esperado_max = 0
+    for activo in portafolio.values():
+        pl_esperado_min += activo.get('Valuación', 0) * activo.get('pl_min', 0)
+        pl_esperado_max += activo.get('Valuación', 0) * activo.get('pl_max', 0)
+    
+    # 5. Calcular probabilidades de pérdida y ganancia
+    probabilidades = {
+        'perdida': 0,
+        'ganancia': 0,
+        'perdida_mayor_10': 0,
+        'ganancia_mayor_10': 0
+    }
+    for activo in portafolio.values():
+        probabilidades['perdida'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida', 0)
+        probabilidades['ganancia'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia', 0)
+        probabilidades['perdida_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida_mayor_10', 0)
+        probabilidades['ganancia_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia_mayor_10', 0)
+    
+    # 6. Calcular riesgo anual
+    riesgo_anual = 0
+    for activo in portafolio.values():
+        riesgo_anual += activo.get('Valuación', 0) * activo.get('riesgo', 0)
+    
+    return {
+        'concentracion': concentracion,
+        'std_dev_activo': std_dev_activo,
+        'retorno_esperado_anual': retorno_esperado_anual,
+        'pl_esperado_min': pl_esperado_min,
+        'pl_esperado_max': pl_esperado_max,
+        'probabilidades': probabilidades,
+        'riesgo_anual': riesgo_anual
+    }
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio):
@@ -1417,59 +1496,37 @@ def mostrar_resumen_portafolio(portafolio):
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
         cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
-        if metricas and any(metricas.values()):
-            # Mostrar métricas solo si hay valores válidos
-            if any(v != 0 for v in [metricas.get('concentracion', 0), 
-                                  metricas.get('std_dev_activo', 0), 
-                                  metricas.get('retorno_esperado_anual', 0)]):
-                
-                # Métricas de Riesgo
-                st.subheader("⚖️ Análisis de Riesgo")
-                cols = st.columns(3)
-                
-                if metricas.get('concentracion', 0) > 0:
-                    cols[0].metric("Concentración", 
-                                  f"{metricas['concentracion']:.3f}",
-                                  help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
-                    
-                    concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
-                    cols[2].metric("Nivel Concentración", concentracion_status)
-                
-                if metricas.get('std_dev_activo', 0) > 0:
-                    cols[1].metric("Volatilidad", 
-                                  f"${metricas['std_dev_activo']:,.0f}",
-                                  help="Desviación estándar de los valores de activos")
-                
-                # Proyecciones
-                st.subheader("📈 Proyecciones de Rendimiento")
-                cols = st.columns(3)
-                
-                if metricas.get('retorno_esperado_anual', 0) != 0:
-                    cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
-                
-                if metricas.get('pl_esperado_max', 0) != 0:
-                    cols[1].metric("Escenario Optimista", f"${metricas['pl_esperado_max']:,.0f}")
-                
-                if metricas.get('pl_esperado_min', 0) != 0:
-                    cols[2].metric("Escenario Pesimista", f"${metricas['pl_esperado_min']:,.0f}")
-                
-                # Probabilidades
-                probs = metricas.get('probabilidades', {})
-                if any(probs.values()):
-                    st.subheader("🎯 Probabilidades")
-                    cols = st.columns(4)
-                    
-                    if probs.get('ganancia', 0) > 0:
-                        cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-                    
-                    if probs.get('perdida', 0) > 0:
-                        cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-                    
-                    if probs.get('ganancia_mayor_10', 0) > 0:
-                        cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-                    
-                    if probs.get('perdida_mayor_10', 0) > 0:
-                        cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+        if metricas:
+            # Métricas de Riesgo
+            st.subheader("⚖️ Análisis de Riesgo")
+            cols = st.columns(3)
+            
+            cols[0].metric("Concentración", 
+                          f"{metricas['concentracion']:.3f}",
+                          help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
+            
+            cols[1].metric("Volatilidad", 
+                          f"${metricas['std_dev_activo']:,.0f}",
+                          help="Desviación estándar de los valores de activos")
+            
+            concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
+            cols[2].metric("Nivel Concentración", concentracion_status)
+            
+            # Proyecciones
+            st.subheader("📈 Proyecciones de Rendimiento")
+            cols = st.columns(3)
+            cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
+            cols[1].metric("Escenario Optimista", f"${metricas['pl_esperado_max']:,.0f}")
+            cols[2].metric("Escenario Pesimista", f"${metricas['pl_esperado_min']:,.0f}")
+            
+            # Probabilidades
+            st.subheader("🎯 Probabilidades")
+            cols = st.columns(4)
+            probs = metricas['probabilidades']
+            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
