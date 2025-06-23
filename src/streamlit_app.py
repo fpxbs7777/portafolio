@@ -1207,7 +1207,16 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, fecha_
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio):
+def mostrar_resumen_portafolio(portafolio, token_portador, fecha_desde, fecha_hasta):
+    """
+    Muestra un resumen detallado del portafolio con métricas avanzadas.
+    
+    Args:
+        portafolio (dict): Diccionario con la información del portafolio
+        token_portador (str): Token de autenticación para la API
+        fecha_desde (str): Fecha de inicio en formato YYYY-MM-DD
+        fecha_hasta (str): Fecha de fin en formato YYYY-MM-DD
+    """
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -1305,9 +1314,15 @@ def mostrar_resumen_portafolio(portafolio):
     
     if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
-        # Convert list to dictionary with symbols as keys
-        portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total)
+        # Convert list to dictionary with symbols as keys and valuation
+        portafolio_dict = {row['Símbolo']: {'Valuación': row['Valuación']} for row in datos_activos}
+        metricas = calcular_metricas_portafolio(
+            portafolio=portafolio_dict,
+            valor_total=valor_total,
+            token_portador=token_portador,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta
+        )
         
         # Información General
         cols = st.columns(4)
@@ -1924,6 +1939,8 @@ def mostrar_movimientos_asesor():
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
 
     if not cliente:
         st.error("No hay cliente seleccionado")
@@ -1946,7 +1963,12 @@ def mostrar_analisis_portafolio():
     with tab1:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
-            mostrar_resumen_portafolio(portafolio)
+            mostrar_resumen_portafolio(
+                portafolio=portafolio,
+                token_portador=token_acceso,
+                fecha_desde=fecha_desde.isoformat(),
+                fecha_hasta=fecha_hasta.isoformat()
+            )
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
