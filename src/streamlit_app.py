@@ -2082,6 +2082,98 @@ def mostrar_analisis_portafolio():
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
+def obtener_mercado_activo(activo):
+    """
+    Obtiene el mercado de un activo basado en la información del portafolio.
+    
+    Args:
+        activo (dict): Diccionario con la información del activo del portafolio
+        
+    Returns:
+        str: Código del mercado según InvertirOnline (en minúsculas)
+    """
+    # Si el activo tiene información de mercado, usarla
+    if 'mercado' in activo and activo['mercado']:
+        return activo['mercado'].lower()
+        
+    # Si hay un símbolo con sufijo de mercado (ej: 'GGAL.BA')
+    if 'simbolo' in activo and isinstance(activo['simbolo'], str) and '.' in activo['simbolo']:
+        return activo['simbolo'].split('.')[-1].lower()
+    
+    # Si hay un título con sufijo de mercado
+    if 'titulo' in activo and isinstance(activo['titulo'], dict):
+        # Si el título tiene mercado definido, usarlo
+        if 'mercado' in activo['titulo'] and activo['titulo']['mercado']:
+            return activo['titulo']['mercado'].lower()
+            
+        # Si no, verificar si el símbolo tiene sufijo de mercado
+        if 'simbolo' in activo['titulo'] and isinstance(activo['titulo']['simbolo'], str) and '.' in activo['titulo']['simbolo']:
+            return activo['titulo']['simbolo'].split('.')[-1].lower()
+    
+    # Si no se puede determinar, devolver 'bcba' como valor por defecto
+    return 'bcba'
+
+def obtener_serie_historica_activo(activo, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Obtiene la serie histórica de un activo utilizando la API de InvertirOnline.
+    
+    Args:
+        activo (dict): Diccionario con la información del activo
+        token_acceso (str): Token de acceso a la API de IOL
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
+        
+    Returns:
+        tuple: (DataFrame con los datos históricos, código del mercado usado)
+    """
+    try:
+        # Obtener el símbolo del activo
+        simbolo = activo.get('simbolo', '')
+        if not simbolo and 'titulo' in activo and isinstance(activo['titulo'], dict):
+            simbolo = activo['titulo'].get('simbolo', '')
+        
+        if not simbolo:
+            st.warning(f"No se pudo obtener el símbolo para el activo: {activo}")
+            return None, None
+            
+        # Obtener el mercado del activo
+        mercado = obtener_mercado_activo(activo)
+        
+        st.write(f"Obteniendo datos históricos para {simbolo} en mercado {mercado}...")
+        
+        # Intentar obtener la serie histórica
+        df_historico = obtener_serie_historica_iol(
+            token_portador=token_acceso,
+            mercado=mercado,
+            simbolo=simbolo,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+            ajustada="ajustada"
+        )
+        
+        if df_historico is not None and not df_historico.empty:
+            return df_historico, mercado
+            
+        # Si no se encontraron datos, intentar con el mercado por defecto (bcba)
+        if mercado != 'bcba':
+            st.warning(f"No se encontraron datos para {simbolo} en {mercado}, intentando con bcba...")
+            df_historico = obtener_serie_historica_iol(
+                token_portador=token_acceso,
+                mercado='bcba',
+                simbolo=simbolo,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                ajustada="ajustada"
+            )
+            if df_historico is not None and not df_historico.empty:
+                return df_historico, 'bcba'
+        
+        return None, mercado
+        
+    except Exception as e:
+        st.error(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
+        return None, None
+
 def calcular_metricas_portafolio(portafolio, valor_total, token_acceso=None):
     """
     Calcula métricas del portafolio del cliente utilizando series históricas de IOL.
@@ -2111,18 +2203,13 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_acceso=None):
         for simbolo, activo in portafolio.items():
             try:
                 st.write(f"Procesando activo: {simbolo}")
-                # Obtener el mercado del activo (asumimos BCBA como predeterminado)
-                mercado = activo.get('Mercado', 'BCBA')
                 
-                st.write(f"Obteniendo datos históricos para {simbolo} en mercado {mercado}...")
                 # Obtener la serie histórica del activo
-                df_historico = obtener_serie_historica_iol(
-                    token_portador=token_acceso,
-                    mercado=mercado,
-                    simbolo=simbolo,
+                df_historico, mercado_usado = obtener_serie_historica_activo(
+                    activo=activo,
+                    token_acceso=token_acceso,
                     fecha_desde=fecha_desde,
-                    fecha_hasta=fecha_hasta,
-                    ajustada="ajustada"
+                    fecha_hasta=fecha_hasta
                 )
                 
                 if df_historico is not None and not df_historico.empty:
@@ -2130,26 +2217,21 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_acceso=None):
                     # Verificar columnas disponibles
                     st.write(f"Columnas disponibles: {df_historico.columns.tolist()}")
                     
-                    # Calcular retornos diarios
-                    if 'ultimoPrecio' in df_historico.columns:
+                    try:
+                        # Calcular retornos diarios
                         precios = df_historico['ultimoPrecio']
-                        st.write(f"Precios para {simbolo} (primeros 5): {precios.head().tolist()}")
+                        retornos = precios.pct_change().dropna()
                         
-                        # Verificar que hay suficientes datos para calcular retornos
-                        if len(precios) > 1:
-                            retornos = precios.pct_change().dropna()
-                            if not retornos.empty:
-                                retornos_diarios[simbolo] = retornos
-                                activos_con_datos.append(simbolo)
-                                st.write(f"Retornos calculados para {simbolo} (primeros 5): {retornos.head().tolist()}")
-                            else:
-                                st.warning(f"No se pudieron calcular retornos para {simbolo} - Serie de retornos vacía")
-                                activos_sin_datos.append(simbolo)
+                        if len(retornos) > 0:
+                            retornos_diarios[simbolo] = retornos
+                            activos_con_datos.append(simbolo)
+                            st.success(f"✓ Datos procesados para {simbolo} ({mercado_usado.upper()}): {len(retornos)} retornos")
                         else:
-                            st.warning(f"No hay suficientes datos históricos para {simbolo} - Solo {len(precios)} registros")
+                            st.warning(f"No hay suficientes datos para calcular retornos de {simbolo}")
                             activos_sin_datos.append(simbolo)
-                    else:
-                        st.warning(f"No se encontró la columna 'ultimoPrecio' para {simbolo}")
+                            
+                    except Exception as e:
+                        st.error(f"Error al calcular retornos para {simbolo}: {str(e)}")
                         st.write(f"Columnas disponibles: {df_historico.columns.tolist()}")
                         activos_sin_datos.append(simbolo)
                 else:
