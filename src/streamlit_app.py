@@ -1138,6 +1138,11 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, fecha_
         dict: Diccionario con las métricas calculadas
     """
     try:
+        # Si no se proporcionan fechas, usar valores por defecto
+        if not fecha_desde or not fecha_hasta:
+            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+            fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+            
         # Obtener datos históricos para cada activo en el portafolio
         returns_data = {}
         
@@ -1153,10 +1158,18 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, fecha_
                     ajustada='Ajustada'  # Usar datos ajustados por splits/dividendos
                 )
                 
-                if df is not None and not df.empty and 'ultimoPrecio' in df.columns:
-                    # Calcular retornos diarios
-                    df['retorno'] = df['ultimoPrecio'].pct_change()
-                    returns_data[simbolo] = df['retorno'].dropna()
+                if df is not None and not df.empty:
+                    # Verificar si el DataFrame tiene la columna de precios
+                    price_column = None
+                    for col in ['ultimoPrecio', 'cierre', 'close', 'precioCierre']:
+                        if col in df.columns:
+                            price_column = col
+                            break
+                    
+                    if price_column is not None:
+                        # Calcular retornos diarios
+                        df['retorno'] = df[price_column].pct_change()
+                        returns_data[simbolo] = df['retorno'].dropna()
                 
             except Exception as e:
                 st.warning(f'Error procesando {simbolo}: {str(e)}')
@@ -1246,17 +1259,27 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, fecha_
         return {}
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador, fecha_desde, fecha_hasta):
+def mostrar_resumen_portafolio(portafolio, token_portador=None, fecha_desde=None, fecha_hasta=None):
     """
     Muestra un resumen detallado del portafolio con métricas avanzadas.
     
     Args:
         portafolio (dict): Diccionario con la información del portafolio
-        token_portador (str): Token de autenticación para la API
-        fecha_desde (str): Fecha de inicio en formato YYYY-MM-DD
-        fecha_hasta (str): Fecha de fin en formato YYYY-MM-DD
+        token_portador (str, optional): Token de autenticación para la API
+        fecha_desde (str, optional): Fecha de inicio en formato YYYY-MM-DD. Si no se especifica, se usan los últimos 365 días.
+        fecha_hasta (str, optional): Fecha de fin en formato YYYY-MM-DD. Si no se especifica, se usa la fecha actual.
     """
     st.markdown("### 📈 Resumen del Portafolio")
+    
+    # Si no se proporciona token_portador, intentar obtenerlo de la sesión
+    if token_portador is None and 'token_acceso' in st.session_state:
+        token_portador = st.session_state.token_acceso
+    
+    # Establecer fechas por defecto si no se proporcionan
+    if fecha_hasta is None:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    if fecha_desde is None:
+        fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
     
     activos = portafolio.get('activos', [])
     datos_activos = []
@@ -1355,13 +1378,23 @@ def mostrar_resumen_portafolio(portafolio, token_portador, fecha_desde, fecha_ha
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys and valuation
         portafolio_dict = {row['Símbolo']: {'Valuación': row['Valuación']} for row in datos_activos}
-        metricas = calcular_metricas_portafolio(
-            portafolio=portafolio_dict,
-            valor_total=valor_total,
-            token_portador=token_portador,
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta
-        )
+        
+        # Solo intentar calcular métricas si hay activos y token_portador está disponible
+        if portafolio_dict and token_portador:
+            try:
+                metricas = calcular_metricas_portafolio(
+                    portafolio=portafolio_dict,
+                    valor_total=valor_total,
+                    token_portador=token_portador,
+                    fecha_desde=fecha_desde,
+                    fecha_hasta=fecha_hasta
+                )
+            except Exception as e:
+                st.error(f"Error al calcular métricas: {str(e)}")
+                metricas = {}
+        else:
+            st.warning("No se pudo calcular métricas: token de autenticación no disponible")
+            metricas = {}
         
         # Información General
         cols = st.columns(4)
@@ -1370,7 +1403,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador, fecha_desde, fecha_ha
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
         cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
-        if metricas:
+        # Mostrar métricas si están disponibles
+        if metricas and isinstance(metricas, dict) and len(metricas) > 0:
             # Métricas de Riesgo
             st.subheader("⚖️ Análisis de Riesgo")
             cols = st.columns(3)
