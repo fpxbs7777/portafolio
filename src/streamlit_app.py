@@ -520,16 +520,26 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
 def parse_datetime_flexible(date_str: str):
     """
     Parses a datetime string that may or may not include microseconds or timezone info.
-    Uses pandas.to_datetime for robust parsing.
+    Handles both formats: with and without milliseconds.
     """
     if not isinstance(date_str, str):
         return None
     try:
-        # pd.to_datetime is very robust and can handle various formats, including ISO 8601
-        # with or without microseconds and timezone information.
-        # errors='coerce' will return NaT (Not a Time) for strings that cannot be parsed.
+        # First try parsing with the exact format that matches the error
+        try:
+            # Handle format without milliseconds: "2024-12-10T17:11:04"
+            if len(date_str) == 19 and 'T' in date_str and date_str.count(':') == 2:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S', utc=True)
+            # Handle format with milliseconds: "2024-12-10T17:11:04.123"
+            elif '.' in date_str and 'T' in date_str:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
+        except (ValueError, TypeError):
+            pass
+            
+        # Fall back to pandas' built-in parser if specific formats don't match
         return pd.to_datetime(date_str, errors='coerce', utc=True)
-    except Exception:
+    except Exception as e:
+        st.warning(f"Error parsing date '{date_str}': {str(e)}")
         return None
 
 def procesar_respuesta_historico(data, tipo_activo):
