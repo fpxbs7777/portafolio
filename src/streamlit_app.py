@@ -202,6 +202,32 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
 
+def obtener_precio_actual(token_portador, mercado, simbolo):
+    """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, (int, float)):
+                return float(data)
+            elif isinstance(data, dict):
+                # La API suele devolver 'ultimoPrecio'
+                for k in [
+                    'ultimoPrecio', 'ultimo_precio', 'ultimoPrecioComprador', 'ultimoPrecioVendedor',
+                    'precio', 'precioActual', 'valor'
+                ]:
+                    if k in data and data[k] is not None:
+                        try:
+                            return float(data[k])
+                        except ValueError:
+                            continue
+        return None
+    except Exception:
+        return None
+
+
 def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
     url_cotizacion_mep = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
     encabezados = obtener_encabezado_autorizacion(token_portador)
@@ -1218,7 +1244,7 @@ def calcular_metricas_portafolio(portafolio, valor_total):
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio):
+def mostrar_resumen_portafolio(portafolio, token):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -1280,6 +1306,15 @@ def mostrar_resumen_portafolio(portafolio):
                         except (ValueError, TypeError):
                             continue
                 
+                if precio_unitario > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                        else:
+                            valuacion = cantidad_num * precio_unitario
+                    except (ValueError, TypeError):
+                        pass
                 if precio_unitario == 0:
                     for campo in campos_precio:
                         if campo in titulo and titulo[campo] is not None:
@@ -1291,16 +1326,20 @@ def mostrar_resumen_portafolio(portafolio):
                             except (ValueError, TypeError):
                                 continue
                 
-                if precio_unitario > 0:
+                # Intento final: consultar precio actual vía API si sigue en cero
+            if valuacion == 0:
+                ultimo_precio = None
+                if mercado := titulo.get('mercado'):
+                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
-                        # Ajustar la valuación para bonos (precio por 100 nominal)
                         if tipo == 'TitulosPublicos':
-                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                            valuacion = (cantidad_num * ultimo_precio) / 100.0
                         else:
-                            valuacion = cantidad_num * precio_unitario
-                    except (ValueError, TypeError) as e:
-                        st.warning(f"Error calculando valuación para {simbolo}: {str(e)}")
+                            valuacion = cantidad_num * ultimo_precio
+                    except (ValueError, TypeError):
+                        pass
             
             datos_activos.append({
                 'Símbolo': simbolo,
@@ -1966,7 +2005,7 @@ def mostrar_analisis_portafolio():
     with tab1:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
-            mostrar_resumen_portafolio(portafolio)
+            mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
