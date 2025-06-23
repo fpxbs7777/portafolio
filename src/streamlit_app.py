@@ -589,22 +589,32 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
             st.warning(f"No se pudo determinar el endpoint para el símbolo {simbolo}")
             return None
         
+        st.info(f"🔍 Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
+        st.info(f"🌐 URL: {url}")
+        
         headers = obtener_encabezado_autorizacion(token_portador)
         
         # Configurar un timeout más corto para no bloquear la interfaz
         response = requests.get(url, headers=headers, timeout=10)
         
+        st.info(f"📡 Respuesta recibida - Status: {response.status_code}")
+        
         # Verificar si la respuesta es exitosa
         if response.status_code == 200:
             data = response.json()
+            st.info(f"📊 Datos recibidos para {simbolo}: {len(data) if isinstance(data, list) else 1} registros")
+            
             if isinstance(data, dict) and data.get('status') == 'error':
                 st.warning(f"Error en la respuesta para {simbolo}: {data.get('message', 'Error desconocido')}")
                 return None
                 
             # Procesar la respuesta según el tipo de activo
-            return procesar_respuesta_historico(data, mercado)
+            resultado = procesar_respuesta_historico(data, mercado)
+            st.info(f"✅ Datos procesados para {simbolo}: {'Válidos' if resultado is not None else 'Inválidos'}")
+            return resultado
         else:
             st.warning(f"Error {response.status_code} al obtener datos para {simbolo}")
+            st.warning(f"Respuesta: {response.text[:200]}")
             return None
             
     except requests.exceptions.RequestException as e:
