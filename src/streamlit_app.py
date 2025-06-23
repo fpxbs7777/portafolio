@@ -1105,14 +1105,8 @@ class PortfolioManager:
                         with col_b:
                             st.metric("Skewness", f"{portfolio_result.skewness:.4f}")
                             st.metric("Kurtosis", f"{portfolio_result.kurtosis:.4f}")
-                            st.metric("JB Statistic", f"{portfolio_result.jb_statistic:.4f}")
-                            st.metric("Ratio de Sharpe", f"{metricas['sharpe_ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['var_95']:.4f}")
-                        with col_b:
-                            st.metric("Skewness", f"{metricas['skewness']:.4f}")
-                            st.metric("Kurtosis", f"{metricas['kurtosis']:.4f}")
-                            st.metric("JB Statistic", f"{metricas['jb_statistic']:.4f}")
-                        st.metric("JB Statistic", f"{metricas['jb_statistic']:.4f}")
+                            st.metric("JB Statistic", f"{portfolio_result.jb_stat:.4f}")
+                            st.metric("Normalidad", "Sí" if portfolio_result.is_normal else "No")
 
                     # Mostrar Frontera Eficiente si está habilitada
                     if show_frontier:
