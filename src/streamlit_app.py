@@ -1352,37 +1352,59 @@ def mostrar_resumen_portafolio(portafolio):
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
         cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
-        if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
-            
-            cols[0].metric("Concentración", 
-                          f"{metricas['concentracion']:.3f}",
-                          help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
-            
-            cols[1].metric("Volatilidad", 
-                          f"${metricas['std_dev_activo']:,.0f}",
-                          help="Desviación estándar de los valores de activos")
-            
-            concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
-            cols[2].metric("Nivel Concentración", concentracion_status)
-            
-            # Proyecciones
-            st.subheader("📈 Proyecciones de Rendimiento")
-            cols = st.columns(3)
-            cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
-            cols[1].metric("Escenario Optimista", f"${metricas['pl_esperado_max']:,.0f}")
-            cols[2].metric("Escenario Pesimista", f"${metricas['pl_esperado_min']:,.0f}")
-            
-            # Probabilidades
-            st.subheader("🎯 Probabilidades")
-            cols = st.columns(4)
-            probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+        if metricas and any(metricas.values()):
+            # Mostrar métricas solo si hay valores válidos
+            if any(v != 0 for v in [metricas.get('concentracion', 0), 
+                                  metricas.get('std_dev_activo', 0), 
+                                  metricas.get('retorno_esperado_anual', 0)]):
+                
+                # Métricas de Riesgo
+                st.subheader("⚖️ Análisis de Riesgo")
+                cols = st.columns(3)
+                
+                if metricas.get('concentracion', 0) > 0:
+                    cols[0].metric("Concentración", 
+                                  f"{metricas['concentracion']:.3f}",
+                                  help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
+                    
+                    concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
+                    cols[2].metric("Nivel Concentración", concentracion_status)
+                
+                if metricas.get('std_dev_activo', 0) > 0:
+                    cols[1].metric("Volatilidad", 
+                                  f"${metricas['std_dev_activo']:,.0f}",
+                                  help="Desviación estándar de los valores de activos")
+                
+                # Proyecciones
+                st.subheader("📈 Proyecciones de Rendimiento")
+                cols = st.columns(3)
+                
+                if metricas.get('retorno_esperado_anual', 0) != 0:
+                    cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
+                
+                if metricas.get('pl_esperado_max', 0) != 0:
+                    cols[1].metric("Escenario Optimista", f"${metricas['pl_esperado_max']:,.0f}")
+                
+                if metricas.get('pl_esperado_min', 0) != 0:
+                    cols[2].metric("Escenario Pesimista", f"${metricas['pl_esperado_min']:,.0f}")
+                
+                # Probabilidades
+                probs = metricas.get('probabilidades', {})
+                if any(probs.values()):
+                    st.subheader("🎯 Probabilidades")
+                    cols = st.columns(4)
+                    
+                    if probs.get('ganancia', 0) > 0:
+                        cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+                    
+                    if probs.get('perdida', 0) > 0:
+                        cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+                    
+                    if probs.get('ganancia_mayor_10', 0) > 0:
+                        cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+                    
+                    if probs.get('perdida_mayor_10', 0) > 0:
+                        cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
