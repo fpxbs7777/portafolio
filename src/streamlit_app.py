@@ -2015,19 +2015,26 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_acceso=None):
         dict: Diccionario con las métricas calculadas
     """
     try:
+        st.write("Iniciando cálculo de métricas del portafolio...")
+        st.write(f"Número de activos en el portafolio: {len(portafolio)}")
+        
         # Obtener la fecha de hace 1 año y la fecha actual
         fecha_hasta = date.today().strftime('%Y-%m-%d')
         fecha_desde = (date.today() - timedelta(days=365)).strftime('%Y-%m-%d')
         
         # Inicializar diccionario para almacenar los retornos diarios de cada activo
         retornos_diarios = {}
+        activos_con_datos = []
+        activos_sin_datos = []
         
         # Para cada activo en el portafolio, obtener su serie histórica
         for simbolo, activo in portafolio.items():
             try:
+                st.write(f"Procesando activo: {simbolo}")
                 # Obtener el mercado del activo (asumimos BCBA como predeterminado)
                 mercado = activo.get('Mercado', 'BCBA')
                 
+                st.write(f"Obteniendo datos históricos para {simbolo} en mercado {mercado}...")
                 # Obtener la serie histórica del activo
                 df_historico = obtener_serie_historica_iol(
                     token_portador=token_acceso,
@@ -2039,81 +2046,146 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_acceso=None):
                 )
                 
                 if df_historico is not None and not df_historico.empty:
+                    st.write(f"Datos obtenidos para {simbolo}: {len(df_historico)} registros")
+                    # Verificar columnas disponibles
+                    st.write(f"Columnas disponibles: {df_historico.columns.tolist()}")
+                    
                     # Calcular retornos diarios
                     if 'ultimoPrecio' in df_historico.columns:
                         precios = df_historico['ultimoPrecio']
-                        retornos = precios.pct_change().dropna()
-                        retornos_diarios[simbolo] = retornos
+                        st.write(f"Precios para {simbolo} (primeros 5): {precios.head().tolist()}")
+                        
+                        # Verificar que hay suficientes datos para calcular retornos
+                        if len(precios) > 1:
+                            retornos = precios.pct_change().dropna()
+                            if not retornos.empty:
+                                retornos_diarios[simbolo] = retornos
+                                activos_con_datos.append(simbolo)
+                                st.write(f"Retornos calculados para {simbolo} (primeros 5): {retornos.head().tolist()}")
+                            else:
+                                st.warning(f"No se pudieron calcular retornos para {simbolo} - Serie de retornos vacía")
+                                activos_sin_datos.append(simbolo)
+                        else:
+                            st.warning(f"No hay suficientes datos históricos para {simbolo} - Solo {len(precios)} registros")
+                            activos_sin_datos.append(simbolo)
+                    else:
+                        st.warning(f"No se encontró la columna 'ultimoPrecio' para {simbolo}")
+                        st.write(f"Columnas disponibles: {df_historico.columns.tolist()}")
+                        activos_sin_datos.append(simbolo)
+                else:
+                    st.warning(f"No se encontraron datos históricos para {simbolo}")
+                    if df_historico is not None and hasattr(df_historico, 'status_code'):
+                        st.warning(f"Código de estado: {df_historico.status_code}")
+                        st.warning(f"Contenido de la respuesta: {df_historico.text}")
+                    activos_sin_datos.append(simbolo)
                         
             except Exception as e:
-                st.warning(f"Error al procesar {simbolo}: {str(e)}")
+                st.error(f"Error al procesar {simbolo}: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
+                activos_sin_datos.append(simbolo)
                 continue
         
+        # Mostrar resumen de activos procesados
+        st.subheader("Resumen de activos procesados")
+        st.write(f"Activos con datos: {len(activos_con_datos)} de {len(portafolio)}")
+        st.write("Activos con datos:", ", ".join(activos_con_datos) if activos_con_datos else "Ninguno")
+        st.write("Activos sin datos:", ", ".join(activos_sin_datos) if activos_sin_datos else "Ninguno")
+        
         if not retornos_diarios:
+            st.error("No se pudieron obtener retornos para ningún activo. Verifique la conexión y los símbolos.")
             return None
             
         # Crear DataFrame con los retornos de todos los activos
+        st.write("Creando DataFrame con los retornos...")
         df_retornos = pd.DataFrame(retornos_diarios)
+        st.write(f"DataFrame de retornos creado con {len(df_retornos)} filas y {len(df_retornos.columns)} columnas")
         
         # Calcular pesos del portafolio
+        st.write("Calculando pesos del portafolio...")
         pesos = {}
         for simbolo, activo in portafolio.items():
             if simbolo in df_retornos.columns:
-                valor_activo = activo.get('Valuación', 0)
-                pesos[simbolo] = valor_activo / valor_total if valor_total > 0 else 0
+                valor_activo = float(activo.get('Valuación', 0))
+                pesos[simbolo] = valor_activo / float(valor_total) if float(valor_total) > 0 else 0
         
         # Asegurarse de que los pesos sumen 1
         total_pesos = sum(pesos.values())
         if total_pesos > 0:
             pesos = {k: v/total_pesos for k, v in pesos.items()}
+            st.write("Pesos normalizados:", pesos)
+        else:
+            st.error("Los pesos del portafolio suman 0. Verifique los valores de los activos.")
+            st.write("Valores de activos:", {k: v.get('Valuación', 0) for k, v in portafolio.items()})
+            return None
         
         # Calcular retornos del portafolio
-        df_retornos_portafolio = df_retornos.mul(pd.Series(pesos), axis=1).sum(axis=1)
+        st.write("Calculando retornos del portafolio...")
+        try:
+            df_retornos_portafolio = df_retornos.mul(pd.Series(pesos), axis=1).sum(axis=1)
+            st.write("Retornos del portafolio calculados exitosamente")
+            st.write("Primeros 5 retornos:", df_retornos_portafolio.head().tolist())
+        except Exception as e:
+            st.error(f"Error al calcular retornos del portafolio: {str(e)}")
+            st.error(f"Columnas en df_retornos: {df_retornos.columns.tolist()}")
+            st.error(f"Claves en pesos: {list(pesos.keys())}")
+            return None
         
         # Calcular métricas de riesgo y rendimiento
+        st.write("Calculando métricas de riesgo y rendimiento...")
         retorno_medio_diario = df_retornos_portafolio.mean()
         volatilidad_diaria = df_retornos_portafolio.std()
         
         # Calcular métricas anualizadas (asumiendo 252 días hábiles)
-        retorno_anual = (1 + retorno_medio_diario) ** 252 - 1
-        volatilidad_anual = volatilidad_diaria * np.sqrt(252)
+        retorno_anual = (1 + retorno_medio_diario) ** 252 - 1 if not pd.isna(retorno_medio_diario) else 0
+        volatilidad_anual = volatilidad_diaria * np.sqrt(252) if not pd.isna(volatilidad_diaria) else 0
         
         # Calcular ratio de Sharpe (asumiendo tasa libre de riesgo del 40% anual)
         tasa_libre_riesgo_anual = 0.40
         tasa_libre_riesgo_diaria = (1 + tasa_libre_riesgo_anual) ** (1/252) - 1
-        exceso_retorno = retorno_medio_diario - tasa_libre_riesgo_diaria
+        exceso_retorno = retorno_medio_diario - tasa_libre_riesgo_diaria if not pd.isna(retorno_medio_diario) else 0
         ratio_sharpe = (exceso_retorno / volatilidad_diaria) * np.sqrt(252) if volatilidad_diaria > 0 else 0
         
         # Calcular Value at Risk (VaR) al 95% de confianza
-        var_95 = np.percentile(df_retornos_portafolio, 5)
+        var_95 = np.percentile(df_retornos_portafolio, 5) if len(df_retornos_portafolio) > 0 else 0
         
         # Calcular métricas de concentración
         pesos_activos = list(pesos.values())
-        indice_herfindahl = sum([p**2 for p in pesos_activos])
+        indice_herfindahl = sum([p**2 for p in pesos_activos]) if pesos_activos else 0
         
         # Calcular métricas de distribución de retornos
-        skewness = df_retornos_portafolio.skew()
-        kurtosis = df_retornos_portafolio.kurtosis()
+        skewness = df_retornos_portafolio.skew() if not df_retornos_portafolio.empty else 0
+        kurtosis = df_retornos_portafolio.kurtosis() if not df_retornos_portafolio.empty else 0
         
         # Calcular probabilidades
-        prob_ganancia = (df_retornos_portafolio > 0).mean()
-        prob_perdida = (df_retornos_portafolio < 0).mean()
-        prob_ganancia_mayor_10 = (df_retornos_portafolio > 0.10).mean()
-        prob_perdida_mayor_10 = (df_retornos_portafolio < -0.10).mean()
+        prob_ganancia = (df_retornos_portafolio > 0).mean() if not df_retornos_portafolio.empty else 0.5
+        prob_perdida = (df_retornos_portafolio < 0).mean() if not df_retornos_portafolio.empty else 0.5
+        prob_ganancia_mayor_10 = (df_retornos_portafolio > 0.10).mean() if not df_retornos_portafolio.empty else 0
+        prob_perdida_mayor_10 = (df_retornos_portafolio < -0.10).mean() if not df_retornos_portafolio.empty else 0
         
         # Calcular escenarios
-        pl_esperado = valor_total * retorno_anual
-        pl_esperado_max = valor_total * (retorno_anual + 2 * volatilidad_anual)
-        pl_esperado_min = valor_total * (retorno_anual - 2 * volatilidad_anual)
+        pl_esperado = valor_total * retorno_anual if not pd.isna(retorno_anual) else 0
+        pl_esperado_max = valor_total * (retorno_anual + 2 * volatilidad_anual) if not pd.isna(retorno_anual) and not pd.isna(volatilidad_anual) else 0
+        pl_esperado_min = valor_total * (retorno_anual - 2 * volatilidad_anual) if not pd.isna(retorno_anual) and not pd.isna(volatilidad_anual) else 0
+        
+        # Mostrar métricas calculadas para depuración
+        st.subheader("Métricas calculadas")
+        st.write(f"Retorno medio diario: {retorno_medio_diario:.6f}")
+        st.write(f"Volatilidad diaria: {volatilidad_diaria:.6f}")
+        st.write(f"Retorno anualizado: {retorno_anual:.4f} ({(retorno_anual*100):.2f}%)")
+        st.write(f"Volatilidad anualizada: {volatilidad_anual:.4f} ({(volatilidad_anual*100):.2f}%)")
+        st.write(f"Ratio de Sharpe: {ratio_sharpe:.4f}")
+        st.write(f"VaR 95%: {var_95:.6f}")
+        st.write(f"Índice de Herfindahl: {indice_herfindahl:.4f}")
         
         # Retornar métricas en un diccionario
         return {
             'concentracion': indice_herfindahl,
-            'std_dev_activo': volatilidad_anual * valor_total if valor_total > 0 else 0,
+            'std_dev_activo': volatilidad_anual * float(valor_total) if float(valor_total) > 0 else 0,
             'retorno_esperado_anual': pl_esperado,
             'pl_esperado_max': pl_esperado_max,
             'pl_esperado_min': pl_esperado_min,
-            'riesgo_anual': volatilidad_anual * valor_total if valor_total > 0 else 0,
+            'riesgo_anual': volatilidad_anual * float(valor_total) if float(valor_total) > 0 else 0,
             'ratio_sharpe': ratio_sharpe,
             'var_95': var_95,
             'skewness': skewness,
