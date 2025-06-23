@@ -781,21 +781,34 @@ class manager:
         return port_output
 
 class output:
-    def __init__(self, returns, notional, risk_free_rate=0.40):
+    def __init__(self, returns, notional, risk_free_rate=0.05):
         """
-        Inicializa el objeto de salida con métricas de rendimiento del portafolio.
+        Enhanced portfolio statistics and visualization class.
         
         Args:
-            returns (array-like): Array de retornos diarios del portafolio
-            notional (float): Valor nocional del portafolio
-            risk_free_rate (float, optional): Tasa libre de riesgo anual. Default 0.40 (40% para Argentina)
+            returns (array-like): Array of daily portfolio returns
+            notional (float): Portfolio notional value
+            risk_free_rate (float): Annual risk-free rate (default: 0.05 for Argentina)
         """
-        self.returns = np.array(returns)
+        # Validate returns data
+        if not isinstance(returns, (list, np.ndarray, pd.Series)):
+            raise ValueError("Los retornos deben ser una lista, array numpy o serie pandas")
+            
+        returns = np.array(returns)
+        if len(returns) < 2:
+            raise ValueError("Se necesitan al menos 2 retornos para calcular estadísticas")
+            
+        # Remove outliers (returns more than 3 standard deviations away)
+        mean = np.mean(returns)
+        std = np.std(returns)
+        returns = returns[np.abs(returns - mean) <= 3 * std]
+        
+        self.returns = returns
         self.notional = notional
         self.risk_free_rate = risk_free_rate
-        self.daily_risk_free = (1 + risk_free_rate) ** (1/252) - 1  # Conversión a tasa diaria
+        self.daily_risk_free = (1 + risk_free_rate) ** (1/252) - 1
         
-        # Cálculo de métricas básicas
+        # Basic return statistics with validation
         self.mean_daily = np.mean(self.returns)
         self.median_daily = np.median(self.returns)
         self.volatility_daily = np.std(self.returns)
@@ -832,9 +845,55 @@ class output:
         self.jb_stat, self.jb_pvalue = stats.jarque_bera(self.returns)
         self.is_normal = self.jb_pvalue > 0.05
         
+        # Risk analysis metrics
+        self.concentration = self._calculate_concentration()
+        self.concentration_level = self._get_concentration_level()
+        
+        # Calculate probabilities
+        self.prob_gain = self._calculate_probability_gain()
+        self.prob_loss = self._calculate_probability_loss()
+        self.prob_gain_10 = self._calculate_probability_gain_10()
+        self.prob_loss_10 = self._calculate_probability_loss_10()
+        
+        # Expected return scenarios
+        self.expected_return = self.annual_return
+        self.optimistic_scenario = self.expected_return * 1.5
+        self.pessimistic_scenario = self.expected_return * 0.5
+        
         # Placeholders for optimization results
         self.weights = None
         self.dataframe_allocation = None
+
+    def _calculate_concentration(self):
+        """Calculate portfolio concentration"""
+        if self.weights is None:
+            return 1.0  # Default for non-optimized portfolios
+        return 1.0 / len(self.weights)
+
+    def _get_concentration_level(self):
+        """Get concentration level based on concentration metric"""
+        if self.concentration >= 0.5:
+            return "🔴 Alta"
+        elif self.concentration >= 0.2:
+            return "🟡 Media"
+        else:
+            return "🟢 Baja"
+
+    def _calculate_probability_gain(self):
+        """Calculate probability of positive return"""
+        return (self.returns > 0).mean()
+
+    def _calculate_probability_loss(self):
+        """Calculate probability of negative return"""
+        return (self.returns < 0).mean()
+
+    def _calculate_probability_gain_10(self):
+        """Calculate probability of >10% gain"""
+        return (self.returns > 0.1).mean()
+
+    def _calculate_probability_loss_10(self):
+        """Calculate probability of >10% loss"""
+        return (self.returns < -0.1).mean()
 
     def _calculate_sharpe_ratio(self, annualize=True):
         """Calculate Sharpe ratio with validation"""
@@ -874,6 +933,23 @@ class output:
         """Display portfolio metrics in a formatted Streamlit table with validations"""
         # Create metrics dictionary
         metrics = {
+            # Risk Analysis
+            'Concentración': self.concentration_level,
+            'Volatilidad': f"{self.volatility_daily:.2%}",
+            'Nivel Concentración': self.concentration_level,
+            
+            # Return Projections
+            'Retorno Esperado': f"{self.expected_return:.2%}",
+            'Escenario Optimista': f"{self.optimistic_scenario:.2%}",
+            'Escenario Pesimista': f"{self.pessimistic_scenario:.2%}",
+            
+            # Probabilities
+            'Probabilidad de Ganancia': f"{self.prob_gain:.1%}",
+            'Probabilidad de Pérdida': f"{self.prob_loss:.1%}",
+            'Probabilidad Ganancia >10%': f"{self.prob_gain_10:.1%}",
+            'Probabilidad Pérdida >10%': f"{self.prob_loss_10:.1%}",
+            
+            # Traditional Metrics
             'Retorno Anualizado': f"{self.annual_return:.2%}",
             'Volatilidad Anualizada': f"{self.annual_volatility:.2%}",
             'Ratio de Sharpe': f"{self.sharpe_ratio:.4f}",
@@ -908,6 +984,16 @@ class output:
 
             # Add explanations
             explanations = {
+                'Concentración': "Medida de la concentración del portafolio (1/número de activos)",
+                'Volatilidad': "Desviación estándar de los retornos diarios",
+                'Nivel Concentración': "Indicador visual del nivel de concentración",
+                'Retorno Esperado': "Retorno anualizado esperado del portafolio",
+                'Escenario Optimista': "Escenario de retorno optimista (1.5x retorno esperado)",
+                'Escenario Pesimista': "Escenario de retorno pesimista (0.5x retorno esperado)",
+                'Probabilidad de Ganancia': "Probabilidad de tener un día de ganancia",
+                'Probabilidad de Pérdida': "Probabilidad de tener un día de pérdida",
+                'Probabilidad Ganancia >10%': "Probabilidad de tener un día con ganancia >10%",
+                'Probabilidad Pérdida >10%': "Probabilidad de tener un día con pérdida >10%",
                 'Retorno Anualizado': f"Retorno anualizado del portafolio ({len(self.returns)} datos)",
                 'Volatilidad Anualizada': "Desviación estándar de los retornos anualizada",
                 'Ratio de Sharpe': "Retorno excedente por unidad de riesgo total",
@@ -933,6 +1019,10 @@ class output:
             st.warning("⚠️ Ratio de Sortino negativo: El portafolio tiene más riesgo a la baja que retorno")
         if not self.is_normal:
             st.warning("⚠️ La distribución de retornos no sigue una distribución normal")
+        
+        # Add concentration warning
+        if self.concentration_level == "🔴 Alta":
+            st.warning("⚠️ Portafolio muy concentrado: Alto riesgo de concentración")
 
         # Añadir anotación con métricas clave
         metrics_text = (
