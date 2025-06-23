@@ -2399,15 +2399,21 @@ def main():
                 if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
                     if usuario and contraseña:
                         with st.spinner("Conectando..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
+                            try:
+                                # Create API client and attempt login
+                                iol_api = InvertirOnlineAPI()
+                                token_acceso, refresh_token = iol_api.login(usuario, contraseña)
+                                
+                                if token_acceso:
+                                    st.session_state.token_acceso = token_acceso
+                                    st.session_state.refresh_token = refresh_token
+                                    st.session_state.iol_api = iol_api  # Store the API client in session state
+                                    st.success("✅ Conexión exitosa!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Error en la autenticación: No se recibió token de acceso")
+                            except Exception as e:
+                                st.error(f"❌ Error en la autenticación: {str(e)}")
                     else:
                         st.warning("⚠️ Complete todos los campos")
         else:
