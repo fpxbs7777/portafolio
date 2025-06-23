@@ -479,16 +479,30 @@ def mostrar_tasas_caucion(token_portador):
     except Exception:
         return None
 
-def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    """
-    Devuelve el endpoint correcto según el tipo de activo
+def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """Devuelve la URL correcta para la serie histórica del símbolo indicado.
+
+    La prioridad es:
+    1. Usar el mercado recibido (ya normalizado por la llamada superior)
+       si existe en el mapeo de casos especiales.
+    2. Caso contrario, construir la ruta estándar
+       "{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/...".
+
+    No se aplican heurísticas sobre el símbolo: la función que invoque debe
+    pasar el mercado correcto (por ejemplo: 'Bonos', 'Cedears', 'BCBA').
     """
     base_url = "https://api.invertironline.com/api/v2"
-    
-    # Mapeo de mercados a sus respectivos endpoints
-    endpoints = {
+
+    # Cubrir alias frecuentes para que el mapeo sea coherente
+    alias = {
+        'TITULOSPUBLICOS': 'TitulosPublicos',
+        'TITULOS PUBLICOS': 'TitulosPublicos'
+    }
+    mercado_norm = alias.get(mercado.upper(), mercado)
+
+    especiales = {
         'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'FCI': f"{base_url}/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'FCI': f"{base_url}/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
         'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
         'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
         'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
@@ -496,18 +510,12 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
         'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
         'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
     }
-    
-    # Intentar determinar automáticamente el tipo de activo si no se especifica
-    if mercado not in endpoints:
-        if simbolo.endswith(('.BA', '.AR')):
-            return endpoints.get('Cedears')
-        elif any(ext in simbolo.upper() for ext in ['AL', 'GD', 'AY24', 'GD30', 'AL30']):
-            return endpoints.get('Bonos')
-        else:
-            # Por defecto, asumimos que es un título regular
-            return f"{base_url}/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    
-    return endpoints.get(mercado)
+
+    if mercado_norm in especiales:
+        return especiales[mercado_norm]
+
+    # Ruta genérica (acciones BCBA, NYSE, NASDAQ, etc.)
+    return f"{base_url}/{mercado_norm}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
 
 def parse_datetime_flexible(date_str: str):
     """
@@ -556,13 +564,16 @@ def procesar_respuesta_historico(data, tipo_activo):
                     continue
             
             if precios and fechas:
-                serie = pd.Series(precios, index=fechas, name='precio')
-                serie = serie[~serie.index.duplicated(keep='last')]
-                return serie.sort_index()
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                # Eliminar duplicados manteniendo el último
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
         
         # Para respuestas que son un solo valor (ej: MEP)
         elif isinstance(data, (int, float)):
-            return pd.Series([float(data)], index=[pd.Timestamp.now(tz='UTC')], name='precio')
+            df = pd.DataFrame({'fecha': [pd.Timestamp.now(tz='UTC').date()], 'precio': [float(data)]})
+            return df
             
         return None
         
@@ -952,32 +963,47 @@ class PortfolioManager:
             # Convertir lista de activos a formato adecuado
             symbols = []
             markets = []
-            special_map = {
-                'FCI': 'FCI',
-                'OPCIONES': 'Opciones',
-                'BONOS': 'Bonos',
-                'ADRS': 'ADRs',
-                'CEDAERS': 'Cedears',
-                'CEDARS': 'Cedears',
-                'CEDAAR': 'Cedears',
-                'TITULOSPUBLICOS': 'TitulosPublicos',
-                'TITULOS PUBLICOS': 'TitulosPublicos',
-                'MEP': 'MEP',
-                'CAUCION': 'Caucion'
-            }
+            tipos = []
+            # Detectar mercado sin uso de tablas rígidas
+            def detectar_mercado(tipo_raw: str, mercado_raw: str) -> str:
+                tipo_norm = tipo_raw.strip().upper()
+                mercado_norm = mercado_raw.strip().upper()
+
+                if not tipo_norm and mercado_norm:
+                    return mercado_norm.title()
+
+                # Casos especiales por prefijo o palabra clave en 'tipo'
+                if 'CED' in tipo_norm:
+                    return 'Cedears'
+                if 'FOND' in tipo_norm or 'FCI' in tipo_norm:
+                    return 'FCI'
+                if 'ADR' in tipo_norm:
+                    return 'ADRs'
+                if 'BONO' in tipo_norm or 'BONOS' in tipo_norm:
+                    return 'Bonos'
+                if 'OPCION' in tipo_norm:
+                    return 'Opciones'
+                if 'MEP' in tipo_norm:
+                    return 'MEP'
+                if 'CAUCION' in tipo_norm:
+                    return 'Caucion'
+                if 'TITULOS' in tipo_norm and 'PUBLIC' in tipo_norm:
+                    return 'TitulosPublicos'
+
+                # Fallback al mercado informado o BCBA
+                return mercado_norm.title() if mercado_norm else 'BCBA'
             
             for activo in self.activos:
                 if isinstance(activo, dict):
                     simbolo = activo.get('simbolo', '')
-                    tipo_raw = (activo.get('tipo') or '').upper()
-                    mercado_raw = (activo.get('mercado') or '').upper()
+                    tipo_raw = (activo.get('tipo') or '')
+                    mercado_raw = (activo.get('mercado') or '')
                     
+                    if not simbolo:
+                        continue
                     symbols.append(simbolo)
-                    
-                    if tipo_raw in special_map:
-                        markets.append(special_map[tipo_raw])
-                    else:
-                        markets.append(mercado_raw if mercado_raw else 'BCBA')
+                    tipos.append(tipo_raw)
+                    markets.append(detectar_mercado(tipo_raw, mercado_raw))
                 else:
                     symbols.append(activo)
                     markets.append('BCBA')  # Default market
