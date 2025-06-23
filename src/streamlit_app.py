@@ -872,6 +872,7 @@ class output:
 
     def display_metrics_table(self):
         """Display portfolio metrics in a formatted Streamlit table with validations"""
+        # Create metrics dictionary
         metrics = {
             'Retorno Anualizado': f"{self.annual_return:.2%}",
             'Volatilidad Anualizada': f"{self.annual_volatility:.2%}",
@@ -885,119 +886,61 @@ class output:
             'Curtosis': f"{self.kurtosis:.4f}",
             'Test de Normalidad (p-valor)': f"{self.jb_pvalue:.4f}",
             'Distribución Normal': "Sí" if self.is_normal else "No"
-                f"{self.min_return:.2%}",
-                f"{self.max_return:.2%}",
-                f"{self.median_daily:.4%}"
-            ]
         }
-        
-        # Crear DataFrame para mostrar
-        df_metrics = pd.DataFrame(metrics)
-        
-        # Mostrar tabla con estilo
-        st.markdown("### 📊 Métricas de Rendimiento y Riesgo")
-        st.dataframe(
-            df_metrics,
-            column_config={
-                "Métrica": st.column_config.TextColumn("Métrica", width="medium"),
-                "Valor": st.column_config.TextColumn("Valor", width="small")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-        
-        # Explicación de métricas
-        with st.expander("📝 Explicación de Métricas"):
-            st.markdown("""
-            - **Retorno Diario/Anual**: Rentabilidad promedio del portafolio en el período.
-            - **Volatilidad**: Desviación estándar de los retornos (medida de riesgo).
-            - **Ratio de Sharpe**: Retorno excedente por unidad de riesgo total (mayor es mejor).
-            - **Ratio de Sortino**: Similar al Sharpe pero solo considera la volatilidad a la baja.
-            - **VaR 95%**: Pérdida máxima esperada con 95% de confianza en un día.
-            - **CVaR 95%**: Pérdida promedio en el peor 5% de los casos.
-            - **Asimetría**: Medida de asimetría de la distribución de retornos.
-            - **Curtosis**: Medida de colas pesadas en la distribución.
-            - **Test de Normalidad**: Evalúa si los retornos siguen una distribución normal.
-            """)
 
-    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
-        """Create an enhanced histogram of portfolio returns with key metrics"""
-        if len(self.returns) == 0:
-            st.warning("No hay datos suficientes para mostrar el histograma")
-            return None
-            
-        # Create figure
-        fig = go.Figure()
-        
-        # Add histogram
-        fig.add_trace(go.Histogram(
-            x=self.returns,
-            histnorm='probability density',
-            name='Densidad de Probabilidad',
-            marker_color='#1f77b4',
-            opacity=0.75,
-            nbinsx=50,
-            hovertemplate='Retorno: %{x:.2%}<br>Densidad: %{y:.4f}<extra></extra>'
-        ))
-        
-        # Add vertical lines for key metrics
-        metrics = [
-            (self.mean_daily, 'Retorno Promedio', '#2ca02c', 'dash'),
-            (self.median_daily, 'Mediana', '#9467bd', 'dot'),
-            (self.var_95, 'VaR 95%', '#ff7f0e', 'dash'),
-            (0, 'Cero', '#d62728', 'solid')
-        ]
-        
-        for value, name, color, dash in metrics:
-            fig.add_vline(
-                x=value,
-                line=dict(color=color, width=2, dash=dash),
-                name=name,
-                annotation_text=f"{name}: {value:.2%}",
-                annotation_position="top right"
+        # Create DataFrame
+        df = pd.DataFrame({
+            'Métrica': list(metrics.keys()),
+            'Valor': list(metrics.values())
+        })
+
+        # Display table with explanations
+        with st.expander("📊 Métricas del Portafolio (click para ver explicaciones)"):
+            st.dataframe(
+                df,
+                column_config={
+                    "Métrica": st.column_config.TextColumn("Métrica", width="medium"),
+                    "Valor": st.column_config.TextColumn("Valor", width="small")
+                },
+                hide_index=True,
+                use_container_width=True
             )
-        
-        # Add shaded area for VaR
-        fig.add_vrect(
-            x0=min(self.returns) - 0.01,
-            x1=self.var_95,
-            fillcolor="rgba(255, 0, 0, 0.1)",
-            line_width=0,
-            name="Zona de Riesgo (5%)",
-            annotation_text=f"Zona de Riesgo (5% de probabilidad)",
-            annotation_position="top right"
-        )
-        
-        # Update layout
-        fig.update_layout(
-            title=dict(
-                text=title,
-                x=0.5,
-                y=0.95,
-                xanchor='center',
-                yanchor='top'
-            ),
-            xaxis_title="Retorno Diario",
-            yaxis_title="Densidad de Probabilidad",
-            showlegend=True,
-            legend_title="Métricas",
-            template="plotly_white",
-            hovermode="closest",
-            margin=dict(l=50, r=50, t=80, b=50),
-            xaxis_tickformat=".1%",
-            xaxis_showgrid=True,
-            yaxis_showgrid=True,
-            xaxis_zeroline=True,
-            yaxis_zeroline=True
-        )
-        
+
+            # Add explanations
+            explanations = {
+                'Retorno Anualizado': f"Retorno anualizado del portafolio ({len(self.returns)} datos)",
+                'Volatilidad Anualizada': "Desviación estándar de los retornos anualizada",
+                'Ratio de Sharpe': "Retorno excedente por unidad de riesgo total",
+                'Ratio de Sortino': "Similar al Sharpe pero solo considera el riesgo a la baja",
+                'VaR 95% (Diario)': "Pérdida máxima esperada con 95% de confianza",
+                'CVaR 95% (Diario)': "Pérdida promedio en el peor 5% de los días",
+                'Retorno Promedio (Diario)': "Retorno promedio diario",
+                'Volatilidad (Diaria)': "Desviación estándar de los retornos diarios",
+                'Asimetría': "Medida de la asimetría de la distribución",
+                'Curtosis': "Medida de las colas de la distribución",
+                'Test de Normalidad': "Prueba de Jarque-Bera para normalidad",
+                'Distribución Normal': "Indica si los retornos siguen una distribución normal"
+            }
+
+            # Display explanations
+            for metric, explanation in explanations.items():
+                st.caption(f"**{metric}**: {explanation}")
+
+        # Add validation warnings
+        if self.sharpe_ratio < 0:
+            st.warning("⚠️ Ratio de Sharpe negativo: El portafolio está subperformando relativo a la tasa libre de riesgo")
+        if self.sortino_ratio < 0:
+            st.warning("⚠️ Ratio de Sortino negativo: El portafolio tiene más riesgo a la baja que retorno")
+        if not self.is_normal:
+            st.warning("⚠️ La distribución de retornos no sigue una distribución normal")
+
         # Añadir anotación con métricas clave
         metrics_text = (
             f"<b>Estadísticas Clave:</b><br>"
-            f"Retorno Anual: {self.return_annual:,.2%}<br>"
-            f"Volatilidad Anual: {self.volatility_annual:,.2%}<br>"
-            f"Ratio de Sharpe: {self.sharpe_annual:.2f}<br>"
-            f"VaR 95% (1d): {self.var_95:,.2%}"
+            f"Retorno Anual: {self.annual_return:.2%}<br>"
+            f"Volatilidad Anual: {self.annual_volatility:.2%}<br>"
+            f"Ratio de Sharpe: {self.sharpe_ratio:.2f}<br>"
+            f"VaR 95% (1d): {self.var_95:.2%}"
         )
         
         fig.add_annotation(
