@@ -987,3 +987,37 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         return None
 
 # ... Rest of the code remains the same ...
+
+def main():
+    st.title('IOL Portfolio Analyzer')
+    # ... (the entire Streamlit UI code) ...
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
