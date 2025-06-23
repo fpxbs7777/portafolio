@@ -799,32 +799,59 @@ class output:
         self.mean_daily = np.mean(self.returns)
         self.median_daily = np.median(self.returns)
         self.volatility_daily = np.std(self.returns)
-        self.min_return = np.min(self.returns)
-        self.max_return = np.max(self.returns)
         
-        # Cálculo de métricas de riesgo
+        # Validate volatility (should not be zero)
+        if self.volatility_daily == 0:
+            raise ValueError("Volatilidad cero detectada. Los retornos son constantes.")
+            
+        # Risk metrics
         self.var_95 = np.percentile(self.returns, 5)
-        self.cvar_95 = np.mean(self.returns[self.returns <= self.var_95])  # Expected Shortfall
+        self.cvar_95 = np.mean(self.returns[self.returns <= self.var_95])
         
-        # Cálculo de ratios de rendimiento
+        # Calculate annualized metrics with validation
+        try:
+            self.annual_return = (1 + self.mean_daily) ** 252 - 1
+            self.annual_volatility = self.volatility_daily * np.sqrt(252)
+            
+            # Validate extreme values
+            if abs(self.annual_return) > 100:  # 100% annual return is extreme
+                st.warning(f"⚠️ Retorno anualizado extremadamente alto: {self.annual_return:.2%}")
+            if self.annual_volatility > 100:  # 100% volatility is extreme
+                st.warning(f"⚠️ Volatilidad anualizada extremadamente alta: {self.annual_volatility:.2%}")
+                
+        except Exception as e:
+            raise ValueError(f"Error calculando métricas anualizadas: {str(e)}")
+        
+        # Risk-adjusted metrics
         self.sharpe_ratio = self._calculate_sharpe_ratio()
         self.sortino_ratio = self._calculate_sortino_ratio()
         
-        # Análisis de distribución
+        # Distribution metrics
         self.skewness = stats.skew(self.returns)
         self.kurtosis = stats.kurtosis(self.returns)
-        self.jb_stat, self.p_value = stats.jarque_bera(self.returns)
-        self.is_normal = self.p_value > 0.05
+        self.jb_stat, self.jb_pvalue = stats.jarque_bera(self.returns)
+        self.is_normal = self.jb_pvalue > 0.05
         
-        # Métricas anualizadas
-        self.volatility_annual = self.volatility_daily * np.sqrt(252)
-        self.return_annual = (1 + self.mean_daily) ** 252 - 1
-        self.sharpe_annual = self.sharpe_ratio * np.sqrt(252) if self.sharpe_ratio else 0
-        
-        # Placeholders para información adicional
+        # Placeholders for optimization results
         self.weights = None
         self.dataframe_allocation = None
-        self.str_title = 'Portfolio Returns'
+
+    def _calculate_sharpe_ratio(self, annualize=True):
+        """Calculate Sharpe ratio with validation"""
+        excess_returns = self.returns - self.daily_risk_free
+        sharpe = np.mean(excess_returns) / np.std(excess_returns)
+        if np.isnan(sharpe):
+            raise ValueError("Sharpe ratio no puede ser calculado (división por cero)")
+        return sharpe * np.sqrt(252) if annualize else sharpe
+
+    def _calculate_sortino_ratio(self, annualize=True, target_return=0):
+        """Calculate Sortino ratio with validation"""
+        downside_returns = np.minimum(self.returns - target_return, 0)
+        downside_deviation = np.sqrt(np.mean(downside_returns ** 2))
+        if downside_deviation == 0:
+            raise ValueError("Deviation negativa es cero, no se puede calcular Sortino ratio")
+        sortino = (np.mean(self.returns) - target_return) / downside_deviation
+        return sortino * np.sqrt(252) if annualize else sortino
         self.decimals = 4
         
     def _calculate_sharpe_ratio(self):
@@ -843,61 +870,21 @@ class output:
             return 0
         return (self.mean_daily - self.daily_risk_free) / downside_volatility
 
-    def get_metrics_dict(self):
-        """Retorna métricas del portafolio en formato diccionario"""
-        return {
-            'Mean Daily': self.mean_daily,
-            'Median Daily': self.median_daily,
-            'Volatility Daily': self.volatility_daily,
-            'Sharpe Ratio': self.sharpe_ratio,
-            'VaR 95%': self.var_95,
-            'Skewness': self.skewness,
-            'Kurtosis': self.kurtosis,
-            'JB Statistic': self.jb_stat,
-            'P-Value': self.p_value,
-            'Is Normal': self.is_normal,
-            'Annual Return': self.return_annual,
-            'Annual Volatility': self.volatility_annual
-        }
-
     def display_metrics_table(self):
-        """Muestra las métricas del portafolio en una tabla de Streamlit"""
-        if self.returns is None or len(self.returns) == 0:
-            st.warning("No hay datos suficientes para mostrar métricas")
-            return
-
-        # Crear métricas en formato para mostrar
+        """Display portfolio metrics in a formatted Streamlit table with validations"""
         metrics = {
-            'Métrica': [
-                'Retorno Diario Promedio',
-                'Retorno Anualizado',
-                'Volatilidad Diaria',
-                'Volatilidad Anualizada',
-                'Ratio de Sharpe (Anual)',
-                'Ratio de Sortino (Anual)',
-                'VaR 95% (1 día)',
-                'CVaR 95% (1 día)',
-                'Asimetría',
-                'Curtosis',
-                'Test de Normalidad (Jarque-Bera)',
-                'p-valor',
-                'Retorno Mínimo',
-                'Retorno Máximo',
-                'Mediana de Retornos'
-            ],
-            'Valor': [
-                f"{self.mean_daily:.4%}",
-                f"{self.return_annual:.2%}",
-                f"{self.volatility_daily:.4%}",
-                f"{self.volatility_annual:.2%}",
-                f"{self.sharpe_annual:.2f}",
-                f"{self.sortino_ratio * np.sqrt(252):.2f}",
-                f"{self.var_95:.2%}",
-                f"{self.cvar_95:.2%}",
-                f"{self.skewness:.4f}",
-                f"{self.kurtosis:.4f}",
-                "Normal" if self.is_normal else "No Normal",
-                f"{self.p_value:.4f}",
+            'Retorno Anualizado': f"{self.annual_return:.2%}",
+            'Volatilidad Anualizada': f"{self.annual_volatility:.2%}",
+            'Ratio de Sharpe': f"{self.sharpe_ratio:.4f}",
+            'Ratio de Sortino': f"{self.sortino_ratio:.4f}",
+            'VaR 95% (Diario)': f"{self.var_95:.2%}",
+            'CVaR 95% (Diario)': f"{self.cvar_95:.2%}",
+            'Retorno Promedio (Diario)': f"{self.mean_daily:.4%}",
+            'Volatilidad (Diaria)': f"{self.volatility_daily:.4%}",
+            'Asimetría': f"{self.skewness:.4f}",
+            'Curtosis': f"{self.kurtosis:.4f}",
+            'Test de Normalidad (p-valor)': f"{self.jb_pvalue:.4f}",
+            'Distribución Normal': "Sí" if self.is_normal else "No"
                 f"{self.min_return:.2%}",
                 f"{self.max_return:.2%}",
                 f"{self.median_daily:.4%}"
@@ -934,73 +921,63 @@ class output:
             """)
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
-        """Crea un histograma de retornos usando Plotly para Streamlit"""
-        if self.returns is None or len(self.returns) == 0:
-            fig = go.Figure()
-            fig.add_annotation(
-                text="No hay datos suficientes para mostrar",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
+        """Create an enhanced histogram of portfolio returns with key metrics"""
+        if len(self.returns) == 0:
+            st.warning("No hay datos suficientes para mostrar el histograma")
+            return None
+            
+        # Create figure with secondary y-axis
+        fig = go.Figure()
+        
+        # Add histogram with probability density
+        fig.add_trace(go.Histogram(
+            x=self.returns,
+            histnorm='probability density',
+            name='Densidad de Probabilidad',
+            marker_color='#1f77b4',
+            opacity=0.75,
+            nbinsx=50,  # Increase number of bins for smoother distribution
+            hovertemplate='Retorno: %{x:.2%}<br>Densidad: %{y:.4f}<extra></extra>'
+        ))
+        
+        # Add vertical lines for key metrics
+        metrics = [
+            (self.mean_daily, 'Retorno Promedio', '#2ca02c', 'dash'),
+            (self.median_daily, 'Mediana', '#9467bd', 'dot'),
+            (self.var_95, 'VaR 95%', '#ff7f0e', 'dash'),
+            (0, 'Cero', '#d62728', 'solid')
+        ]
+        
+        for value, name, color, dash in metrics:
+            fig.add_vline(
+                x=value,
+                line=dict(color=color, width=2, dash=dash),
+                name=name,
+                annotation_text=f"{name}: {value:.2%}",
+                annotation_position="top right"
             )
-            fig.update_layout(title=title)
-            return fig
         
-        # Calcular el rango para los bins
-        data_range = max(abs(self.returns.min()), abs(self.returns.max()))
-        bin_size = data_range / 20  # 20 bins para mejor resolución
-        
-        fig = go.Figure(data=[
-            go.Histogram(
-                x=self.returns,
-                xbins=dict(size=bin_size),
-                name="Retornos",
-                marker_color='#0d6efd',
-                opacity=0.8,
-                histnorm='probability density',
-                hovertemplate='Retorno: %{x:.2%}<br>Frecuencia: %{y:.2f}<extra></extra>'
-            )
-        ])
-        
-        # Agregar líneas de métricas importantes
-        annotations = []
-        
-        # Línea de media
-        fig.add_vline(
-            x=self.mean_daily, 
-            line_dash="dash", 
-            line_color="#28a745",
-            annotation_text=f"Media: {self.mean_daily:.2%}",
+        # Add shaded area for VaR
+        fig.add_vrect(
+            x0=min(self.returns) - 0.01,  # Extend slightly beyond min return
+            x1=self.var_95,
+            fillcolor="rgba(255, 0, 0, 0.1)",
+            line_width=0,
+            name="Zona de Riesgo (5%)",
+            annotation_text=f"Zona de Riesgo (5% de probabilidad)",
             annotation_position="top right"
         )
         
-        # Línea de mediana
-        fig.add_vline(
-            x=self.median_daily,
-            line_dash="dot",
-            line_color="#6f42c1",
-            annotation_text=f"Mediana: {self.median_daily:.2%}",
-            annotation_position="top left"
-        )
-        
-        # Área de VaR 95%
-        fig.add_vrect(
-            x0=self.returns.min(),
-            x1=self.var_95,
-            fillcolor="rgba(255, 0, 0, 0.1)",
-            layer="below",
-            line_width=0,
-            annotation_text=f"Zona de Riesgo (5% de probabilidad)"
-        )
-        
-        # Ajustes del layout
+        # Update layout
         fig.update_layout(
+            title=title,
+            xaxis_title="Retorno Diario",
             title={
                 'text': f"{title}<br><sup>Distribución de retornos diarios</sup>",
                 'x': 0.5,
                 'xanchor': 'center',
                 'yanchor': 'top'
             },
-            xaxis_title="Retorno",
             yaxis_title="Densidad de Probabilidad",
             showlegend=False,
             template='plotly_white',
