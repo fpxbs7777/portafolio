@@ -1117,15 +1117,10 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         
     except Exception as e:
         st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
-        return None
-
-
-
-
-# --- Portfolio Metrics Function ---
 def calcular_metricas_portafolio(portafolio, valor_total):
     """
-    Calcula métricas clave de desempeño para un portafolio de inversión.
+    Calcula métricas clave de desempeño para un portafolio de inversión
+    utilizando datos históricos de la API de IOL.
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
@@ -1134,69 +1129,118 @@ def calcular_metricas_portafolio(portafolio, valor_total):
     Returns:
         dict: Diccionario con las métricas calculadas
     """
-    if not isinstance(portafolio, dict):
-        return {}
-
-    if valor_total == 0:
+    if not isinstance(portafolio, dict) or not portafolio or valor_total <= 0:
         return {
             'concentracion': 0,
             'std_dev_activo': 0,
             'retorno_esperado_anual': 0,
             'pl_esperado_min': 0,
             'pl_esperado_max': 0,
-            'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
+            'probabilidades': {
+                'perdida': 0.0,
+                'ganancia': 0.0,
+                'perdida_mayor_10': 0.0,
+                'ganancia_mayor_10': 0.0
+            },
             'riesgo_anual': 0
         }
 
-    # 1. Calcular concentración del portafolio
-    concentracion = 0
-    for activo in portafolio.values():
-        concentracion += (activo.get('Valuación', 0) / valor_total) ** 2
-    
-    # 2. Calcular volatilidad de los activos
-    std_dev_activo = 0
-    for activo in portafolio.values():
-        std_dev_activo += activo.get('Valuación', 0) * activo.get('volatilidad', 0)
-    
-    # 3. Calcular retorno esperado
-    retorno_esperado_anual = 0
-    for activo in portafolio.values():
-        retorno_esperado_anual += activo.get('Valuación', 0) * activo.get('retorno_esperado', 0)
-    
-    # 4. Calcular escenarios de pérdida y ganancia
-    pl_esperado_min = 0
-    pl_esperado_max = 0
-    for activo in portafolio.values():
-        pl_esperado_min += activo.get('Valuación', 0) * activo.get('pl_min', 0)
-        pl_esperado_max += activo.get('Valuación', 0) * activo.get('pl_max', 0)
-    
-    # 5. Calcular probabilidades de pérdida y ganancia
-    probabilidades = {
-        'perdida': 0,
-        'ganancia': 0,
-        'perdida_mayor_10': 0,
-        'ganancia_mayor_10': 0
-    }
-    for activo in portafolio.values():
-        probabilidades['perdida'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida', 0)
-        probabilidades['ganancia'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia', 0)
-        probabilidades['perdida_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_perdida_mayor_10', 0)
-        probabilidades['ganancia_mayor_10'] += activo.get('Valuación', 0) * activo.get('probabilidad_ganancia_mayor_10', 0)
-    
-    # 6. Calcular riesgo anual
-    riesgo_anual = 0
-    for activo in portafolio.values():
-        riesgo_anual += activo.get('Valuación', 0) * activo.get('riesgo', 0)
-    
-    return {
-        'concentracion': concentracion,
-        'std_dev_activo': std_dev_activo,
-        'retorno_esperado_anual': retorno_esperado_anual,
-        'pl_esperado_min': pl_esperado_min,
-        'pl_esperado_max': pl_esperado_max,
-        'probabilidades': probabilidades,
-        'riesgo_anual': riesgo_anual
-    }
+    try:
+        # Obtener fechas para el análisis (últimos 3 meses)
+        fecha_hasta = date.today()
+        fecha_desde = fecha_hasta - timedelta(days=90)
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
+        
+        # Obtener datos históricos para cada activo
+        precios = {}
+        retornos = {}
+        
+        for simbolo, activo in portafolio.items():
+            # Verificar si tenemos token y mercado
+            if not all(k in activo for k in ['token', 'mercado']):
+                continue
+                
+            # Obtener datos históricos (últimos 3 meses)
+            df = obtener_serie_historica_iol(
+                token_portador=activo['token'],
+                mercado=activo['mercado'],
+                simbolo=simbolo,
+                fecha_desde=fecha_desde_str,
+                fecha_hasta=fecha_hasta_str
+            )
+            
+            if df is not None and not df.empty and 'ultimoPrecio' in df.columns:
+                # Obtener precios y calcular retornos diarios
+                precios[simbolo] = df['ultimoPrecio']
+                retornos[simbolo] = df['ultimoPrecio'].pct_change().dropna()
+        
+        if not precios:
+            raise ValueError("No se pudieron obtener datos históricos para ningún activo")
+        
+        # Calcular métricas
+        df_precios = pd.DataFrame(precios)
+        df_retornos = pd.DataFrame(retornos)
+        
+        # 1. Calcular concentración del portafolio (Índice de Herfindahl-Hirschman)
+        pesos = np.array([activo.get('Valuación', 0) / valor_total for activo in portafolio.values()])
+        concentracion = float(np.sum(pesos ** 2))
+        
+        # 2. Calcular volatilidad (desviación estándar anualizada)
+        cov_matrix = df_retornos.cov() * 252  # Anualizar
+        port_vol = np.sqrt(np.dot(pesos.T, np.dot(cov_matrix, pesos)))
+        riesgo_anual = float(port_vol * valor_total)  # Riesgo en términos monetarios
+        
+        # 3. Calcular retorno esperado anualizado
+        retorno_anual = df_retornos.mean() * 252  # Retorno anualizado
+        retorno_esperado_anual = float(np.dot(pesos, retorno_anual) * valor_total)
+        
+        # 4. Calcular escenarios usando percentiles históricos
+        pl_diario = df_retornos.dot(pesos) * valor_total
+        pl_esperado_min = float(np.percentile(pl_diario, 5))  # Percentil 5% como escenario pesimista
+        pl_esperado_max = float(np.percentile(pl_diario, 95))  # Percentil 95% como escenario optimista
+        
+        # 5. Calcular probabilidades basadas en retornos históricos
+        total_dias = len(pl_diario)
+        if total_dias > 0:
+            prob_ganancia = float((pl_diario > 0).sum() / total_dias)
+            prob_perdida = float((pl_diario < 0).sum() / total_dias)
+            prob_ganancia_10 = float((pl_diario > 0.1).sum() / total_dias)
+            prob_perdida_10 = float((pl_diario < -0.1).sum() / total_dias)
+        else:
+            prob_ganancia = prob_perdida = prob_ganancia_10 = prob_perdida_10 = 0.0
+        
+        return {
+            'concentracion': concentracion,
+            'std_dev_activo': riesgo_anual,  # Volatilidad en términos monetarios
+            'retorno_esperado_anual': retorno_esperado_anual,
+            'pl_esperado_min': pl_esperado_min,
+            'pl_esperado_max': pl_esperado_max,
+            'probabilidades': {
+                'perdida': prob_perdida,
+                'ganancia': prob_ganancia,
+                'perdida_mayor_10': prob_perdida_10,
+                'ganancia_mayor_10': prob_ganancia_10
+            },
+            'riesgo_anual': riesgo_anual
+        }
+        
+    except Exception as e:
+        st.error(f"Error calculando métricas del portafolio: {str(e)}")
+        return {
+            'concentracion': 0,
+            'std_dev_activo': 0,
+            'retorno_esperado_anual': 0,
+            'pl_esperado_min': 0,
+            'pl_esperado_max': 0,
+            'probabilidades': {
+                'perdida': 0.0,
+                'ganancia': 0.0,
+                'perdida_mayor_10': 0.0,
+                'ganancia_mayor_10': 0.0
+            },
+            'riesgo_anual': 0
+        }
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio):
