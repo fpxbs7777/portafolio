@@ -316,7 +316,7 @@ def obtener_tasas_caucion(token_portador):
                 if 'ultimoPrecio' in df.columns:
                     df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
                 
-                # Asegurarse de que las columnas necesarias existan
+                # Asegurarse de que las columnas necesarias existen
                 if 'monto' not in df.columns and 'volumen' in df.columns:
                     df['monto'] = df['volumen']
                 
@@ -800,6 +800,12 @@ class manager:
         
         # Calcular retornos del portafolio
         portfolio_returns = self.returns.dot(weights)
+        
+        # Debug: verificar datos de retornos
+        st.info(f"🔍 Debug - Portfolio returns stats:")
+        st.info(f"• Shape: {portfolio_returns.shape}")
+        st.info(f"• Non-zero values: {(portfolio_returns != 0).sum()}")
+        st.info(f"• Sample values: {portfolio_returns.head(5) if len(portfolio_returns) > 0 else 'Empty'}")
         
         # Crear objeto output
         port_output = output(portfolio_returns, self.notional)
