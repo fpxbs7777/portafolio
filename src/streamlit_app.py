@@ -2084,34 +2084,104 @@ def mostrar_analisis_portafolio():
 
 def obtener_mercado_activo(activo):
     """
-    Obtiene el mercado de un activo basado en la información del portafolio.
+    Obtiene el mercado de un activo basado en la información del portafolio de InvertirOnline.
     
     Args:
         activo (dict): Diccionario con la información del activo del portafolio
         
     Returns:
-        str: Código del mercado según InvertirOnline (en minúsculas)
-    """
-    # Si el activo tiene información de mercado, usarla
-    if 'mercado' in activo and activo['mercado']:
-        return activo['mercado'].lower()
+        tuple: (str: código del mercado, str: símbolo del activo)
         
-    # Si hay un símbolo con sufijo de mercado (ej: 'GGAL.BA')
-    if 'simbolo' in activo and isinstance(activo['simbolo'], str) and '.' in activo['simbolo']:
-        return activo['simbolo'].split('.')[-1].lower()
+    Nota: Los códigos de mercado deben coincidir con los endpoints de la API de IOL:
+        - bcba: Mercado de Buenos Aires (acciones locales)
+        - byma: Mercado de Valores de Buenos Aires (CEDEARs, bonos, etc.)
+        - rofex: Mercado de futuros y opciones
+        - fci: Fondos comunes de inversión
+    """
+    # Mapeo de tipos de activo a mercados según la API de IOL
+    tipo_a_mercado = {
+        'ACCIONES': 'bcba',
+        'CEDEARS': 'byma',
+        'FondoComunDeInversion': 'fci',
+        'FondoComundeInversion': 'fci',  # Ambos formatos parecen usarse
+        'TitulosPublicos': 'byma',
+        'BONOS': 'byma',
+        'OPCIONES': 'rofex',
+        'FUTUROS': 'rofex',
+        'CEDEAR': 'byma',  # Alternativa para CEDEARS
+        'CAUCION': 'byma',
+        'CAUCIONES': 'byma',
+        'LETRAS': 'byma',
+        'LETRAS_LIQ': 'byma',
+        'CHEQUES': 'byma',
+        'CHEQUEPAGARE': 'byma'
+    }
     
-    # Si hay un título con sufijo de mercado
+    # 1. Obtener el tipo de activo (puede venir en diferentes campos)
+    tipo_activo = activo.get('Tipo', '')
+    if not tipo_activo and 'titulo' in activo and isinstance(activo['titulo'], dict):
+        tipo_activo = activo['titulo'].get('tipo', '')
+    
+    # 2. Manejar fondos comunes de inversión (caso especial)
+    if tipo_activo in ['FondoComunDeInversion', 'FondoComundeInversion']:
+        simbolo = activo.get('simbolo', activo.get('Descripción', '')).split()[-1]
+        return 'fci', simbolo
+    
+    # 3. Manejar CEDEARS (siempre van a BYMA)
+    if tipo_activo == 'CEDEARS' or (isinstance(activo.get('Descripción'), str) and 'cedear' in activo['Descripción'].lower()):
+        simbolo = activo.get('simbolo', activo.get('Descripción', '')).split()[-1]
+        return 'byma', simbolo
+    
+    # 4. Manejar títulos públicos (generalmente en BYMA)
+    if tipo_activo == 'TitulosPublicos':
+        simbolo = activo.get('simbolo', activo.get('Descripción', '')).split()[-1]
+        return 'byma', simbolo
+    
+    # 5. Manejar símbolos con sufijo de mercado (ej: 'GGAL.BA')
+    if 'simbolo' in activo and isinstance(activo['simbolo'], str):
+        simbolo = activo['simbolo']
+        if '.' in simbolo:
+            mercado = simbolo.split('.')[-1].lower()
+            # Mapear sufijos comunes a mercados de IOL
+            if mercado in ['ba', 'bue', 'baires']:
+                return 'bcba', simbolo.split('.')[0]
+            elif mercado in ['cb', 'c']:
+                return 'byma', simbolo.split('.')[0]
+            elif mercado in ['ro', 'rofex']:
+                return 'rofex', simbolo.split('.')[0]
+    
+    # 6. Buscar en la estructura de título si existe
     if 'titulo' in activo and isinstance(activo['titulo'], dict):
+        titulo = activo['titulo']
+        
         # Si el título tiene mercado definido, usarlo
-        if 'mercado' in activo['titulo'] and activo['titulo']['mercado']:
-            return activo['titulo']['mercado'].lower()
-            
-        # Si no, verificar si el símbolo tiene sufijo de mercado
-        if 'simbolo' in activo['titulo'] and isinstance(activo['titulo']['simbolo'], str) and '.' in activo['titulo']['simbolo']:
-            return activo['titulo']['simbolo'].split('.')[-1].lower()
+        if 'mercado' in titulo and titulo['mercado']:
+            mercado = titulo['mercado'].lower()
+            # Mapear nombres de mercado a códigos de API
+            if mercado in ['byma', 'mae', 'merval']:
+                mercado = 'byma'
+            elif mercado in ['bcba', 'bue', 'baires']:
+                mercado = 'bcba'
+            elif mercado in ['rofex', 'futuros']:
+                mercado = 'rofex'
+                
+            simbolo = titulo.get('simbolo', '')
+            if not simbolo and 'Descripción' in activo:
+                simbolo = activo['Descripción'].split()[-1]
+                
+            return mercado, simbolo if simbolo else ''
     
-    # Si no se puede determinar, devolver 'bcba' como valor por defecto
-    return 'bcba'
+    # 7. Por defecto, usar el mapeo de tipo a mercado
+    mercado = tipo_a_mercado.get(tipo_activo, 'byma')
+    
+    # 8. Obtener el símbolo del mejor campo disponible
+    simbolo = (
+        activo.get('simbolo') or 
+        (activo['titulo'].get('simbolo') if isinstance(activo.get('titulo'), dict) else '') or
+        (activo.get('Descripción', '').split()[-1] if 'Descripción' in activo else '')
+    )
+    
+    return mercado, simbolo
 
 def obtener_serie_historica_activo(activo, token_acceso, fecha_desde, fecha_hasta):
     """
@@ -2124,21 +2194,27 @@ def obtener_serie_historica_activo(activo, token_acceso, fecha_desde, fecha_hast
         fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
         
     Returns:
-        tuple: (DataFrame con los datos históricos, código del mercado usado)
+        tuple: (DataFrame con los datos históricos, código del mercado usado, símbolo usado)
     """
     try:
-        # Obtener el símbolo del activo
-        simbolo = activo.get('simbolo', '')
-        if not simbolo and 'titulo' in activo and isinstance(activo['titulo'], dict):
-            simbolo = activo['titulo'].get('simbolo', '')
+        # Obtener el mercado y símbolo del activo
+        mercado, simbolo = obtener_mercado_activo(activo)
+        
+        # Si no se pudo obtener el símbolo, intentar obtenerlo de otra manera
+        if not simbolo:
+            simbolo = activo.get('simbolo', '')
+            if not simbolo and 'titulo' in activo and isinstance(activo['titulo'], dict):
+                simbolo = activo['titulo'].get('simbolo', '')
+            if not simbolo and 'Descripción' in activo:
+                # Intentar extraer el símbolo de la descripción (última palabra)
+                partes = activo['Descripción'].split()
+                if partes:
+                    simbolo = partes[-1]
         
         if not simbolo:
             st.warning(f"No se pudo obtener el símbolo para el activo: {activo}")
-            return None, None
+            return None, None, None
             
-        # Obtener el mercado del activo
-        mercado = obtener_mercado_activo(activo)
-        
         st.write(f"Obteniendo datos históricos para {simbolo} en mercado {mercado}...")
         
         # Intentar obtener la serie histórica
@@ -2152,11 +2228,24 @@ def obtener_serie_historica_activo(activo, token_acceso, fecha_desde, fecha_hast
         )
         
         if df_historico is not None and not df_historico.empty:
-            return df_historico, mercado
+            return df_historico, mercado, simbolo
             
-        # Si no se encontraron datos, intentar con el mercado por defecto (bcba)
-        if mercado != 'bcba':
-            st.warning(f"No se encontraron datos para {simbolo} en {mercado}, intentando con bcba...")
+        # Si no se encontraron datos, intentar con el mercado BYMA como respaldo para CEDEARS
+        if mercado != 'byma' and activo.get('Tipo') == 'CEDEARS':
+            st.warning(f"No se encontraron datos para {simbolo} en {mercado}, intentando con BYMA...")
+            df_historico = obtener_serie_historica_iol(
+                token_portador=token_acceso,
+                mercado='byma',
+                simbolo=simbolo,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                ajustada="ajustada"
+            )
+            if df_historico is not None and not df_historico.empty:
+                return df_historico, 'byma', simbolo
+        # Para otros tipos de activos, intentar con BCBA
+        elif mercado != 'bcba':
+            st.warning(f"No se encontraron datos para {simbolo} en {mercado}, intentando con BCBA...")
             df_historico = obtener_serie_historica_iol(
                 token_portador=token_acceso,
                 mercado='bcba',
@@ -2166,13 +2255,14 @@ def obtener_serie_historica_activo(activo, token_acceso, fecha_desde, fecha_hast
                 ajustada="ajustada"
             )
             if df_historico is not None and not df_historico.empty:
-                return df_historico, 'bcba'
+                return df_historico, 'bcba', simbolo
         
-        return None, mercado
+        st.warning(f"No se encontraron datos históricos para {simbolo} en ningún mercado")
+        return None, mercado, simbolo
         
     except Exception as e:
-        st.error(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
-        return None, None
+        st.error(f"Error al obtener datos históricos para {activo.get('simbolo', 'activo')}: {str(e)}")
+        return None, None, None
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_acceso=None):
     """
