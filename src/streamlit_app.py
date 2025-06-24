@@ -2418,12 +2418,7 @@ def mostrar_movimientos_asesor():
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
 def mostrar_analisis_portafolio():
-    cliente = st.session_state.cliente_seleccionado
-    token_acceso = st.session_state.token_acceso
-
-    if not cliente:
-        st.error("No hay cliente seleccionado")
-        return
+    st.title("Análisis de Portafolio")
 
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
@@ -2431,12 +2426,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Optimización"
+        "🔄 Optimización",
+        "📊 Análisis FCIs"
     ])
 
     with tab1:
@@ -2461,6 +2457,185 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+        
+    with tab6:
+        # Análisis de FCIs
+        st.header("Análisis de Fondos Comunes de Inversión")
+        
+        # Obtener portafolio si no está en la sesión
+        if 'portafolio' not in st.session_state:
+            st.session_state.portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        portafolio = st.session_state.portafolio
+        
+        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+            st.warning("No se encontraron activos en el portafolio.")
+            return
+            
+        # Filtrar solo FCIs
+        fcis_en_portafolio = [activo for activo in portafolio.get('activos', []) 
+                            if activo.get('tipo', '').upper() == 'FCI']
+        
+        if not fcis_en_portafolio:
+            st.info("No se encontraron Fondos Comunes de Inversión en el portafolio.")
+            return
+            
+        # Mostrar resumen de FCIs
+        st.subheader("Resumen de FCIs en el Portafolio")
+        
+        # Crear DataFrame con información de los FCIs
+        fcis_data = []
+        for fci in fcis_en_portafolio:
+            fci_info = {
+                'Símbolo': fci.get('simbolo', ''),
+                'Descripción': fci.get('descripcion', ''),
+                'Moneda': fci.get('moneda', '').replace('_', ' ').title(),
+                'Cantidad': fci.get('cantidad', 0),
+                'Último Precio': fci.get('ultimoPrecio', 0),
+                'Valorización': fci.get('valorizacion', 0),
+                'Variación Diaria': f'{fci.get("variacionDiaria", 0):.2f}%',
+                'Variación Mes': f'{fci.get("variacionMensual", 0):.2f}%',
+                'Variación Año': f'{fci.get("variacionAnual", 0):.2f}%'
+            }
+            fcis_data.append(fci_info)
+        
+        if fcis_data:
+            df_fcis = pd.DataFrame(fcis_data)
+            st.dataframe(df_fcis, use_container_width=True)
+            
+            # Análisis detallado por FCI
+            st.subheader("Análisis Detallado")
+            
+            # Selector de FCI para análisis detallado
+            fci_seleccionado = st.selectbox(
+                "Seleccione un FCI para ver más detalles:",
+                [f"{fci['Símbolo']} - {fci['Descripción']}" for fci in fcis_data],
+                key="fci_selector"
+            )
+            
+            # Obtener símbolo del FCI seleccionado
+            simbolo_fci = fci_seleccionado.split(' - ')[0]
+            
+            # Obtener datos históricos del FCI
+            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+            fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+            
+            with st.spinner(f"Obteniendo datos históricos para {simbolo_fci}..."):
+                try:
+                    # Obtener datos históricos del FCI
+                    historico_fci = obtener_serie_historica_fci(
+                        token_acceso,
+                        simbolo_fci,
+                        fecha_desde,
+                        fecha_hasta
+                    )
+                    
+                    if historico_fci is not None and not historico_fci.empty:
+                        # Mostrar gráfico de evolución
+                        st.subheader(f"Evolución de Precio - {simbolo_fci}")
+                        
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=historico_fci.index,
+                            y=historico_fci['precio'],
+                            mode='lines',
+                            name='Precio',
+                            line=dict(color='#0d6efd')
+                        ))
+                        
+                        # Calcular medias móviles
+                        historico_fci['media_20'] = historico_fci['precio'].rolling(window=20).mean()
+                        historico_fci['media_50'] = historico_fci['precio'].rolling(window=50).mean()
+                        
+                        fig.add_trace(go.Scatter(
+                            x=historico_fci.index,
+                            y=historico_fci['media_20'],
+                            mode='lines',
+                            name='Media Móvil 20 días',
+                            line=dict(color='#ff7f0e', dash='dash')
+                        ))
+                        
+                        fig.add_trace(go.Scatter(
+                            x=historico_fci.index,
+                            y=historico_fci['media_50'],
+                            mode='lines',
+                            name='Media Móvil 50 días',
+                            line=dict(color='#2ca02c', dash='dash')
+                        ))
+                        
+                        fig.update_layout(
+                            xaxis_title='Fecha',
+                            yaxis_title='Precio',
+                            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                            margin=dict(l=0, r=0, t=30, b=0),
+                            height=400,
+                            template='plotly_white'
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Calcular métricas de rendimiento
+                        st.subheader("Métricas de Rendimiento")
+                        
+                        # Calcular retornos
+                        retornos = historico_fci['precio'].pct_change().dropna()
+                        
+                        # Calcular métricas
+                        rendimiento_total = (historico_fci['precio'].iloc[-1] / historico_fci['precio'].iloc[0] - 1) * 100
+                        volatilidad_anual = retornos.std() * np.sqrt(252) * 100
+                        sharpe_ratio = (retornos.mean() * 252) / (retornos.std() * np.sqrt(252)) if retornos.std() > 0 else 0
+                        max_drawdown = ((historico_fci['precio'] / historico_fci['precio'].cummax()) - 1).min() * 100
+                        
+                        # Mostrar métricas en columnas
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Rendimiento Total", f"{rendimiento_total:.2f}%")
+                        with col2:
+                            st.metric("Volatilidad Anual", f"{volatilidad_anual:.2f}%")
+                        with col3:
+                            st.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
+                        with col4:
+                            st.metric("Máximo Drawdown", f"{max_drawdown:.2f}%")
+                        
+                        # Mostrar distribución de retornos
+                        st.subheader("Distribución de Retornos Diarios")
+                        
+                        fig_hist = go.Figure()
+                        fig_hist.add_trace(go.Histogram(
+                            x=retornos * 100,
+                            nbinsx=50,
+                            marker_color='#0d6efd',
+                            opacity=0.75,
+                            name='Frecuencia'
+                        ))
+                        
+                        # Añadir línea de media
+                        mean_ret = retornos.mean() * 100
+                        fig_hist.add_vline(
+                            x=mean_ret,
+                            line_dash="dash",
+                            line_color="red",
+                            annotation_text=f"Media: {mean_ret:.2f}%",
+                            annotation_position="top"
+                        )
+                        
+                        fig_hist.update_layout(
+                            xaxis_title="Retorno Diario (%)",
+                            yaxis_title="Frecuencia",
+                            showlegend=False,
+                            height=400,
+                            template='plotly_white'
+                        )
+                        
+                        st.plotly_chart(fig_hist, use_container_width=True)
+                        
+                    else:
+                        st.warning(f"No se encontraron datos históricos para {simbolo_fci}")
+                        
+                except Exception as e:
+                    st.error(f"Error al obtener datos históricos: {str(e)}")
+        else:
+            st.warning("No se encontraron datos de FCIs para mostrar.")
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
