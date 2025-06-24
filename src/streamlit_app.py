@@ -1359,9 +1359,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     fecha_hasta = datetime.now().strftime('%Y-%m-%d')
     fecha_desde = (datetime.now() - timedelta(days=dias_historial*1.5)).strftime('%Y-%m-%d')
     
-    # 1. Calcular concentración del portafolio
-    concentracion = sum((activo.get('Valuación', 0) / valor_total) ** 2 
-                       for activo in portafolio.values())
+    # 1. Calcular concentración del portafolio (Índice de Herfindahl-Hirschman normalizado)
+    if len(portafolio) == 0:
+        concentracion = 0
+    elif len(portafolio) == 1:
+        concentracion = 1.0
+    else:
+        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
+                         for activo in portafolio.values())
+        # Normalizar entre 0 y 1
+        min_concentration = 1.0 / len(portafolio)
+        concentracion = (sum_squares - min_concentration) / (1 - min_concentration)
     
     # Inicializar estructuras para cálculos
     retornos_diarios = {}
@@ -1394,8 +1402,19 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                                       (df_historico['retorno'] <= q_high)]
             
             # Calcular métricas
-            retorno_medio = df_historico['retorno'].mean() * 252  # Anualizado
-            volatilidad = df_historico['retorno'].std() * np.sqrt(252)  # Anualizada
+            # Filtrar valores NaN e infinitos
+            retornos_validos = df_historico['retorno'].replace([np.inf, -np.inf], np.nan).dropna()
+            if len(retornos_validos) < 2:  # Necesitamos al menos 2 puntos para calcular volatilidad
+                continue
+                
+            retorno_medio = retornos_validos.mean() * 252  # Anualizado
+            volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
+            
+            # Asegurar valores razonables
+            if abs(retorno_medio) > 5:  # Más del 500% de retorno anual es poco realista
+                retorno_medio = np.sign(retorno_medio) * min(abs(retorno_medio), 5)
+            if volatilidad > 3:  # Más del 300% de volatilidad es poco común
+                volatilidad = min(volatilidad, 3)
             
             # Calcular probabilidades
             retornos_positivos = df_historico[df_historico['retorno'] > 0]['retorno']
@@ -1467,12 +1486,20 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
     pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
     
-    # Calcular probabilidades ponderadas
+    # Calcular probabilidades basadas en los retornos simulados
+    retornos_simulados = np.array(retornos_simulados)
+    total_simulaciones = len(retornos_simulados)
+            
+    prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
+    prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
+    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
+    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
+            
     probabilidades = {
-        'perdida': sum(m['prob_perdida'] * m['peso'] for m in metricas_activos.values()),
-        'ganancia': sum(m['prob_ganancia'] * m['peso'] for m in metricas_activos.values()),
-        'perdida_mayor_10': sum(m['prob_perdida_10'] * m['peso'] for m in metricas_activos.values()),
-        'ganancia_mayor_10': sum(m['prob_ganancia_10'] * m['peso'] for m in metricas_activos.values())
+        'perdida': prob_perdida,
+        'ganancia': prob_ganancia,
+        'perdida_mayor_10': prob_perdida_10,
+        'ganancia_mayor_10': prob_ganancia_10
     }
     
     return {
@@ -1613,23 +1640,48 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.subheader("⚖️ Análisis de Riesgo")
             cols = st.columns(3)
             
+            # Mostrar concentración como porcentaje
+            concentracion_pct = metricas['concentracion'] * 100
             cols[0].metric("Concentración", 
-                          f"{metricas['concentracion']:.3f}",
-                          help="Índice de Herfindahl: 0=diversificado, 1=concentrado")
+                         f"{concentracion_pct:.1f}%",
+                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
             
-            cols[1].metric("Volatilidad", 
-                          f"${metricas['std_dev_activo']:,.0f}",
-                          help="Desviación estándar de los valores de activos")
+            # Mostrar volatilidad como porcentaje anual
+            volatilidad_pct = metricas['std_dev_activo'] * 100
+            cols[1].metric("Volatilidad Anual", 
+                         f"{volatilidad_pct:.1f}%",
+                         help="Riesgo medido como desviación estándar de retornos anuales")
             
-            concentracion_status = "🟢 Baja" if metricas['concentracion'] < 0.25 else "🟡 Media" if metricas['concentracion'] < 0.5 else "🔴 Alta"
+            # Nivel de concentración con colores
+            if metricas['concentracion'] < 0.3:
+                concentracion_status = "🟢 Baja"
+            elif metricas['concentracion'] < 0.6:
+                concentracion_status = "🟡 Media"
+            else:
+                concentracion_status = "🔴 Alta"
+                
             cols[2].metric("Nivel Concentración", concentracion_status)
             
             # Proyecciones
             st.subheader("📈 Proyecciones de Rendimiento")
             cols = st.columns(3)
-            cols[0].metric("Retorno Esperado", f"${metricas['retorno_esperado_anual']:,.0f}")
-            cols[1].metric("Escenario Optimista", f"${metricas['pl_esperado_max']:,.0f}")
-            cols[2].metric("Escenario Pesimista", f"${metricas['pl_esperado_min']:,.0f}")
+            
+            # Mostrar retornos como porcentaje del portafolio
+            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+            cols[0].metric("Retorno Esperado Anual", 
+                         f"{retorno_anual_pct:+.1f}%",
+                         help="Retorno anual esperado basado en datos históricos")
+            
+            # Mostrar escenarios como porcentaje del portafolio
+            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+            
+            cols[1].metric("Escenario Optimista (95%)", 
+                         f"{optimista_pct:+.1f}%",
+                         help="Mejor escenario con 95% de confianza")
+            cols[2].metric("Escenario Pesimista (5%)", 
+                         f"{pesimista_pct:+.1f}%",
+                         help="Peor escenario con 5% de confianza")
             
             # Probabilidades
             st.subheader("🎯 Probabilidades")
