@@ -1511,18 +1511,63 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
+def obtener_tasa_libre_riesgo(token_portador):
+    """
+    Obtiene la tasa libre de riesgo promedio de las cauciones.
+    
+    Args:
+        token_portador (str): Token de autenticación para la API de IOL
+        
+    Returns:
+        float: Tasa libre de riesgo anualizada promedio
+    """
+    try:
+        # Obtener tasas de caución
+        df_cauciones = obtener_tasas_caucion(token_portador)
+        
+        if df_cauciones is None or df_cauciones.empty:
+            st.warning("No se pudieron obtener las tasas de caución. Usando tasa predeterminada del 40%.")
+            return 0.40  # Tasa predeterminada como respaldo
+            
+        # Calcular el promedio ponderado por monto de las tasas
+        if 'tasa_limpia' in df_cauciones.columns and 'monto' in df_cauciones.columns:
+            # Convertir a numérico y limpiar valores no numéricos
+            df_cauciones['tasa_limpia'] = pd.to_numeric(df_cauciones['tasa_limpia'], errors='coerce')
+            df_cauciones['monto'] = pd.to_numeric(df_cauciones['monto'], errors='coerce')
+            df_cauciones = df_cauciones.dropna(subset=['tasa_limpia', 'monto'])
+            
+            if len(df_cauciones) > 0:
+                # Calcular tasa promedio ponderada por monto
+                tasa_promedio = np.average(
+                    df_cauciones['tasa_limpia'], 
+                    weights=df_cauciones['monto']
+                )
+                return tasa_promedio / 100  # Convertir de porcentaje a decimal
+                
+    except Exception as e:
+        st.warning(f"Error al obtener tasa libre de riesgo: {str(e)}. Usando tasa predeterminada del 40%.")
+    
+    return 0.40  # Tasa predeterminada como último recurso
+
+def calcular_alpha_beta(portfolio_returns, benchmark_returns, token_portador=None, risk_free_rate=None):
     """
     Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
     
     Args:
         portfolio_returns (pd.Series): Retornos del portafolio
         benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
-        risk_free_rate (float): Tasa libre de riesgo (anualizada)
+        token_portador (str, optional): Token de autenticación para obtener la tasa libre de riesgo
+        risk_free_rate (float, optional): Tasa libre de riesgo (anualizada). Si no se proporciona, se obtendrá automáticamente.
         
     Returns:
         dict: Diccionario con alpha, beta, información de la regresión y métricas adicionales
     """
+    # Obtener tasa libre de riesgo si no se proporciona
+    if risk_free_rate is None and token_portador is not None:
+        risk_free_rate = obtener_tasa_libre_riesgo(token_portador)
+    elif risk_free_rate is None:
+        risk_free_rate = 0.40  # Tasa predeterminada si no hay token
+    
     # Alinear las series por fecha y eliminar NaN
     aligned_data = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
     if len(aligned_data) < 5:  # Mínimo de datos para regresión
@@ -1534,7 +1579,8 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
             'tracking_error': 0,
             'information_ratio': 0,
             'observations': len(aligned_data),
-            'alpha_annual': 0
+            'alpha_annual': 0,
+            'risk_free_rate': risk_free_rate
         }
     
     portfolio_aligned = aligned_data.iloc[:, 0]
@@ -2263,11 +2309,21 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             )
             
             if len(aligned_data) > 5:  # Mínimo de datos para cálculo confiable
+                # Obtener tasa libre de riesgo actualizada
+                try:
+                    tasa_libre_riesgo = obtener_tasa_libre_riesgo(token_portador)
+                    print(f"Tasa libre de riesgo obtenida: {tasa_libre_riesgo:.2%} anual")
+                except Exception as e:
+                    print(f"Error al obtener tasa libre de riesgo: {str(e)}")
+                    tasa_libre_riesgo = 0.40  # Valor por defecto si falla
+                    print(f"Usando tasa libre de riesgo por defecto: {tasa_libre_riesgo:.0%}")
+                
                 # Calcular métricas de Alpha y Beta para el portafolio completo
                 alpha_beta_metrics = calcular_alpha_beta(
                     aligned_data['Portfolio'],
                     aligned_data['MERVAL'],
-                    risk_free_rate=0.40  # Tasa libre de riesgo para Argentina
+                    risk_free_rate=tasa_libre_riesgo,
+                    token_portador=token_portador  # Pasar el token para cálculo automático
                 )
                 
                 # Calcular alpha y beta para cada activo individual
@@ -2276,11 +2332,27 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                     if activo != 'Portfolio':
                         activos_returns[activo] = aligned_data[activo]
                 
-                alpha_beta_activos = calcular_alpha_beta_activos(
-                    activos_returns,
-                    aligned_data['MERVAL'],
-                    risk_free_rate=0.40
-                )
+                alpha_beta_activos = {}
+                for activo, retornos in activos_returns.items():
+                    try:
+                        # Calcular métricas para cada activo individualmente
+                        metrics = calcular_alpha_beta(
+                            retornos,
+                            aligned_data['MERVAL'],
+                            risk_free_rate=tasa_libre_riesgo,
+                            token_portador=token_portador
+                        )
+                        alpha_beta_activos[activo] = metrics
+                    except Exception as e:
+                        print(f"Error calculando alpha/beta para {activo}: {str(e)}")
+                        alpha_beta_activos[activo] = {
+                            'alpha': 0,
+                            'alpha_annual': 0,
+                            'beta': 0,
+                            'r_squared': 0,
+                            'volatilidad': 0,
+                            'sharpe_ratio': 0
+                        }
                 
                 # Agregar información adicional a las métricas de cada activo
                 for activo, datos in alpha_beta_activos.items():
