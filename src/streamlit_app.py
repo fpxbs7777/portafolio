@@ -2013,34 +2013,31 @@ def obtener_lista_clientes(token_acceso):
         list: Lista de diccionarios con información de los clientes
     """
     try:
-        url = "https://api.invertironline.com/api/v2/usuarios/me"
+        # Intentar primero con el endpoint de cuentas
+        url = "https://api.invertironline.com/api/v2/cuentas"
         headers = {
             'Authorization': f'Bearer {token_acceso}'
         }
         
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # Esto lanzará un error para códigos 4XX/5XX
+        response.raise_for_status()
         
-        data = response.json()
-        
-        # Si el usuario tiene múltiples cuentas, devolver la lista de cuentas
-        if 'cuentas' in data and data['cuentas']:
-            return data['cuentas']
-        
-        # Si no hay cuentas pero hay datos de usuario, devolver la cuenta principal
-        if 'usuario' in data and data['usuario']:
-            return [{
-                'id': data['usuario'].get('id'),
-                'numeroCliente': data['usuario'].get('numeroCliente'),
-                'apellidoYNombre': data['usuario'].get('apellidoYNombre', 'Cliente')
-            }]
+        # Si la respuesta es exitosa, devolver las cuentas
+        cuentas = response.json()
+        if isinstance(cuentas, list) and len(cuentas) > 0:
+            return cuentas
             
-        # Si no hay datos de usuario, intentar con la respuesta directa
-        if 'id' in data:
+        # Si no hay cuentas, intentar con el endpoint de perfil
+        url = "https://api.invertironline.com/api/v2/perfil"
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        perfil = response.json()
+        if 'id' in perfil:
             return [{
-                'id': data.get('id'),
-                'numeroCliente': data.get('numeroCliente'),
-                'apellidoYNombre': data.get('apellidoYNombre', 'Cliente')
+                'id': perfil.get('id'),
+                'numeroCliente': perfil.get('numeroCliente'),
+                'apellidoYNombre': perfil.get('apellidoYNombre', 'Cliente')
             }]
             
         return []
@@ -2049,17 +2046,25 @@ def obtener_lista_clientes(token_acceso):
         error_msg = f"Error HTTP al obtener clientes: {e.response.status_code}"
         if e.response.text:
             error_msg += f" - {e.response.text}"
+            
+        # Si es un error 401, intentar refrescar el token
+        if e.response.status_code == 401:
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                nuevo_token = refrescar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state.token_acceso = nuevo_token
+                    # Intentar nuevamente con el nuevo token
+                    return obtener_lista_clientes(nuevo_token)
+        
         st.error(error_msg)
-        # Si el error es 401 (No autorizado), forzar cierre de sesión
-        if e.response.status_code == 401 and 'token_acceso' in st.session_state:
-            del st.session_state.token_acceso
-            st.rerun()
+        return []
     except requests.exceptions.RequestException as e:
         st.error(f"Error de conexión al obtener clientes: {str(e)}")
+        return []
     except Exception as e:
         st.error(f"Error inesperado al obtener clientes: {str(e)}")
-    
-    return []
+        return []
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
