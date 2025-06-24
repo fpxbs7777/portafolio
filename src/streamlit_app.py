@@ -1625,25 +1625,37 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 [np.inf, -np.inf], np.nan
             ).dropna()
 
-            # Alinear fechas con benchmark si está disponible
-            if merval_available and merval_returns is not None:
-                # Convertir índice de retornos a datetime.date para máxima compatibilidad
-                retornos_validos = retornos_validos.copy()
-                retornos_validos.index = pd.to_datetime(retornos_validos.index).date
-                merval_returns_aligned = merval_returns.copy()
-                merval_returns_aligned.index = pd.to_datetime(merval_returns_aligned.index).date
-                # Intersección de fechas
-                fechas_comunes = set(retornos_validos.index) & set(merval_returns_aligned.index)
-                fechas_comunes = sorted(fechas_comunes)
-                activos_aligned = retornos_validos.loc[fechas_comunes]
-                benchmark_aligned = merval_returns_aligned.loc[fechas_comunes]
-                # Si hay suficientes datos, calcular alpha y beta individual
-                if len(activos_aligned) >= 5:
-                    ab_metrics = calcular_alpha_beta(activos_aligned, benchmark_aligned)
-                else:
-                    ab_metrics = {'alpha': None, 'beta': None}
+            # Detectar índice de referencia según mercado
+            mercado_ref = mercado.upper() if isinstance(mercado, str) else ''
+            if mercado_ref == 'BCBA':
+                indice_ref = '^MERV'
+            elif mercado_ref == 'NYSE':
+                indice_ref = '^GSPC'
+            elif mercado_ref == 'NASDAQ':
+                indice_ref = '^IXIC'
             else:
-                ab_metrics = {'alpha': None, 'beta': None}
+                indice_ref = None
+
+            ab_metrics = {'alpha': None, 'beta': None, 'indice': indice_ref}
+            if indice_ref is not None:
+                try:
+                    idx_data = yf.download(indice_ref, start=fecha_desde, end=fecha_hasta)['Close']
+                    idx_returns = idx_data.pct_change().dropna()
+                    # Alinear fechas
+                    retornos_validos = retornos_validos.copy()
+                    retornos_validos.index = pd.to_datetime(retornos_validos.index).date
+                    idx_returns.index = pd.to_datetime(idx_returns.index).date
+                    fechas_comunes = set(retornos_validos.index) & set(idx_returns.index)
+                    fechas_comunes = sorted(fechas_comunes)
+                    activos_aligned = retornos_validos.loc[fechas_comunes]
+                    benchmark_aligned = idx_returns.loc[fechas_comunes]
+                    if len(activos_aligned) >= 5:
+                        ab = calcular_alpha_beta(activos_aligned, benchmark_aligned)
+                        ab_metrics = {'alpha': ab.get('alpha'), 'beta': ab.get('beta'), 'indice': indice_ref}
+                except Exception as e:
+                    print(f"Error obteniendo/calculando índice para {simbolo}: {e}")
+            else:
+                ab_metrics = {'alpha': None, 'beta': None, 'indice': None}
 
             if len(retornos_validos) < 5:  # Mínimo de datos para métricas confiables
                 print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
@@ -1669,6 +1681,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 'peso': activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0,
                 'alpha': ab_metrics.get('alpha'),
                 'beta': ab_metrics.get('beta'),
+                'indice_ref': ab_metrics.get('indice'),
             }
 
             # Guardar retornos para cálculo de correlaciones
@@ -1716,9 +1729,9 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             if 'metricas_activos' in metricas and metricas['metricas_activos']:
                 st.markdown("#### 📉 Alpha y Beta Individual de cada Activo")
                 df_ab = pd.DataFrame([
-                    {'Símbolo': k, 'Alpha': v.get('alpha'), 'Beta': v.get('beta')}
+                    {'Símbolo': k, 'Alpha': v.get('alpha'), 'Beta': v.get('beta'), 'Índice Ref.': v.get('indice_ref')}
                     for k, v in metricas['metricas_activos'].items()
-                    if v.get('alpha') is not None and v.get('beta') is not None
+                    if v.get('alpha') is not None and v.get('beta') is not None and v.get('indice_ref')
                 ])
                 if not df_ab.empty:
                     df_ab['Alpha'] = df_ab['Alpha'].apply(lambda x: f"{x:.4f}" if x is not None else "N/A")
