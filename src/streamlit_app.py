@@ -1462,55 +1462,136 @@ def comparar_perfil_con_portafolio(perfil_sugerido, portafolio_actual):
         },
         'recomendaciones': recomendaciones
     }
-def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
+def calcular_alpha_beta_portafolio(portafolio, token_portador, fecha_desde, fecha_hasta, risk_free_rate=0.0):
     """
-    Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
+    Calcula el Alpha y Beta de un portafolio completo respecto a múltiples benchmarks.
     
     Args:
-        portfolio_returns (pd.Series): Retornos del portafolio
-        benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
+        portafolio (dict): Diccionario con los activos del portafolio
+        token_portador (str): Token de autenticación para InvertirOnline
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
         risk_free_rate (float): Tasa libre de riesgo (anualizada)
         
     Returns:
-        dict: Diccionario con alpha, beta, información de la regresión y métricas adicionales
+        dict: Diccionario con métricas para cada benchmark
     """
-    # Alinear las series por fecha y eliminar NaN
-    aligned_data = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
-    if len(aligned_data) < 5:  # Mínimo de datos para regresión
-        return {
-            'alpha': 0,
-            'beta': 1.0,
-            'r_squared': 0,
-            'p_value': 1.0,
-            'tracking_error': 0,
-            'information_ratio': 0,
-            'observations': len(aligned_data),
-            'alpha_annual': 0
+    # Obtener datos históricos del portafolio usando InvertirOnline
+    datos_portafolio = {}
+    
+    for simbolo, activo in portafolio.items():
+        try:
+            mercado = activo.get('mercado', 'BCBA')
+            df = obtener_serie_historica_iol(
+                token_portador=token_portador,
+                mercado=mercado,
+                simbolo=simbolo,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                ajustada="SinAjustar"
+            )
+            
+            if df is not None and not df.empty and 'precio' in df.columns:
+                datos_portafolio[simbolo] = df['precio']
+        except Exception as e:
+            print(f"Error obteniendo datos para {simbolo}: {str(e)}")
+    
+    if not datos_portafolio:
+        return {"error": "No se pudieron obtener datos del portafolio"}
+    
+    # Crear DataFrame con todos los precios del portafolio
+    df_portafolio = pd.DataFrame(datos_portafolio)
+    
+    # Calcular retornos diarios del portafolio (promedio ponderado por valor)
+    # Asumiendo que el valor está en activo['Valuación']
+    valor_total = sum(activo.get('Valuación', 0) for activo in portafolio.values())
+    pesos = {simbolo: activo.get('Valuación', 0)/valor_total 
+             for simbolo, activo in portafolio.items() 
+             if simbolo in df_portafolio.columns}
+    
+    # Calcular retornos diarios ponderados
+    retornos_diarios = (df_portafolio.pct_change().dropna() * pd.Series(pesos)).sum(axis=1)
+    
+    # Obtener datos de benchmarks con yfinance
+    benchmarks = {
+        '^MERV': 'MERVAL',
+        '^GSPC': 'S&P 500',
+        '^IXIC': 'NASDAQ',
+        '^DJI': 'Dow Jones',
+        '^STOXX50E': 'Euro Stoxx 50'
+    }
+    
+    resultados = {}
+    
+    for ticker, nombre in benchmarks.items():
+        try:
+            # Obtener datos del benchmark
+            df_bench = yf.download(ticker, start=fecha_desde, end=fecha_hasta)['Adj Close']
+            if df_bench.empty:
+                continue
+                
+            # Calcular retornos diarios del benchmark
+            bench_returns = df_bench.pct_change().dropna()
+            
+            # Alinear fechas entre portafolio y benchmark
+            aligned_data = pd.concat([retornos_diarios, bench_returns], axis=1, join='inner')
+            aligned_data.columns = ['portfolio', 'benchmark']
+            
+            if len(aligned_data) < 5:  # Mínimo de datos para regresión
+                continue
+                
+            # Calcular métricas
+            portfolio_ret = aligned_data['portfolio']
+            bench_ret = aligned_data['benchmark']
+            
+            # Calcular exceso de retornos
+            portfolio_excess = portfolio_ret - (risk_free_rate / 252)
+            bench_excess = bench_ret - (risk_free_rate / 252)
+            
+            # Regresión lineal
+            slope, intercept, r_value, p_value, std_err = linregress(bench_excess, portfolio_excess)
+            
+            # Calcular métricas adicionales
+            residuals = portfolio_excess - (slope * bench_excess + intercept)
+            tracking_error = np.std(residuals) * np.sqrt(252)
+            information_ratio = portfolio_excess.mean() / tracking_error if tracking_error != 0 else 0
+            
+            # Alpha ajustado
+            alpha = intercept - slope * (risk_free_rate / 252)
+            
+            # Guardar resultados
+            resultados[nombre] = {
+                'alpha': alpha,
+                'alpha_annual': alpha * 252,
+                'beta': slope,
+                'r_squared': r_value ** 2,
+                'p_value': p_value,
+                'tracking_error': tracking_error,
+                'information_ratio': information_ratio,
+                'correlacion': portfolio_ret.corr(bench_ret),
+                'observations': len(aligned_data),
+                'periodo': f"{aligned_data.index[0].strftime('%Y-%m-%d')} a {aligned_data.index[-1].strftime('%Y-%m-%d')}"
+            }
+            
+        except Exception as e:
+            print(f"Error procesando benchmark {nombre}: {str(e)}")
+    
+    # Ordenar por R² descendente
+    resultados_ordenados = dict(sorted(
+        resultados.items(), 
+        key=lambda x: x[1]['r_squared'], 
+        reverse=True
+    ))
+    
+    # Agregar resumen con el mejor benchmark
+    if resultados_ordenados:
+        mejor_bench = next(iter(resultados_ordenados))
+        resultados['_mejor_benchmark'] = {
+            'nombre': mejor_bench,
+            **resultados_ordenados[mejor_bench]
         }
     
-    portfolio_aligned = aligned_data.iloc[:, 0]
-    benchmark_aligned = aligned_data.iloc[:, 1]
-    
-    # Calcular regresión lineal
-    slope, intercept, r_value, p_value, std_err = linregress(benchmark_aligned, portfolio_aligned)
-    
-    # Calcular métricas adicionales
-    tracking_error = np.std(portfolio_aligned - benchmark_aligned) * np.sqrt(252)  # Anualizado
-    information_ratio = (portfolio_aligned.mean() - benchmark_aligned.mean()) / tracking_error if tracking_error != 0 else 0
-    
-    # Anualizar alpha (asumiendo 252 días hábiles)
-    alpha_annual = intercept * 252
-    
-    return {
-        'alpha': intercept,
-        'beta': slope,
-        'r_squared': r_value ** 2,
-        'p_value': p_value,
-        'tracking_error': tracking_error,
-        'information_ratio': information_ratio,
-        'observations': len(aligned_data),
-        'alpha_annual': alpha_annual
-    }
+    return resultados
 
 def analizar_estrategia_inversion(alpha_beta_metrics):
     """
