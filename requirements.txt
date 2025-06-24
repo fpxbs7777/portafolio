@@ -13,3 +13,4 @@ pandas-market-calendars
 adjustText
 scikit-learn
 bayesian-optimization
+fpdf
