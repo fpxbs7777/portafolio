@@ -1458,72 +1458,111 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
     beta = alpha_beta_metrics.get('beta', 1.0)
     alpha_annual = alpha_beta_metrics.get('alpha_annual', 0)
     r_squared = alpha_beta_metrics.get('r_squared', 0)
+    observations = alpha_beta_metrics.get('observations', 0)
+    
+    # Validación de datos insuficientes
+    if observations < 20:  # Mínimo 20 observaciones para un análisis confiable
+        return {
+            'error': 'Datos insuficientes',
+            'mensaje': ('No hay suficientes datos históricos para un análisis confiable. ' 
+                       f'Se requieren al menos 20 observaciones, actuales: {observations}'),
+            'beta': beta,
+            'alpha_anual': alpha_annual,
+            'r_cuadrado': r_squared,
+            'observations': observations
+        }
     
     # Análisis de estrategia basado en beta
-    if beta > 1.2:
-        estrategia = "Estrategia Agresiva"
-        explicacion = ("El portafolio es más volátil que el mercado (β > 1.2). "
-                      "Esta estrategia busca rendimientos superiores asumiendo mayor riesgo.")
-    elif beta > 0.8:
-        estrategia = "Estrategia de Crecimiento"
-        explicacion = ("El portafolio sigue de cerca al mercado (0.8 < β < 1.2). "
-                     "Busca rendimientos similares al mercado con un perfil de riesgo equilibrado.")
-    elif beta > 0.3:
-        estrategia = "Estrategia Defensiva"
-        explicacion = ("El portafolio es menos volátil que el mercado (0.3 < β < 0.8). "
-                     "Busca preservar capital con menor exposición a las fluctuaciones del mercado.")
-    elif beta > -0.3:
+    if abs(beta) < 0.3:
         estrategia = "Estrategia de Ingresos"
-        explicacion = ("El portafolio tiene baja correlación con el mercado (-0.3 < β < 0.3). "
+        explicacion = ("El portafolio tiene baja correlación con el mercado (|β| < 0.3). "
                      "Ideal para generar ingresos con bajo riesgo de mercado.")
+    elif 0.3 <= abs(beta) < 0.7:
+        estrategia = "Estrategia Defensiva"
+        explicacion = (f"El portafolio es menos volátil que el mercado (0.3 < |β| < 0.7). "
+                     f"Busca preservar capital con menor exposición a las fluctuaciones del mercado.")
+    elif 0.7 <= abs(beta) <= 1.3:
+        estrategia = "Estrategia de Crecimiento"
+        explicacion = (f"El portafolio sigue de cerca al mercado (0.7 < |β| < 1.3). "
+                     f"Busca rendimientos similares al mercado con un perfil de riesgo equilibrado.")
     else:
-        estrategia = "Estrategia de Cobertura"
-        explicacion = ("El portafolio tiene correlación negativa con el mercado (β < -0.3). "
-                     "Diseñado para moverse en dirección opuesta al mercado, útil para cobertura.")
+        estrategia = "Estrategia Agresiva"
+        explicacion = (f"El portafolio es más volátil que el mercado (|β| > 1.3). "
+                     f"Esta estrategia busca rendimientos superiores asumiendo mayor riesgo.")
     
     # Análisis de desempeño basado en alpha
-    if alpha_annual > 0.05:  # 5% de alpha anual
+    if abs(alpha_annual) < 0.0001:  # Prácticamente cero
+        rendimiento = "Sin desvío significativo"
+        explicacion_rendimiento = "El portafolio no muestra desvío significativo respecto al benchmark."
+    elif alpha_annual > 0.05:  # Más de 5% de alpha anual
         rendimiento = "Excelente desempeño"
-        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
+        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:+.1%}, "
                                  "superando significativamente al benchmark.")
-    elif alpha_annual > 0.02:  # 2% de alpha anual
+    elif alpha_annual > 0.02:  # Entre 2% y 5%
         rendimiento = "Buen desempeño"
-        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
+        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:+.1%}, "
                                  "superando al benchmark.")
     elif alpha_annual > -0.02:  # Entre -2% y 2%
         rendimiento = "Desempeño en línea"
-        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
+        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:+.1%}, "
                                  "en línea con el benchmark.")
-    else:
+    elif alpha_annual > -0.05:  # Entre -5% y -2%
         rendimiento = "Desempeño inferior"
-        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
+        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:+.1%}, "
                                  "por debajo del benchmark.")
+    else:  # Menos de -5%
+        rendimiento = "Pobre desempeño"
+        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:+.1%}, "
+                                 "significativamente por debajo del benchmark.")
     
-    # Calidad de la cobertura basada en R²
+    # Interpretación de R² para la calidad de la relación con el benchmark
     if r_squared > 0.7:
-        calidad_cobertura = "Alta"
-        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una fuerte relación con el benchmark. "
-                               "La cobertura será más efectiva.")
+        calidad_relacion = "Fuerte relación"
+        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una fuerte relación con el benchmark. "
+                              "El beta es altamente confiable para este portafolio.")
     elif r_squared > 0.4:
-        calidad_cobertura = "Moderada"
-        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una relación moderada con el benchmark. "
-                               "La cobertura puede ser parcialmente efectiva.")
+        calidad_relacion = "Relación moderada"
+        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una relación moderada con el benchmark. "
+                              "El beta proporciona una estimación razonable pero con cierto margen de error.")
+    elif r_squared > 0.2:
+        calidad_relacion = "Débil relación"
+        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una relación débil con el benchmark. "
+                              "El beta debe interpretarse con precaución.")
     else:
-        calidad_cobertura = "Baja"
-        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una débil relación con el benchmark. "
-                               "La cobertura puede no ser efectiva.")
+        calidad_relacion = "Mínima relación"
+        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una relación mínima con el benchmark. "
+                              "El beta no es confiable para este portafolio.")
+    
+    # Interpretación del beta
+    if abs(beta) < 0.3:
+        interpretacion_beta = "Mínima sensibilidad al mercado"
+    elif abs(beta) < 0.7:
+        interpretacion_beta = "Baja sensibilidad al mercado"
+    elif abs(beta) < 1.3:
+        interpretacion_beta = "Sensibilidad similar al mercado"
+    elif abs(beta) < 1.7:
+        interpretacion_beta = "Alta sensibilidad al mercado"
+    else:
+        interpretacion_beta = "Muy alta sensibilidad al mercado"
+    
+    # Asegurarse de que beta no sea exactamente 1.0 cuando no hay suficiente precisión
+    if 0.999 < beta < 1.001 and r_squared < 0.3:
+        beta = 1.0
+        interpretacion_beta = "Valor por defecto (datos insuficientes)"
     
     return {
         'estrategia': estrategia,
         'explicacion_estrategia': explicacion,
         'rendimiento': rendimiento,
         'explicacion_rendimiento': explicacion_rendimiento,
-        'calidad_cobertura': calidad_cobertura,
-        'explicacion_cobertura': explicacion_cobertura,
+        'calidad_relacion': calidad_relacion,
+        'explicacion_relacion': explicacion_relacion,
+        'interpretacion_beta': interpretacion_beta,
         'beta': beta,
         'alpha_anual': alpha_annual,
         'r_cuadrado': r_squared,
-        'observations': alpha_beta_metrics.get('observations', 0)
+        'observations': observations
+    
     }
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
