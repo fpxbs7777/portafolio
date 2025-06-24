@@ -1698,26 +1698,26 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # Fuera del bucle de activos: visualización
     cols[0].metric("Total de Activos", len(datos_activos))
     cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+    cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
+    cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+
+    if metricas:
+        # Métricas de Riesgo
+        st.subheader("⚖️ Análisis de Riesgo")
+        cols = st.columns(3)
         
-        if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
-            
-            # Mostrar concentración como porcentaje
-            concentracion_pct = metricas['concentracion'] * 100
-            cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.1f}%",
-                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
-            
-            # Mostrar volatilidad como porcentaje anual
-            volatilidad_pct = metricas['std_dev_activo'] * 100
-            cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.1f}%",
-                         help="Riesgo medido como desviación estándar de retornos anuales")
-            
+        # Mostrar concentración como porcentaje
+        concentracion_pct = metricas['concentracion'] * 100
+        cols[0].metric("Concentración", 
+                     f"{concentracion_pct:.1f}%",
+                     help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+        
+        # Mostrar volatilidad como porcentaje anual
+        volatilidad_pct = metricas['std_dev_activo'] * 100
+        cols[1].metric("Volatilidad Anual", 
+                     f"{volatilidad_pct:.1f}%",
+                     help="Riesgo medido como desviación estándar de retornos anuales")
+        
             # Nivel de concentración con colores
             if metricas['concentracion'] < 0.3:
                 concentracion_status = "🟢 Baja"
