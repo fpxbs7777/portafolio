@@ -591,6 +591,47 @@ def procesar_respuesta_historico(data, tipo_activo):
         st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
 
+def obtener_estado_cuenta(token_acceso, id_cliente):
+    """Obtiene el estado de cuenta del cliente"""
+    url = f"{BASE_URL}/api/v2/estadocuenta/{id_cliente}"
+    headers = {"Authorization": f"Bearer {token_acceso}"}
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener el estado de cuenta: {str(e)}")
+        return None
+
+def obtener_test_inversor(token_acceso):
+    """Obtiene las preguntas del test de perfil de inversor"""
+    url = f"{BASE_URL}/api/v2/asesores/test-inversor"
+    headers = {"Authorization": f"Bearer {token_acceso}"}
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener el test de perfil de inversor: {str(e)}")
+        return None
+
+def enviar_test_inversor(token_acceso, id_cliente, respuestas):
+    """Envía las respuestas del test de perfil de inversor"""
+    url = f"{BASE_URL}/api/v2/asesores/test-inversor/{id_cliente}"
+    headers = {
+        "Authorization": f"Bearer {token_acceso}",
+        "Content-Type": "application/json"
+    }
+    try:
+        response = requests.post(url, headers=headers, json=respuestas)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al enviar el test de perfil de inversor: {str(e)}")
+        if hasattr(e, 'response') and e.response:
+            st.error(f"Respuesta del servidor: {e.response.text}")
+        return None
+
 def obtener_fondos_comunes(token_portador):
     """
     Obtiene la lista de fondos comunes de inversión disponibles
@@ -2371,6 +2412,174 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
+def mostrar_perfil_inversor(token_acceso, id_cliente, cliente_info):
+    st.markdown("## 📊 Perfil de Inversor")
+    
+    # Obtener preguntas del test
+    with st.spinner("Cargando test de perfil de inversor..."):
+        test_data = obtener_test_inversor(token_acceso)
+    
+    if not test_data:
+        st.warning("No se pudo cargar el test de perfil de inversor")
+        return
+    
+    # Mostrar formulario del test
+    with st.form("test_inversor_form"):
+        st.markdown("### Test de Perfil de Inversor")
+        st.markdown("Complete el siguiente cuestionario para determinar su perfil de inversor:")
+        
+        respuestas = {
+            "enviarEmailCliente": False,
+            "instrumentosInvertidosAnteriormente": [],
+            "nivelesConocimientoInstrumentos": []
+        }
+        
+        # Pregunta 1: Instrumentos invertidos anteriormente
+        st.markdown(f"**{test_data.get('instrumentosInvertidosAnteriormente', {}).get('pregunta', '¿En qué instrumentos ha invertido anteriormente?')}**")
+        instrumentos = test_data.get('instrumentosInvertidosAnteriormente', {}).get('instrumentos', [])
+        seleccionados = []
+        
+        for instrumento in instrumentos:
+            if st.checkbox(instrumento.get('nombre', ''), key=f"instrumento_{instrumento.get('id')}"):
+                seleccionados.append(instrumento['id'])
+        
+        respuestas["instrumentosInvertidosAnteriormente"] = seleccionados
+        
+        # Pregunta 2: Niveles de conocimiento
+        st.markdown(f"**{test_data.get('nivelesConocimientoInstrumentos', {}).get('pregunta', '¿Cuál es su nivel de conocimiento sobre instrumentos de inversión?')}**")
+        niveles = test_data.get('nivelesConocimientoInstrumentos', {}).get('niveles', [])
+        conocimiento_seleccionado = []
+        
+        for nivel in niveles:
+            opciones = nivel.get('opciones', [])
+            if opciones:
+                opcion_elegida = st.radio(
+                    nivel.get('nombre', ''),
+                    options=[(op['id'], op['nombre']) for op in opciones],
+                    format_func=lambda x: x[1],
+                    key=f"nivel_{nivel.get('id')}"
+                )
+                if opcion_elegida:
+                    conocimiento_seleccionado.append(opcion_elegida[0])
+        
+        respuestas["nivelesConocimientoInstrumentos"] = conocimiento_seleccionado
+        
+        # Pregunta 3: Plazo de inversión
+        plazos = test_data.get('plazosInversion', {}).get('plazos', [])
+        if plazos:
+            plazo_elegido = st.selectbox(
+                test_data.get('plazosInversion', {}).get('pregunta', '¿Cuál es su horizonte de inversión?'),
+                options=[(p['id'], p['nombre']) for p in plazos],
+                format_func=lambda x: x[1]
+            )
+            respuestas["idPlazoElegido"] = plazo_elegido[0] if plazo_elegido else 0
+        
+        # Pregunta 4: Edad
+        edades = test_data.get('edadesPosibles', {}).get('edades', [])
+        if edades:
+            edad_elegida = st.selectbox(
+                test_data.get('edadesPosibles', {}).get('pregunta', '¿Cuál es su rango de edad?'),
+                options=[(e['id'], e['nombre']) for e in edades],
+                format_func=lambda x: x[1]
+            )
+            respuestas["idEdadElegida"] = edad_elegida[0] if edad_elegida else 0
+        
+        # Pregunta 5: Objetivo de inversión
+        objetivos = test_data.get('objetivosInversion', {}).get('objetivos', [])
+        if objetivos:
+            objetivo_elegido = st.selectbox(
+                test_data.get('objetivosInversion', {}).get('pregunta', '¿Cuál es su objetivo de inversión?'),
+                options=[(o['id'], o['nombre']) for o in objetivos],
+                format_func=lambda x: x[1]
+            )
+            respuestas["idObjetivoInversionElegida"] = objetivo_elegido[0] if objetivo_elegido else 0
+        
+        # Pregunta 6: Póliza de seguro
+        polizas = test_data.get('polizasSeguro', {}).get('polizas', [])
+        if polizas:
+            poliza_elegida = st.selectbox(
+                test_data.get('polizasSeguro', {}).get('pregunta', '¿Tiene alguna póliza de seguro?'),
+                options=[(p['id'], p['nombre']) for p in polizas],
+                format_func=lambda x: x[1]
+            )
+            respuestas["idPolizaElegida"] = poliza_elegida[0] if poliza_elegida else 0
+        
+        # Pregunta 7: Capacidad de ahorro
+        capacidades = test_data.get('capacidadesAhorro', {}).get('capacidadesAhorro', [])
+        if capacidades:
+            capacidad_elegida = st.selectbox(
+                test_data.get('capacidadesAhorro', {}).get('pregunta', '¿Cuál es su capacidad de ahorro mensual?'),
+                options=[(c['id'], c['nombre']) for c in capacidades],
+                format_func=lambda x: x[1]
+            )
+            respuestas["idCapacidadAhorroElegida"] = capacidad_elegida[0] if capacidad_elegida else 0
+        
+        # Pregunta 8: Porcentaje de patrimonio
+        porcentajes = test_data.get('porcentajesPatrimonioDedicado', {}).get('porcentajesPatrimonioDedicado', [])
+        if porcentajes:
+            porcentaje_elegido = st.selectbox(
+                test_data.get('porcentajesPatrimonioDedicado', {}).get('pregunta', '¿Qué porcentaje de su patrimonio destinará a inversiones?'),
+                options=[(p['id'], p['nombre']) for p in porcentajes],
+                format_func=lambda x: x[1]
+            )
+            respuestas["idPorcentajePatrimonioDedicado"] = porcentaje_elegido[0] if porcentaje_elegido else 0
+        
+        # Opción para enviar email
+        respuestas["enviarEmailCliente"] = st.checkbox("Recibir resultados por correo electrónico")
+        
+        if st.form_submit_button("📊 Obtener perfil de inversor"):
+            with st.spinner("Analizando su perfil de inversor..."):
+                resultado = enviar_test_inversor(token_acceso, id_cliente, respuestas)
+                
+                if resultado and resultado.get('ok', False):
+                    perfil = resultado.get('perfilSugerido', {})
+                    
+                    st.success("✅ Análisis de perfil completado con éxito")
+                    
+                    # Mostrar resultados
+                    st.markdown(f"### 🎯 Perfil de Inversor: {perfil.get('nombre', 'No determinado')}")
+                    st.markdown(f"{perfil.get('detalle', '')}")
+                    
+                    # Mostrar composición recomendada
+                    st.markdown("### 📊 Composición Recomendada")
+                    composiciones = perfil.get('perfilComposiciones', [])
+                    
+                    if composiciones:
+                        # Crear gráfico de torta
+                        fig = go.Figure(data=[go.Pie(
+                            labels=[c.get('nombre', '') for c in composiciones],
+                            values=[c.get('porcentaje', 0) for c in composiciones],
+                            textinfo='label+percent',
+                            hole=.3
+                        )])
+                        
+                        fig.update_layout(
+                            title="Distribución Recomendada",
+                            showlegend=True,
+                            height=500
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Mostrar tabla con los porcentajes
+                        df_composicion = pd.DataFrame([
+                            {"Activo": c.get('nombre', ''), "Porcentaje": f"{c.get('porcentaje', 0)}%"} 
+                            for c in composiciones
+                        ])
+                        st.dataframe(df_composicion, use_container_width=True, hide_index=True)
+                    
+                    # Mostrar mensajes adicionales
+                    mensajes = resultado.get('messages', [])
+                    if mensajes:
+                        st.markdown("### 📝 Recomendaciones")
+                        for msg in mensajes:
+                            with st.expander(msg.get('title', 'Recomendación')):
+                                st.write(msg.get('description', ''))
+                else:
+                    st.error("❌ No se pudo determinar el perfil de inversor. Por favor, intente nuevamente.")
+                    if resultado and 'messages' in resultado:
+                        for msg in resultado['messages']:
+                            st.warning(f"{msg.get('title', '')}: {msg.get('description', '')}")
+
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
@@ -2547,13 +2756,13 @@ def mostrar_movimientos_asesor():
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
-def mostrar_analisis_portafolio():
+def mostrar_analisis_portafolio(token_acceso, id_cliente, cliente_info=None):
     st.title("Análisis de Portafolio")
-
-    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-
-    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+    
+    # Si se proporciona información del cliente, usarla para el nombre
+    if cliente_info:
+        nombre_cliente = cliente_info.get('apellidoYNombre', cliente_info.get('nombre', 'Cliente'))
+        st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
     opciones_menu = [
@@ -2563,9 +2772,10 @@ def mostrar_analisis_portafolio():
         "📝 Movimientos",
         "📊 Análisis Técnico",
         "📊 Optimización de Portafolio",
-        "💰 Ganancias y Pérdidas"
+        "💰 Ganancias y Pérdidas",
+        "👤 Perfil de Inversor"
     ]
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(opciones_menu)
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(opciones_menu)
 
     with tab1:
         st.header("Inicio")
@@ -2578,25 +2788,29 @@ def mostrar_analisis_portafolio():
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
-    with tab2:
+    with tab3:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
             mostrar_estado_cuenta(estado_cuenta)
         else:
             st.warning("No se pudo obtener el estado de cuenta")
     
-    with tab3:
+    with tab4:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
     
-    with tab4:
+    with tab5:
         mostrar_cotizaciones_mercado(token_acceso)
     
-    with tab5:
+    with tab6:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
         
-    with tab6:
+    with tab7:
         # Análisis de FCIs
         st.header("Análisis de Fondos Comunes de Inversión")
+        
+    with tab8:
+        # Mostrar perfil de inversor
+        mostrar_perfil_inversor(token_acceso, id_cliente, cliente_info)
         
         # Obtener portafolio si no está en la sesión
         if 'portafolio' not in st.session_state:
@@ -2892,7 +3106,11 @@ def main():
                 st.info("👆 Seleccione una opción del menú para comenzar")
             elif opcion == "📊 Análisis de Portafolio":
                 if st.session_state.cliente_seleccionado:
-                    mostrar_analisis_portafolio()
+                    mostrar_analisis_portafolio(
+                        token_acceso=st.session_state.token_acceso,
+                        id_cliente=st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id')),
+                        cliente_info=st.session_state.cliente_seleccionado
+                    )
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "💰 Tasas de Caución":
