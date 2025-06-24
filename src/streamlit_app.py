@@ -529,8 +529,8 @@ def procesar_respuesta_historico(data, tipo_activo):
     try:
         # Para series históricas estándar
         if isinstance(data, list):
-            precios = []
             fechas = []
+            precios = []
             
             for item in data:
                 try:
@@ -556,7 +556,18 @@ def procesar_respuesta_historico(data, tipo_activo):
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
                 return df
-        
+            
+            # Caso especial para FCIs
+            if tipo_activo == 'FCI':
+                fechas = []
+                precios = []
+                for item in data:
+                    if 'fecha' in item and 'valorCuota' in item:
+                        fechas.append(pd.to_datetime(item['fecha']))
+                        precios.append(float(item['valorCuota']))
+                if fechas and precios:
+                    return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
+                    
         # Para respuestas que son un solo valor (ej: MEP)
         elif isinstance(data, (int, float)):
             df = pd.DataFrame({'fecha': [pd.Timestamp.now(tz='UTC').date()], 'precio': [float(data)]})
@@ -567,17 +578,6 @@ def procesar_respuesta_historico(data, tipo_activo):
     except Exception as e:
         st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
-
-# ... (rest of the code remains the same)
-            precios = []
-            for item in data:
-                if 'fecha' in item and 'valorCuota' in item:
-                    fechas.append(pd.to_datetime(item['fecha']))
-                    precios.append(float(item['valorCuota']))
-            if fechas and precios:
-                return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
-        return None
-    except requests.exceptions.RequestException as e:
         st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
         return None
 
