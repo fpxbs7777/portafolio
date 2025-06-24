@@ -1983,7 +1983,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
