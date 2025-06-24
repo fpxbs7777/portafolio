@@ -307,7 +307,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
 
 def obtener_tasas_caucion(token_portador):
     """
-    Obtiene las tasas de caución desde la API de IOL
+    Obtiene las tasas de caución desde la API de IOL con manejo mejorado de errores
     
     Args:
         token_portador (str): Token de autenticación Bearer
@@ -315,71 +315,104 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
-    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
+    # Endpoints alternativos para obtener las tasas de caución
+    endpoints = [
+        "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos",
+        "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
+    ]
+    
     params = {
         'cotizacionInstrumentoModel.instrumento': 'cauciones',
         'cotizacionInstrumentoModel.pais': 'argentina'
     }
+    
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
     
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
+    for url in endpoints:
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=15)
             
-            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
-                df = pd.DataFrame(data['titulos'])
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Manejar diferentes formatos de respuesta
+                if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
+                    df = pd.DataFrame(data['titulos'])
+                elif isinstance(data, list):
+                    df = pd.DataFrame(data)
+                else:
+                    continue
+                
+                # Normalizar nombres de columnas
+                df = df.rename(columns={
+                    'tasa': 'tasa_limpia',
+                    'tasaNominalAnual': 'tasa_limpia',
+                    'tasaAnual': 'tasa_limpia',
+                    'precio': 'ultimoPrecio',
+                    'volumen': 'monto',
+                    'monedaNombre': 'moneda',
+                    'monedaSimbolo': 'moneda'
+                })
                 
                 # Filtrar solo las cauciónes y limpiar los datos
                 df = df[df['plazo'].notna()].copy()
                 
                 # Extraer el plazo en días
-                df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
+                if 'plazo_dias' not in df.columns:
+                    if 'plazo' in df.columns:
+                        # Intentar extraer el número de días del campo plazo
+                        df['plazo_dias'] = df['plazo'].astype(str).str.extract('(\d+)').astype(float)
+                    elif 'dias' in df.columns:
+                        df['plazo_dias'] = df['dias'].astype(float)
                 
-                # Limpiar la tasa (convertir a float si es necesario)
-                if 'ultimoPrecio' in df.columns:
+                # Asegurarse de que la tasa sea numérica
+                if 'tasa_limpia' not in df.columns and 'ultimoPrecio' in df.columns:
                     df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                elif 'tasa_limpia' in df.columns:
+                    df['tasa_limpia'] = df['tasa_limpia'].astype(str).str.rstrip('%').astype('float')
                 
-                # Asegurarse de que las columnas necesarias existan
-                if 'monto' not in df.columns and 'volumen' in df.columns:
-                    df['monto'] = df['volumen']
+                # Asegurarse de que el monto sea numérico
+                if 'monto' in df.columns:
+                    df['monto'] = pd.to_numeric(df['monto'], errors='coerce')
+                
+                # Normalizar monedas
+                if 'moneda' in df.columns:
+                    df['moneda'] = df['moneda'].str.upper().str.strip()
+                    df['moneda'] = df['moneda'].replace({
+                        'PESOS': 'ARS',
+                        '$': 'ARS',
+                        'DOLARES': 'USD',
+                        'U$S': 'USD'
+                    })
                 
                 # Ordenar por plazo
-                df = df.sort_values('plazo_dias')
+                if 'plazo_dias' in df.columns:
+                    df = df.sort_values('plazo_dias')
                 
                 # Seleccionar solo las columnas necesarias
                 columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
                 columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
                 
-                return df[columnas_disponibles]
-            
-            st.warning("No se encontraron datos de tasas de caución en la respuesta")
-            return None
-            
-        elif response.status_code == 401:
-            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
-            return None
-            
-        else:
-            error_msg = f"Error {response.status_code} al obtener tasas de caución"
-            try:
-                error_data = response.json()
-                error_msg += f": {error_data.get('message', 'Error desconocido')}"
-            except:
-                error_msg += f": {response.text}"
-            st.error(error_msg)
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error de conexión: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
-        return None
+                # Si encontramos datos válidos, los retornamos
+                if not df.empty and 'tasa_limpia' in df.columns and 'plazo_dias' in df.columns:
+                    return df[columnas_disponibles]
+                else:
+                    st.warning("No se encontraron datos válidos de tasas de caución en la respuesta")
+                    return None
+                
+        except requests.exceptions.RequestException as e:
+            print(f"Error de conexión al obtener datos de {url}: {str(e)}")
+            continue
+        except Exception as e:
+            print(f"Error inesperado al procesar datos de {url}: {str(e)}")
+            continue
+    
+    # Si llegamos aquí, ningún endpoint funcionó
+    st.error("No se pudieron obtener las tasas de caución de ninguna fuente")
+    return None
 
 def mostrar_tasas_caucion(token_portador):
     """
