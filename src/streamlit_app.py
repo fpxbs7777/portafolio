@@ -2120,6 +2120,136 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 template='plotly_white'
                             )
                             st.plotly_chart(fig_pie, use_container_width=True)
+                            
+                            # Agregar sección de Ganancias y Pérdidas
+                            st.markdown("---")
+                            st.markdown("### 📊 Ganancias y Pérdidas del Portafolio Optimizado")
+                            
+                            # Obtener el valor total del portafolio
+                            valor_total = portafolio.get('valor_actual', 0)
+                            
+                            # Calcular métricas de ganancias y pérdidas
+                            if valor_total > 0 and hasattr(portfolio_result, 'returns') and portfolio_result.returns is not None:
+                                # Calcular métricas básicas
+                                retorno_anual = metricas['Annual Return']
+                                volatilidad_anual = metricas['Annual Volatility']
+                                var_95 = metricas['VaR 95%']
+                                
+                                # Calcular ganancias/pérdidas esperadas para diferentes horizontes temporales
+                                horizontes = [1, 5, 21, 63, 252]  # días: 1, 1 semana, 1 mes, 3 meses, 1 año
+                                
+                                # Crear tabla de ganancias/pérdidas esperadas
+                                st.markdown("#### 📈 Ganancias/Pérdidas Esperadas")
+                                datos_ganancias = []
+                                for dias in horizontes:
+                                    retorno_esperado = retorno_anual * (dias/252)  # Asumiendo 252 días hábiles al año
+                                    ganancia_esperada = valor_total * retorno_esperado
+                                    
+                                    # Calcular intervalos de confianza (95%)
+                                    desvio_esperado = volatilidad_anual * np.sqrt(dias/252)
+                                    ganancia_min = valor_total * (retorno_esperado - 1.96 * desvio_esperado)
+                                    ganancia_max = valor_total * (retorno_esperado + 1.96 * desvio_esperado)
+                                    
+                                    datos_ganancias.append({
+                                        'Horizonte': f"{dias} días",
+                                        'Retorno Esperado': f"{retorno_esperado*100:.2f}%",
+                                        'Ganancia Esperada (ARS)': f"${ganancia_esperada:,.2f}",
+                                        'Rango 95% (ARS)': f"${ganancia_min:,.2f} a ${ganancia_max:,.2f}"
+                                    })
+                                
+                                # Mostrar tabla de ganancias/pérdidas
+                                df_ganancias = pd.DataFrame(datos_ganancias)
+                                st.dataframe(df_ganancias, use_container_width=True, hide_index=True)
+                                
+                                # Mostrar métricas de riesgo
+                                st.markdown("#### ⚠️ Riesgos del Portafolio")
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Valor en Riesgo (VaR 95%)", f"${valor_total * var_95:,.2f}")
+                                with col2:
+                                    st.metric("Pérdida Máxima Esperada (95%)", f"${valor_total * (retorno_anual - 1.96 * volatilidad_anual):,.2f}")
+                                with col3:
+                                    st.metric("Ganancia Máxima Esperada (95%)", f"${valor_total * (retorno_anual + 1.96 * volatilidad_anual):,.2f}")
+                                
+                                # Gráfico de distribución de retornos con anotaciones
+                                st.markdown("#### 📊 Distribución de Ganancias/Pérdidas")
+                                
+                                # Generar datos de simulación
+                                num_simulaciones = 10000
+                                retornos_simulados = np.random.normal(
+                                    loc=retorno_anual/252,  # Retorno diario esperado
+                                    scale=volatilidad_anual/np.sqrt(252),  # Volatilidad diaria
+                                    size=num_simulaciones
+                                )
+                                
+                                # Convertir a ganancias/pérdidas en ARS
+                                ganancias_simuladas = retornos_simulados * valor_total
+                                
+                                # Crear histograma
+                                fig_hist = go.Figure()
+                                fig_hist.add_trace(go.Histogram(
+                                    x=ganancias_simuladas,
+                                    nbinsx=50,
+                                    marker_color='#0d6efd',
+                                    opacity=0.75,
+                                    name='Frecuencia',
+                                    hovertemplate='Ganancia: $%{x:,.2f}<br>Frecuencia: %{y}'
+                                ))
+                                
+                                # Añadir líneas de referencia
+                                percentil_5 = np.percentile(ganancias_simuladas, 5)
+                                percentil_95 = np.percentile(ganancias_simuladas, 95)
+                                
+                                fig_hist.add_vline(
+                                    x=0, line_dash="dash", line_color="black",
+                                    annotation_text="Punto de Equilibrio", annotation_position="top right"
+                                )
+                                
+                                fig_hist.add_vline(
+                                    x=percentil_5, line_dash="dash", line_color="red",
+                                    annotation_text=f"5%: ${percentil_5:,.2f}", annotation_position="top right"
+                                )
+                                
+                                fig_hist.add_vline(
+                                    x=percentil_95, line_dash="dash", line_color="green",
+                                    annotation_text=f"95%: ${percentil_95:,.2f}", annotation_position="top left"
+                                )
+                                
+                                # Actualizar diseño
+                                fig_hist.update_layout(
+                                    title="Distribución de Ganancias/Pérdidas Diarias Esperadas",
+                                    xaxis_title="Ganancia/Pérdida Diaria (ARS)",
+                                    yaxis_title="Frecuencia",
+                                    showlegend=False,
+                                    height=500,
+                                    template='plotly_white',
+                                    xaxis=dict(tickformat=",.0f")
+                                )
+                                
+                                st.plotly_chart(fig_hist, use_container_width=True)
+                                
+                                # Recomendaciones basadas en el perfil de riesgo
+                                st.markdown("#### 📝 Recomendaciones")
+                                
+                                if retorno_anual / volatilidad_anual > 0.7:  # Sharpe ratio aproximado
+                                    st.success("""
+                                    **✅ Buen Balance Riesgo-Retorno**  
+                                    La relación entre riesgo y retorno es favorable. Considere mantener o aumentar ligeramente su exposición.
+                                    """)
+                                else:
+                                    st.warning("""
+                                    **⚠️ Riesgo Alto en Relación al Retorno**  
+                                    Considere ajustar su portafolio para mejorar el perfil de riesgo-retorno.
+                                    """)
+                                
+                                if var_95 < -0.1:  # VaR mayor al 10%
+                                    st.warning("""
+                                    **⚠️ Alto Riesgo de Pérdida**  
+                                    El portafolio tiene un alto riesgo de pérdida. Considere estrategias de cobertura o reducir posiciones de mayor riesgo.
+                                    """)
+                            else:
+                                st.warning("No se pudieron calcular las métricas de ganancias y pérdidas. Falta información de retornos o valor total del portafolio.")
                         
                     else:
                         st.error("❌ Error en la optimización")
@@ -2426,16 +2556,22 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
+    opciones_menu = [
+        "🏠 Inicio",
+        "📊 Análisis de Portafolio",
+        "📈 Cotizaciones",
+        "📝 Movimientos",
         "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🔄 Optimización",
-        "📊 Análisis FCIs"
-    ])
+        "📊 Optimización de Portafolio",
+        "💰 Ganancias y Pérdidas"
+    ]
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(opciones_menu)
 
     with tab1:
+        st.header("Inicio")
+        st.write("Bienvenido al análisis de portafolio")
+
+    with tab2:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
@@ -2823,6 +2959,271 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+def mostrar_ganancias_probabilidades_perdidas():
+    """
+    Muestra un análisis detallado de ganancias, probabilidades empíricas y pérdidas esperadas
+    para los portafolios en ARS.
+    """
+    st.markdown("## 📊 Ganancias, Probabilidades y Pérdidas Esperadas (ARS)")
+    
+    # Verificar autenticación
+    if 'token_portador' not in st.session_state or not st.session_state.token_portador:
+        st.warning("🔑 Por favor inicia sesión primero para ver el análisis de ganancias y pérdidas.")
+        return
+    
+    token_portador = st.session_state.token_portador
+    
+    # Obtener lista de clientes
+    clientes = obtener_lista_clientes(token_portador)
+    if not clientes:
+        st.error("No se pudo obtener la lista de clientes. Verifica tu conexión o inténtalo más tarde.")
+        return
+    
+    # Selector de cliente
+    opciones_clientes = [f"{cliente['id']} - {cliente['nombre']}" for cliente in clientes]
+    cliente_seleccionado = st.selectbox("Selecciona un cliente:", opciones_clientes, key="cliente_ganancias")
+    id_cliente = int(cliente_seleccionado.split(" - ")[0])
+    
+    # Obtener portafolio
+    with st.spinner("Obteniendo portafolio..."):
+        portafolio = obtener_portafolio(token_portador, id_cliente=id_cliente)
+    
+    if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+        st.warning("El portafolio está vacío o no se pudo cargar.")
+        return
+    
+    # Calcular valor total del portafolio
+    valor_total = sum(float(activo.get('valorMercado', 0) or 0) for activo in portafolio['activos'])
+    
+    if valor_total <= 0:
+        st.warning("El valor total del portafolio debe ser mayor a cero para realizar el análisis.")
+        return
+    
+    # Calcular métricas del portafolio
+    with st.spinner("Calculando métricas de ganancias y pérdidas..."):
+        metricas = calcular_metricas_portafolio(
+            portafolio=portafolio,
+            valor_total=valor_total,
+            token_portador=token_portador,
+            dias_historial=252  # 1 año de datos históricos
+        )
+    
+    # Mostrar resumen de ganancias y pérdidas
+    st.markdown("### 📊 Resumen de Ganancias y Pérdidas")
+    
+    # Sección de ganancias esperadas
+    st.markdown("#### 💰 Ganancias Esperadas (ARS)")
+    
+    # Calcular ganancias para diferentes horizontes temporales
+    horizontes = [1, 7, 30, 90, 180, 365]  # días
+    ganancias = []
+    
+    for dias in horizontes:
+        # Aproximación simple: retorno diario promedio * número de días
+        retorno_esperado = (1 + metricas['retorno_esperado_anual'])**(dias/252) - 1
+        ganancia_esperada = valor_total * retorno_esperado
+        ganancias.append({
+            'Horizonte': f"{dias} días",
+            'Ganancia Esperada (ARS)': ganancia_esperada,
+            'Retorno Esperado': retorno_esperado
+        })
+    
+    # Mostrar tabla de ganancias
+    df_ganancias = pd.DataFrame(ganancias)
+    st.dataframe(
+        df_ganancias,
+        column_config={
+            'Horizonte': "Horizonte Temporal",
+            'Ganancia Esperada (ARS)': st.column_config.NumberColumn(
+                "Ganancia Esperada (ARS)",
+                format="$%.2f"
+            ),
+            'Retorno Esperado': st.column_config.ProgressColumn(
+                "Retorno Esperado",
+                format="%.2f%%",
+                min_value=0,
+                max_value=max(df_ganancias['Retorno Esperado'].max() * 1.2, 0.1)  # Evitar división por cero
+            )
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    # Sección de pérdidas esperadas (Value at Risk - VaR)
+    st.markdown("#### 📉 Pérdidas Esperadas (Value at Risk - VaR)")
+    
+    # Calcular VaR para diferentes niveles de confianza
+    confianzas = [90, 95, 99]  # niveles de confianza en %
+    var_data = []
+    
+    for confianza in confianzas:
+        # Calcular percentil de pérdida
+        percentil = 100 - confianza
+        var = -np.percentile(
+            [r * valor_total for r in np.random.normal(
+                metricas['retorno_esperado_anual']/252, 
+                metricas['riesgo_anual']/np.sqrt(252), 
+                10000
+            ) * 10],  # Multiplicar por 10 para simular 10 días hábiles
+            percentil
+        )
+        
+        var_data.append({
+            'Nivel de Confianza': f"{confianza}%",
+            'VaR 1 día (ARS)': var,
+            'VaR 1 día (% del portafolio)': var / valor_total * 100 if valor_total > 0 else 0
+        })
+    
+    # Mostrar tabla de VaR
+    df_var = pd.DataFrame(var_data)
+    st.dataframe(
+        df_var,
+        column_config={
+            'Nivel de Confianza': "Nivel de Confianza",
+            'VaR 1 día (ARS)': st.column_config.NumberColumn(
+                "VaR 1 día (ARS)",
+                format="$%.2f"
+            ),
+            'VaR 1 día (% del portafolio)': st.column_config.ProgressColumn(
+                "VaR 1 día (% del portafolio)",
+                format="%.2f%%",
+                min_value=0,
+                max_value=100
+            )
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    # Sección de probabilidades empíricas
+    st.markdown("#### 🎲 Probabilidades Empíricas")
+    
+    # Calcular probabilidades para diferentes umbrales de retorno
+    umbrales = [-0.20, -0.10, -0.05, 0, 0.05, 0.10, 0.20]  # Umbrales de retorno
+    probabilidades = []
+    
+    # Simular retornos para el cálculo de probabilidades
+    retornos_simulados = np.random.normal(
+        metricas['retorno_esperado_anual']/252, 
+        metricas['riesgo_anual']/np.sqrt(252), 
+        10000
+    )
+    
+    for umbral in umbrales:
+        if umbral < 0:
+            prob = np.mean(retornos_simulados < umbral) * 100
+            tipo = "Pérdida"
+        else:
+            prob = np.mean(retornos_simulados > umbral) * 100
+            tipo = "Ganancia"
+        
+        probabilidades.append({
+            'Tipo': tipo,
+            'Umbral': f"{abs(umbral)*100:.0f}%",
+            'Probabilidad': prob,
+            'Descripción': f"Prob. de {'pérdida' if umbral < 0 else 'ganancia'} > {abs(umbral)*100:.0f}% en 1 día"
+        })
+    
+    # Mostrar tabla de probabilidades
+    df_prob = pd.DataFrame(probabilidades)
+    st.dataframe(
+        df_prob,
+        column_config={
+            'Tipo': "Tipo",
+            'Umbral': "Umbral",
+            'Probabilidad': st.column_config.ProgressColumn(
+                "Probabilidad",
+                format="%.1f%%",
+                min_value=0,
+                max_value=100
+            ),
+            'Descripción': "Descripción"
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    # Gráfico de distribución de retornos
+    st.markdown("#### 📊 Distribución de Retornos Diarios Esperados")
+    
+    # Crear histograma de retornos diarios
+    fig = go.Figure()
+    
+    # Añadir histograma
+    fig.add_trace(go.Histogram(
+        x=retornos_simulados * 100,  # Convertir a porcentaje
+        nbinsx=50,
+        name='Frecuencia',
+        marker_color='#1f77b4',
+        opacity=0.75,
+        hovertemplate='Retorno: %{x:.2f}%<br>Frecuencia: %{y}<extra></extra>'
+    ))
+    
+    # Añadir líneas para la media y desviación estándar
+    media = np.mean(retornos_simulados) * 100
+    std = np.std(retornos_simulados) * 100
+    
+    fig.add_vline(
+        x=media,
+        line_dash='dash',
+        line_color='green',
+        annotation_text=f'Media: {media:.2f}%',
+        annotation_position='top right'
+    )
+    
+    for i in [-2, -1, 1, 2]:
+        fig.add_vline(
+            x=media + i*std,
+            line_dash='dot',
+            line_color='orange' if i % 2 == 0 else 'red',
+            annotation_text=f'{i}σ' if i != 0 else '',
+            annotation_position='top right'
+        )
+    
+    # Configurar diseño del gráfico
+    fig.update_layout(
+        title='Distribución de Retornos Diarios Esperados',
+        xaxis_title='Retorno Diario (%)',
+        yaxis_title='Frecuencia',
+        showlegend=False,
+        hovermode='x',
+        xaxis_showgrid=True,
+        yaxis_showgrid=True,
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Sección de recomendaciones
+    st.markdown("#### 💡 Recomendaciones")
+    
+    # Analizar el perfil de riesgo del portafolio
+    if metricas['riesgo_anual'] > 0.3:  # 30% de volatilidad anual
+        st.warning("🔴 **Alto riesgo detectado**: El portafolio muestra una alta volatilidad. Considera reducir posiciones de mayor riesgo o añadir activos defensivos.")
+    elif metricas['riesgo_anual'] > 0.15:  # 15-30% de volatilidad anual
+        st.info("🟡 **Riesgo moderado**: El portafolio tiene un nivel de riesgo moderado. Asegúrate de que esté alineado con tu perfil de riesgo.")
+    else:
+        st.success("🟢 **Bajo riesgo**: El portafolio tiene un perfil de riesgo conservador. Podrías considerar añadir activos de mayor crecimiento si tu perfil lo permite.")
+    
+    # Recomendación basada en el ratio de Sharpe
+    sharpe_ratio = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
+    
+    if sharpe_ratio < 0.5:
+        st.warning("🔴 **Baja eficiencia de riesgo**: El portafolio no está generando suficientes retornos para el nivel de riesgo asumido. Considera rebalancear.")
+    elif sharpe_ratio < 1.0:
+        st.info("🟡 **Eficiencia de riesgo moderada**: El portafolio tiene un rendimiento aceptable en relación al riesgo. Podrías optimizarlo aún más.")
+    else:
+        st.success("🟢 **Alta eficiencia de riesgo**: Excelente relación riesgo-retorno. El portafolio está bien optimizado.")
+    
+    # Recomendación de diversificación
+    if metricas['concentracion'] > 0.7:
+        st.warning("🔴 **Alta concentración**: El portafolio está muy concentrado en pocos activos. Considera diversificar para reducir el riesgo no sistemático.")
+    elif metricas['concentracion'] > 0.4:
+        st.info("🟡 **Concentración moderada**: Podrías mejorar la diversificación del portafolio para reducir riesgos específicos.")
+    else:
+        st.success("🟢 **Buena diversificación**: El portafolio está bien diversificado, lo que ayuda a reducir el riesgo no sistemático.")
 
 if __name__ == "__main__":
     main()
