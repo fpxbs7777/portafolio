@@ -1720,30 +1720,30 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                      f"{volatilidad_pct:.1f}%",
                      help="Riesgo medido como desviación estándar de retornos anuales")
         
-            # Nivel de concentración con colores
-            if metricas['concentracion'] < 0.3:
-                concentracion_status = "🟢 Baja"
-            elif metricas['concentracion'] < 0.6:
-                concentracion_status = "🟡 Media"
-            else:
-                concentracion_status = "🔴 Alta"
-            
-            cols[2].metric("Nivel Concentración", concentracion_status)
+        # Nivel de concentración con colores
+        if metricas['concentracion'] < 0.3:
+            concentracion_status = "🟢 Baja"
+        elif metricas['concentracion'] < 0.6:
+            concentracion_status = "🟡 Media"
+        else:
+            concentracion_status = "🔴 Alta"
+        
+        cols[2].metric("Nivel Concentración", concentracion_status)
 
-            # Mostrar tabla de alpha y beta individual por activo si existen
-            if 'metricas_activos' in metricas and metricas['metricas_activos']:
-                st.markdown("#### 📉 Alpha y Beta Individual de cada Activo")
-                df_ab = pd.DataFrame([
-                    {'Símbolo': k, 'Alpha': v.get('alpha'), 'Beta': v.get('beta'), 'Índice Ref.': v.get('indice_ref')}
-                    for k, v in metricas['metricas_activos'].items()
-                    if v.get('alpha') is not None and v.get('beta') is not None and v.get('indice_ref')
-                ])
-                if not df_ab.empty:
-                    df_ab['Alpha'] = df_ab['Alpha'].apply(lambda x: f"{x:.4f}" if x is not None else "N/A")
-                    df_ab['Beta'] = df_ab['Beta'].apply(lambda x: f"{x:.3f}" if x is not None else "N/A")
-                    st.dataframe(df_ab, use_container_width=True, height=200)
-                else:
-                    st.info("No se pudo calcular alpha/beta individual para los activos.")
+        # Mostrar tabla de alpha y beta individual por activo si existen
+        if 'metricas_activos' in metricas and metricas['metricas_activos']:
+            st.markdown("#### 📉 Alpha y Beta Individual de cada Activo")
+            df_ab = pd.DataFrame([
+                {'Símbolo': k, 'Alpha': v.get('alpha'), 'Beta': v.get('beta'), 'Índice Ref.': v.get('indice_ref')}
+                for k, v in metricas['metricas_activos'].items()
+                if v.get('alpha') is not None and v.get('beta') is not None and v.get('indice_ref')
+            ])
+            if not df_ab.empty:
+                df_ab['Alpha'] = df_ab['Alpha'].apply(lambda x: f"{x:.4f}" if x is not None else "N/A")
+                df_ab['Beta'] = df_ab['Beta'].apply(lambda x: f"{x:.3f}" if x is not None else "N/A")
+                st.dataframe(df_ab, use_container_width=True, height=200)
+            else:
+                st.info("No se pudo calcular alpha/beta individual para los activos.")
             
             # Proyecciones
             st.subheader("📈 Proyecciones de Rendimiento")
