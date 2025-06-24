@@ -2660,16 +2660,30 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
                         except Exception as e:
                             st.warning(f"No se pudo obtener el histórico para {simbolo}: {str(e)}")
                     elif tipo_activo == 'TitulosPublicos':
-                        # Para bonos, usar tasa efectiva si está disponible
-                        detalles_bono = obtener_detalle_titulo_publico(token_portador, simbolo)
-                        if detalles_bono and 'tasaEfectiva' in detalles_bono:
-                            retornos_activos.append(float(detalles_bono['tasaEfectiva']))
-                            valores_activos.append(valor)
-                        else:
-                            # Si no hay tasa efectiva, usar un valor por defecto basado en el tipo de bono
-                            tasa_default = 10.0  # Tasa default para bonos sin información
-                            retornos_activos.append(tasa_default)
-                            valores_activos.append(valor)
+                        # For bonds, use historical price data like we do for stocks
+                        try:
+                            fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
+                            fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
+                            
+                            with st.spinner(f'Obteniendo histórico para bono {simbolo}...'):
+                                historico = obtener_historico_activo(token_portador, simbolo, fecha_inicio_str, fecha_fin_str)
+                                
+                            if historico and len(historico) > 1:
+                                precio_inicial = float(historico[0]['ultimoPrecio'])
+                                precio_final = float(historico[-1]['ultimoPrecio'])
+                                retorno_anual = ((precio_final - precio_inicial) / precio_inicial) * 100
+                                
+                                # Annualize if needed
+                                dias_periodo = (fecha_fin - fecha_inicio).days
+                                if dias_periodo > 0:
+                                    factor_anual = 365 / dias_periodo
+                                    retorno_anual = ((1 + retorno_anual/100) ** factor_anual - 1) * 100
+                                
+                                retornos_activos.append(retorno_anual)
+                                valores_activos.append(valor)
+                        except Exception as e:
+                            st.warning(f"No se pudo obtener el histórico para el bono {simbolo}: {str(e)}")
+                            # Skip this bond if we can't get historical data
             
             # Calcular retorno ponderado total del portafolio
             if valores_activos and len(valores_activos) > 0:
