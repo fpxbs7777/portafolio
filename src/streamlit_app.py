@@ -2189,28 +2189,110 @@ def mostrar_estado_cuenta(estado_cuenta):
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
-    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
     cuentas = estado_cuenta.get('cuentas', [])
     
-    cols = st.columns(3)
-    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-    cols[1].metric("Número de Cuentas", len(cuentas))
+    # Calcular totales por moneda
+    saldos_por_moneda = {}
+    for cuenta in cuentas:
+        moneda = cuenta.get('moneda', 'PESO').upper()
+        saldo = float(cuenta.get('saldo', 0))
+        if moneda in saldos_por_moneda:
+            saldos_por_moneda[moneda] += saldo
+        else:
+            saldos_por_moneda[moneda] = saldo
     
-    if cuentas:
-        st.subheader("📊 Detalle de Cuentas")
+    # Mostrar resumen de saldos
+    st.subheader("📈 Resumen de Saldos")
+    
+    # Ordenar monedas: primero USD, luego otras, finalmente ARS/PESO
+    monedas_ordenadas = sorted(saldos_por_moneda.keys(), 
+                              key=lambda x: (x != 'DOLAR', x in ['PESO', 'ARS'], x))
+    
+    # Mostrar métricas principales
+    cols = st.columns(min(4, len(monedas_ordenadas) + 1))
+    
+    # Mostrar total en pesos en la primera columna
+    total_pesos = saldos_por_moneda.get('PESO', 0) + saldos_por_moneda.get('ARS', 0)
+    cols[0].metric("Total en Pesos (ARS)", f"$ {total_pesos:,.2f}")
+    
+    # Mostrar otras monedas
+    for i, moneda in enumerate(monedas_ordenadas, 1):
+        if moneda not in ['PESO', 'ARS'] and i < 4:  # Máximo 3 monedas en la fila superior
+            saldo = saldos_por_moneda[moneda]
+            moneda_simbolo = 'U$D' if moneda == 'DOLAR' else moneda
+            cols[i].metric(f"Total en {moneda_simbolo}", f"{moneda_simbolo} {saldo:,.2f}")
+    
+    # Mostrar tabla con todos los saldos
+    st.subheader("📊 Detalle por Moneda")
+    
+    # Crear DataFrame con los totales
+    datos_totales = []
+    for moneda, saldo in saldos_por_moneda.items():
+        moneda_nombre = 'Pesos' if moneda in ['PESO', 'ARS'] else moneda.title()
+        moneda_simbolo = 'AR$' if moneda in ['PESO', 'ARS'] else 'U$D' if moneda == 'DOLAR' else moneda
+        datos_totales.append({
+            'Moneda': moneda_nombre,
+            'Símbolo': moneda_simbolo,
+            'Saldo Total': saldo,
+            'Formateado': f"{moneda_simbolo} {saldo:,.2f}"
+        })
+    
+    # Mostrar tabla con los totales
+    if datos_totales:
+        df_totales = pd.DataFrame(datos_totales)
+        st.dataframe(
+            df_totales[['Moneda', 'Formateado']].rename(columns={'Formateado': 'Saldo Total'}),
+            column_config={
+                'Moneda': 'Moneda',
+                'Formateado': st.column_config.NumberColumn(
+                    'Saldo Total',
+                    format='%f'
+                )
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    
+    # Mostrar detalle de cuentas
+    st.subheader("📛 Detalle de Cuentas")
+    
+    datos_cuentas = []
+    for cuenta in cuentas:
+        moneda = cuenta.get('moneda', 'PESO').upper()
+        moneda_simbolo = 'AR$' if moneda in ['PESO', 'ARS'] else 'U$D' if moneda == 'DOLAR' else moneda
         
-        datos_cuentas = []
-        for cuenta in cuentas:
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                'Total': f"${cuenta.get('total', 0):,.2f}",
-            })
-        
+        datos_cuentas.append({
+            'Número': cuenta.get('numero', 'N/A'),
+            'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+            'Moneda': moneda_simbolo,
+            'Disponible': cuenta.get('disponible', 0),
+            'Saldo': cuenta.get('saldo', 0),
+            'Total': cuenta.get('total', 0),
+        })
+    
+    if datos_cuentas:
         df_cuentas = pd.DataFrame(datos_cuentas)
+        
+        # Formatear columnas numéricas
+        for col in ['Disponible', 'Saldo', 'Total']:
+            df_cuentas[col] = df_cuentas.apply(
+                lambda x: f"{x['Moneda']} {x[col]:,.2f}" if pd.notnull(x[col]) else "N/A", 
+                axis=1
+            )
+        
+        st.dataframe(
+            df_cuentas,
+            column_config={
+                'Número': 'Cuenta',
+                'Tipo': 'Tipo',
+                'Moneda': 'Moneda',
+                'Disponible': 'Disponible',
+                'Saldo': 'Saldo',
+                'Total': 'Total'
+            },
+            hide_index=True,
+            use_container_width=True
+        )
         st.dataframe(df_cuentas, use_container_width=True, height=300)
 
 def mostrar_cotizaciones_mercado(token_acceso):
