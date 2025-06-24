@@ -1619,208 +1619,464 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             
             # Calcular retornos diarios
             df_historico['retorno'] = df_historico['precio'].pct_change()
-
-            # No filtrar outliers: usar todos los retornos válidos
+            
+            # Filtrar valores atípicos usando un enfoque más robusto
+            if len(df_historico) > 5:  # Necesitamos suficientes puntos para el filtrado
+                q_low = df_historico['retorno'].quantile(0.01)
+                q_high = df_historico['retorno'].quantile(0.99)
+                df_historico = df_historico[
+                    (df_historico['retorno'] >= q_low) & 
+                    (df_historico['retorno'] <= q_high)
+                ]
+            
+            # Filtrar valores no finitos y asegurar suficientes datos
             retornos_validos = df_historico['retorno'].replace(
                 [np.inf, -np.inf], np.nan
             ).dropna()
-
-            # Detectar índice de referencia según mercado
-            mercado_ref = mercado.upper() if isinstance(mercado, str) else ''
-            if mercado_ref == 'BCBA':
-                indice_ref = '^MERV'
-            elif mercado_ref == 'NYSE':
-                indice_ref = '^GSPC'
-            elif mercado_ref == 'NASDAQ':
-                indice_ref = '^IXIC'
-            else:
-                indice_ref = None
-
-            ab_metrics = {'alpha': None, 'beta': None, 'indice': indice_ref}
-            if indice_ref is not None:
-                try:
-                    idx_data = yf.download(indice_ref, start=fecha_desde, end=fecha_hasta)['Close']
-                    idx_returns = idx_data.pct_change().dropna()
-                    # Alinear fechas
-                    retornos_validos = retornos_validos.copy()
-                    retornos_validos.index = pd.to_datetime(retornos_validos.index).date
-                    idx_returns.index = pd.to_datetime(idx_returns.index).date
-                    fechas_comunes = set(retornos_validos.index) & set(idx_returns.index)
-                    fechas_comunes = sorted(fechas_comunes)
-                    activos_aligned = retornos_validos.loc[fechas_comunes]
-                    benchmark_aligned = idx_returns.loc[fechas_comunes]
-                    if len(activos_aligned) >= 5:
-                        ab = calcular_alpha_beta(activos_aligned, benchmark_aligned)
-                        ab_metrics = {'alpha': ab.get('alpha'), 'beta': ab.get('beta'), 'indice': indice_ref}
-                except Exception as e:
-                    print(f"Error obteniendo/calculando índice para {simbolo}: {e}")
-            else:
-                ab_metrics = {'alpha': None, 'beta': None, 'indice': None}
-
-
+            
             if len(retornos_validos) < 5:  # Mínimo de datos para métricas confiables
                 print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
                 continue
-
+                
             # Verificar si hay suficientes variaciones de precio
             if retornos_validos.nunique() < 2:
                 print(f"No hay suficiente variación en los precios de {simbolo}")
                 continue
-
+            
             # Calcular métricas básicas
             retorno_medio = retornos_validos.mean() * 252  # Anualizado
             volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
-
-            # Guardar alpha y beta individual
-            metricas_activos[simbolo] = {
-                'retorno_medio': retorno_medio,
-                'volatilidad': volatilidad,
-                'prob_ganancia': len(retornos_validos[retornos_validos > 0]) / len(retornos_validos) if len(retornos_validos) > 0 else 0.5,
-                'prob_perdida': len(retornos_validos[retornos_validos < 0]) / len(retornos_validos) if len(retornos_validos) > 0 else 0.5,
-                'prob_ganancia_10': len(retornos_validos[retornos_validos > 0.1]) / len(retornos_validos) if len(retornos_validos) > 0 else 0,
-                'prob_perdida_10': len(retornos_validos[retornos_validos < -0.1]) / len(retornos_validos) if len(retornos_validos) > 0 else 0,
-                'peso': activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0,
-                'alpha': ab_metrics.get('alpha'),
-                'beta': ab_metrics.get('beta'),
-                'indice_ref': ab_metrics.get('indice'),
-            }
-
-            # Guardar retornos para cálculo de correlaciones
-            retornos_diarios[simbolo] = retornos_validos
-
+            
             # Asegurar valores razonables
             retorno_medio = np.clip(retorno_medio, -5, 5)  # Límite de ±500% anual
             volatilidad = min(volatilidad, 3)  # Límite de 300% de volatilidad
             
             # Calcular métricas de riesgo basadas en la distribución de retornos
-            # (Aquí va el cálculo real o se elimina si no se usa)
+            ret_pos = retornos_validos[retornos_validos > 0]
+            ret_neg = retornos_validos[retornos_validos < 0]
+            n_total = len(retornos_validos)
+            
+            # Calcular probabilidades
+            prob_ganancia = len(ret_pos) / n_total if n_total > 0 else 0.5
+            prob_perdida = len(ret_neg) / n_total if n_total > 0 else 0.5
+            
+            # Calcular probabilidades de movimientos extremos
+            prob_ganancia_10 = len(ret_pos[ret_pos > 0.1]) / n_total if n_total > 0 else 0
+            prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
+            
+            # Calcular el peso del activo en el portafolio
+            peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
+            
+            # Guardar métricas
+            metricas_activos[simbolo] = {
+                'retorno_medio': retorno_medio,
+                'volatilidad': volatilidad,
+                'prob_ganancia': prob_ganancia,
+                'prob_perdida': prob_perdida,
+                'prob_ganancia_10': prob_ganancia_10,
+                'prob_perdida_10': prob_perdida_10,
+                'peso': peso
+            }
+            
+            # Guardar retornos para cálculo de correlaciones
+            retornos_diarios[simbolo] = df_historico.set_index('fecha')['retorno']
+            
         except Exception as e:
-            print(f"Error inesperado procesando {simbolo}: {e}")
-
-    # Fuera del bucle de activos: visualización
-    cols[0].metric("Total de Activos", len(datos_activos))
-    cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-    cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-    cols[3].metric("Valor Total", f"${valor_total:,.2f}")
-
-    if metricas:
-        # Métricas de Riesgo
-        st.subheader("⚖️ Análisis de Riesgo")
-        cols = st.columns(3)
-        
-        # Mostrar concentración como porcentaje
-        concentracion_pct = metricas['concentracion'] * 100
-        cols[0].metric("Concentración", 
-                     f"{concentracion_pct:.1f}%",
-                     help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
-        
-        # Mostrar volatilidad como porcentaje anual
-        volatilidad_pct = metricas['std_dev_activo'] * 100
-        cols[1].metric("Volatilidad Anual", 
-                     f"{volatilidad_pct:.1f}%",
-                     help="Riesgo medido como desviación estándar de retornos anuales")
-        
-        # Nivel de concentración con colores
-        if metricas['concentracion'] < 0.3:
-            concentracion_status = "🟢 Baja"
-        elif metricas['concentracion'] < 0.6:
-            concentracion_status = "🟡 Media"
-        else:
-            concentracion_status = "🔴 Alta"
-        
-        cols[2].metric("Nivel Concentración", concentracion_status)
-
-        # Mostrar tabla de alpha y beta individual por activo si existen
-        if 'metricas_activos' in metricas and metricas['metricas_activos']:
-            st.markdown("#### 📉 Alpha y Beta Individual de cada Activo")
-            df_ab = pd.DataFrame([
-                {'Símbolo': k, 'Alpha': v.get('alpha'), 'Beta': v.get('beta'), 'Índice Ref.': v.get('indice_ref')}
-                for k, v in metricas['metricas_activos'].items()
-                if v.get('alpha') is not None and v.get('beta') is not None and v.get('indice_ref')
-            ])
-            if not df_ab.empty:
-                df_ab['Alpha'] = df_ab['Alpha'].apply(lambda x: f"{x:.4f}" if x is not None else "N/A")
-                df_ab['Beta'] = df_ab['Beta'].apply(lambda x: f"{x:.3f}" if x is not None else "N/A")
-                st.dataframe(df_ab, use_container_width=True, height=200)
+            print(f"Error procesando {simbolo}: {str(e)}")
+            continue
+    
+    if not metricas_activos:
+        print("No se pudieron calcular métricas para ningún activo")
+        return {
+            'concentracion': concentracion,
+            'std_dev_activo': 0,
+            'retorno_esperado_anual': 0,
+            'pl_esperado_min': 0,
+            'pl_esperado_max': 0,
+            'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
+            'riesgo_anual': 0
+        }
+    else:
+        print(f"\nMétricas calculadas para {len(metricas_activos)} activos")
+    
+    # 3. Calcular métricas del portafolio
+    # Retorno esperado ponderado
+    retorno_esperado_anual = sum(
+        m['retorno_medio'] * m['peso'] 
+        for m in metricas_activos.values()
+    )
+    
+    # Volatilidad del portafolio (considerando correlaciones)
+    try:
+        if len(retornos_diarios) > 1:
+            # Asegurarse de que tenemos suficientes datos para calcular correlaciones
+            df_retornos = pd.DataFrame(retornos_diarios).dropna()
+            if len(df_retornos) < 5:  # Mínimo de datos para correlación confiable
+                print("No hay suficientes datos para calcular correlaciones confiables")
+                # Usar promedio ponderado simple como respaldo
+                volatilidad_portafolio = sum(
+                    m['volatilidad'] * m['peso'] 
+                    for m in metricas_activos.values()
+                )
             else:
-                st.info("No se pudo calcular alpha/beta individual para los activos.")
+                # Calcular matriz de correlación
+                df_correlacion = df_retornos.corr()
+                
+                # Verificar si la matriz de correlación es válida
+                if df_correlacion.isna().any().any():
+                    print("Advertencia: Matriz de correlación contiene valores NaN")
+                    df_correlacion = df_correlacion.fillna(0)  # Reemplazar NaN con 0
+                
+                # Obtener pesos y volatilidades
+                activos = list(metricas_activos.keys())
+                pesos = np.array([metricas_activos[a]['peso'] for a in activos])
+                volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
+                
+                # Asegurarse de que las dimensiones coincidan
+                if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
+                    # Calcular matriz de covarianza
+                    matriz_cov = np.diag(volatilidades) @ df_correlacion.values @ np.diag(volatilidades)
+                    # Calcular varianza del portafolio
+                    varianza_portafolio = pesos.T @ matriz_cov @ pesos
+                    # Asegurar que la varianza no sea negativa
+                    varianza_portafolio = max(0, varianza_portafolio)
+                    volatilidad_portafolio = np.sqrt(varianza_portafolio)
+                else:
+                    print("Dimensiones no coinciden, usando promedio ponderado")
+                    volatilidad_portafolio = sum(v * w for v, w in zip(volatilidades, pesos))
+        else:
+            # Si solo hay un activo, usar su volatilidad directamente
+            volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
             
-        # Proyecciones
-        st.subheader("📈 Proyecciones de Rendimiento")
-        cols = st.columns(3)
+        # Asegurar que la volatilidad sea un número finito
+        if not np.isfinite(volatilidad_portafolio):
+            print("Advertencia: Volatilidad no finita, usando valor por defecto")
+            volatilidad_portafolio = 0.2  # Valor por defecto razonable
+            
+    except Exception as e:
+        print(f"Error al calcular volatilidad del portafolio: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Valor por defecto seguro
+        volatilidad_portafolio = sum(
+            m['volatilidad'] * m['peso'] 
+            for m in metricas_activos.values()
+        ) if metricas_activos else 0.2
+    
+    # Calcular percentiles para escenarios
+    retornos_simulados = []
+    for _ in range(1000):  # Simulación Monte Carlo simple
+        retorno_simulado = 0
+        for m in metricas_activos.values():
+            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
+        retornos_simulados.append(retorno_simulado * 252)  # Anualizado
+    
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
+    
+    # Calcular probabilidades basadas en los retornos simulados
+    retornos_simulados = np.array(retornos_simulados)
+    total_simulaciones = len(retornos_simulados)
+            
+    prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
+    prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
+    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
+    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
+            
+    # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
+    alpha_beta_metrics = {}
+    if merval_available and len(retornos_diarios) > 1:
+        try:
+            # Calcular retornos diarios del portafolio (promedio ponderado de los activos)
+            df_port_returns = pd.DataFrame(retornos_diarios)
+            
+            # Asegurarse de que los pesos estén en el mismo orden que las columnas
+            pesos_ordenados = [metricas_activos[col]['peso'] for col in df_port_returns.columns]
+            df_port_returns['Portfolio'] = df_port_returns.dot(pesos_ordenados)
+            
+            # Alinear fechas con el MERVAL
+            merval_series = pd.Series(merval_returns, name='MERVAL')
+            aligned_data = pd.merge(
+                df_port_returns[['Portfolio']], 
+                merval_series, 
+                left_index=True, 
+                right_index=True,
+                how='inner'
+            )
+            
+            if len(aligned_data) > 5:  # Mínimo de datos para cálculo confiable
+                # Calcular métricas de Alpha y Beta
+                alpha_beta_metrics = calcular_alpha_beta(
+                    aligned_data['Portfolio'],  # Retornos del portafolio
+                    aligned_data['MERVAL'],      # Retornos del MERVAL
+                    risk_free_rate=0.40  # Tasa libre de riesgo para Argentina
+                )
+                
+                print(f"Alpha: {alpha_beta_metrics.get('alpha_annual', 0):.2%}, "
+                      f"Beta: {alpha_beta_metrics.get('beta', 0):.2f}, "
+                      f"R²: {alpha_beta_metrics.get('r_squared', 0):.2f}")
+            
+        except Exception as e:
+            print(f"Error al calcular Alpha/Beta: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    # Crear diccionario de probabilidades
+    probabilidades = {
+        'perdida': prob_perdida,
+        'ganancia': prob_ganancia,
+        'perdida_mayor_10': prob_perdida_10,
+        'ganancia_mayor_10': prob_ganancia_10
+    }
+    
+    # Crear diccionario de resultados
+    resultados = {
+        'concentracion': concentracion,
+        'std_dev_activo': volatilidad_portafolio,
+        'retorno_esperado_anual': retorno_esperado_anual,
+        'pl_esperado_min': pl_esperado_min,
+        'pl_esperado_max': pl_esperado_max,
+        'probabilidades': probabilidades,
+        'riesgo_anual': volatilidad_portafolio,  # Usamos la volatilidad como proxy de riesgo
+        'alpha': alpha_beta_metrics.get('alpha_annual', 0),
+        'beta': alpha_beta_metrics.get('beta', 0),
+        'r_cuadrado': alpha_beta_metrics.get('r_squared', 0),
+        'tracking_error': alpha_beta_metrics.get('tracking_error', 0),
+        'information_ratio': alpha_beta_metrics.get('information_ratio', 0)
+    }
+    
+    # Analizar la estrategia de inversión
+    analisis_estrategia = analizar_estrategia_inversion(alpha_beta_metrics)
+    resultados['analisis_estrategia'] = analisis_estrategia
+    
+    # Agregar métricas adicionales si están disponibles
+    if 'p_value' in alpha_beta_metrics:
+        resultados['p_value'] = alpha_beta_metrics['p_value']
+    if 'observations' in alpha_beta_metrics:
+        resultados['observaciones'] = alpha_beta_metrics['observations']
+    
+    return resultados
+
+# --- Funciones de Visualización ---
+def mostrar_resumen_portafolio(portafolio, token_portador):
+    st.markdown("### 📈 Resumen del Portafolio")
+    
+    activos = portafolio.get('activos', [])
+    datos_activos = []
+    valor_total = 0
+    
+    for activo in activos:
+        try:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            descripcion = titulo.get('descripcion', 'Sin descripción')
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            
+            campos_valuacion = [
+                'valuacionEnMonedaOriginal',
+                'valuacionActual',
+                'valorNominalEnMonedaOriginal', 
+                'valorNominal',
+                'valuacionDolar',
+                'valuacion',
+                'valorActual',
+                'montoInvertido',
+                'valorMercado',
+                'valorTotal',
+                'importe'
+            ]
+            
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            if valuacion == 0 and cantidad:
+                campos_precio = [
+                    'precioPromedio',
+                    'precioCompra',
+                    'precioActual',
+                    'precio',
+                    'precioUnitario',
+                    'ultimoPrecio',
+                    'cotizacion'
+                ]
+                
+                precio_unitario = 0
+                for campo in campos_precio:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            precio = float(activo[campo])
+                            if precio > 0:
+                                precio_unitario = precio
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                if precio_unitario > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                        else:
+                            valuacion = cantidad_num * precio_unitario
+                    except (ValueError, TypeError):
+                        pass
+                if precio_unitario == 0:
+                    for campo in campos_precio:
+                        if campo in titulo and titulo[campo] is not None:
+                            try:
+                                precio = float(titulo[campo])
+                                if precio > 0:
+                                    precio_unitario = precio
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                
+                # Intento final: consultar precio actual vía API si sigue en cero
+            if valuacion == 0:
+                ultimo_precio = None
+                if mercado := titulo.get('mercado'):
+                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                if ultimo_precio:
+                    try:
+                        cantidad_num = float(cantidad)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * ultimo_precio) / 100.0
+                        else:
+                            valuacion = cantidad_num * ultimo_precio
+                    except (ValueError, TypeError):
+                        pass
+            
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+            })
+            
+            valor_total += valuacion
+        except Exception as e:
+            continue
+    
+    if datos_activos:
+        df_activos = pd.DataFrame(datos_activos)
+        # Convert list to dictionary with symbols as keys
+        portafolio_dict = {row['Símbolo']: row for row in datos_activos}
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Mostrar retornos como porcentaje del portafolio
-        retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-        cols[0].metric("Retorno Esperado Anual", 
-                     f"{retorno_anual_pct:+.1f}%",
-                     help="Retorno anual esperado basado en datos históricos")
-        
-        # Mostrar escenarios como porcentaje del portafolio
-        optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
-        pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
-        
-        cols[1].metric("Escenario Optimista (95%)", 
-                     f"{optimista_pct:+.1f}%",
-                     help="Mejor escenario con 95% de confianza")
-        cols[2].metric("Escenario Pesimista (5%)", 
-                     f"{pesimista_pct:+.1f}%",
-                     help="Peor escenario con 5% de confianza")
-        
-        # Probabilidades
-        st.subheader("🎯 Probabilidades")
+        # Información General
         cols = st.columns(4)
-        probs = metricas['probabilidades']
-        cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-        cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-        cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-        cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+        cols[0].metric("Total de Activos", len(datos_activos))
+        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
+        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
-        # Análisis de Estrategia de Inversión
-        if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
-            st.subheader("🔍 Análisis de Estrategia de Inversión")
-            
-            # Mostrar la estrategia principal
-            estrategia = metricas['analisis_estrategia']
-            
-            # Tarjeta de estrategia
-            st.markdown(f"""
-            <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
-                        border-left: 5px solid #0d6efd;">
-                <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
-                <p>{estrategia['explicacion_estrategia']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-                
-            # Métricas clave
+        if metricas:
+            # Métricas de Riesgo
+            st.subheader("⚖️ Análisis de Riesgo")
             cols = st.columns(3)
-            cols[0].metric("Beta del Portafolio", f"{estrategia['beta']:.2f}")
-            cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']*100:.2f}%")
-            cols[2].metric("Índice de Sharpe", f"{estrategia['sharpe']:.2f}")
             
-            # Explicación detallada
-            st.markdown("### 📝 Explicación Detallada")
-            st.write(estrategia['explicacion_detallada'])
+            # Mostrar concentración como porcentaje
+            concentracion_pct = metricas['concentracion'] * 100
+            cols[0].metric("Concentración", 
+                         f"{concentracion_pct:.1f}%",
+                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
             
-            # Recomendaciones
-            if 'recomendaciones' in estrategia and estrategia['recomendaciones']:
-                st.markdown("### 💡 Recomendaciones")
-                for rec in estrategia['recomendaciones']:
-                    st.markdown(f"- {rec}")
+            # Mostrar volatilidad como porcentaje anual
+            volatilidad_pct = metricas['std_dev_activo'] * 100
+            cols[1].metric("Volatilidad Anual", 
+                         f"{volatilidad_pct:.1f}%",
+                         help="Riesgo medido como desviación estándar de retornos anuales")
             
-            # Advertencias
-            if 'advertencias' in estrategia and estrategia['advertencias']:
-                st.markdown("### ⚠️ Consideraciones")
-                for adv in estrategia['advertencias']:
-                    st.warning(adv)
+            # Nivel de concentración con colores
+            if metricas['concentracion'] < 0.3:
+                concentracion_status = "🟢 Baja"
+            elif metricas['concentracion'] < 0.6:
+                concentracion_status = "🟡 Media"
+            else:
+                concentracion_status = "🔴 Alta"
                 
-                # Mostrar efectividad de cobertura si está disponible
-                if 'calidad_cobertura' in estrategia and 'explicacion_cobertura' in estrategia:
-                    st.markdown(f"""
-                    <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                        <h5 style="margin-top: 0; color: #856404;">Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
-                        <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+            cols[2].metric("Nivel Concentración", concentracion_status)
+            
+            # Proyecciones
+            st.subheader("📈 Proyecciones de Rendimiento")
+            cols = st.columns(3)
+            
+            # Mostrar retornos como porcentaje del portafolio
+            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+            cols[0].metric("Retorno Esperado Anual", 
+                         f"{retorno_anual_pct:+.1f}%",
+                         help="Retorno anual esperado basado en datos históricos")
+            
+            # Mostrar escenarios como porcentaje del portafolio
+            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+            
+            cols[1].metric("Escenario Optimista (95%)", 
+                         f"{optimista_pct:+.1f}%",
+                         help="Mejor escenario con 95% de confianza")
+            cols[2].metric("Escenario Pesimista (5%)", 
+                         f"{pesimista_pct:+.1f}%",
+                         help="Peor escenario con 5% de confianza")
+            
+            # Probabilidades
+            st.subheader("🎯 Probabilidades")
+            cols = st.columns(4)
+            probs = metricas['probabilidades']
+            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+            
+            # Análisis de Estrategia de Inversión
+            if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
+                st.subheader("🔍 Análisis de Estrategia de Inversión")
+                
+                # Mostrar la estrategia principal
+                estrategia = metricas['analisis_estrategia']
+                
+                # Tarjeta de estrategia
+                st.markdown(f"""
+                <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
+                            border-left: 5px solid #0d6efd;">
+                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
+                    <p>{estrategia['explicacion_estrategia']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Métricas clave
+                cols = st.columns(3)
+                cols[0].metric("Beta", f"{estrategia['beta']:.2f}", 
+                              help="Sensibilidad del portafolio respecto al mercado (1 = mismo riesgo que el mercado)")
+                cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']:+.2%}", 
+                              help="Rendimiento adicional sobre el mercado ajustado por riesgo")
+                cols[2].metric("Calidad de Cobertura", f"{estrategia['calidad_cobertura']}", 
+                              help=f"R² = {estrategia['r_cuadrado']:.2f}")
+                
+                # Explicación del rendimiento
+                st.markdown(f"""
+                <div style="background-color: #e8f4fd; border-radius: 10px; padding: 15px; margin: 10px 0;">
+                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {estrategia['rendimiento']}</h5>
+                    <p style="margin-bottom: 0;">{estrategia['explicacion_rendimiento']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Explicación de la cobertura
+                st.markdown(f"""
+                <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
+                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
+                    <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
+                </div>
+                """, unsafe_allow_html=True)
                 
                 # Interpretación del Beta
                 st.markdown("#### 📈 Interpretación del Beta")
@@ -2426,85 +2682,6 @@ def mostrar_movimientos_asesor():
                 st.warning("No se encontraron movimientos o hubo un error en la consulta")
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
-
-def mostrar_resumen_portafolio(portafolio, token_acceso):
-    """
-    Muestra un resumen del portafolio con métricas clave y visualizaciones.
-    
-    Args:
-        portafolio (dict): Diccionario con los datos del portafolio
-        token_acceso (str): Token de autenticación para la API de IOL
-    """
-    st.subheader("📊 Resumen del Portafolio")
-    
-    if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
-        st.warning("No hay activos en el portafolio")
-        return
-    
-    # Calcular métricas básicas
-    valor_total = portafolio.get('valor_total', 0)
-    total_activos = len(portafolio['activos'])
-    
-    # Mostrar métricas principales
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Valor Total", f"${valor_total:,.2f}")
-    col2.metric("📊 Total de Activos", total_activos)
-    
-    # Calcular distribución por tipo de activo
-    if 'activos' in portafolio and portafolio['activos']:
-        df_activos = pd.DataFrame(portafolio['activos'])
-        if 'tipo' in df_activos.columns and 'valor' in df_activos.columns:
-            distribucion = df_activos.groupby('tipo')['valor'].sum().reset_index()
-            
-            # Mostrar gráfico de distribución
-            st.subheader("📈 Distribución por Tipo de Activo")
-            fig = px.pie(
-                distribucion, 
-                values='valor', 
-                names='tipo',
-                hole=0.4,
-                color_discrete_sequence=px.colors.sequential.RdBu
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    # Mostrar tabla de activos
-    st.subheader("📋 Lista de Activos")
-    if 'activos' in portafolio and portafolio['activos']:
-        df_display = pd.DataFrame(portafolio['activos'])
-        # Seleccionar solo las columnas relevantes para mostrar
-        if not df_display.empty:
-            columnas_a_mostrar = ['simbolo', 'descripcion', 'tipo', 'cantidad', 'precio', 'valor']
-            columnas_disponibles = [col for col in columnas_a_mostrar if col in df_display.columns]
-            
-            if columnas_disponibles:
-                st.dataframe(
-                    df_display[columnas_disponibles],
-                    use_container_width=True,
-                    height=400
-                )
-    
-    # Mostrar métricas de riesgo si están disponibles
-    if 'metricas' in portafolio and portafolio['metricas']:
-        st.subheader("📊 Métricas de Riesgo")
-        metricas = portafolio['metricas']
-        
-        # Mostrar métricas en columnas
-        col1, col2, col3 = st.columns(3)
-        
-        if 'volatilidad' in metricas:
-            col1.metric("📉 Volatilidad Anual", f"{metricas['volatilidad']*100:.2f}%")
-        if 'sharpe' in metricas:
-            col2.metric("⚖️ Índice de Sharpe", f"{metricas['sharpe']:.2f}")
-        if 'var_95' in metricas:
-            col3.metric("⚠️ VaR 95%", f"{metricas['var_95']*100:.2f}%")
-        
-        # Mostrar explicación de las métricas
-        with st.expander("ℹ️ ¿Qué significan estas métricas?"):
-            st.markdown("""
-            - **Volatilidad Anual**: Mide la variabilidad de los rendimientos (a mayor valor, mayor riesgo)
-            - **Índice de Sharpe**: Mide el rendimiento ajustado por riesgo (valores > 1 son buenos)
-            - **VaR 95%**: Pérdida máxima esperada con un 95% de confianza en un día
-            """)
 
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
