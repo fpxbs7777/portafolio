@@ -1228,38 +1228,53 @@ class PortfolioManager:
             st.error(f"❌ Error en load_data: {str(e)}")
             return False
     
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
+    def compute_portfolio(self, strategy='markowitz', target_return=None, ajustar_al_perfil=True):
+        """
+        Calcula el portafolio optimo usando diferentes estrategias.
+        
+        Args:
+            strategy (str): Estrategia de optimización ('markowitz', 'min_variance', 'equal_weight')
+            target_return (float): Retorno objetivo para Markowitz
+            ajustar_al_perfil (bool): Si True, ajusta el portafolio al perfil del inversor
+        """
         if not self.data_loaded or self.returns is None:
             return None
         
         try:
             if self.manager:
-                # Usar el manager avanzado
+                # Obtener el perfil del inversor si está habilitado
+                if ajustar_al_perfil:
+                    perfil = obtener_perfil_inversor(self.token, self.id_cliente, self.portafolio)
+                    if perfil:
+                        # Ajustar el target_return según el perfil de riesgo
+                        if perfil.get('perfilSugerido', {}).get('nombre') == 'Conservador':
+                            target_return = 0.05  # 5% anual
+                        elif perfil.get('perfilSugerido', {}).get('nombre') == 'Moderado':
+                            target_return = 0.08  # 8% anual
+                        else:  # Agresivo
+                            target_return = 0.12  # 12% anual
+                
+                # Calcular el portafolio usando el manager
                 portfolio_output = self.manager.compute_portfolio(strategy, target_return)
+                
+                # Ajustar el portafolio según el perfil
+                if ajustar_al_perfil and perfil:
+                    composicion_sugerida = perfil.get('perfilSugerido', {}).get('perfilComposiciones', [])
+                    for asset in self.manager.rics:
+                        tipo = self._detectar_tipo_activo(asset)
+                        peso_sugerido = next((item['porcentaje'] for item in composicion_sugerida 
+                                            if item['nombre'].lower() == tipo.lower()), None)
+                        if peso_sugerido is not None:
+                            # Ajustar el peso del activo según el perfil sugerido
+                            self.manager.weights[asset] = peso_sugerido / 100
+                
                 return portfolio_output
             else:
-                # Fallback a optimización básica
-                n_assets = len(self.returns.columns)
-                
-                if strategy == 'equi-weight':
-                    weights = np.ones(n_assets) / n_assets
-                else:
-                    weights = optimize_portfolio(self.returns, target_return=target_return)
-                
-                # Crear objeto de resultado básico
-                portfolio_returns = (self.returns * weights).sum(axis=1)
-                portfolio_output = output(portfolio_returns, self.notional)
-                portfolio_output.weights = weights
-                portfolio_output.dataframe_allocation = pd.DataFrame({
-                    'rics': list(self.returns.columns),
-                    'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
-                })
-                
-                return portfolio_output
+                st.error("Manager no inicializado")
+                return None
             
         except Exception as e:
+            st.error(f"Error en compute_portfolio: {str(e)}")
             return None
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
@@ -1337,6 +1352,116 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
+
+def obtener_test_inversor(token_portador):
+    """
+    Obtiene las preguntas del test de perfil de inversor.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        
+    Returns:
+        dict: Diccionario con las preguntas del test
+    """
+    url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error obteniendo el test de perfil: {str(e)}")
+        return None
+
+def obtener_perfil_inversor(token_portador, id_cliente, portafolio):
+    """
+    Obtiene el perfil sugerido para el inversor basado en su portafolio actual.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        id_cliente (int): ID del cliente
+        portafolio (dict): Diccionario con el portafolio actual
+        
+    Returns:
+        dict: Diccionario con el perfil sugerido y su composición
+    """
+    url = f"https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    # Preparar datos del portafolio para el test
+    data = {
+        "enviarEmailCliente": False,
+        "instrumentosInvertidosAnteriormente": [1],  # Asumir experiencia básica
+        "nivelesConocimientoInstrumentos": [1],      # Asumir conocimiento básico
+        "idPlazoElegido": 3,                         # Plazo medio
+        "idEdadElegida": 3,                          # Edad media
+        "idObjetivoInversionElegida": 3,             # Objetivo de crecimiento
+        "idPolizaElegida": 1,                        # Sin seguro
+        "idCapacidadAhorroElegida": 3,               # Capacidad media de ahorro
+        "idPorcentajePatrimonioDedicado": 3         # Patrimonio medio
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error obteniendo el perfil de inversor: {str(e)}")
+        return None
+
+def comparar_perfil_con_portafolio(perfil_sugerido, portafolio_actual):
+    """
+    Compara el perfil sugerido con la composición actual del portafolio.
+    
+    Args:
+        perfil_sugerido (dict): Perfil sugerido obtenido de la API
+        portafolio_actual (dict): Composición actual del portafolio
+        
+    Returns:
+        dict: Diccionario con la comparación y recomendaciones
+    """
+    if not perfil_sugerido or not portafolio_actual:
+        return None
+    
+    # Obtener la composición sugerida
+    composicion_sugerida = {}
+    for item in perfil_sugerido.get('perfilSugerido', {}).get('perfilComposiciones', []):
+        composicion_sugerida[item['nombre']] = item['porcentaje']
+    
+    # Calcular la composición actual
+    composicion_actual = {}
+    total_valor = sum(item['valor'] for item in portafolio_actual.values())
+    
+    for simbolo, data in portafolio_actual.items():
+        # Clasificar el activo según su tipo
+        tipo = 'Acciones' if data.get('tipo') == 'Acciones' else 'Otros'
+        if tipo not in composicion_actual:
+            composicion_actual[tipo] = 0
+        composicion_actual[tipo] += (data['valor'] / total_valor) * 100
+    
+    # Comparar y generar recomendaciones
+    recomendaciones = []
+    for tipo in composicion_sugerida.keys():
+        sugerido = composicion_sugerida.get(tipo, 0)
+        actual = composicion_actual.get(tipo, 0)
+        diferencia = actual - sugerido
+        
+        if abs(diferencia) > 10:  # Umbral de diferencia significativa
+            recomendacion = f"Recomendación para {tipo}:"
+            if diferencia > 0:
+                recomendacion += f" Reducir {diferencia:.1f}%"
+            else:
+                recomendacion += f" Aumentar {-diferencia:.1f}%"
+            recomendaciones.append(recomendacion)
+    
+    return {
+        'comparacion': {
+            'sugerido': composicion_sugerida,
+            'actual': composicion_actual
+        },
+        'recomendaciones': recomendaciones
+    }
 def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
     """
     Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
