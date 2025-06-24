@@ -2579,17 +2579,131 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
             hide_index=True
         )
         
+        # Configuración del período de análisis
+        st.subheader("📈 Configuración del Análisis")
+        
+        # Obtener fechas para el análisis histórico
+        hoy = datetime.now().date()
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_inicio = st.date_input("Fecha de inicio", 
+                                      value=hoy - timedelta(days=365),  # Último año por defecto
+                                      max_value=hoy - timedelta(days=1))
+        with col2:
+            fecha_fin = st.date_input("Fecha de fin", 
+                                    value=hoy,
+                                    min_value=fecha_inicio + timedelta(days=1),
+                                    max_value=hoy)
+        
+        # Validar fechas
+        if fecha_inicio >= fecha_fin:
+            st.error("La fecha de inicio debe ser anterior a la fecha de fin")
+            return
+            
         # Mostrar proyecciones de rendimiento
         st.subheader("📈 Proyecciones de Rendimiento")
         
-        # Calcular retorno esperado ponderado
+        # Calcular retorno esperado ponderado del portafolio completo
         if valor_total > 0:
-            retorno_ponderado = np.average(
-                [fci.get('variacionAnual', 0) for fci in [d for d in [obtener_detalle_fci(token_portador, fci['Símbolo']) 
+            # Obtener retornos de todos los activos del portafolio, no solo FCIs
+            retornos_activos = []
+            valores_activos = []
+            
+            # Mostrar mensaje de carga
+            with st.spinner('Calculando rendimientos...'):
+                # Procesar FCIs
+                for fci in fcis_portafolio:
+                    detalles = obtener_detalle_fci(token_portador, fci['simbolo'])
+                    if detalles and 'variacionAnual' in detalles and detalles['variacionAnual'] is not None:
+                        retornos_activos.append(detalles['variacionAnual'])
+                        valores_activos.append(fci.get('cantidad', 0) * fci.get('precio', 0))
+                
+                # Obtener datos reales de los FCIs
+                fcis_disponibles = obtener_fondos_comunes(token_portador)
+                fci_por_simbolo = {fci['simbolo']: fci for fci in fcis_disponibles} if fcis_disponibles else {}
+                
+                # Procesar otros activos del portafolio
+                for activo in portafolio.get('activos', []):
+                    valor = activo.get('cantidad', 0) * activo.get('precio', 0)
+                    if valor <= 0:
+                        continue
+                        
+                    simbolo = activo.get('simbolo', '')
+                    tipo_activo = activo.get('tipo', '')
+                    
+                    if tipo_activo.lower() == 'fondocomundeinversion':
+                        # Ya procesamos los FCIs en el paso anterior
+                        continue
+                    elif tipo_activo in ['CEDEARS', 'ACCIONES']:
+                        # Para acciones y CEDEARS, obtener el rendimiento histórico
+                        try:
+                            # Obtener datos históricos para calcular retorno
+                            fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
+                            fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
+                            
+                            with st.spinner(f'Obteniendo histórico para {simbolo}...'):
+                                historico = obtener_historico_activo(token_portador, simbolo, fecha_inicio_str, fecha_fin_str)
+                                
+                            if historico and len(historico) > 1:
+                                precio_inicial = float(historico[0]['ultimoPrecio'])
+                                precio_final = float(historico[-1]['ultimoPrecio'])
+                                retorno_anual = ((precio_final - precio_inicial) / precio_inicial) * 100
+                                
+                                # Ajustar a período anual si es necesario
+                                dias_periodo = (fecha_fin - fecha_inicio).days
+                                if dias_periodo > 0:
+                                    factor_anual = 365 / dias_periodo
+                                    retorno_anual = ((1 + retorno_anual/100) ** factor_anual - 1) * 100
+                                
+                                retornos_activos.append(retorno_anual)
+                                valores_activos.append(valor)
+                        except Exception as e:
+                            st.warning(f"No se pudo obtener el histórico para {simbolo}: {str(e)}")
+                elif tipo_activo == 'TitulosPublicos':
+                    # Para bonos, usar tasa efectiva si está disponible
+                    detalles_bono = obtener_detalle_titulo_publico(token_portador, simbolo)
+                    if detalles_bono and 'tasaEfectiva' in detalles_bono:
+                        retornos_activos.append(float(detalles_bono['tasaEfectiva']))
+                        valores_activos.append(valor)
+                    else:
+                        # Si no hay tasa efectiva, usar un valor por defecto basado en el tipo de bono
+                        tasa_default = 10.0  # Tasa default para bonos sin información
+                        retornos_activos.append(tasa_default)
+                        valores_activos.append(valor)
+            
+            # Calcular retorno ponderado total del portafolio
+            if valores_activos and len(valores_activos) > 0:
+                valor_total_portafolio = sum(valores_activos)
+                if valor_total_portafolio > 0:
+                    retorno_ponderado = np.average(retornos_activos, weights=valores_activos)
+                    
+                    # Mostrar métricas
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Retorno Esperado Anual (Portafolio)", f"+{retorno_ponderado:.1f}%")
+                    with col2:
+                        # Mostrar composición de retornos
+                        st.metric("Retorno FCIs", 
+                                f"{np.average([r for r, v in zip(retornos_activos, valores_activos) if v in valores]):.1f}%" 
+                                if any(v in valores for v in valores_activos) else "N/A")
+                    
+                    # Mostrar desglose de retornos por tipo de activo
+                    with st.expander("🔍 Ver desglose de retornos"):
+                        st.write("Retorno esperado por tipo de activo:")
+                        for tipo, retorno in retornos_esperados.items():
+                            st.write(f"- {tipo}: {retorno}%")
+                    
+                    st.info("💡 El retorno esperado considera el rendimiento histórico de los FCIs y promedios del mercado para otros activos.")
+                    return
+            
+            # Si no se pudo calcular el retorno del portafolio completo, mostrar solo el de FCIs
+            retorno_fcis = np.average(
+                [fci.get('variacionAnual', 0) for fci in [d for d in [obtener_detalle_fci(token_portador, fci['simbolo']) 
                                                               for fci in fcis_portafolio] if d]],
                 weights=valores
             )
-            st.metric("Retorno Esperado Anual", f"+{retorno_ponderado:.1f}%")
+            st.metric("Retorno Esperado Anual (Solo FCIs)", f"+{retorno_fcis:.1f}%")
+            st.warning("⚠️ No se pudo calcular el retorno del portafolio completo. Mostrando solo el retorno de los FCIs.")
         
         # Mostrar detalles de rendimiento para cada FCI
         st.subheader("📊 Rendimiento Detallado")
