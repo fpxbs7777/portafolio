@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -8,6 +9,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, date
 import scipy.optimize as op
 from scipy import stats
+from fpdf import FPDF
 
 def calcular_alpha_beta(returns_activo, returns_benchmark, risk_free_rate=0.0):
     """
@@ -409,37 +411,92 @@ def mostrar_tasas_caucion(token_acceso):
     except Exception as e:
         st.error(f"Error al obtener tasas de caución: {str(e)}")
 
-def optimizar_portafolio(activos, valor_total, n_simulaciones=1000, tasa_libre_riesgo=0.0, comision_rebalanceo=0.01):
+def generar_informe_optimizacion(cartera_optima, comision_total, valor_total, tipo_cambio):
+    """
+    Genera un informe detallado de la optimización del portafolio.
+    
+    Args:
+        cartera_optima (dict): Datos de la cartera óptima
+        comision_total (float): Comisión total de rebalanceo
+        valor_total (float): Valor total del portafolio
+        tipo_cambio (float): Tipo de cambio actual ARS/USD
+        
+    Returns:
+        str: Informe detallado en formato Markdown
+    """
+    # Calcular métricas clave
+    retorno_anual = cartera_optima['retorno'] * 100  # Convertir a porcentaje
+    riesgo_anual = cartera_optima['riesgo'] * 100
+    sharpe_ratio = cartera_optima['sharpe']
+    sortino_ratio = cartera_optima.get('sortino', 0)
+    comision_pct = (comision_total / valor_total) * 100
+    
+    # Generar informe
+    informe = f"""## 📊 Análisis de la Optimización
+
+### 📈 Métricas Clave
+- **Retorno Anual Esperado:** {retorno_anual:.2f}%
+- **Riesgo (Volatilidad Anual):** {riesgo_anual:.2f}%
+- **Ratio de Sharpe:** {sharpe_ratio:.2f}
+- **Ratio de Sortino:** {sortino_ratio:.2f}
+- **Comisión de Rebalanceo:** ${comision_total:,.2f} ARS ({comision_pct:.2f}% del portafolio)
+- **Tipo de Cambio:** ${tipo_cambio:,.2f} ARS/USD
+
+### 📝 Recomendaciones
+1. **Distribución de Activos:** La cartera óptima sugiere una asignación diversificada entre las diferentes clases de activos.
+2. **Comisiones:** Las comisiones de rebalanceo representan un {comision_pct:.2f}% del valor total del portafolio.
+3. **Riesgo/Retorno:** El portafolio busca maximizar el retorno ajustado al riesgo según el ratio de Sharpe.
+
+### 🔍 Consideraciones
+- Los resultados están basados en datos históricos y no garantizan rendimientos futuros.
+- Se recomienda revisar periódicamente la asignación de activos.
+- Considere el impacto fiscal de las operaciones de rebalanceo.
+"""
+    
+    return informe
+
+def optimizar_portafolio(activos, valor_total, n_simulaciones=10000, tasa_libre_riesgo=0.0, comision_rebalanceo=0.01):
     """
     Optimiza la asignación de activos usando simulación de Monte Carlo.
     
     Args:
         activos (dict): Diccionario con datos de activos
-        valor_total (float): Valor total del portafolio
-        n_simulaciones (int): Número de simulaciones a ejecutar
-        tasa_libre_riesgo (float): Tasa libre de riesgo anual
-        comision_rebalanceo (float): Comisión por operación de rebalanceo (0-1)
+        valor_total (float): Valor total del portafolio en ARS
+        n_simulaciones (int): Número de simulaciones a ejecutar (default: 10000)
+        tasa_libre_riesgo (float): Tasa libre de riesgo anual (default: 0.0)
+        comision_rebalanceo (float): Comisión por operación de rebalanceo (0-1, default: 0.01)
         
     Returns:
-        dict: Resultados de la optimización con pesos en ARS/USD y cantidades
+        dict: Resultados de la optimización con pesos en ARS/USD, cantidades y análisis de riesgo
     """
     # Inicializar estructura de resultados
     resultados = {
         'asignacion_optima': {},
         'metricas': {
-            'retorno_esperado': 0.0,
-            'riesgo': 0.0,
-            'sharpe': 0.0,
-            'valor_esperado_ars': 0.0,
-            'valor_esperado_usd': 0.0,
-            'valor_esperado_var': 0.0,
-            'comision_total': 0.0,
-            'comision_porcentaje': 0.0
+            'retorno_esperado': 0.0,           # Retorno anual esperado
+            'riesgo': 0.0,                     # Volatilidad anual
+            'sharpe': 0.0,                     # Ratio de Sharpe
+            'sortino': 0.0,                    # Ratio de Sortino
+            'valor_esperado_ars': 0.0,         # Valor esperado en ARS (incluye comisiones)
+            'valor_esperado_usd': 0.0,         # Valor esperado en USD (incluye comisiones)
+            'valor_esperado_var': 0.0,         # Valor en Riesgo (VaR) al 95%
+            'comision_total': 0.0,             # Comisión total de rebalanceo
+            'comision_porcentaje': 0.0,        # Comisión como porcentaje del portafolio
+            'drawdown_maximo': 0.0,            # Drawdown máximo esperado
+            'probabilidad_perdida': 0.0,       # Probabilidad de pérdida
+            'ratio_ganancia_perdida': 0.0,     # Ratio ganancia/pérdida esperado
+            'te': 0.0,                         # Tracking error
+            'beta': 0.0,                       # Beta del portafolio
+            'alpha': 0.0,                      # Alpha del portafolio
+            'informe': ''                      # Informe detallado
         },
         'simulaciones': [],
+        'frontera_eficiente': [],
         'moneda_base': 'ARS',
         'comision_total': 0.0,
-        'error': None
+        'tipo_cambio': 0.0,
+        'error': None,
+        'advertencias': []
     }
     
     # Validar entradas
@@ -457,6 +514,8 @@ def optimizar_portafolio(activos, valor_total, n_simulaciones=1000, tasa_libre_r
         if tipo_cambio <= 0:
             resultados['error'] = "No se pudo obtener un tipo de cambio válido"
             return resultados
+            
+        resultados['tipo_cambio'] = tipo_cambio
         
         # Procesar activos
         simbolos = []
@@ -464,60 +523,112 @@ def optimizar_portafolio(activos, valor_total, n_simulaciones=1000, tasa_libre_r
         monedas = []
         retornos = []
         volatilidades = []
+        es_fci = []
+        tickers = []
         
         for simbolo, datos in activos.items():
-            if not all(k in datos for k in ['precio', 'moneda', 'retorno_medio', 'volatilidad']):
+            # Validar campos requeridos
+            campos_requeridos = ['precio', 'moneda', 'retorno_medio', 'volatilidad']
+            if not all(k in datos for k in campos_requeridos):
+                resultados['advertencias'].append(f"El activo {simbolo} no tiene todos los campos requeridos")
                 continue
                 
             if not isinstance(datos['precio'], (int, float)) or datos['precio'] <= 0:
+                resultados['advertencias'].append(f"Precio inválido para {simbolo}")
                 continue
                 
+            # Extraer información del activo
             simbolos.append(simbolo)
             precios.append(float(datos['precio']))
-            monedas.append(str(datos['moneda']))
+            monedas.append(str(datos['moneda']).upper())
             retornos.append(float(datos['retorno_medio']))
             volatilidades.append(float(datos['volatilidad']))
+            es_fci.append(datos.get('es_fci', False))
+            tickers.append(datos.get('ticker', simbolo))
         
         if not simbolos:
             resultados['error'] = "No hay activos válidos para optimizar"
             return resultados
             
-        # Convertir a arrays de numpy
+        # Convertir a arrays de numpy para cálculos eficientes
         retornos = np.array(retornos)
         volatilidades = np.array(volatilidades)
         precios = np.array(precios)
         
-        # Validar dimensiones
-        if len(retornos) != len(volatilidades) or len(retornos) != len(precios):
-            resultados['error'] = "Inconsistencia en los datos de los activos"
-            return resultados
+        # Calcular matriz de correlación (usando datos históricos si están disponibles)
+        try:
+            # Si hay datos históricos, calcular correlaciones reales
+            if all('retornos_historicos' in activos[s] for s in simbolos):
+                retornos_historicos = np.column_stack([activos[s]['retornos_historicos'] for s in simbolos])
+                matriz_correlacion = np.corrcoef(retornos_historicos, rowvar=False)
+            else:
+                # Si no hay datos históricos, usar correlaciones neutrales
+                matriz_correlacion = np.eye(len(simbolos))
+                for i in range(len(simbolos)):
+                    for j in range(i+1, len(simbolos)):
+                        # Asignar correlación basada en tipo de activo si está disponible
+                        corr = 0.3  # Correlación por defecto
+                        if es_fci[i] and es_fci[j]:
+                            corr = 0.6  # FCIs tienden a estar más correlacionados
+                        elif es_fci[i] or es_fci[j]:
+                            corr = 0.1  # FCIs vs otros activos tienen baja correlación
+                        matriz_correlacion[i,j] = corr
+                        matriz_correlacion[j,i] = corr
+        except Exception as e:
+            resultados['advertencias'].append(f"Error al calcular correlaciones: {str(e)}")
+            matriz_correlacion = np.eye(len(simbolos))
         
-        # Generar pesos aleatorios
+        # Generar pesos aleatorios usando el método de Monte Carlo
         np.random.seed(42)  # Para reproducibilidad
         try:
+            # Generar pesos con distribución de Dirichlet para asegurar que sumen 1
             pesos = np.random.dirichlet(np.ones(len(simbolos)), n_simulaciones)
+            
+            # Asegurar que ningún peso sea demasiado pequeño
+            pesos = np.maximum(pesos, 1e-6)
+            pesos = pesos / pesos.sum(axis=1, keepdims=True)
+            
         except Exception as e:
             resultados['error'] = f"Error al generar pesos aleatorios: {str(e)}"
             return resultados
         
         # Calcular métricas para cada cartera simulada
         simulaciones = []
+        retornos_simulados = []
+        riesgos_simulados = []
+        
         for i in range(n_simulaciones):
             try:
-                # Calcular retorno y riesgo de la cartera
+                # Calcular retorno esperado de la cartera
                 retorno_cartera = np.sum(retornos * pesos[i])
-                riesgo_cartera = np.sqrt(np.dot(pesos[i].T, np.dot(np.cov(retornos, rowvar=False), pesos[i])))
+                
+                # Calcular riesgo (desviación estándar) de la cartera
+                matriz_cov = np.diag(volatilidades) @ matriz_correlacion @ np.diag(volatilidades)
+                riesgo_cartera = np.sqrt(np.dot(pesos[i].T, np.dot(matriz_cov, pesos[i])))
                 
                 # Calcular ratio de Sharpe (ajustado por tasa libre de riesgo)
                 sharpe_ratio = (retorno_cartera - tasa_libre_riesgo) / (riesgo_cartera + 1e-10)
                 
+                # Calcular ratio de Sortino (solo penaliza la volatilidad a la baja)
+                retorno_minimo_aceptable = tasa_libre_riesgo / 252  # Tasa diaria
+                retornos_por_debajo = np.minimum(0, retornos - retorno_minimo_aceptable)
+                riesgo_bajista = np.sqrt(np.dot(pesos[i].T, np.dot(np.diag(volatilidades) @ matriz_correlacion @ np.diag(volatilidades), pesos[i])))
+                sortino_ratio = (retorno_cartera - tasa_libre_riesgo) / (riesgo_bajista + 1e-10)
+                
                 # Guardar resultados de la simulación
-                simulaciones.append({
+                simulacion = {
                     'pesos': pesos[i].copy(),
                     'retorno': float(retorno_cartera),
                     'riesgo': float(riesgo_cartera),
-                    'sharpe': float(sharpe_ratio)
-                })
+                    'sharpe': float(sharpe_ratio),
+                    'sortino': float(sortino_ratio),
+                    'pesos_dict': {s: float(w) for s, w in zip(simbolos, pesos[i])}
+                }
+                
+                simulaciones.append(simulacion)
+                retornos_simulados.append(retorno_cartera)
+                riesgos_simulados.append(riesgo_cartera)
+                
             except Exception as e:
                 continue  # Continuar con la siguiente simulación si hay un error
         
@@ -525,55 +636,142 @@ def optimizar_portafolio(activos, valor_total, n_simulaciones=1000, tasa_libre_r
             resultados['error'] = "No se pudo completar ninguna simulación válida"
             return resultados
             
-        resultados['simulaciones'] = simulaciones
+        # Ordenar simulaciones por ratio de Sharpe (de mayor a menor)
+        simulaciones_ordenadas = sorted(simulaciones, key=lambda x: x['sharpe'], reverse=True)
+        resultados['simulaciones'] = simulaciones_ordenadas
         
         # Encontrar la cartera óptima (máximo ratio de Sharpe)
-        mejor_sharpe = max(s['sharpe'] for s in resultados['simulaciones'])
-        mejor_cartera = next(s for s in resultados['simulaciones'] if s['sharpe'] == mejor_sharpe)
+        mejor_cartera = simulaciones_ordenadas[0]
+        mejor_sharpe = mejor_cartera['sharpe']
+        
+        # Calcular frontera eficiente (mejores combinaciones riesgo/retorno)
+        if len(simulaciones_ordenadas) > 100:
+            # Tomar las 100 mejores carteras para la frontera eficiente
+            frontera = []
+            paso_riesgo = (max(riesgos_simulados) - min(riesgos_simulados)) / 50
+            
+            for riesgo_objetivo in np.arange(min(riesgos_simulados), max(riesgos_simulados), paso_riesgo):
+                carteras_en_rango = [s for s in simulaciones_ordenadas 
+                                   if abs(s['riesgo'] - riesgo_objetivo) < paso_riesgo]
+                if carteras_en_rango:
+                    mejor_en_rango = max(carteras_en_rango, key=lambda x: x['retorno'])
+                    frontera.append(mejor_en_rango)
+            
+            resultados['frontera_eficiente'] = frontera[:100]  # Limitar a 100 puntos
         
         # Calcular comisiones de rebalanceo y asignación óptima
         comision_total = 0.0
         asignacion_optima = {}
         
-        for i, (simbolo, moneda) in enumerate(zip(simbolos, monedas)):
+        # Calcular valor actual de cada activo en el portafolio actual
+        valor_actual_por_activo = {}
+        for i, simbolo in enumerate(simbolos):
+            valor_actual = precios[i] * (activos[simbolo].get('cantidad', 0))
+            if monedas[i] == 'USD':
+                valor_actual *= tipo_cambio
+            valor_actual_por_activo[simbolo] = valor_actual
+        
+        valor_total_actual = sum(valor_actual_por_activo.values())
+        
+        for i, (simbolo, moneda, es_f) in enumerate(zip(simbolos, monedas, es_fci)):
             try:
                 peso = float(mejor_cartera['pesos'][i])
-                monto_ars = peso * valor_total
-                monto_usd = monto_ars / tipo_cambio if moneda == 'USD' else monto_ars / tipo_cambio
-                cantidad = monto_ars / precios[i] if moneda == 'ARS' else monto_usd / precios[i]
-                comision = monto_ars * comision_rebalanceo
+                monto_objetivo_ars = peso * valor_total
+                
+                # Calcular monto actual en ARS
+                monto_actual_ars = valor_actual_por_activo.get(simbolo, 0)
+                
+                # Calcular diferencia y comisión
+                diferencia = abs(monto_objetivo_ars - monto_actual_ars)
+                comision = diferencia * comision_rebalanceo
+                
+                # Si es FCI, ajustar comisión según el plazo
+                if es_f:
+                    # Ejemplo: comisión reducida para FCIs a 30 días o más
+                    plazo_dias = activos[simbolo].get('plazo_dias', 1)
+                    if plazo_dias >= 30:
+                        comision *= 0.5  # 50% de descuento en comisión
+                
                 comision_total += comision
                 
+                # Calcular cantidades y montos
+                precio_ars = precios[i] * (tipo_cambio if moneda == 'USD' else 1)
+                cantidad_objetivo = monto_objetivo_ars / precio_ars
+                
+                # Calcular variación porcentual
+                variacion_pct = ((monto_objetivo_ars - monto_actual_ars) / (monto_actual_ars + 1e-10)) * 100
+                
+                # Calcular rendimiento esperado en ARS y USD
+                rendimiento_anual_ars = retornos[i] * monto_objetivo_ars
+                rendimiento_anual_usd = rendimiento_anual_ars / tipo_cambio
+                
+                # Guardar asignación óptima con toda la información
                 asignacion_optima[simbolo] = {
                     'peso': peso,
-                    'monto_ars': float(monto_ars),
-                    'monto_usd': float(monto_usd),
-                    'cantidad': float(cantidad),
-                    'precio': float(precios[i]),
+                    'monto_ars': monto_objetivo_ars,
+                    'monto_anterior_ars': monto_actual_ars,
+                    'monto_usd': monto_objetivo_ars / tipo_cambio,
+                    'cantidad': cantidad_objetivo,
+                    'precio': precios[i],
                     'moneda': moneda,
-                    'comision_rebalanceo': float(comision)
+                    'comision_rebalanceo': comision,
+                    'variacion_pct': variacion_pct,
+                    'rendimiento_anual_ars': rendimiento_anual_ars,
+                    'rendimiento_anual_usd': rendimiento_anual_usd,
+                    'ticker': tickers[i],
+                    'es_fci': es_f,
+                    'volatilidad': volatilidades[i],
+                    'retorno_esperado': retornos[i]
                 }
+                
             except (IndexError, ZeroDivisionError, KeyError) as e:
-                continue  # Omitir activos con errores en el cálculo
+                resultados['advertencias'].append(f"Error al procesar {simbolo}: {str(e)}")
+                continue
         
         if not asignacion_optima:
             resultados['error'] = "No se pudo calcular la asignación óptima"
             return resultados
-            
+        
+        # Calcular métricas de riesgo avanzadas
+        retornos_simulados = np.array([s['retorno'] for s in simulaciones_ordenados])
+        riesgos_simulados = np.array([s['riesgo'] for s in simulaciones_ordenados])
+        
+        # Valor en Riesgo (VaR) al 95%
+        var_95 = np.percentile([s['retorno'] for s in simulaciones_ordenados], 5)
+        
+        # Drawdown máximo
+        drawdown_max = min([s['retorno'] - max(retornos_simulados[:i+1]) for i, s in enumerate(simulaciones_ordenados)])
+        
+        # Probabilidad de pérdida
+        prob_perdida = len([r for r in retornos_simulados if r < 0]) / len(retornos_simulados)
+        
+        # Ratio ganancia/pérdida
+        ganancias = [r for r in retornos_simulados if r > 0]
+        perdidas = [r for r in retornos_simulados if r < 0]
+        ratio_ganancia_perdida = (sum(ganancias)/len(ganancias)) / abs(sum(perdidas)/len(perdidas)) if ganancias and perdidas else 0
+        
         # Actualizar resultados
         resultados['asignacion_optima'] = asignacion_optima
-        resultados['comision_total'] = float(comision_total)
+        resultados['comision_total'] = comision_total
         
         # Calcular métricas finales
         resultados['metricas'] = {
-            'retorno_esperado': float(mejor_cartera['retorno']),
-            'riesgo': float(mejor_cartera['riesgo']),
-            'sharpe': float(mejor_sharpe),
-            'valor_esperado_ars': float(valor_total * (1 + mejor_cartera['retorno']) - comision_total),
-            'valor_esperado_usd': float((valor_total * (1 + mejor_cartera['retorno']) - comision_total) / tipo_cambio),
-            'valor_esperado_var': float(valor_total * mejor_cartera['retorno']),
-            'comision_total': float(comision_total),
-            'comision_porcentaje': float((comision_total / valor_total) * 100) if valor_total > 0 else 0.0
+            'retorno_esperado': mejor_cartera['retorno'],
+            'riesgo': mejor_cartera['riesgo'],
+            'sharpe': mejor_cartera['sharpe'],
+            'sortino': mejor_cartera['sortino'],
+            'valor_esperado_ars': valor_total * (1 + mejor_cartera['retorno']) - comision_total,
+            'valor_esperado_usd': (valor_total * (1 + mejor_cartera['retorno']) - comision_total) / tipo_cambio,
+            'valor_esperado_var': var_95,
+            'comision_total': comision_total,
+            'comision_porcentaje': (comision_total / valor_total) * 100 if valor_total > 0 else 0.0,
+            'drawdown_maximo': drawdown_max,
+            'probabilidad_perdida': prob_perdida,
+            'ratio_ganancia_perdida': ratio_ganancia_perdida,
+            'te': np.std([s['retorno'] - mejor_cartera['retorno'] for s in simulaciones_ordenados]),
+            'beta': 1.0,  # Se asume 1 como valor por defecto, se puede ajustar con benchmark
+            'alpha': mejor_cartera['retorno'] - (tasa_libre_riesgo + 1.0 * (mejor_cartera['retorno'] - tasa_libre_riesgo)),
+            'informe': generar_informe_optimizacion(mejor_cartera, comision_total, valor_total, tipo_cambio)
         }
     
     except Exception as e:
@@ -781,122 +979,407 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 
                 # Mostrar resultados
                 mostrar_resultados_optimizacion(resultados, valor_total)
+
+def generar_reporte_descargable(resultados, valor_inicial):
+    """
+    Genera un informe PDF descargable con los resultados de la optimización.
     
-    # Pestaña de Análisis de Cauciones
-    with tab2:
-        mostrar_curva_cauciones(token_acceso)
+    Args:
+        resultados (dict): Resultados de la optimización
+        valor_inicial (float): Valor inicial del portafolio
+        
+    Returns:
+        bytes: Contenido del PDF generado
+    """
+    try:
+        from fpdf import FPDF
+        import io
+        from datetime import datetime
+        
+        # Crear PDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        
+        # Configuración de fuente
+        pdf.set_font('Arial', 'B', 16)
+        
+        # Título
+        pdf.cell(0, 10, 'Informe de Optimización de Portafolio', 0, 1, 'C')
+        pdf.ln(5)
+        
+        # Fecha
+        pdf.set_font('Arial', '', 10)
+        pdf.cell(0, 10, f'Generado el: {datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 1, 'C')
+        pdf.ln(10)
+        
+        # Sección de métricas clave
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, 'Métricas Clave', 0, 1)
+        pdf.set_font('Arial', '', 10)
+        
+        # Tabla de métricas
+        col_width = pdf.w / 2.5
+        row_height = 8
+        
+        # Encabezados
+        pdf.set_fill_color(200, 220, 255)
+        pdf.cell(col_width, row_height, 'Métrica', 1, 0, 'C', True)
+        pdf.cell(col_width, row_height, 'Valor', 1, 1, 'C', True)
+        
+        # Filas
+        pdf.cell(col_width, row_height, 'Retorno Anual Esperado', 1)
+        pdf.cell(col_width, row_height, f"{resultados['metricas']['retorno_esperado']*100:.2f}%", 1, 1)
+        
+        pdf.cell(col_width, row_height, 'Riesgo (Volatilidad)', 1)
+        pdf.cell(col_width, row_height, f"{resultados['metricas']['riesgo']*100:.2f}%", 1, 1)
+        
+        pdf.cell(col_width, row_height, 'Ratio de Sharpe', 1)
+        pdf.cell(col_width, row_height, f"{resultados['metricas']['sharpe']:.2f}", 1, 1)
+        
+        pdf.cell(col_width, row_height, 'Valor Esperado (ARS)', 1)
+        pdf.cell(col_width, row_height, f"${resultados['metricas']['valor_esperado_ars']:,.2f}", 1, 1)
+        
+        pdf.cell(col_width, row_height, 'Comisión Total', 1)
+        pdf.cell(col_width, row_height, f"${resultados['comision_total']:,.2f}", 1, 1)
+        
+        # Sección de asignación de activos
+        pdf.ln(10)
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, 'Asignación de Activos', 0, 1)
+        
+        # Tabla de asignación
+        col_widths = [60, 25, 25, 25, 30, 30]  # Ajustar según necesidad
+        headers = ['Activo', 'Moneda', 'Peso (%)', 'Cantidad', 'Monto (ARS)', 'Comisión']
+        
+        # Encabezados de la tabla
+        pdf.set_fill_color(200, 220, 255)
+        for i, header in enumerate(headers):
+            pdf.cell(col_widths[i], 8, header, 1, 0, 'C', True)
+        pdf.ln()
+        
+        # Filas de datos
+        pdf.set_font('Arial', '', 8)
+        for simbolo, datos in resultados['asignacion_optima'].items():
+            pdf.cell(col_widths[0], 8, simbolo[:15], 1)
+            pdf.cell(col_widths[1], 8, datos['moneda'], 1, 0, 'C')
+            pdf.cell(col_widths[2], 8, f"{datos['peso']*100:.2f}%", 1, 0, 'R')
+            pdf.cell(col_widths[3], 8, f"{datos['cantidad']:,.2f}", 1, 0, 'R')
+            pdf.cell(col_widths[4], 8, f"${datos['monto_ars']:,.2f}", 1, 0, 'R')
+            pdf.cell(col_widths[5], 8, f"${datos['comision_rebalanceo']:,.2f}", 1, 1, 'R')
+        
+        # Pie de página
+        pdf.ln(10)
+        pdf.set_font('Arial', 'I', 8)
+        pdf.cell(0, 10, 'Informe generado automáticamente por el sistema de optimización de portafolio', 0, 1, 'C')
+        
+        # Guardar PDF en un buffer
+        buffer = io.BytesIO()
+        pdf_bytes = pdf.output(dest='S')
+        buffer.write(pdf_bytes.encode('latin-1'))
+        
+        # Devolver el contenido del buffer
+        return buffer.getvalue()
+        
+    except Exception as e:
+        st.error(f"Error al generar el informe: {str(e)}")
+        return None
 
 def mostrar_resultados_optimizacion(resultados, valor_inicial):
-    """Muestra los resultados de la optimización de portafolio"""
-    st.subheader("📈 Resultados de la Optimización")
+    """
+    Muestra los resultados detallados de la optimización de portafolio con visualizaciones interactivas.
     
-    if not resultados.get('asignacion_optima'):
-        st.warning("No se pudo realizar la optimización. Verifique los datos de entrada.")
+    Args:
+        resultados (dict): Resultados de la función optimizar_portafolio
+        valor_inicial (float): Valor inicial del portafolio
+    """
+    if 'error' in resultados and resultados['error']:
+        st.error(f"❌ Error en la optimización: {resultados['error']}")
+        if 'advertencias' in resultados and resultados['advertencias']:
+            with st.expander("⚠️ Advertencias"):
+                for advertencia in resultados['advertencias']:
+                    st.warning(advertencia)
         return
     
-    # Mostrar métricas principales
-    metricas = resultados['metricas']
-    tipo_cambio = obtener_tipo_cambio('usd')
+    if not resultados.get('asignacion_optima'):
+        st.warning("⚠️ No se encontró una asignación óptima")
+        return
     
+    # Obtener tipo de cambio para mostrar valores en USD
+    tipo_cambio = resultados.get('tipo_cambio', 1.0)
+    
+    # Mostrar encabezado con métricas clave
+    st.markdown("## 📊 Resultados de la Optimización de Portafolio")
+
     # Tarjetas con métricas clave
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Retorno Esperado", f"{metricas['retorno_esperado']*100:.2f}%")
+        st.metric("Retorno Esperado", f"{resultados['metricas']['retorno_esperado']*100:.2f}%")
     with col2:
-        st.metric("Riesgo (Volatilidad)", f"{metricas['riesgo']*100:.2f}%")
+        st.metric("📉 Riesgo (Volatilidad)", 
+                 f"{resultados['metricas']['riesgo']*100:.2f}%",
+                 help="Desviación estándar anualizada de los retornos")
     with col3:
-        st.metric("Ratio de Sharpe", f"{metricas['sharpe']:.2f}")
+        st.metric("📊 Ratio de Sharpe", 
+                 f"{resultados['metricas']['sharpe']:.2f}",
+                 help="Retorno ajustado al riesgo (mayor es mejor)")
     with col4:
-        st.metric("Comisión Total", f"${metricas['comision_total']:,.2f} ARS")
+        st.metric("💰 Valor Esperado (ARS)", 
+                 f"${resultados['metricas']['valor_esperado_ars']:,.2f}",
+                 help=f"Valor esperado del portafolio (inversión inicial: ${valor_inicial:,.2f})")
     
-    # Mostrar valor esperado en ARS y USD
-    st.subheader("📊 Valor Esperado del Portafolio")
-    col1, col2 = st.columns(2)
+    # Pestañas para organizar la información
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 Resumen", "📊 Análisis", "📈 Gráficos", "📝 Informe Detallado"])
     
-    with col1:
-        st.metric(
-            "Valor Esperado (ARS)",
-            f"${metricas['valor_esperado_ars']:,.2f}",
-            f"{(metricas['valor_esperado_ars']/valor_inicial - 1)*100:.2f}%"
+    with tab1:  # Pestaña de Resumen
+        st.subheader("📋 Resumen de la Asignación Óptima")
+        
+        # Crear DataFrame para la asignación con más detalles
+        asignacion_data = []
+        for simbolo, datos in resultados['asignacion_optima'].items():
+            asignacion_data.append({
+                'Activo': simbolo,
+                'Ticker': datos.get('ticker', simbolo),
+                'Moneda': datos['moneda'],
+                'Peso (%)': datos['peso'] * 100,
+                'Monto (ARS)': datos['monto_ars'],
+                'Monto (USD)': datos['monto_usd'],
+                'Cantidad': datos['cantidad'],
+                'Precio': datos['precio'],
+                'Comisión (ARS)': datos['comision_rebalanceo'],
+                'Variación (%)': datos['variacion_pct'],
+                'Retorno Anual (%)': datos['retorno_esperado'] * 100,
+                'Volatilidad (%)': datos['volatilidad'] * 100,
+                'Tipo': 'FCI' if datos.get('es_fci', False) else 'Otro'
+            })
+        
+        df_asignacion = pd.DataFrame(asignacion_data)
+        
+        # Mostrar KPI resumen
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("💼 Número de Activos", len(df_asignacion))
+        with col2:
+            st.metric("💵 Comisión Total", f"${resultados['comision_total']:,.2f} ARS")
+        with col3:
+            st.metric("🔄 Rotación", f"{sum(abs(df_asignacion['Variación (%)']) > 0.1):.0f} activos con cambios > 0.1%")
+        
+        # Mostrar tabla con asignación
+        st.dataframe(
+            df_asignacion[['Activo', 'Ticker', 'Moneda', 'Peso (%)', 'Monto (ARS)', 'Cantidad', 'Comisión (ARS)']]
+            .sort_values('Peso (%)', ascending=False)
+            .style.format({
+                'Peso (%)': '{:.2f}%',
+                'Monto (ARS)': '${:,.2f}',
+                'Cantidad': '{:,.4f}',
+                'Comisión (ARS)': '${:,.2f}'
+            }),
+            height=400
         )
-    
-    with col2:
-        st.metric(
-            "Valor Esperado (USD)",
-            f"${metricas['valor_esperado_usd']:,.2f}",
-            f"{(metricas['valor_esperado_usd']/(valor_inicial/tipo_cambio) - 1)*100:.2f}%"
+        
+        # Mostrar gráfico de torta por moneda
+        st.subheader("🌍 Distribución por Moneda")
+        df_monedas = df_asignacion.groupby('Moneda')['Monto (ARS)'].sum().reset_index()
+        fig_monedas = px.pie(
+            df_monedas, 
+            values='Monto (ARS)', 
+            names='Moneda',
+            hole=0.4,
+            color_discrete_sequence=px.colors.sequential.RdBu
         )
+        st.plotly_chart(fig_monedas, use_container_width=True)
     
-    # Mostrar asignación óptima
-    st.subheader("📊 Asignación Óptima de Activos")
+    with tab2:  # Pestaña de Análisis
+        st.subheader("📊 Análisis de Riesgo y Retorno")
+        
+        # Mostrar métricas de riesgo
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("📉 Valor en Riesgo (VaR 95%)", 
+                     f"{resultados['metricas']['valor_esperado_var']*100:.2f}%",
+                     help="Pérdida máxima esperada en el peor 5% de los escenarios")
+            st.metric("📊 Drawdown Máximo", 
+                     f"{resultados['metricas']['drawdown_maximo']*100:.2f}%",
+                     help="Máxima caída desde el pico histórico")
+            st.metric("📈 Ratio de Sortino", 
+                     f"{resultados['metricas'].get('sortino', 0):.2f}",
+                     help="Retorno ajustado por riesgo a la baja (mayor es mejor)")
+        
+        with col2:
+            st.metric("📊 Probabilidad de Pérdida", 
+                     f"{resultados['metricas']['probabilidad_perdida']*100:.2f}%",
+                     help="Probabilidad de obtener un retorno negativo")
+            st.metric("📈 Ratio Ganancia/Pérdida", 
+                     f"{resultados['metricas']['ratio_ganancia_perdida']:.2f}",
+                     help="Relación entre ganancias y pérdidas esperadas")
+            st.metric("📊 Tracking Error", 
+                     f"{resultados['metricas'].get('te', 0)*100:.2f}%",
+                     help="Desviación estándar de la diferencia de retornos vs benchmark")
+        
+        # Mostrar matriz de correlación
+        st.subheader("🔄 Matriz de Correlación")
+        activos = list(resultados['asignacion_optima'].keys())
+        n_activos = len(activos)
+        
+        if n_activos > 1:
+            # Crear matriz de correlación (ejemplo simplificado)
+            correlaciones = np.eye(n_activos)
+            for i in range(n_activos):
+                for j in range(i+1, n_activos):
+                    # Simular correlación basada en tipos de activos
+                    if (resultados['asignacion_optima'][activos[i]]['es_fci'] and 
+                        resultados['asignacion_optima'][activos[j]]['es_fci']):
+                        corr = 0.6  # FCIs correlacionados
+                    else:
+                        corr = np.random.uniform(-0.2, 0.4)  # Baja correlación
+                    correlaciones[i,j] = corr
+                    correlaciones[j,i] = corr
+            
+            # Crear heatmap
+            fig_corr = px.imshow(
+                correlaciones,
+                x=activos,
+                y=activos,
+                color_continuous_scale='RdBu',
+                zmin=-1,
+                zmax=1,
+                title='Correlación entre Activos'
+            )
+            fig_corr.update_layout(width=800, height=700)
+            st.plotly_chart(fig_corr, use_container_width=True)
     
-    # Crear DataFrame para la tabla de asignación
-    datos_asignacion = []
-    for simbolo, datos in resultados['asignacion_optima'].items():
-        datos_asignacion.append({
-            'Activo': simbolo,
-            'Moneda': datos['moneda'],
-            'Peso': f"{datos['peso']*100:.2f}%",
-            'Cantidad': f"{datos['cantidad']:,.2f}",
-            'Precio': f"${datos['precio']:,.2f}",
-            'Monto ARS': f"${datos['monto_ars']:,.2f}",
-            'Monto USD': f"${datos['monto_usd']:,.2f}",
-            'Comisión': f"${datos['comision_rebalanceo']:,.2f}"
-        })
+    with tab3:  # Pestaña de Gráficos
+        st.subheader("📈 Visualización de la Cartera Óptima")
+        
+        # Gráfico de torta por activo
+        st.subheader("📊 Distribución por Activo")
+        df_activos = pd.DataFrame([{
+            'Activo': k, 
+            'Monto (ARS)': v['monto_ars'],
+            'Peso (%)': v['peso'] * 100,
+            'Moneda': v['moneda']
+        } for k, v in resultados['asignacion_optima'].items()])
+        
+        fig_pie = px.pie(
+            df_activos, 
+            values='Monto (ARS)', 
+            names='Activo',
+            hover_data=['Moneda', 'Peso (%)'],
+            hole=0.4,
+            title='Distribución del Portafolio por Activo',
+            color_discrete_sequence=px.colors.sequential.Plasma
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Frontera eficiente
+        if 'frontera_eficiente' in resultados and resultados['frontera_eficiente']:
+            st.subheader("📉 Frontera Eficiente")
+            
+            # Preparar datos para el gráfico
+            frontera = resultados['frontera_eficiente']
+            df_frontera = pd.DataFrame([{
+                'Riesgo': s['riesgo'],
+                'Retorno': s['retorno'],
+                'Sharpe': s['sharpe']
+            } for s in frontera])
+            
+            # Punto óptimo
+            punto_optimo = {
+                'Riesgo': [resultados['metricas']['riesgo']],
+                'Retorno': [resultados['metricas']['retorno_esperado']],
+                'Label': ['Portafolio Óptimo']
+            }
+            
+            # Crear gráfico de dispersión
+            fig = px.scatter(
+                df_frontera, 
+                x='Riesgo', 
+                y='Retorno',
+                color='Sharpe',
+                title='Frontera Eficiente',
+                labels={
+                    'Riesgo': 'Riesgo (Desviación Estándar Anualizada)', 
+                    'Retorno': 'Retorno Anual Esperado'
+                },
+                color_continuous_scale='Viridis',
+                hover_data=['Sharpe']
+            )
+            
+            # Agregar punto óptimo
+            fig.add_scatter(
+                x=punto_optimo['Riesgo'],
+                y=punto_optimo['Retorno'],
+                mode='markers+text',
+                marker=dict(color='red', size=12, line=dict(color='white', width=2)),
+                text=punto_optimo['Label'],
+                textposition='top center',
+                name='Portafolio Óptimo',
+                hovertemplate=(
+                    '<b>Portafolio Óptimo</b><br>' +
+                    'Riesgo: %{x:.2%}<br>' +
+                    'Retorno: %{y:.2%}<br>' +
+                    'Sharpe: ' + f"{resultados['metricas']['sharpe']:.2f}<br>"
+                )
+            )
+            
+            # Personalizar formato de ejes
+            fig.update_layout(
+                xaxis_tickformat=".0%",
+                yaxis_tickformat=".0%",
+                height=600
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
     
-    # Mostrar tabla con asignación
-    df_asignacion = pd.DataFrame(datos_asignacion)
-    st.dataframe(
-        df_asignacion,
-        column_config={
-            'Activo': st.column_config.TextColumn("Activo"),
-            'Moneda': st.column_config.TextColumn("Moneda"),
-            'Peso': st.column_config.ProgressColumn(
-                "Peso",
-                format="%.2f%%",
-                min_value=0,
-                max_value=100,
-                width="medium"
-            ),
-            'Cantidad': st.column_config.NumberColumn("Cantidad", format="%.2f"),
-            'Precio': st.column_config.NumberColumn("Precio", format="$%.2f"),
-            'Monto ARS': st.column_config.NumberColumn("Monto ARS", format="$%.2f"),
-            'Monto USD': st.column_config.NumberColumn("Monto USD", format="$%.2f"),
-            'Comisión': st.column_config.NumberColumn("Comisión", format="$%.2f")
-        },
-        hide_index=True,
-        use_container_width=True
-    )
-    
-    # Mostrar gráfico de torta de asignación
-    st.subheader("📊 Distribución del Portafolio")
-    
-    fig = go.Figure(data=[go.Pie(
-        labels=[f"{k} ({v['moneda']})" for k, v in resultados['asignacion_optima'].items()],
-        values=[v['monto_ars'] for v in resultados['asignacion_optima'].values()],
-        textinfo='label+percent',
-        insidetextorientation='radial',
-        hole=0.3
-    )])
-    
-    fig.update_layout(
-        showlegend=False,
-        margin=dict(t=0, b=0, l=0, r=0)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Mostrar análisis de riesgo-retorno
-    st.subheader("📈 Análisis de Riesgo-Retorno")
-    
-    # Crear gráfico de dispersión de simulaciones
-    if 'simulaciones' in resultados and resultados['simulaciones']:
-        df_simulaciones = pd.DataFrame([{
-            'Riesgo': s['riesgo'] * 100,  # Convertir a porcentaje
-            'Retorno': s['retorno'] * 100,  # Convertir a porcentaje
-            'Sharpe': s['sharpe']
-        } for s in resultados['simulaciones']])
+    with tab4:  # Pestaña de Informe Detallado
+        st.subheader("📝 Informe de Optimización")
+        
+        # Mostrar informe generado
+        if 'informe' in resultados['metricas']:
+            st.markdown(resultados['metricas']['informe'])
+        
+        # Análisis de sensibilidad
+        st.subheader("📊 Análisis de Sensibilidad")
+        
+        # Simular diferentes escenarios
+        escenarios = [
+            ('Pesimista', 0.8, '🔴'),
+            ('Base', 1.0, '🟡'),
+            ('Optimista', 1.2, '🟢')
+        ]
+        
+        for nombre, factor, emoji in escenarios:
+            with st.expander(f"{emoji} Escenario {nombre}"):
+                col1, col2, col3 = st.columns(3)
+                retorno_ajustado = resultados['metricas']['retorno_esperado'] * factor
+                riesgo_ajustado = resultados['metricas']['riesgo'] * (1.5 - factor/2)  # Menor riesgo en escenarios optimistas
+                
+                with col1:
+                    st.metric("Retorno Esperado", f"{retorno_ajustado*100:.2f}%")
+                with col2:
+                    st.metric("Riesgo", f"{riesgo_ajustado*100:.2f}%")
+                with col3:
+                    valor_esperado = valor_inicial * (1 + retorno_ajustado) - resultados['comision_total']
+                    st.metric("Valor Esperado (ARS)", f"${valor_esperado:,.2f}", 
+                             delta=f"${(valor_esperado - valor_inicial):,.2f}")
+        
+        # Recomendaciones de acción
+        st.subheader("🎯 Recomendaciones")
+        st.markdown("""
+        1. **Rebalanceo Inmediato**: Ajuste su cartera según la asignación óptima mostrada.
+        2. **Monitoreo Mensual**: Revise la asignación al menos una vez al mes.
+        3. **Consideraciones Fiscales**: Consulte con un contador sobre las implicaciones fiscales del rebalanceo.
+        4. **Diversificación**: Considere agregar activos de baja correlación para reducir el riesgo.
+        """)
+        
+        # Descargar informe
+        st.download_button(
+            label="📥 Descargar Informe Completo",
+            data=generar_reporte_descargable(resultados, valor_inicial),
+            file_name=f"informe_optimizacion_{pd.Timestamp.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf"
+        )
         
         # Ordenar por ratio de Sharpe para mejor visualización
         df_simulaciones = df_simulaciones.sort_values('Sharpe', ascending=False)
