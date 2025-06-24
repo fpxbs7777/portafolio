@@ -2489,7 +2489,7 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
         return
     
     # Mostrar resumen de FCIs
-    st.header("Fondos Comunes de Inversión en su Portafolio")
+    st.header("📊 Fondos Comunes de Inversión en su Portafolio")
     
     # Crear tabla de resumen
     resumen_data = []
@@ -2505,26 +2505,98 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
         resumen_data.append({
             'Símbolo': simbolo,
             'Descripción': detalles.get('descripcion', 'N/A') if detalles else 'N/A',
-            'Cantidad': f"{cantidad:,.2f}",
-            'Precio': f"${precio:,.2f}",
-            'Valor': f"${valor:,.2f}",
+            'Cantidad': cantidad,
+            'Precio': precio,
+            'Valor': valor,
             'Tipo': detalles.get('tipoFondo', 'N/A') if detalles else 'N/A',
             'Horizonte': detalles.get('horizonteInversion', 'N/A') if detalles else 'N/A',
             'Perfil': detalles.get('perfilInversor', 'N/A') if detalles else 'N/A',
-            'Variación 24h': f"{detalles.get('variacion', 0):.2f}%" if detalles else 'N/A',
+            'Var. 24h': detalles.get('variacion', 0) if detalles else 0,
+            'Var. Mensual': detalles.get('variacionMensual', 0) if detalles else 0,
+            'Var. Anual': detalles.get('variacionAnual', 0) if detalles else 0,
         })
     
     # Mostrar tabla de resumen
     if resumen_data:
         df_resumen = pd.DataFrame(resumen_data)
-        st.dataframe(df_resumen, use_container_width=True)
+        
+        # Formatear columnas para visualización
+        display_columns = {
+            'Símbolo': 'Símbolo',
+            'Descripción': 'Descripción',
+            'Cantidad': st.column_config.NumberColumn('Cantidad', format='%.2f'),
+            'Precio': st.column_config.NumberColumn('Precio', format='$%.2f'),
+            'Valor': st.column_config.NumberColumn('Valor', format='$%.2f'),
+            'Tipo': 'Tipo',
+            'Horizonte': 'Horizonte',
+            'Perfil': 'Perfil',
+            'Var. 24h': st.column_config.NumberColumn('Var. 24h', format='%.2f%%'),
+            'Var. Mensual': st.column_config.NumberColumn('Var. Mensual', format='%.2f%%'),
+            'Var. Anual': st.column_config.NumberColumn('Var. Anual', format='%.2f%%')
+        }
+        
+        # Mostrar métricas de riesgo
+        st.subheader("⚖️ Análisis de Riesgo")
+        
+        # Calcular métricas de concentración
+        valores = df_resumen['Valor'].values
+        valor_total = valores.sum()
+        
+        if valor_total > 0:
+            # Calcular índice de Herfindahl-Hirschman (HHI) para medir concentración
+            participaciones = (valores / valor_total) * 100
+            hhi = np.sum(participaciones ** 2)
+            
+            # Determinar nivel de concentración
+            if hhi < 1000:
+                nivel_concentracion = "🟢 Baja"
+            elif hhi < 1800:
+                nivel_concentracion = "🟡 Moderada"
+            else:
+                nivel_concentracion = "🔴 Alta"
+            
+            # Calcular volatilidad promedio ponderada
+            volatilidad_ponderada = np.average(
+                [fci.get('volatilidad_anual', 0) for fci in fcis_portafolio],
+                weights=valores
+            )
+            
+            # Mostrar métricas en columnas
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Concentración", f"{hhi:.1f}")
+            with col2:
+                st.metric("Volatilidad Anual", f"{volatilidad_ponderada:.1f}%")
+            with col3:
+                st.metric("Nivel Concentración", nivel_concentracion)
+        
+        # Mostrar tabla de FCIs
+        st.subheader("📋 Resumen de FCIs")
+        st.dataframe(
+            df_resumen[display_columns.keys()],
+            column_config=display_columns,
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Mostrar proyecciones de rendimiento
+        st.subheader("📈 Proyecciones de Rendimiento")
+        
+        # Calcular retorno esperado ponderado
+        if valor_total > 0:
+            retorno_ponderado = np.average(
+                [fci.get('variacionAnual', 0) for fci in [d for d in [obtener_detalle_fci(token_portador, fci['Símbolo']) 
+                                                              for fci in fcis_portafolio] if d]],
+                weights=valores
+            )
+            st.metric("Retorno Esperado Anual", f"+{retorno_ponderado:.1f}%")
         
         # Mostrar detalles de rendimiento para cada FCI
-        st.subheader("Rendimiento Histórico")
+        st.subheader("📊 Rendimiento Detallado")
         
-        # Obtener fechas para el histórico (últimos 90 días)
+        # Obtener fechas para el histórico (últimos 6 meses para mejor análisis)
         fecha_hasta = date.today()
-        fecha_desde = fecha_hasta - timedelta(days=90)
+        fecha_desde = fecha_hasta - timedelta(days=180)
         
         # Crear pestañas para cada FCI
         tabs = st.tabs([f"{fci['simbolo']}" for fci in fcis_portafolio])
@@ -2533,6 +2605,7 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
             with tab:
                 fci = fcis_portafolio[idx]
                 simbolo = fci.get('simbolo')
+                detalles = obtener_detalle_fci(token_portador, simbolo)
                 
                 # Obtener datos históricos
                 historico = obtener_serie_historica_fci(token_portador, simbolo, 
@@ -2542,16 +2615,22 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
                 if historico is not None and not historico.empty:
                     # Calcular métricas
                     retorno_total = ((historico['precio'].iloc[-1] / historico['precio'].iloc[0]) - 1) * 100
+                    retorno_anualizado = ((1 + retorno_total/100) ** (252/len(historico)) - 1) * 100
                     volatilidad = historico['precio'].pct_change().std() * np.sqrt(252) * 100  # Anualizada
-                    sharpe = (retorno_total - 40) / (volatilidad + 1e-10)  # Tasa libre de riesgo del 40%
+                    sharpe = (retorno_anualizado - 40) / (volatilidad + 1e-10)  # Tasa libre de riesgo del 40%
                     
-                    # Mostrar métricas
-                    col1, col2, col3 = st.columns(3)
+                    # Usar el retorno anual del FCI si está disponible, de lo contrario usar el histórico
+                    retorno_final = detalles.get('variacionAnual', retorno_anualizado) if detalles else retorno_anualizado
+                    
+                    # Mostrar métricas en columnas
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Retorno Total", f"{retorno_total:.2f}%")
+                        st.metric("Retorno Histórico", f"{retorno_anualizado:.1f}%")
                     with col2:
-                        st.metric("Volatilidad Anual", f"{volatilidad:.2f}%")
+                        st.metric("Retorno FCI", f"{detalles.get('variacionAnual', 'N/A')}%" if detalles else "N/A")
                     with col3:
+                        st.metric("Volatilidad Anual", f"{volatilidad:.1f}%")
+                    with col4:
                         st.metric("Ratio de Sharpe", f"{sharpe:.2f}")
                     
                     # Gráfico de evolución
@@ -2568,16 +2647,45 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
                         xaxis_title='Fecha',
                         yaxis_title='Valor Cuotaparte ($)',
                         showlegend=True,
-                        height=400
+                        height=400,
+                        xaxis=dict(
+                            rangeselector=dict(
+                                buttons=list([
+                                    dict(count=1, label="1m", step="month", stepmode="backward"),
+                                    dict(count=3, label="3m", step="month", stepmode="backward"),
+                                    dict(count=6, label="6m", step="month", stepmode="backward"),
+                                    dict(step="all")
+                                ])
+                            ),
+                            rangeslider=dict(visible=True),
+                            type="date"
+                        )
                     )
                     
                     st.plotly_chart(fig, use_container_width=True)
                     
+                    # Mostrar información adicional del FCI
+                    if detalles:
+                        st.subheader("ℹ️ Información del Fondo")
+                        info_cols = st.columns(2)
+                        with info_cols[0]:
+                            st.write(f"**Administradora:** {detalles.get('tipoAdministradoraTituloFCI', 'N/A')}")
+                            st.write(f"**Horizonte de Inversión:** {detalles.get('horizonteInversion', 'N/A')}")
+                            st.write(f"**Perfil de Inversor:** {detalles.get('perfilInversor', 'N/A')}")
+                        with info_cols[1]:
+                            st.write(f"**Monto Mínimo:** ${detalles.get('montoMinimo', 'N/A')}")
+                            st.write(f"**Plazo de Rescate:** {detalles.get('rescate', 'N/A')}")
+                            st.write(f"**Moneda:** {detalles.get('moneda', 'N/A')}")
+                    
                     # Mostrar tabla con datos históricos
-                    st.subheader("Datos Históricos")
-                    st.dataframe(historico, use_container_width=True)
+                    with st.expander("📋 Ver datos históricos completos"):
+                        st.dataframe(historico, use_container_width=True)
                 else:
                     st.warning(f"No se encontraron datos históricos para {simbolo}")
+                    
+                    if detalles:
+                        st.subheader("ℹ️ Información del Fondo")
+                        st.json({k: v for k, v in detalles.items() if v is not None})
     else:
         st.info("No hay datos para mostrar.")
 
