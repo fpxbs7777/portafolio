@@ -430,23 +430,6 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
-            continue
 
     try:
         return pd.to_datetime(datetime_string, infer_datetime_format=True)
@@ -498,6 +481,26 @@ def parse_datetime_flexible(date_str: str):
     """
     if not isinstance(date_str, str):
         return None
+        
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "ISO8601",
+        "mixed"
+    ]
+    
+    for fmt in formats_to_try:
+        try:
+            if fmt == "ISO8601":
+                return pd.to_datetime(date_str, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(date_str, format='mixed')
+            else:
+                return pd.to_datetime(date_str, format=fmt)
+        except Exception:
+            continue
     try:
         # First try parsing with the exact format that matches the error
         try:
