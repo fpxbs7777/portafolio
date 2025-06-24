@@ -2573,15 +2573,22 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 # Verificar si el activo está en USD
                 moneda_activo = activo.get('monedaCotizacion', 'ARS').upper()
                 
-                if moneda_activo == 'USD' and tasa_mep > 0:
-                    # Convertir el valor a ARS usando la tasa MEP
-                    valor_ars = valuacion * tasa_mep
-                    valor_total_ars += valor_ars
-                    moneda_mostrar = 'USD (convertido a ARS)'
+                if moneda_activo == 'USD':
+                    if tasa_mep > 0:
+                        # Convertir el valor a ARS usando la tasa MEP
+                        valor_ars = valuacion * tasa_mep
+                        moneda_mostrar = 'USD (convertido a ARS)'
+                    else:
+                        valor_ars = 0
+                        moneda_mostrar = 'USD (sin tasa de cambio)'
+                    # Mantener el valor en USD para el total de activos USD
+                    valor_total_usd = valuacion
                 else:
                     valor_ars = valuacion
-                    valor_total_ars += valor_ars
                     moneda_mostrar = 'ARS'
+                    valor_total_usd = 0
+                
+                valor_total_ars += valor_ars
                 
                 valor_total += valuacion
                 
@@ -2605,8 +2612,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Calcular el valor total ajustado incluyendo el saldo en USD convertido a ARS
         valor_total_ajustado = valor_total_ars + saldo_usd_ars
         
-        # Obtener métricas con el valor total ajustado
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total_ajustado, token_portador)
+        # Calcular el valor total en ARS (incluyendo la conversión de USD a ARS)
+        valor_total_ars = sum(activo.get('valor_ars', 0) for activo in portafolio.get('activos', []))
+        
+        # Obtener métricas con el valor total en ARS
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total_ars, token_portador)
         
         # Mostrar resumen de valores
         st.markdown("### 📊 Resumen de Valores")
@@ -2618,11 +2628,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         col1.metric("Valor Activos ARS", f"${valor_total_ars:,.2f}", 
                    help="Valor total de los activos en pesos argentinos")
         
-        # Valor total de los activos en USD (convertido a ARS)
-        valor_activos_usd_ars = valor_total - valor_total_ars
-        col2.metric("Valor Activos USD", f"${valor_activos_usd_ars:,.2f}", 
-                   f"${(valor_activos_usd_ars * tasa_mep):,.2f} ARS" if tasa_mep > 0 else "Tasa MEP no disponible",
-                   help="Valor de activos en USD convertidos a ARS")
+        # Calcular el valor total de los activos en USD (sin convertir)
+        valor_total_usd = sum(activo.get('valor_usd', 0) for activo in portafolio.get('activos', []) 
+                             if activo.get('monedaCotizacion', '').upper() == 'USD')
+        
+        # Mostrar el valor en USD y su conversión a ARS
+        col2.metric("Valor Activos USD", 
+                   f"${valor_total_usd:,.2f} USD",
+                   f"${valor_total_usd * tasa_mep:,.2f} ARS" if tasa_mep > 0 else "Tasa MEP no disponible",
+                   help="Valor total de activos en dólares y su equivalente en pesos")
         
         # Saldo en cuentas USD convertido a ARS
         col3.metric("Saldo en Cuentas USD", f"${saldo_usd:,.2f} USD", 
@@ -2630,9 +2644,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                    help="Saldo en cuentas en dólares convertido a pesos")
         
         # Valor total ajustado (activos + saldo en USD convertido)
-        col4.metric("Valor Total Ajustado (ARS)", f"${valor_total_ajustado:,.2f}", 
-                   "Incluye activos en ARS y USD convertidos",
-                   help="Valor total incluyendo activos y saldos en USD convertidos a ARS")
+        valor_total_ajustado = valor_total_ars + (saldo_usd * tasa_mep if tasa_mep > 0 else 0)
+        col4.metric("Valor Total Ajustado (ARS)", 
+                   f"${valor_total_ajustado:,.2f}", 
+                   "Incluye activos en ARS, USD convertidos y saldos",
+                   help="Valor total incluyendo activos en ARS, activos en USD convertidos y saldos en cuentas")
         
         # Mostrar tasa MEP utilizada
         st.caption(f"*Tasa de cambio MEP utilizada: ${tasa_mep:,.2f} ARS/USD" if tasa_mep > 0 else "*No se pudo obtener la tasa MEP")
