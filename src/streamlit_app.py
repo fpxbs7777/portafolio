@@ -2080,46 +2080,58 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
                 st.subheader("🔍 Análisis de Estrategia de Inversión")
                 
-                # Mostrar la estrategia principal
-                estrategia = metricas['analisis_estrategia']
+                # Mostrar la estrategia principal con manejo de errores
+                estrategia = metricas.get('analisis_estrategia', {})
+                estrategia_nombre = estrategia.get('estrategia', 'Estrategia no disponible')
+                explicacion = estrategia.get('explicacion_estrategia', 'No se pudo determinar la explicación de la estrategia')
                 
                 # Tarjeta de estrategia
                 st.markdown(f"""
                 <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
                             border-left: 5px solid #0d6efd;">
-                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
-                    <p>{estrategia['explicacion_estrategia']}</p>
+                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia_nombre}</h4>
+                    <p>{explicacion}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Métricas clave
+                # Métricas clave con valores por defecto
                 cols = st.columns(3)
-                cols[0].metric("Beta", f"{estrategia['beta']:.2f}", 
+                beta = estrategia.get('beta', 0)
+                alpha_anual = estrategia.get('alpha_anual', 0)
+                calidad_cobertura = estrategia.get('calidad_cobertura', 'N/A')
+                r_cuadrado = estrategia.get('r_cuadrado', 0)
+                
+                cols[0].metric("Beta", f"{beta:.2f}", 
                               help="Sensibilidad del portafolio respecto al mercado (1 = mismo riesgo que el mercado)")
-                cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']:+.2%}", 
+                cols[1].metric("Alpha Anualizado", f"{alpha_anual:+.2%}", 
                               help="Rendimiento adicional sobre el mercado ajustado por riesgo")
-                cols[2].metric("Calidad de Cobertura", f"{estrategia['calidad_cobertura']}", 
-                              help=f"R² = {estrategia['r_cuadrado']:.2f}")
+                cols[2].metric("Calidad de Cobertura", f"{calidad_cobertura}", 
+                              help=f"R² = {r_cuadrado:.2f}")
                 
                 # Explicación del rendimiento
+                rendimiento = estrategia.get('rendimiento', 'Análisis de rendimiento no disponible')
+                explicacion_rendimiento = estrategia.get('explicacion_rendimiento', 'No se pudo determinar la explicación del rendimiento')
+                explicacion_cobertura = estrategia.get('explicacion_cobertura', 'No se pudo determinar la explicación de la cobertura')
+                
                 st.markdown(f"""
                 <div style="background-color: #e8f4fd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {estrategia['rendimiento']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_rendimiento']}</p>
+                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {rendimiento}</h5>
+                    <p style="margin-bottom: 0;">{explicacion_rendimiento}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Explicación de la cobertura
                 st.markdown(f"""
                 <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
+                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {calidad_cobertura}</h5>
+                    <p style="margin-bottom: 0;">{explicacion_cobertura}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Interpretación del Beta
                 st.markdown("#### 📈 Interpretación del Beta")
-                if estrategia['beta'] > 1.2:
+                beta_value = estrategia.get('beta', 1.0)  # Valor por defecto de 1.0 (mercado)
+                if beta_value > 1.2:
                     st.info("""
                     **Alta volatilidad (β > 1.2)**  
                     El portafolio es más volátil que el mercado. Espere mayores oscilaciones en el valor de su inversión.
