@@ -776,139 +776,83 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
         print(error_msg)
         import traceback
-    
-    """
-    Obtiene la cotización del dólar MEP para un bono específico.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        simbolo (str): Símbolo del bono (por defecto 'AL30')
-        id_plazo_compra (int): ID del plazo para la operación de compra (por defecto 1)
-        id_plazo_venta (int): ID del plazo para la operación de venta (por defecto 1)
-        
-    Returns:
-        float: Precio del dólar MEP o None en caso de error
-    """
-    url = "https://api.invertironline.com/api/v2/Cotizaciones/MEP"
-    headers = {
-        "Authorization": f"Bearer {token_portador}",
-        "Content-Type": "application/json"
-    }
-    
-    try:
-        payload = {
-            "simbolo": simbolo,
-            "idPlazoOperatoriaCompra": id_plazo_compra,
-            "idPlazoOperatoriaVenta": id_plazo_venta
-        }
-        
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        return float(response.text)
-    except Exception as e:
-        print(f"Error al obtener cotización MEP: {e}")
+        traceback.print_exc()
+        st.error(error_msg)
         return None
-
-def convertir_a_usd(monto_ars, cotizacion_mep):
-    """
-    Convierte un monto en ARS a USD usando la cotización MEP.
-    
-    Args:
-        monto_ars (float): Monto en pesos argentinos
-        cotizacion_mep (float): Cotización del dólar MEP
-        
-    Returns:
-        float: Monto equivalente en USD
-    """
-    if not cotizacion_mep or cotizacion_mep <= 0:
-        return 0.0
-    return monto_ars / cotizacion_mep
-
-def procesar_datos_historicos(fechas, precios, fecha_str, precio):
-    """
-    Procesa los datos históricos de precios.
-    
-    Args:
-        fechas (list): Lista de fechas
-        precios (list): Lista de precios
-        fecha_str (str): Fecha en formato string
-        precio (float): Precio a agregar
-        
-    Returns:
-        tuple: (fechas, precios) actualizadas
-    """
-    try:
-        # Convertir fecha
-        fecha = parse_datetime_flexible(fecha_str)
-        if not pd.isna(fecha):
-            fechas.append(fecha)
-            precios.append(float(precio))
-    except (ValueError, TypeError, AttributeError) as e:
-        pass
-    return fechas, precios
+        return None
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
-    Obtiene la serie histórica de un fondo común de inversión
+    Obtiene la serie histórica de un Fondo Común de Inversión.
     
     Args:
         token_portador (str): Token de autenticación
         simbolo (str): Símbolo del FCI
-        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
+        fecha_desde (str): Fecha inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha fin (YYYY-MM-DD)
         
     Returns:
-        pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
+        pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
     """
     try:
-        fechas = []
-        precios = []
+        # Primero intentar obtener directamente la serie histórica
+        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
         
-        # Obtener información del FCI
-        url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
-        headers = {"Authorization": f"Bearer {token_portador}"}
-        response = requests.get(url_fci, headers=headers, timeout=30)
+        response = requests.get(url_serie, headers=headers, timeout=30)
         response.raise_for_status()
-        fc_data = response.json()
+        data = response.json()
         
-        # Buscar el FCI por símbolo
-        fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
-        if not fci:
-            st.warning(f"No se encontró el FCI con símbolo {simbolo}")
-            return None
+        # Procesar la respuesta según el formato esperado
+        if isinstance(data, list):
+            fechas = []
+            precios = []
             
-        # Obtener el ID del FCI
-        fci_id = fci.get('id')
-        if not fci_id:
-            st.warning(f"No se pudo obtener el ID para el FCI {simbolo}")
-            return None
+            for item in data:
+                try:
+                    # Manejar diferentes formatos de fecha
+                    fecha_str = item.get('fecha') or item.get('fechaHora')
+                    if not fecha_str:
+                        continue
+                        
+                    # Obtener el valor de la cuota (puede venir en diferentes campos)
+                    precio = item.get('valorCuota') or item.get('precio') or item.get('ultimoPrecio')
+                    if not precio:
+                        continue
+                        
+                    # Convertir fecha
+                    fecha = parse_datetime_flexible(fecha_str)
+                    if not pd.isna(fecha):
+                        fechas.append(fecha)
+                        precios.append(float(precio))
+                        
+                except (ValueError, TypeError, AttributeError) as e:
+                    continue
             
-        # Obtener la serie histórica del FCI
-        url_historico = f"https://api.invertironline.com/api/v2/Titulos/FCI/{fci_id}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}"
-        response = requests.get(url_historico, headers=headers, timeout=30)
-        response.raise_for_status()
-        historico_data = response.json()
+            if fechas and precios:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
         
-        # Procesar los datos históricos
-        for item in historico_data:
-            fechas, precios = procesar_datos_historicos(
-                fechas, precios, 
-                item.get('fecha'),
-                item.get('valorCuotaParte')
-            )
+        # Si no se pudo obtener la serie histórica, intentar obtener el último valor
+        try:
+            # Obtener información del FCI
+            url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
+            response = requests.get(url_fci, headers=headers, timeout=30)
+            response.raise_for_status()
+            fc_data = response.json()
             
-        if fechas and precios:
-            df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-            df = df.drop_duplicates(subset=['fecha'], keep='last')
-            df = df.sort_values('fecha')
-            return df
-            
-        # Si no hay datos históricos, devolver el último valor disponible
-        if 'ultimoValorCuotaParte' in fci:
-            return pd.DataFrame({
-                'fecha': [pd.Timestamp.now(tz='UTC')],
-                'precio': [float(fci['ultimoValorCuotaParte'])]
-            })
+            # Buscar el FCI por símbolo
+            fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
+            if fci and 'ultimoValorCuotaParte' in fci:
+                return pd.DataFrame({
+                    'fecha': [pd.Timestamp.now(tz='UTC')],
+                    'precio': [float(fci['ultimoValorCuotaParte'])]
+                })
         except Exception:
             pass
         
@@ -1514,111 +1458,72 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
     beta = alpha_beta_metrics.get('beta', 1.0)
     alpha_annual = alpha_beta_metrics.get('alpha_annual', 0)
     r_squared = alpha_beta_metrics.get('r_squared', 0)
-    observations = alpha_beta_metrics.get('observations', 0)
-    
-    # Validación de datos insuficientes
-    if observations < 20:  # Mínimo 20 observaciones para un análisis confiable
-        return {
-            'error': 'Datos insuficientes',
-            'mensaje': ('No hay suficientes datos históricos para un análisis confiable. ' 
-                       f'Se requieren al menos 20 observaciones, actuales: {observations}'),
-            'beta': beta,
-            'alpha_anual': alpha_annual,
-            'r_cuadrado': r_squared,
-            'observations': observations
-        }
     
     # Análisis de estrategia basado en beta
-    if abs(beta) < 0.3:
-        estrategia = "Estrategia de Ingresos"
-        explicacion = ("El portafolio tiene baja correlación con el mercado (|β| < 0.3). "
-                     "Ideal para generar ingresos con bajo riesgo de mercado.")
-    elif 0.3 <= abs(beta) < 0.7:
-        estrategia = "Estrategia Defensiva"
-        explicacion = (f"El portafolio es menos volátil que el mercado (0.3 < |β| < 0.7). "
-                     f"Busca preservar capital con menor exposición a las fluctuaciones del mercado.")
-    elif 0.7 <= abs(beta) <= 1.3:
-        estrategia = "Estrategia de Crecimiento"
-        explicacion = (f"El portafolio sigue de cerca al mercado (0.7 < |β| < 1.3). "
-                     f"Busca rendimientos similares al mercado con un perfil de riesgo equilibrado.")
-    else:
+    if beta > 1.2:
         estrategia = "Estrategia Agresiva"
-        explicacion = (f"El portafolio es más volátil que el mercado (|β| > 1.3). "
-                     f"Esta estrategia busca rendimientos superiores asumiendo mayor riesgo.")
+        explicacion = ("El portafolio es más volátil que el mercado (β > 1.2). "
+                      "Esta estrategia busca rendimientos superiores asumiendo mayor riesgo.")
+    elif beta > 0.8:
+        estrategia = "Estrategia de Crecimiento"
+        explicacion = ("El portafolio sigue de cerca al mercado (0.8 < β < 1.2). "
+                     "Busca rendimientos similares al mercado con un perfil de riesgo equilibrado.")
+    elif beta > 0.3:
+        estrategia = "Estrategia Defensiva"
+        explicacion = ("El portafolio es menos volátil que el mercado (0.3 < β < 0.8). "
+                     "Busca preservar capital con menor exposición a las fluctuaciones del mercado.")
+    elif beta > -0.3:
+        estrategia = "Estrategia de Ingresos"
+        explicacion = ("El portafolio tiene baja correlación con el mercado (-0.3 < β < 0.3). "
+                     "Ideal para generar ingresos con bajo riesgo de mercado.")
+    else:
+        estrategia = "Estrategia de Cobertura"
+        explicacion = ("El portafolio tiene correlación negativa con el mercado (β < -0.3). "
+                     "Diseñado para moverse en dirección opuesta al mercado, útil para cobertura.")
     
     # Análisis de desempeño basado en alpha
-    if abs(alpha_annual) < 0.0001:  # Prácticamente cero
-        rendimiento = "Sin desvío significativo"
-        explicacion_rendimiento = "El portafolio no muestra desvío significativo respecto al benchmark."
-    elif alpha_annual > 0.05:  # Más de 5% de alpha anual
+    if alpha_annual > 0.05:  # 5% de alpha anual
         rendimiento = "Excelente desempeño"
-        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:+.1%}, "
+        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
                                  "superando significativamente al benchmark.")
-    elif alpha_annual > 0.02:  # Entre 2% y 5%
+    elif alpha_annual > 0.02:  # 2% de alpha anual
         rendimiento = "Buen desempeño"
-        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:+.1%}, "
+        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
                                  "superando al benchmark.")
     elif alpha_annual > -0.02:  # Entre -2% y 2%
         rendimiento = "Desempeño en línea"
-        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:+.1%}, "
+        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
                                  "en línea con el benchmark.")
-    elif alpha_annual > -0.05:  # Entre -5% y -2%
+    else:
         rendimiento = "Desempeño inferior"
-        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:+.1%}, "
+        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
                                  "por debajo del benchmark.")
-    else:  # Menos de -5%
-        rendimiento = "Pobre desempeño"
-        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:+.1%}, "
-                                 "significativamente por debajo del benchmark.")
     
-    # Interpretación de R² para la calidad de la relación con el benchmark
+    # Calidad de la cobertura basada en R²
     if r_squared > 0.7:
-        calidad_relacion = "Fuerte relación"
-        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una fuerte relación con el benchmark. "
-                              "El beta es altamente confiable para este portafolio.")
+        calidad_cobertura = "Alta"
+        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una fuerte relación con el benchmark. "
+                               "La cobertura será más efectiva.")
     elif r_squared > 0.4:
-        calidad_relacion = "Relación moderada"
-        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una relación moderada con el benchmark. "
-                              "El beta proporciona una estimación razonable pero con cierto margen de error.")
-    elif r_squared > 0.2:
-        calidad_relacion = "Débil relación"
-        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una relación débil con el benchmark. "
-                              "El beta debe interpretarse con precaución.")
+        calidad_cobertura = "Moderada"
+        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una relación moderada con el benchmark. "
+                               "La cobertura puede ser parcialmente efectiva.")
     else:
-        calidad_relacion = "Mínima relación"
-        explicacion_relacion = (f"El R² de {r_squared:.2f} indica una relación mínima con el benchmark. "
-                              "El beta no es confiable para este portafolio.")
-    
-    # Interpretación del beta
-    if abs(beta) < 0.3:
-        interpretacion_beta = "Mínima sensibilidad al mercado"
-    elif abs(beta) < 0.7:
-        interpretacion_beta = "Baja sensibilidad al mercado"
-    elif abs(beta) < 1.3:
-        interpretacion_beta = "Sensibilidad similar al mercado"
-    elif abs(beta) < 1.7:
-        interpretacion_beta = "Alta sensibilidad al mercado"
-    else:
-        interpretacion_beta = "Muy alta sensibilidad al mercado"
-    
-    # Asegurarse de que beta no sea exactamente 1.0 cuando no hay suficiente precisión
-    if 0.999 < beta < 1.001 and r_squared < 0.3:
-        beta = 1.0
-        interpretacion_beta = "Valor por defecto (datos insuficientes)"
+        calidad_cobertura = "Baja"
+        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una débil relación con el benchmark. "
+                               "La cobertura puede no ser efectiva.")
     
     return {
         'estrategia': estrategia,
         'explicacion_estrategia': explicacion,
         'rendimiento': rendimiento,
         'explicacion_rendimiento': explicacion_rendimiento,
-        'calidad_relacion': calidad_relacion,
-        'explicacion_relacion': explicacion_relacion,
-        'interpretacion_beta': interpretacion_beta,
+        'calidad_cobertura': calidad_cobertura,
+        'explicacion_cobertura': explicacion_cobertura,
         'beta': beta,
         'alpha_anual': alpha_annual,
         'r_cuadrado': r_squared,
-        'observations': observations
-    
+        'observations': alpha_beta_metrics.get('observations', 0)
     }
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
@@ -2039,7 +1944,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2066,59 +1971,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        
-        # Obtener cotización MEP para conversión
-        cotizacion_mep = obtener_cotizacion_mep(token_portador)
-        
-        # Calcular métricas del portafolio
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Agrupar por moneda y calcular totales
-        df_activos['Moneda'] = df_activos['Tipo'].apply(
-            lambda x: 'PESO_ARGENTINO' if 'PESO' in str(x).upper() else 'DOLAR_ESTADOUNIDENSE'
-        )
-        totales_por_moneda = df_activos.groupby('Moneda')['Valuación'].sum()
-        
-        # Mostrar totales por moneda con conversión MEP
-        st.subheader("💰 Valores Totales por Moneda")
-        
-        # Obtener totales
-        total_pesos = totales_por_moneda.get('PESO_ARGENTINO', 0)
-        total_dolares = totales_por_moneda.get('DOLAR_ESTADOUNIDENSE', 0)
-        
-        # Convertir pesos a dólares usando MEP
-        total_dolares_mep = convertir_a_usd(total_pesos, cotizacion_mep) + total_dolares
-        
-        # Mostrar en columnas
-        col1, col2, col3 = st.columns(3)
-        
-        # Total en Pesos
-        col1.metric(
-            "Total en Pesos (ARS)", 
-            f"${total_pesos:,.2f}",
-            help="Valor total en Pesos Argentinos"
-        )
-        
-        # Total en Dólares (activos en USD)
-        col2.metric(
-            "Activos en Dólares (USD)", 
-            f"${total_dolares:,.2f}",
-            help="Valor total de activos en Dólares Estadounidenses"
-        )
-        
-        # Total en Dólares MEP (conversión total)
-        col3.metric(
-            "Total en Dólares MEP (ARS→USD)",
-            f"${total_dolares_mep:,.2f}",
-            help=f"Valor total convertido a USD usando MEP (Cotización: ${cotizacion_mep:,.2f} si se obtuvo correctamente)"
-        )
-        
-        # Mostrar información general
-        st.subheader("📊 Información General del Portafolio")
-        cols = st.columns(3)
+        # Información General
+        cols = st.columns(4)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
+        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
         if metricas:
             # Métricas de Riesgo
@@ -2181,58 +2041,46 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
                 st.subheader("🔍 Análisis de Estrategia de Inversión")
                 
-                # Mostrar la estrategia principal con manejo de errores
-                estrategia = metricas.get('analisis_estrategia', {})
-                estrategia_nombre = estrategia.get('estrategia', 'Estrategia no disponible')
-                explicacion = estrategia.get('explicacion_estrategia', 'No se pudo determinar la explicación de la estrategia')
+                # Mostrar la estrategia principal
+                estrategia = metricas['analisis_estrategia']
                 
                 # Tarjeta de estrategia
                 st.markdown(f"""
                 <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
                             border-left: 5px solid #0d6efd;">
-                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia_nombre}</h4>
-                    <p>{explicacion}</p>
+                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
+                    <p>{estrategia['explicacion_estrategia']}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Métricas clave con valores por defecto
+                # Métricas clave
                 cols = st.columns(3)
-                beta = estrategia.get('beta', 0)
-                alpha_anual = estrategia.get('alpha_anual', 0)
-                calidad_cobertura = estrategia.get('calidad_cobertura', 'N/A')
-                r_cuadrado = estrategia.get('r_cuadrado', 0)
-                
-                cols[0].metric("Beta", f"{beta:.2f}", 
+                cols[0].metric("Beta", f"{estrategia['beta']:.2f}", 
                               help="Sensibilidad del portafolio respecto al mercado (1 = mismo riesgo que el mercado)")
-                cols[1].metric("Alpha Anualizado", f"{alpha_anual:+.2%}", 
+                cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']:+.2%}", 
                               help="Rendimiento adicional sobre el mercado ajustado por riesgo")
-                cols[2].metric("Calidad de Cobertura", f"{calidad_cobertura}", 
-                              help=f"R² = {r_cuadrado:.2f}")
+                cols[2].metric("Calidad de Cobertura", f"{estrategia['calidad_cobertura']}", 
+                              help=f"R² = {estrategia['r_cuadrado']:.2f}")
                 
                 # Explicación del rendimiento
-                rendimiento = estrategia.get('rendimiento', 'Análisis de rendimiento no disponible')
-                explicacion_rendimiento = estrategia.get('explicacion_rendimiento', 'No se pudo determinar la explicación del rendimiento')
-                explicacion_cobertura = estrategia.get('explicacion_cobertura', 'No se pudo determinar la explicación de la cobertura')
-                
                 st.markdown(f"""
                 <div style="background-color: #e8f4fd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {rendimiento}</h5>
-                    <p style="margin-bottom: 0;">{explicacion_rendimiento}</p>
+                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {estrategia['rendimiento']}</h5>
+                    <p style="margin-bottom: 0;">{estrategia['explicacion_rendimiento']}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Explicación de la cobertura
                 st.markdown(f"""
                 <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {calidad_cobertura}</h5>
-                    <p style="margin-bottom: 0;">{explicacion_cobertura}</p>
+                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
+                    <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Interpretación del Beta
                 st.markdown("#### 📈 Interpretación del Beta")
-                beta_value = estrategia.get('beta', 1.0)  # Valor por defecto de 1.0 (mercado)
-                if beta_value > 1.2:
+                if estrategia['beta'] > 1.2:
                     st.info("""
                     **Alta volatilidad (β > 1.2)**  
                     El portafolio es más volátil que el mercado. Espere mayores oscilaciones en el valor de su inversión.
@@ -2334,197 +2182,35 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     else:
         st.warning("No se encontraron activos en el portafolio")
 
-def mostrar_estado_cuenta(estado_cuenta, token_portador=None):
+def mostrar_estado_cuenta(estado_cuenta):
     st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
+    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
     cuentas = estado_cuenta.get('cuentas', [])
     
-    # Calcular totales por moneda y tipo de cuenta
-    saldos_por_moneda = {}
-    saldos_por_cuenta = {}
+    cols = st.columns(3)
+    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
+    cols[1].metric("Número de Cuentas", len(cuentas))
     
-    for cuenta in cuentas:
-        moneda = cuenta.get('moneda', 'PESO').upper()
-        tipo_cuenta = cuenta.get('tipo', 'Cuenta')
-        saldo = float(cuenta.get('saldo', 0))
-        disponible = float(cuenta.get('disponible', 0))
+    if cuentas:
+        st.subheader("📊 Detalle de Cuentas")
         
-        # Agrupar por moneda
-        if moneda not in saldos_por_moneda:
-            saldos_por_moneda[moneda] = {
-                'saldo': 0,
-                'disponible': 0,
-                'cuentas': []
-            }
-        saldos_por_moneda[moneda]['saldo'] += saldo
-        saldos_por_moneda[moneda]['disponible'] += disponible
-        saldos_por_moneda[moneda]['cuentas'].append(cuenta)
+        datos_cuentas = []
+        for cuenta in cuentas:
+            datos_cuentas.append({
+                'Número': cuenta.get('numero', 'N/A'),
+                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                'Total': f"${cuenta.get('total', 0):,.2f}",
+            })
         
-        # Agrupar por tipo de cuenta
-        if tipo_cuenta not in saldos_por_cuenta:
-            saldos_por_cuenta[tipo_cuenta] = {'saldo': 0, 'moneda': moneda}
-        saldos_por_cuenta[tipo_cuenta]['saldo'] += saldo
-
-    # Obtener cotización MEP si hay cuentas en USD
-    cotizacion_mep = None
-    if token_portador and any(m in saldos_por_moneda for m in ['DOLAR', 'USD']):
-        try:
-            # Intentar obtener cotización MEP (Dólar MEP)
-            cotizacion_mep = obtener_cotizacion_mep(token_portador, 'MEP', 'todos', 'todos')
-        except Exception as e:
-            st.warning(f"No se pudo obtener la cotización MEP: {str(e)}")
-    
-    # Mostrar resumen de saldos
-    st.subheader("📈 Resumen de Saldos")
-    
-    # Ordenar monedas: primero USD, luego otras, finalmente ARS/PESO
-    monedas_ordenadas = sorted(saldos_por_moneda.keys(), 
-                              key=lambda x: (x != 'DOLAR' and x != 'USD', x in ['PESO', 'ARS'], x))
-    
-    # Crear columnas para el resumen
-    num_cols = min(4, len(monedas_ordenadas) + 1)
-    cols = st.columns(num_cols)
-    
-    # Mostrar total en pesos
-    total_pesos = saldos_por_moneda.get('PESO', {'saldo': 0})['saldo'] + \
-                 saldos_por_moneda.get('ARS', {'saldo': 0})['saldo']
-    
-    # Convertir USD a ARS si hay cotización MEP
-    if cotizacion_mep and 'precio' in cotizacion_mep:
-        total_usd = saldos_por_moneda.get('DOLAR', {'saldo': 0})['saldo'] + \
-                   saldos_por_moneda.get('USD', {'saldo': 0})['saldo']
-        total_pesos += total_usd * float(cotizacion_mep['precio'])
-        
-    cols[0].metric("Total en Pesos (ARS)", f"$ {total_pesos:,.2f}")
-    
-    # Mostrar otras monedas
-    col_index = 1
-    for moneda in monedas_ordenadas:
-        if moneda not in ['PESO', 'ARS'] and col_index < num_cols:
-            moneda_info = saldos_por_moneda[moneda]
-            moneda_simbolo = 'U$D' if moneda in ['DOLAR', 'USD'] else moneda
-            saldo = moneda_info['saldo']
-            
-            # Agregar cotización MEP si es USD
-            if moneda in ['DOLAR', 'USD'] and cotizacion_mep and 'precio' in cotizacion_mep:
-                valor_ars = saldo * float(cotizacion_mep['precio'])
-                cols[col_index].metric(
-                    f"Total en {moneda_simbolo}", 
-                    f"{moneda_simbolo} {saldo:,.2f}",
-                    f"AR$ {valor_ars:,.2f}"
-                )
-            else:
-                cols[col_index].metric(f"Total en {moneda_simbolo}", f"{moneda_simbolo} {saldo:,.2f}")
-            col_index += 1
-    
-    # Mostrar cotización MEP si está disponible
-    if cotizacion_mep and 'precio' in cotizacion_mep:
-        st.info(f"💱 Cotización MEP: AR$ {float(cotizacion_mep['precio']):,.2f} por Dólar")
-    
-    # Mostrar tablas detalladas
-    st.subheader("📊 Detalle por Moneda")
-    
-    # Crear DataFrame con los totales por moneda
-    datos_totales = []
-    for moneda, info in saldos_por_moneda.items():
-        moneda_nombre = 'Pesos' if moneda in ['PESO', 'ARS'] else 'Dólares' if moneda in ['DOLAR', 'USD'] else moneda.title()
-        moneda_simbolo = 'AR$' if moneda in ['PESO', 'ARS'] else 'U$D' if moneda in ['DOLAR', 'USD'] else moneda
-        
-        # Calcular valor en ARS si es USD y hay cotización MEP
-        valor_ars = None
-        if moneda in ['DOLAR', 'USD'] and cotizacion_mep and 'precio' in cotizacion_mep:
-            valor_ars = info['saldo'] * float(cotizacion_mep['precio'])
-        
-        datos_totales.append({
-            'Moneda': moneda_nombre,
-            'Símbolo': moneda_simbolo,
-            'Saldo Total': info['saldo'],
-            'Disponible': info['disponible'],
-            'Valor en ARS': valor_ars if valor_ars is not None else 'N/A',
-            'Formateado': f"{moneda_simbolo} {info['saldo']:,.2f}",
-            'Disponible Formateado': f"{moneda_simbolo} {info['disponible']:,.2f}",
-            'Valor ARS Formateado': f"AR$ {valor_ars:,.2f}" if valor_ars is not None else 'N/A'
-        })
-    
-    # Mostrar tabla con los totales
-    if datos_totales:
-        df_totales = pd.DataFrame(datos_totales)
-        
-        # Configurar columnas a mostrar
-        columnas = ['Moneda', 'Saldo Total', 'Disponible']
-        if any(df_totales['Valor en ARS'] != 'N/A'):
-            columnas.append('Valor en ARS')
-        
-        # Mostrar solo las columnas necesarias
-        st.dataframe(
-            df_totales[columnas],
-            column_config={
-                'Moneda': 'Moneda',
-                'Saldo Total': st.column_config.NumberColumn(
-                    'Saldo Total',
-                    format='%.2f',
-                    help='Saldo total en la moneda original'
-                ),
-                'Disponible': st.column_config.NumberColumn(
-                    'Disponible',
-                    format='%.2f',
-                    help='Fondos disponibles para operar'
-                ),
-                'Valor en ARS': st.column_config.NumberColumn(
-                    'Valor en ARS',
-                    format='%.2f',
-                    help='Valor convertido a pesos argentinos (MEP)'
-                ) if 'Valor en ARS' in columnas else None
-            },
-            hide_index=True,
-            use_container_width=True,
-            height=min(400, len(datos_totales) * 45 + 50)  # Ajustar altura automáticamente
-        )
-    
-    # Mostrar detalle de cuentas
-    st.subheader("📛 Detalle de Cuentas")
-    
-    datos_cuentas = []
-    for cuenta in cuentas:
-        moneda = cuenta.get('moneda', 'PESO').upper()
-        moneda_simbolo = 'AR$' if moneda in ['PESO', 'ARS'] else 'U$D' if moneda == 'DOLAR' else moneda
-        
-        datos_cuentas.append({
-            'Número': cuenta.get('numero', 'N/A'),
-            'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-            'Moneda': moneda_simbolo,
-            'Disponible': cuenta.get('disponible', 0),
-            'Saldo': cuenta.get('saldo', 0),
-            'Total': cuenta.get('total', 0),
-        })
-    
-    if datos_cuentas:
         df_cuentas = pd.DataFrame(datos_cuentas)
-        
-        # Formatear columnas numéricas
-        for col in ['Disponible', 'Saldo', 'Total']:
-            df_cuentas[col] = df_cuentas.apply(
-                lambda x: f"{x['Moneda']} {x[col]:,.2f}" if pd.notnull(x[col]) else "N/A", 
-                axis=1
-            )
-        
-        st.dataframe(
-            df_cuentas,
-            column_config={
-                'Número': 'Cuenta',
-                'Tipo': 'Tipo',
-                'Moneda': 'Moneda',
-                'Disponible': 'Disponible',
-                'Saldo': 'Saldo',
-                'Total': 'Total'
-            },
-            hide_index=True,
-            use_container_width=True
-        )
         st.dataframe(df_cuentas, use_container_width=True, height=300)
 
 def mostrar_cotizaciones_mercado(token_acceso):
