@@ -2131,6 +2131,30 @@ def obtener_precios_historicos(simbolos, dias=252):
     
     return precios_historicos
 
+def obtener_token_valido():
+    """
+    Obtiene un token válido, refrescándolo si es necesario
+    
+    Returns:
+        str: Token válido o None si no se puede obtener
+    """
+    if not st.session_state.get('token_acceso'):
+        return None
+    
+    # Verificar si el token es válido
+    if verificar_token(st.session_state.token_acceso):
+        return st.session_state.token_acceso
+    
+    # Si el token está expirado, intentar refrescarlo
+    refresh_token = st.session_state.get('refresh_token')
+    if refresh_token:
+        nuevo_token = refrescar_token(refresh_token)
+        if nuevo_token:
+            st.session_state.token_acceso = nuevo_token
+            return nuevo_token
+    
+    return None
+
 def obtener_portafolio(id_cliente, pais='Argentina'):
     """
     Obtiene el portafolio de un cliente específico
