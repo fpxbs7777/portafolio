@@ -255,23 +255,6 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
         st.error(f'Error al obtener cotización MEP: {str(e)}')
         return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
-def obtener_tasa_mep(token_portador):
-    """
-    Obtiene la tasa MEP para convertir USD a ARS
-    """
-    # Intentar con AL30 como referencia principal
-    cotizacion = obtener_cotizacion_mep(token_portador, "AL30", 48, 48)
-    
-    if not cotizacion or 'precio' not in cotizacion or not cotizacion['precio']:
-        # Si falla, intentar con GD30
-        cotizacion = obtener_cotizacion_mep(token_portador, "GD30", 48, 48)
-    
-    if cotizacion and 'precio' in cotizacion and cotizacion['precio']:
-        return float(cotizacion['precio'])
-    else:
-        st.warning("No se pudo obtener la cotización MEP. Usando tipo de cambio de respaldo.")
-        return 900.0  # Valor de respaldo conservador
-
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
@@ -1871,16 +1854,16 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         resultados['p_value'] = alpha_beta_metrics['p_value']
     if 'observations' in alpha_beta_metrics:
         resultados['observaciones'] = alpha_beta_metrics['observations']
+    
+    return resultados
+
+# --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
-    # Obtener la tasa MEP
-    tasa_mep = obtener_tasa_mep(token_portador) if token_portador else 900.0
-    
     activos = portafolio.get('activos', [])
     datos_activos = []
-    valor_total_ars = 0
-    valor_total_usd = 0
+    valor_total = 0
     
     for activo in activos:
         try:
@@ -1980,23 +1963,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 'Valuación': valuacion,
             })
             
-            # Clasificar por moneda y sumar al total correspondiente
-            moneda = titulo.get('monedaCotizacion', 'ARS').upper()
-            if moneda in ['USD', 'DOLARES']:
-                valor_total_usd += valuacion
-                valor_total_ars += valuacion * tasa_mep
-            else:
-                valor_total_ars += valuacion
-                
-            datos_activos.append({
-                'Símbolo': simbolo,
-                'Descripción': descripcion,
-                'Tipo': tipo,
-                'Moneda': moneda,
-                'Cantidad': cantidad,
-                'Valuación': valuacion,
-                'Valuación ARS': valuacion * (tasa_mep if moneda in ['USD', 'DOLARES'] else 1)
-            })
+            valor_total += valuacion
         except Exception as e:
             continue
     
@@ -2004,16 +1971,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total_ars, token_portador)
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
         # Información General
-        cols = st.columns(5)
+        cols = st.columns(4)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total USD", f"U$D {valor_total_usd:,.2f}")
-        cols[4].metric("Valor Total ARS", f"AR$ {valor_total_ars:,.2f}", 
-                      delta=f"Tipo de cambio: {tasa_mep:,.2f}" if token_portador else None)
+        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
         if metricas:
             # Métricas de Riesgo
@@ -2053,8 +2018,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                          help="Retorno anual esperado basado en datos históricos")
             
             # Mostrar escenarios como porcentaje del portafolio
-            optimista_pct = (metricas['pl_esperado_max'] / valor_total_ars) * 100 if valor_total_ars > 0 else 0
-            pesimista_pct = (metricas['pl_esperado_min'] / valor_total_ars) * 100 if valor_total_ars > 0 else 0
+            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
             
             cols[1].metric("Escenario Optimista (95%)", 
                          f"{optimista_pct:+.1f}%",
@@ -2176,20 +2141,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Tabla de activos
         st.subheader("📋 Detalle de Activos")
         df_display = df_activos.copy()
-        
-        # Formatear valores según la moneda
-        def formatear_valor(fila):
-            if fila['Moneda'] in ['USD', 'DOLARES']:
-                return f"U$D {fila['Valuación']:,.2f} (AR$ {fila['Valuación ARS']:,.2f})"
-            else:
-                return f"AR$ {fila['Valuación']:,.2f}"
-        
-        df_display['Valuación'] = df_display.apply(formatear_valor, axis=1)
-        df_display['Peso (%)'] = (df_activos['Valuación ARS'] / valor_total_ars * 100).round(2)
+        df_display['Valuación'] = df_display['Valuación'].apply(
+            lambda x: f"${x:,.2f}" if x > 0 else "N/A"
+        )
+        df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
         df_display = df_display.sort_values('Peso (%)', ascending=False)
-        
-        # Eliminar columna temporal
-        df_display = df_display.drop(columns=['Valuación ARS'])
         
         st.dataframe(df_display, use_container_width=True, height=400)
         
@@ -2226,76 +2182,33 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     else:
         st.warning("No se encontraron activos en el portafolio")
 
-def mostrar_estado_cuenta(estado_cuenta, token_portador=None):
+def mostrar_estado_cuenta(estado_cuenta):
     st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
-    # Obtener la tasa MEP
-    tasa_mep = obtener_tasa_mep(token_portador) if token_portador else 900.0
-    
     total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
     cuentas = estado_cuenta.get('cuentas', [])
     
-    # Calcular totales por moneda
-    total_ars = 0.0
-    total_usd = 0.0
-    
-    for cuenta in cuentas:
-        moneda = cuenta.get('moneda', '').upper()
-        total_cuenta = float(cuenta.get('total', 0))
-        
-        if moneda == 'PESOS' or moneda == 'ARS':
-            total_ars += total_cuenta
-        elif moneda == 'DOLARES' or moneda == 'USD':
-            total_usd += total_cuenta
-    
-    # Convertir USD a ARS usando MEP
-    total_usd_ars = total_usd * tasa_mep
-    total_general_ars = total_ars + total_usd_ars
-    
-    # Mostrar métricas
-    cols = st.columns(4)
-    cols[0].metric("Total en Pesos", f"AR$ {total_ars:,.2f}")
-    cols[1].metric("Total en Dólares", f"U$D {total_usd:,.2f}")
-    cols[2].metric("Tipo de Cambio MEP", f"AR$ {tasa_mep:,.2f}")
-    cols[3].metric("Total en ARS (MEP)", f"AR$ {total_general_ars:,.2f}", 
-                  delta=f"{((total_general_ars/total_ars - 1)*100):.1f}% vs ARS" if total_ars > 0 else None)
+    cols = st.columns(3)
+    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
+    cols[1].metric("Número de Cuentas", len(cuentas))
     
     if cuentas:
         st.subheader("📊 Detalle de Cuentas")
         
         datos_cuentas = []
         for cuenta in cuentas:
-            moneda = cuenta.get('moneda', 'N/A').replace('_', ' ').title()
-            disponible = float(cuenta.get('disponible', 0))
-            saldo = float(cuenta.get('saldo', 0))
-            total = float(cuenta.get('total', 0))
-            
-            # Convertir a ARS si es USD
-            if moneda.upper() in ['DOLARES', 'USD'] and token_portador:
-                disponible_ars = disponible * tasa_mep
-                saldo_ars = saldo * tasa_mep
-                total_ars = total * tasa_mep
-                datos_cuentas.append({
-                    'Número': cuenta.get('numero', 'N/A'),
-                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                    'Moneda': moneda,
-                    'Disponible': f"U$D {disponible:,.2f} (AR$ {disponible_ars:,.2f})",
-                    'Saldo': f"U$D {saldo:,.2f} (AR$ {saldo_ars:,.2f})",
-                    'Total': f"U$D {total:,.2f} (AR$ {total_ars:,.2f})",
-                })
-            else:
-                datos_cuentas.append({
-                    'Número': cuenta.get('numero', 'N/A'),
-                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                    'Moneda': moneda,
-                    'Disponible': f"AR$ {disponible:,.2f}",
-                    'Saldo': f"AR$ {saldo:,.2f}",
-                    'Total': f"AR$ {total:,.2f}",
-                })
+            datos_cuentas.append({
+                'Número': cuenta.get('numero', 'N/A'),
+                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                'Total': f"${cuenta.get('total', 0):,.2f}",
+            })
         
         df_cuentas = pd.DataFrame(datos_cuentas)
         st.dataframe(df_cuentas, use_container_width=True, height=300)
