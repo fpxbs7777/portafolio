@@ -2441,8 +2441,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     
     # Analizar la estrategia de inversión
     analisis_estrategia = analizar_estrategia_inversion(alpha_beta_metrics)
-{{ ... }}
-        """)
+    
+    return resultados
 
 def plot_histograma_montecarlo(simulacion, valor_inicial):
     """
