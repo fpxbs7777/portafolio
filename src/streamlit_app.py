@@ -1745,27 +1745,26 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             else:
                 st.info("No se pudo calcular alpha/beta individual para los activos.")
             
-            # Proyecciones
-            st.subheader("📈 Proyecciones de Rendimiento")
-            cols = st.columns(3)
-            
-{{ ... }}
-            # Mostrar retornos como porcentaje del portafolio
-            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-            cols[0].metric("Retorno Esperado Anual", 
-                         f"{retorno_anual_pct:+.1f}%",
-                         help="Retorno anual esperado basado en datos históricos")
-            
-            # Mostrar escenarios como porcentaje del portafolio
-            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
-            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
-            
-            cols[1].metric("Escenario Optimista (95%)", 
-                         f"{optimista_pct:+.1f}%",
-                         help="Mejor escenario con 95% de confianza")
-            cols[2].metric("Escenario Pesimista (5%)", 
-                         f"{pesimista_pct:+.1f}%",
-                         help="Peor escenario con 5% de confianza")
+        # Proyecciones
+        st.subheader("📈 Proyecciones de Rendimiento")
+        cols = st.columns(3)
+        
+        # Mostrar retornos como porcentaje del portafolio
+        retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+        cols[0].metric("Retorno Esperado Anual", 
+                     f"{retorno_anual_pct:+.1f}%",
+                     help="Retorno anual esperado basado en datos históricos")
+        
+        # Mostrar escenarios como porcentaje del portafolio
+        optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+        pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+        
+        cols[1].metric("Escenario Optimista (95%)", 
+                     f"{optimista_pct:+.1f}%",
+                     help="Mejor escenario con 95% de confianza")
+        cols[2].metric("Escenario Pesimista (5%)", 
+                     f"{pesimista_pct:+.1f}%",
+                     help="Peor escenario con 5% de confianza")
             
             # Probabilidades
             st.subheader("🎯 Probabilidades")
