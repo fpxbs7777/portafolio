@@ -1812,11 +1812,15 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 st.markdown("### ⚠️ Consideraciones")
                 for adv in estrategia['advertencias']:
                     st.warning(adv)
-                <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                
+                # Mostrar efectividad de cobertura si está disponible
+                if 'calidad_cobertura' in estrategia and 'explicacion_cobertura' in estrategia:
+                    st.markdown(f"""
+                    <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
+                        <h5 style="margin-top: 0; color: #856404;">Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
+                        <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 # Interpretación del Beta
                 st.markdown("#### 📈 Interpretación del Beta")
