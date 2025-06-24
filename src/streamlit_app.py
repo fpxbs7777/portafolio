@@ -2144,6 +2144,7 @@ def obtener_portafolio(id_cliente, pais='Argentina'):
     """
     token_valido = obtener_token_valido()
     if not token_valido:
+        st.error("Token expirado. Por favor, inicie sesión nuevamente.")
         return None
     
     url = f"https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}"
@@ -2159,7 +2160,7 @@ def obtener_portafolio(id_cliente, pais='Argentina'):
             if portafolio:
                 # Añadir precios históricos a cada activo
                 simbolos = [a['simbolo'] for a in portafolio['activos']]
-                precios_historicos = obtener_precios_historicos(token_valido, simbolos)
+                precios_historicos = obtener_precios_historicos(simbolos)
                 
                 # Calcular retornos diarios para cada activo
                 for activo in portafolio['activos']:
@@ -2177,6 +2178,89 @@ def obtener_portafolio(id_cliente, pais='Argentina'):
             return None
     except Exception as e:
         st.error(f"Error al obtener portafolio: {str(e)}")
+        return None
+
+def obtener_estado_cuenta(token_acceso, id_cliente=None):
+    """
+    Obtiene el estado de cuenta del cliente
+    
+    Args:
+        token_acceso (str): Token de acceso a la API
+        id_cliente (str, optional): ID del cliente. Si no se especifica, se usa el cliente actual
+        
+    Returns:
+        dict: Estado de cuenta del cliente
+    """
+    url = "https://api.invertironline.com/api/v2/estadocuenta"
+    if id_cliente:
+        url = f"https://api.invertironline.com/api/v2/Asesores/EstadosCuenta/{id_cliente}"
+    
+    headers = {
+        'Authorization': f'Bearer {token_acceso}',
+        'Accept': 'application/json'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener estado de cuenta: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener estado de cuenta: {str(e)}")
+        return None
+
+def obtener_movimientos_asesor(token_portador, clientes, fecha_desde=None, fecha_hasta=None, 
+                              tipo_fecha=None, estado=None, tipo_operacion=None, moneda=None):
+    """
+    Obtiene los movimientos del asesor para los clientes especificados
+    
+    Args:
+        token_portador (str): Token de autenticación
+        clientes (list): Lista de IDs de clientes
+        fecha_desde (str): Fecha desde (ISO format)
+        fecha_hasta (str): Fecha hasta (ISO format)
+        tipo_fecha (str): Tipo de fecha (fechaOperacion o fechaLiquidacion)
+        estado (str): Estado de la operación
+        tipo_operacion (str): Tipo de operación
+        moneda (str): Moneda de la operación
+        
+    Returns:
+        list: Lista de movimientos
+    """
+    url = "https://api.invertironline.com/api/v2/Asesores/Movimientos"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Accept': 'application/json'
+    }
+    
+    params = {
+        'clientes': ','.join(clientes)
+    }
+    
+    if fecha_desde:
+        params['fechaDesde'] = fecha_desde
+    if fecha_hasta:
+        params['fechaHasta'] = fecha_hasta
+    if tipo_fecha:
+        params['tipoFecha'] = tipo_fecha
+    if estado:
+        params['estado'] = estado
+    if tipo_operacion:
+        params['tipoOperacion'] = tipo_operacion
+    if moneda:
+        params['moneda'] = moneda
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener movimientos: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error al obtener movimientos: {str(e)}")
         return None
         
     except requests.exceptions.HTTPError as e:
