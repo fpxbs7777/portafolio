@@ -2221,7 +2221,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     else:
         st.warning("No se encontraron activos en el portafolio")
 
-def mostrar_estado_cuenta(estado_cuenta):
+def mostrar_estado_cuenta(estado_cuenta, token_portador=None):
     st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
@@ -2230,66 +2230,146 @@ def mostrar_estado_cuenta(estado_cuenta):
     
     cuentas = estado_cuenta.get('cuentas', [])
     
-    # Calcular totales por moneda
+    # Calcular totales por moneda y tipo de cuenta
     saldos_por_moneda = {}
+    saldos_por_cuenta = {}
+    
     for cuenta in cuentas:
         moneda = cuenta.get('moneda', 'PESO').upper()
+        tipo_cuenta = cuenta.get('tipo', 'Cuenta')
         saldo = float(cuenta.get('saldo', 0))
-        if moneda in saldos_por_moneda:
-            saldos_por_moneda[moneda] += saldo
-        else:
-            saldos_por_moneda[moneda] = saldo
+        disponible = float(cuenta.get('disponible', 0))
+        
+        # Agrupar por moneda
+        if moneda not in saldos_por_moneda:
+            saldos_por_moneda[moneda] = {
+                'saldo': 0,
+                'disponible': 0,
+                'cuentas': []
+            }
+        saldos_por_moneda[moneda]['saldo'] += saldo
+        saldos_por_moneda[moneda]['disponible'] += disponible
+        saldos_por_moneda[moneda]['cuentas'].append(cuenta)
+        
+        # Agrupar por tipo de cuenta
+        if tipo_cuenta not in saldos_por_cuenta:
+            saldos_por_cuenta[tipo_cuenta] = {'saldo': 0, 'moneda': moneda}
+        saldos_por_cuenta[tipo_cuenta]['saldo'] += saldo
+
+    # Obtener cotización MEP si hay cuentas en USD
+    cotizacion_mep = None
+    if token_portador and any(m in saldos_por_moneda for m in ['DOLAR', 'USD']):
+        try:
+            # Intentar obtener cotización MEP (Dólar MEP)
+            cotizacion_mep = obtener_cotizacion_mep(token_portador, 'MEP', 'todos', 'todos')
+        except Exception as e:
+            st.warning(f"No se pudo obtener la cotización MEP: {str(e)}")
     
     # Mostrar resumen de saldos
     st.subheader("📈 Resumen de Saldos")
     
     # Ordenar monedas: primero USD, luego otras, finalmente ARS/PESO
     monedas_ordenadas = sorted(saldos_por_moneda.keys(), 
-                              key=lambda x: (x != 'DOLAR', x in ['PESO', 'ARS'], x))
+                              key=lambda x: (x != 'DOLAR' and x != 'USD', x in ['PESO', 'ARS'], x))
     
-    # Mostrar métricas principales
-    cols = st.columns(min(4, len(monedas_ordenadas) + 1))
+    # Crear columnas para el resumen
+    num_cols = min(4, len(monedas_ordenadas) + 1)
+    cols = st.columns(num_cols)
     
-    # Mostrar total en pesos en la primera columna
-    total_pesos = saldos_por_moneda.get('PESO', 0) + saldos_por_moneda.get('ARS', 0)
+    # Mostrar total en pesos
+    total_pesos = saldos_por_moneda.get('PESO', {'saldo': 0})['saldo'] + \
+                 saldos_por_moneda.get('ARS', {'saldo': 0})['saldo']
+    
+    # Convertir USD a ARS si hay cotización MEP
+    if cotizacion_mep and 'precio' in cotizacion_mep:
+        total_usd = saldos_por_moneda.get('DOLAR', {'saldo': 0})['saldo'] + \
+                   saldos_por_moneda.get('USD', {'saldo': 0})['saldo']
+        total_pesos += total_usd * float(cotizacion_mep['precio'])
+        
     cols[0].metric("Total en Pesos (ARS)", f"$ {total_pesos:,.2f}")
     
     # Mostrar otras monedas
-    for i, moneda in enumerate(monedas_ordenadas, 1):
-        if moneda not in ['PESO', 'ARS'] and i < 4:  # Máximo 3 monedas en la fila superior
-            saldo = saldos_por_moneda[moneda]
-            moneda_simbolo = 'U$D' if moneda == 'DOLAR' else moneda
-            cols[i].metric(f"Total en {moneda_simbolo}", f"{moneda_simbolo} {saldo:,.2f}")
+    col_index = 1
+    for moneda in monedas_ordenadas:
+        if moneda not in ['PESO', 'ARS'] and col_index < num_cols:
+            moneda_info = saldos_por_moneda[moneda]
+            moneda_simbolo = 'U$D' if moneda in ['DOLAR', 'USD'] else moneda
+            saldo = moneda_info['saldo']
+            
+            # Agregar cotización MEP si es USD
+            if moneda in ['DOLAR', 'USD'] and cotizacion_mep and 'precio' in cotizacion_mep:
+                valor_ars = saldo * float(cotizacion_mep['precio'])
+                cols[col_index].metric(
+                    f"Total en {moneda_simbolo}", 
+                    f"{moneda_simbolo} {saldo:,.2f}",
+                    f"AR$ {valor_ars:,.2f}"
+                )
+            else:
+                cols[col_index].metric(f"Total en {moneda_simbolo}", f"{moneda_simbolo} {saldo:,.2f}")
+            col_index += 1
     
-    # Mostrar tabla con todos los saldos
+    # Mostrar cotización MEP si está disponible
+    if cotizacion_mep and 'precio' in cotizacion_mep:
+        st.info(f"💱 Cotización MEP: AR$ {float(cotizacion_mep['precio']):,.2f} por Dólar")
+    
+    # Mostrar tablas detalladas
     st.subheader("📊 Detalle por Moneda")
     
-    # Crear DataFrame con los totales
+    # Crear DataFrame con los totales por moneda
     datos_totales = []
-    for moneda, saldo in saldos_por_moneda.items():
-        moneda_nombre = 'Pesos' if moneda in ['PESO', 'ARS'] else moneda.title()
-        moneda_simbolo = 'AR$' if moneda in ['PESO', 'ARS'] else 'U$D' if moneda == 'DOLAR' else moneda
+    for moneda, info in saldos_por_moneda.items():
+        moneda_nombre = 'Pesos' if moneda in ['PESO', 'ARS'] else 'Dólares' if moneda in ['DOLAR', 'USD'] else moneda.title()
+        moneda_simbolo = 'AR$' if moneda in ['PESO', 'ARS'] else 'U$D' if moneda in ['DOLAR', 'USD'] else moneda
+        
+        # Calcular valor en ARS si es USD y hay cotización MEP
+        valor_ars = None
+        if moneda in ['DOLAR', 'USD'] and cotizacion_mep and 'precio' in cotizacion_mep:
+            valor_ars = info['saldo'] * float(cotizacion_mep['precio'])
+        
         datos_totales.append({
             'Moneda': moneda_nombre,
             'Símbolo': moneda_simbolo,
-            'Saldo Total': saldo,
-            'Formateado': f"{moneda_simbolo} {saldo:,.2f}"
+            'Saldo Total': info['saldo'],
+            'Disponible': info['disponible'],
+            'Valor en ARS': valor_ars if valor_ars is not None else 'N/A',
+            'Formateado': f"{moneda_simbolo} {info['saldo']:,.2f}",
+            'Disponible Formateado': f"{moneda_simbolo} {info['disponible']:,.2f}",
+            'Valor ARS Formateado': f"AR$ {valor_ars:,.2f}" if valor_ars is not None else 'N/A'
         })
     
     # Mostrar tabla con los totales
     if datos_totales:
         df_totales = pd.DataFrame(datos_totales)
+        
+        # Configurar columnas a mostrar
+        columnas = ['Moneda', 'Saldo Total', 'Disponible']
+        if any(df_totales['Valor en ARS'] != 'N/A'):
+            columnas.append('Valor en ARS')
+        
+        # Mostrar solo las columnas necesarias
         st.dataframe(
-            df_totales[['Moneda', 'Formateado']].rename(columns={'Formateado': 'Saldo Total'}),
+            df_totales[columnas],
             column_config={
                 'Moneda': 'Moneda',
-                'Formateado': st.column_config.NumberColumn(
+                'Saldo Total': st.column_config.NumberColumn(
                     'Saldo Total',
-                    format='%f'
-                )
+                    format='%.2f',
+                    help='Saldo total en la moneda original'
+                ),
+                'Disponible': st.column_config.NumberColumn(
+                    'Disponible',
+                    format='%.2f',
+                    help='Fondos disponibles para operar'
+                ),
+                'Valor en ARS': st.column_config.NumberColumn(
+                    'Valor en ARS',
+                    format='%.2f',
+                    help='Valor convertido a pesos argentinos (MEP)'
+                ) if 'Valor en ARS' in columnas else None
             },
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
+            height=min(400, len(datos_totales) * 45 + 50)  # Ajustar altura automáticamente
         )
     
     # Mostrar detalle de cuentas
