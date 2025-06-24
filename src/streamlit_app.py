@@ -1395,6 +1395,38 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
+def calcular_beta_individual(asset_returns, benchmark_returns):
+    """
+    Calcula el beta de un activo individual respecto a un benchmark sin restricciones.
+    
+    Args:
+        asset_returns (pd.Series): Retornos del activo individual
+        benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
+        
+    Returns:
+        float: Beta del activo
+    """
+    # Asegurarse de que los datos estén alineados por fecha
+    data = pd.concat([asset_returns, benchmark_returns], axis=1).dropna()
+    if len(data) < 2:
+        return np.nan
+        
+    # Extraer las series limpias
+    asset = data.iloc[:, 0]
+    benchmark = data.iloc[:, 1]
+    
+    # Calcular covarianza y varianza
+    cov_matrix = np.cov(asset, benchmark)
+    
+    # Beta = cov(activo, benchmark) / var(benchmark)
+    if cov_matrix[1, 1] == 0:
+        return np.nan
+        
+    beta = cov_matrix[0, 1] / cov_matrix[1, 1]
+    
+    return beta
+
+
 def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
     """
     Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
@@ -1525,6 +1557,71 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
         'r_cuadrado': r_squared,
         'observations': alpha_beta_metrics.get('observations', 0)
     }
+
+def calcular_betas_activos(activos, token_portador, dias_historial=252, benchmark_ticker='^MERV'):
+    """
+    Calcula los betas individuales de múltiples activos respecto a un benchmark.
+    
+    Args:
+        activos (list): Lista de diccionarios con 'simbolo' y 'mercado' de cada activo
+        token_portador (str): Token de autenticación para la API
+        dias_historial (int): Días de histórico a considerar
+        benchmark_ticker (str): Ticker del benchmark (por defecto: MERVAL)
+        
+    Returns:
+        dict: Diccionario con los betas de cada activo
+    """
+    # Obtener fechas
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=dias_historial*2)).strftime('%Y-%m-%d')
+    
+    # Obtener datos del benchmark
+    try:
+        benchmark_data = yf.download(benchmark_ticker, start=fecha_desde, end=fecha_hasta)['Adj Close']
+        benchmark_returns = benchmark_data.pct_change().dropna()
+    except Exception as e:
+        st.error(f"Error al obtener datos del benchmark: {str(e)}")
+        return {}
+    
+    betas = {}
+    
+    for activo in activos:
+        try:
+            # Obtener datos históricos del activo
+            historico = obtener_serie_historica_iol(
+                token_portador, 
+                activo['mercado'], 
+                activo['simbolo'], 
+                fecha_desde, 
+                fecha_hasta
+            )
+            
+            if historico is None or historico.empty:
+                st.warning(f"No se pudieron obtener datos para {activo['simbolo']}")
+                continue
+                
+            # Calcular retornos
+            activo_returns = historico['precio'].pct_change().dropna()
+            
+            # Asegurar que las fechas coincidan
+            common_dates = benchmark_returns.index.intersection(activo_returns.index)
+            if len(common_dates) < 5:  # Mínimo de puntos para un cálculo significativo
+                st.warning(f"No hay suficientes datos coincidentes para {activo['simbolo']}")
+                continue
+                
+            # Calcular beta
+            beta = calcular_beta_individual(
+                activo_returns[common_dates],
+                benchmark_returns[common_dates]
+            )
+            
+            betas[activo['simbolo']] = beta
+            
+        except Exception as e:
+            st.error(f"Error al calcular beta para {activo['simbolo']}: {str(e)}")
+    
+    return betas
+
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
