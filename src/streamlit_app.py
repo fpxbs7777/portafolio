@@ -1657,6 +1657,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             else:
                 ab_metrics = {'alpha': None, 'beta': None, 'indice': None}
 
+
             if len(retornos_validos) < 5:  # Mínimo de datos para métricas confiables
                 print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
                 continue
@@ -1692,7 +1693,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             volatilidad = min(volatilidad, 3)  # Límite de 300% de volatilidad
             
             # Calcular métricas de riesgo basadas en la distribución de retornos
-{{ ... }}
+            # (Aquí va el cálculo real o se elimina si no se usa)
+
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
