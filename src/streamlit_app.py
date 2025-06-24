@@ -383,9 +383,50 @@ def obtener_tasas_caucion(token_portador):
 
 def mostrar_tasas_caucion(token_portador):
     """
-    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
+    Muestra un dashboard completo de tasas de caución con análisis detallado y visualizaciones interactivas
     """
-    st.subheader("📊 Tasas de Caución")
+    st.markdown("## 📊 Análisis de Mercado de Caución")
+    
+    # Información contextual con pestañas
+    tab1, tab2 = st.tabs(["📊 Gráficos", "ℹ️ Información"])
+    
+    with tab2:
+        st.markdown("### ¿Qué son las tasas de caución?")
+        st.markdown("""
+        Las tasas de caución representan el costo de financiamiento en el mercado de dinero argentino. 
+        Son operaciones de préstamo de corto plazo donde se entregan títulos públicos como garantía.
+        
+        **Características principales:**
+        - **Plazo**: Generalmente de 1 a 30 días
+        - **Tasa**: Interés anualizado que se paga por el préstamo
+        - **Garantía**: Títulos públicos de bajo riesgo
+        - **Liquidación**: Normalmente operan con liquidación en 24 o 48 horas hábiles
+        
+        **Interpretación de la curva de tasas:**
+        - Pendiente positiva: Expectativas de suba de tasas
+        - Pendiente negativa: Expectativas de baja de tasas
+        - Curva plana: Incertidumbre en el mercado
+        """)
+    
+    # Mostrar selector de moneda
+    with st.sidebar:
+        st.subheader("Filtros")
+        moneda = st.radio("Moneda:", ["ARS", "USD"], horizontal=True)
+        
+        # Filtro de plazo máximo
+        plazo_max = st.slider(
+            "Plazo máximo (días):",
+            min_value=1,
+            max_value=30,
+            value=30,
+            step=1,
+            help="Filtrar por plazo máximo en días"
+        )
+        
+        # Opciones de visualización
+        st.subheader("Opciones de visualización")
+        show_table = st.checkbox("Mostrar tabla detallada", value=True)
+        show_stats = st.checkbox("Mostrar estadísticas", value=True)
     
     try:
         with st.spinner('Obteniendo tasas de caución...'):
@@ -396,62 +437,216 @@ def mostrar_tasas_caucion(token_portador):
                 st.warning("No se encontraron datos de tasas de caución.")
                 return
                 
+            # Filtrar por moneda y plazo
+            df_cauciones = df_cauciones[
+                (df_cauciones['moneda'] == moneda) & 
+                (df_cauciones['plazo_dias'] <= plazo_max)
+            ].copy()
+            
+            if df_cauciones.empty:
+                st.warning(f"No hay datos disponibles para caución en {moneda} con plazo hasta {plazo_max} días")
+                return
+                
             # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia', 'monto']
             missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
             if missing_columns:
                 st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
                 return
             
-            # Mostrar tabla con las tasas
-            st.dataframe(
-                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                             else ['simbolo', 'plazo', 'ultimoPrecio']]
-                .rename(columns={
-                    'simbolo': 'Instrumento',
-                    'plazo': 'Plazo',
-                    'ultimoPrecio': 'Tasa',
-                    'monto': 'Monto (en millones)'
-                }),
-                use_container_width=True,
-                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
-            )
+            # Calcular métricas adicionales
+            df_cauciones['tasa_anual_efectiva'] = ((1 + df_cauciones['tasa_limpia']/100/365)**df_cauciones['plazo_dias'] - 1) * (365/df_cauciones['plazo_dias']) * 100
             
-            # Crear gráfico de curva de tasas si hay suficientes puntos
-            if len(df_cauciones) > 1:
-                fig = go.Figure()
+            with tab1:
+                # Crear pestañas para diferentes visualizaciones
+                tab_curva, tab_barras, tab_comp_moneda = st.tabs(["📈 Curva de Tasas", "📊 Análisis por Plazo", "🌐 Comparación por Moneda"])
                 
-                fig.add_trace(go.Scatter(
-                    x=df_cauciones['plazo_dias'],
-                    y=df_cauciones['tasa_limpia'],
-                    mode='lines+markers+text',
-                    name='Tasa',
-                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                    textposition='top center',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=10, color='#1f77b4')
-                ))
+                with tab_curva:
+                    # Gráfico de curva de tasas principal
+                    fig_curva = go.Figure()
+                    
+                    # Agregar línea de tendencia si hay suficientes puntos
+                    if len(df_cauciones) > 2:
+                        z = np.polyfit(df_cauciones['plazo_dias'], df_cauciones['tasa_limpia'], 1)
+                        p = np.poly1d(z)
+                        df_cauciones['tendencia'] = p(df_cauciones['plazo_dias'])
+                        
+                        fig_curva.add_trace(go.Scatter(
+                            x=df_cauciones['plazo_dias'],
+                            y=df_cauciones['tendencia'],
+                            mode='lines',
+                            name='Tendencia',
+                            line=dict(color='red', width=2, dash='dash'),
+                            opacity=0.7
+                        ))
+                    
+                    # Agregar puntos de datos
+                    fig_curva.add_trace(go.Scatter(
+                        x=df_cauciones['plazo_dias'],
+                        y=df_cauciones['tasa_limpia'],
+                        mode='markers+text',
+                        name='Tasas',
+                        text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                        textposition='top center',
+                        marker=dict(
+                            size=12,
+                            color=df_cauciones['tasa_limpia'],
+                            colorscale='Viridis',
+                            showscale=True,
+                            colorbar=dict(title='Tasa %')
+                        ),
+                        customdata=df_cauciones[['plazo', 'monto']],
+                        hovertemplate=
+                            '<b>Plazo:</b> %{customdata[0]}<br>' +
+                            '<b>Tasa:</b> %{y:.2f}%<br>' +
+                            '<b>Monto:</b> %{customdata[1]:,.0f} M<extra></extra>'
+                    ))
+                    
+                    # Configuración del layout
+                    fig_curva.update_layout(
+                        title=f'Curva de Tasas de Caución - {moneda}',
+                        xaxis_title='Plazo (días)',
+                        yaxis_title='Tasa Anual (%)',
+                        template='plotly_white',
+                        height=500,
+                        hovermode='closest',
+                        showlegend=len(df_cauciones) > 2
+                    )
+                    
+                    st.plotly_chart(fig_curva, use_container_width=True)
                 
-                fig.update_layout(
-                    title='Curva de Tasas de Caución',
-                    xaxis_title='Plazo (días)',
-                    yaxis_title='Tasa Anual (%)',
-                    template='plotly_white',
-                    height=500,
-                    showlegend=False
-                )
+                with tab_barras:
+                    # Gráfico de barras por plazo
+                    fig_barras = go.Figure()
+                    
+                    fig_barras.add_trace(go.Bar(
+                        x=df_cauciones['plazo'],
+                        y=df_cauciones['tasa_limpia'],
+                        name='Tasa',
+                        text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                        textposition='auto',
+                        marker_color='#636EFA',
+                        customdata=df_cauciones[['plazo_dias', 'monto']],
+                        hovertemplate=
+                            '<b>Plazo:</b> %{x}<br>' +
+                            '<b>Tasa:</b> %{y:.2f}%<br>' +
+                            '<b>Días:</b> %{customdata[0]}<br>' +
+                            '<b>Monto:</b> %{customdata[1]:,.0f} M<extra></extra>'
+                    ))
+                    
+                    fig_barras.update_layout(
+                        title=f'Tasas por Plazo - {moneda}',
+                        xaxis_title='Plazo',
+                        yaxis_title='Tasa Anual (%)',
+                        template='plotly_white',
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig_barras, use_container_width=True)
                 
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Mostrar resumen estadístico
-            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-                with col2:
-                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+                with tab_comp_moneda:
+                    # Obtener datos de la otra moneda para comparación
+                    otra_moneda = 'USD' if moneda == 'ARS' else 'ARS'
+                    df_otra_moneda = obtener_tasas_caucion(token_portador)
+                    
+                    if df_otra_moneda is not None and not df_otra_moneda.empty:
+                        df_otra_moneda = df_otra_moneda[df_otra_moneda['moneda'] == otra_moneda].copy()
+                        
+                        if not df_otra_moneda.empty:
+                            # Crear figura de comparación
+                            fig_comp = go.Figure()
+                            
+                            # Agregar tasas de la moneda principal
+                            fig_comp.add_trace(go.Scatter(
+                                x=df_cauciones['plazo_dias'],
+                                y=df_cauciones['tasa_limpia'],
+                                mode='lines+markers',
+                                name=f'Tasas {moneda}',
+                                line=dict(color='#1f77b4', width=2),
+                                marker=dict(size=8)
+                            ))
+                            
+                            # Agregar tasas de la otra moneda
+                            fig_comp.add_trace(go.Scatter(
+                                x=df_otra_moneda['plazo_dias'],
+                                y=df_otra_moneda['tasa_limpia'],
+                                mode='lines+markers',
+                                name=f'Tasas {otra_moneda}',
+                                line=dict(color='#ff7f0e', width=2),
+                                marker=dict(size=8)
+                            ))
+                            
+                            fig_comp.update_layout(
+                                title=f'Comparación de Tasas {moneda} vs {otra_moneda}',
+                                xaxis_title='Plazo (días)',
+                                yaxis_title='Tasa Anual (%)',
+                                template='plotly_white',
+                                height=500,
+                                legend=dict(orientation='h', y=1.1, yanchor='bottom')
+                            )
+                            
+                            st.plotly_chart(fig_comp, use_container_width=True)
+                        else:
+                            st.warning(f"No hay datos disponibles para caución en {otra_moneda}")
+                    else:
+                        st.warning("No se pudieron cargar datos para comparación de monedas")
+                
+                # Mostrar tabla detallada si está habilitado
+                if show_table:
+                    st.subheader("Detalle de Tasas")
+                    # Formatear montos en millones
+                    df_display = df_cauciones.copy()
+                    if 'monto' in df_display.columns:
+                        df_display['monto_millones'] = (df_display['monto'] / 1e6).round(2)
+                    
+                    # Ordenar por plazo
+                    df_display = df_display.sort_values('plazo_dias')
+                    
+                    # Mostrar tabla con columnas seleccionadas
+                    st.dataframe(
+                        df_display[['plazo', 'plazo_dias', 'tasa_limpia', 'tasa_anual_efectiva', 'monto_millones']]
+                        .rename(columns={
+                            'plazo': 'Plazo',
+                            'plazo_dias': 'Días',
+                            'tasa_limpia': 'Tasa N.A. (%)',
+                            'tasa_anual_efectiva': 'TEA (%)',
+                            'monto_millones': 'Monto (M)'
+                        })
+                        .style.format({
+                            'Tasa N.A. (%)': '{:.2f}%',
+                            'TEA (%)': '{:.2f}%',
+                            'Monto (M)': '{:,.2f}'
+                        }),
+                        use_container_width=True,
+                        height=min(400, 50 + len(df_cauciones) * 35)
+                    )
+                
+                # Mostrar estadísticas si está habilitado
+                if show_stats and not df_cauciones.empty and 'tasa_limpia' in df_cauciones.columns:
+                    st.subheader("Estadísticas")
+                    
+                    # Calcular métricas
+                    tasas = df_cauciones['tasa_limpia']
+                    plazos = df_cauciones['plazo_dias']
+                    
+                    # Crear columnas para métricas
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Tasa Mínima", f"{tasas.min():.2f}%")
+                        st.metric("Plazo Mínimo", f"{plazos.min():.0f} días")
+                    
+                    with col2:
+                        st.metric("Tasa Máxima", f"{tasas.max():.2f}%")
+                        st.metric("Plazo Máximo", f"{plazos.max():.0f} días")
+                    
+                    with col3:
+                        st.metric("Tasa Promedio", f"{tasas.mean():.2f}%")
+                        st.metric("Plazo Promedio", f"{plazos.mean():.1f} días")
+                    
+                    with col4:
+                        st.metric("Tasa Mediana", f"{tasas.median():.2f}%")
+                        st.metric("Cantidad de Plazos", len(df_cauciones))
                     
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
@@ -2229,9 +2424,27 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
+    # Obtener cotización MEP para conversión USD a ARS
+    cotizacion_mep = obtener_cotizacion_mep(token_portador, "AL30", 1, 1)  # Usamos AL30 como referencia
+    tasa_mep = float(cotizacion_mep.get('precio', 0)) if cotizacion_mep and 'precio' in cotizacion_mep else 0
+    
+    # Obtener saldos en USD del estado de cuenta
+    saldo_usd = 0
+    monto_invertido_usd = 0
+    if 'estado_cuenta' in portafolio:
+        for cuenta in portafolio['estado_cuenta'].get('cuentas', []):
+            if cuenta.get('moneda', '').upper() == 'USD':
+                saldo_usd += float(cuenta.get('saldo', 0) or 0)
+                monto_invertido_usd += float(cuenta.get('montoInvertido', 0) or 0)
+    
+    # Convertir saldos USD a ARS usando MEP
+    saldo_usd_ars = saldo_usd * tasa_mep if tasa_mep > 0 else 0
+    monto_invertido_usd_ars = monto_invertido_usd * tasa_mep if tasa_mep > 0 else 0
+    
     activos = portafolio.get('activos', [])
     datos_activos = []
     valor_total = 0
+    valor_total_ars = 0  # Para rastrear el total en ARS (activos en ARS + USD convertidos)
     
     for activo in activos:
         try:
@@ -2323,15 +2536,31 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     except (ValueError, TypeError):
                         pass
             
-            datos_activos.append({
-                'Símbolo': simbolo,
-                'Descripción': descripcion,
-                'Tipo': tipo,
-                'Cantidad': cantidad,
-                'Valuación': valuacion,
-            })
-            
-            valor_total += valuacion
+            if valuacion > 0:
+                # Verificar si el activo está en USD
+                moneda_activo = activo.get('monedaCotizacion', 'ARS').upper()
+                
+                if moneda_activo == 'USD' and tasa_mep > 0:
+                    # Convertir el valor a ARS usando la tasa MEP
+                    valor_ars = valuacion * tasa_mep
+                    valor_total_ars += valor_ars
+                    moneda_mostrar = 'USD (convertido a ARS)'
+                else:
+                    valor_ars = valuacion
+                    valor_total_ars += valor_ars
+                    moneda_mostrar = 'ARS'
+                
+                valor_total += valuacion
+                
+                # Agregar a datos para el DataFrame
+                datos_activos.append({
+                    'Símbolo': simbolo,
+                    'Descripción': descripcion,
+                    'Tipo': tipo,
+                    'Cantidad': f"{float(cantidad):,.2f}",
+                    'Valor': f"${valor_ars:,.2f}",
+                    'Moneda': moneda_mostrar
+                })
         except Exception as e:
             continue
     
@@ -2339,14 +2568,51 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General
+        # Calcular el valor total ajustado incluyendo el saldo en USD convertido a ARS
+        valor_total_ajustado = valor_total_ars + saldo_usd_ars
+        
+        # Obtener métricas con el valor total ajustado
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total_ajustado, token_portador)
+        
+        # Mostrar resumen de valores
+        st.markdown("### 📊 Resumen de Valores")
+        
+        # Primera fila - Totales generales
+        col1, col2, col3, col4 = st.columns(4)
+        
+        # Valor total de los activos en ARS
+        col1.metric("Valor Activos ARS", f"${valor_total_ars:,.2f}", 
+                   help="Valor total de los activos en pesos argentinos")
+        
+        # Valor total de los activos en USD (convertido a ARS)
+        valor_activos_usd_ars = valor_total - valor_total_ars
+        col2.metric("Valor Activos USD", f"${valor_activos_usd_ars:,.2f}", 
+                   f"${(valor_activos_usd_ars * tasa_mep):,.2f} ARS" if tasa_mep > 0 else "Tasa MEP no disponible",
+                   help="Valor de activos en USD convertidos a ARS")
+        
+        # Saldo en cuentas USD convertido a ARS
+        col3.metric("Saldo en Cuentas USD", f"${saldo_usd:,.2f} USD", 
+                   f"${saldo_usd_ars:,.2f} ARS" if tasa_mep > 0 else "Tasa MEP no disponible",
+                   help="Saldo en cuentas en dólares convertido a pesos")
+        
+        # Valor total ajustado (activos + saldo en USD convertido)
+        col4.metric("Valor Total Ajustado (ARS)", f"${valor_total_ajustado:,.2f}", 
+                   "Incluye activos en ARS y USD convertidos",
+                   help="Valor total incluyendo activos y saldos en USD convertidos a ARS")
+        
+        # Mostrar tasa MEP utilizada
+        st.caption(f"*Tasa de cambio MEP utilizada: ${tasa_mep:,.2f} ARS/USD" if tasa_mep > 0 else "*No se pudo obtener la tasa MEP")
+        
+        # Segunda fila - Métricas generales
+        st.markdown("### 📈 Métricas Generales")
         cols = st.columns(4)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        cols[3].metric("Monto Invertido USD", 
+                      f"${monto_invertido_usd:,.2f} USD", 
+                      f"${monto_invertido_usd_ars:,.2f} ARS" if tasa_mep > 0 else "")
         
         if metricas:
             # Métricas de Riesgo
