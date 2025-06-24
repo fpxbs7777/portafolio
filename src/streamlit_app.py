@@ -2013,33 +2013,56 @@ def obtener_lista_clientes(token_acceso):
         list: Lista de diccionarios con información de los clientes
     """
     try:
-        # Intentar primero con el endpoint de cuentas
-        url = "https://api.invertironline.com/api/v2/cuentas"
+        # Usar el endpoint de usuarios
+        url = "https://api.invertironline.com/api/v2/usuarios/me"
         headers = {
-            'Authorization': f'Bearer {token_acceso}'
+            'Authorization': f'Bearer {token_acceso}',
+            'Accept': 'application/json'
         }
         
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        # Si la respuesta es exitosa, devolver las cuentas
-        cuentas = response.json()
-        if isinstance(cuentas, list) and len(cuentas) > 0:
-            return cuentas
-            
-        # Si no hay cuentas, intentar con el endpoint de perfil
-        url = "https://api.invertironline.com/api/v2/perfil"
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        data = response.json()
         
-        perfil = response.json()
-        if 'id' in perfil:
-            return [{
-                'id': perfil.get('id'),
-                'numeroCliente': perfil.get('numeroCliente'),
-                'apellidoYNombre': perfil.get('apellidoYNombre', 'Cliente')
-            }]
+        # Verificar si hay cuentas en la respuesta
+        if isinstance(data, dict):
+            # Si hay cuentas, devolverlas
+            if 'cuentas' in data and isinstance(data['cuentas'], list):
+                return data['cuentas']
+                
+            # Si hay información de usuario, crear una cuenta
+            if 'id' in data:
+                return [{
+                    'id': data.get('id'),
+                    'numeroCliente': data.get('numeroCliente', data.get('id')),
+                    'apellidoYNombre': f"{data.get('apellido', '')} {data.get('nombre', '')}".strip() or 'Cliente'
+                }]
+                
+        return []
+        
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"Error HTTP al obtener clientes: {e.response.status_code}"
+        if e.response.text:
+            error_msg += f" - {e.response.text}"
             
+        # Si es un error 401, intentar refrescar el token
+        if e.response.status_code == 401:
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                nuevo_token = refrescar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state.token_acceso = nuevo_token
+                    # Intentar nuevamente con el nuevo token
+                    return obtener_lista_clientes(nuevo_token)
+        
+        st.error(error_msg)
+        return []
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión al obtener clientes: {str(e)}")
+        return []
+    except Exception as e:
+        st.error(f"Error inesperado al obtener clientes: {str(e)}")
         return []
         
     except requests.exceptions.HTTPError as e:
