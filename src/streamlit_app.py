@@ -385,79 +385,51 @@ def mostrar_tasas_caucion(token_portador):
     """
     Muestra las tasas de caución en una tabla y gráfico de curva de tasas
     """
-    st.subheader("📊 Tasas de Caución")
-    
     try:
-        with st.spinner('Obteniendo tasas de caución...'):
-            df_cauciones = obtener_tasas_caucion(token_portador)
-            
-            # Verificar si se obtuvieron datos
-            if df_cauciones is None or df_cauciones.empty:
-                st.warning("No se encontraron datos de tasas de caución.")
-                return
-                
-            # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-            if missing_columns:
-                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-                return
-            
-            # Mostrar tabla con las tasas
-            st.dataframe(
-                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                             else ['simbolo', 'plazo', 'ultimoPrecio']]
-                .rename(columns={
-                    'simbolo': 'Instrumento',
-                    'plazo': 'Plazo',
-                    'ultimoPrecio': 'Tasa',
-                    'monto': 'Monto (en millones)'
-                }),
-                use_container_width=True,
-                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
-            )
-            
-            # Crear gráfico de curva de tasas si hay suficientes puntos
-            if len(df_cauciones) > 1:
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=df_cauciones['plazo_dias'],
-                    y=df_cauciones['tasa_limpia'],
-                    mode='lines+markers+text',
-                    name='Tasa',
-                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                    textposition='top center',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=10, color='#1f77b4')
-                ))
-                
-                fig.update_layout(
-                    title='Curva de Tasas de Caución',
-                    xaxis_title='Plazo (días)',
-                    yaxis_title='Tasa Anual (%)',
-                    template='plotly_white',
-                    height=500,
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Mostrar resumen estadístico
-            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-                with col2:
-                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
-                    
+        # Obtener las tasas de caución
+        df_cauciones = obtener_tasas_caucion(token_portador)
+        if df_cauciones is None or df_cauciones.empty:
+            st.warning("No se encontraron datos de tasas de caución.")
+            return
+
+        # Verificar columnas requeridas
+        required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+        missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+        if missing_columns:
+            st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+            return
+
+        # Mostrar tabla con las tasas
+        st.subheader('Tasas de Caucción')
+        st.dataframe(
+            df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                         else ['simbolo', 'plazo', 'ultimoPrecio']]
+            .rename(columns={
+                'simbolo': 'Instrumento',
+                'plazo': 'Plazo',
+                'ultimoPrecio': 'Tasa',
+                'monto': 'Monto (en millones)'
+            }),
+            use_container_width=True,
+            height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+        )
+
+        # Graficar curva de tasas
+        graficar_curva_tasas(df_cauciones)
+
+        # Mostrar resumen estadístico
+        if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+            with col2:
+                st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S.%f",
         "%Y-%m-%d %H:%M:%S",
@@ -593,40 +565,7 @@ def procesar_respuesta_historico(data, tipo_activo):
         st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
 
-def obtener_fondos_comunes(token_portador):
-    """
-    Obtiene la lista de fondos comunes de inversión disponibles
-    """
-    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
-    headers = {
-        'Authorization': f'Bearer {token_portador}'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener fondos comunes: {str(e)}")
-        return []
-
-def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene la serie histórica de un fondo común de inversión
-    """
-    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
-    headers = {
-        'Authorization': f'Bearer {token_portador}',
-        'Accept': 'application/json'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        # Procesar la respuesta para convertirla al formato esperado
-        if isinstance(data, list):
-            fechas = []
+# ... (rest of the code remains the same)
             precios = []
             for item in data:
                 if 'fecha' in item and 'valorCuota' in item:
