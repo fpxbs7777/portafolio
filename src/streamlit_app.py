@@ -1395,7 +1395,144 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
+def detectar_benchmark(simbolo, mercado):
+    """
+    Detecta el benchmark apropiado basado en el símbolo y mercado del activo.
+    
+    Args:
+        simbolo (str): Símbolo del activo
+        mercado (str): Mercado del activo (BCBA, NASDAQ, NYSE, etc.)
+        
+    Returns:
+        str: Símbolo del benchmark correspondiente
+    """
+    mercado = str(mercado).upper()
+    simbolo = str(simbolo).upper()
+    
+    # Mapeo de mercados a sus benchmarks
+    benchmarks = {
+        'BCBA': '^MERV',      # MERVAL para Argentina
+        'NYSE': '^GSPC',      # S&P 500 para NYSE
+        'NASDAQ': '^IXIC',    # NASDAQ Composite
+        'AMEX': '^XAX',       # NYSE AMEX Composite
+        'BME': '^IBEX',       # IBEX 35 para España
+        'LSE': '^FTSE',       # FTSE 100 para Londres
+        'FRA': '^GDAXI',      # DAX para Alemania
+        'PAR': '^FCHI',       # CAC 40 para Francia
+        'MIL': 'FTSEMIB.MI',  # FTSE MIB para Italia
+        'SHA': '000001.SS',   # SSE Composite para China
+        'SHE': '399001.SZ',   # SZSE Component para Shenzhen
+        'TYO': '^N225',       # Nikkei 225 para Japón
+        'HKG': '^HSI',        # Hang Seng para Hong Kong
+        'ASX': '^AXJO',       # S&P/ASX 200 para Australia
+        'TSE': '^GSPTSE',     # S&P/TSX para Canadá
+        'BOVESPA': '^BVSP',   # Bovespa para Brasil
+        'MEX': '^MXX',        # IPC para México
+        'BCS': '^IPSA',       # IPSA para Chile
+        'BOG': 'COLCAP',      # COLCAP para Colombia
+    }
+    
+    # Verificar si el símbolo ya es un índice conocido
+    if simbolo.startswith('^') or any(simbolo.endswith(ext) for ext in ['.BA', '.MC', '.L', '.DE', '.PA', '.MI', '.SS', '.SZ', '.T', '.HK', '.AX', '.TO', '.SA', '.MX', '.SN', '.CO']):
+        return simbolo
+    
+    # Devolver benchmark basado en el mercado
+    return benchmarks.get(mercado, '^GSPC')  # Por defecto S&P 500
+
+def obtener_datos_benchmark(simbolo_benchmark, fecha_desde, fecha_hasta):
+    """
+    Obtiene los datos históricos del benchmark.
+    
+    Args:
+        simbolo_benchmark (str): Símbolo del benchmark
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
+        
+    Returns:
+        pd.Series: Serie de precios del benchmark
+    """
+    try:
+        if simbolo_benchmark == '^MERV':
+            # Usar yfinance para MERVAL
+            df = yf.download(simbolo_benchmark, start=fecha_desde, end=fecha_hasta)['Adj Close']
+        else:
+            # Para otros índices, intentar con yfinance
+            df = yf.download(simbolo_benchmark, start=fecha_desde, end=fecha_hasta)['Adj Close']
+        
+        return df.pct_change().dropna()
+    except Exception as e:
+        st.error(f"Error al obtener datos del benchmark {simbolo_benchmark}: {str(e)}")
+        return None
+
+def calcular_estadisticas_activo(activo_returns, benchmark_returns, risk_free_rate=0.0):
+    """
+    Calcula estadísticas detalladas para un activo individual.
+    
+    Args:
+        activo_returns (pd.Series): Retornos del activo
+        benchmark_returns (pd.Series): Retornos del benchmark
+        risk_free_rate (float): Tasa libre de riesgo
+        
+    Returns:
+        dict: Diccionario con métricas del activo
+    """
+    if activo_returns.empty or benchmark_returns.empty:
+        return None
+        
+    # Alinear fechas
+    aligned_data = pd.concat([activo_returns, benchmark_returns], axis=1).dropna()
+    if len(aligned_data) < 2:
+        return None
+        
+    activo = aligned_data.iloc[:, 0]
+    benchmark = aligned_data.iloc[:, 1]
+    
+    # Calcular métricas básicas
+    retorno_anual = activo.mean() * 252
+    volatilidad_anual = activo.std() * np.sqrt(252)
+    sharpe_ratio = (retorno_anual - risk_free_rate) / volatilidad_anual if volatilidad_anual > 0 else 0
+    
+    # Calcular beta y alpha
+    cov_matrix = np.cov(benchmark, activo, ddof=1)
+    beta = cov_matrix[0, 1] / cov_matrix[0, 0] if cov_matrix[0, 0] > 0 else 1.0
+    alpha = (activo.mean() - beta * benchmark.mean()) * 252  # Alpha anualizado
+    
+    # Calcular R-cuadrado
+    y_pred = beta * benchmark + (activo.mean() - beta * benchmark.mean())
+    ss_res = np.sum((activo - y_pred) ** 2)
+    ss_tot = np.sum((activo - activo.mean()) ** 2)
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+    
+    # Calcular tracking error e information ratio
+    tracking_error = np.std(activo - benchmark, ddof=1) * np.sqrt(252)
+    information_ratio = (activo.mean() - benchmark.mean()) * np.sqrt(252) / tracking_error if tracking_error > 0 else 0
+    
+    # Calcular drawdown máximo
+    cum_returns = (1 + activo).cumprod()
+    rolling_max = cum_returns.cummax()
+    drawdowns = (cum_returns - rolling_max) / rolling_max
+    max_drawdown = drawdowns.min()
+    
+    # Calcular ratio de Sortino (usando solo desviación a la baja)
+    negative_returns = activo[activo < 0]
+    downside_std = np.sqrt((negative_returns ** 2).mean()) * np.sqrt(252) if len(negative_returns) > 0 else 0
+    sortino_ratio = (retorno_anual - risk_free_rate) / downside_std if downside_std > 0 else 0
+    
+    return {
+        'Retorno Anual': retorno_anual,
+        'Volatilidad Anual': volatilidad_anual,
+        'Ratio de Sharpe': sharpe_ratio,
+        'Ratio de Sortino': sortino_ratio,
+        'Beta': beta,
+        'Alpha Anual': alpha,
+        'R²': r_squared,
+        'Tracking Error': tracking_error,
+        'Information Ratio': information_ratio,
+        'Máximo Drawdown': max_drawdown,
+        'Días': len(activo)
+    }
+
+def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0, activos_individuales=None, fechas=None):
     """
     Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
     
@@ -1403,6 +1540,8 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
         portfolio_returns (pd.Series): Retornos del portafolio
         benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
         risk_free_rate (float): Tasa libre de riesgo (anualizada)
+        activos_individuales (dict): Diccionario con retornos de activos individuales
+        fechas (tuple): Tupla con (fecha_desde, fecha_hasta) para análisis
         
     Returns:
         dict: Diccionario con alpha, beta, información de la regresión y métricas adicionales
@@ -1424,11 +1563,155 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
                 'alpha_annual': 0,
                 'beta_std_error': 0,
                 'success': False,
-                'message': 'Datos insuficientes para el cálculo'
+                'message': 'Datos insuficientes para el cálculo',
+                'estadisticas_activos': pd.DataFrame(),
+                'estadisticas_benchmark': {}
             }
         
         portfolio_aligned = aligned_data.iloc[:, 0]
         benchmark_aligned = aligned_data.iloc[:, 1]
+        
+        # Calcular métricas del portafolio
+        retorno_anual = portfolio_aligned.mean() * 252
+        volatilidad_anual = portfolio_aligned.std() * np.sqrt(252)
+        sharpe_ratio = (retorno_anual - risk_free_rate) / volatilidad_anual if volatilidad_anual > 0 else 0
+        
+        # Calcular beta y alpha del portafolio
+        cov_matrix = np.cov(benchmark_aligned, portfolio_aligned, ddof=1)
+        beta = cov_matrix[0, 1] / cov_matrix[0, 0] if cov_matrix[0, 0] > 0 else 1.0
+        alpha = (portfolio_aligned.mean() - beta * benchmark_aligned.mean()) * 252  # Alpha anualizado
+        
+        # Calcular R-cuadrado
+        y_pred = beta * benchmark_aligned + (portfolio_aligned.mean() - beta * benchmark_aligned.mean())
+        ss_res = np.sum((portfolio_aligned - y_pred) ** 2)
+        ss_tot = np.sum((portfolio_aligned - portfolio_aligned.mean()) ** 2)
+        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        
+        # Calcular tracking error e information ratio
+        tracking_error = np.std(portfolio_aligned - benchmark_aligned, ddof=1) * np.sqrt(252)
+        information_ratio = (portfolio_aligned.mean() - benchmark_aligned.mean()) * np.sqrt(252) / tracking_error if tracking_error > 0 else 0
+        
+        # Calcular drawdown máximo del portafolio
+        cum_returns = (1 + portfolio_aligned).cumprod()
+        rolling_max = cum_returns.cummax()
+        drawdowns = (cum_returns - rolling_max) / rolling_max
+        max_drawdown = drawdowns.min()
+        
+        # Calcular ratio de Sortino
+        negative_returns = portfolio_aligned[portfolio_aligned < 0]
+        downside_std = np.sqrt((negative_returns ** 2).mean()) * np.sqrt(252) if len(negative_returns) > 0 else 0
+        sortino_ratio = (retorno_anual - risk_free_rate) / downside_std if downside_std > 0 else 0
+        
+        # Calcular métricas para cada activo individual si se proporcionan
+        df_activos = pd.DataFrame()
+        if activos_individuales and isinstance(activos_individuales, dict):
+            stats_activos = []
+            for nombre, retornos in activos_individuales.items():
+                if isinstance(retornos, pd.Series):
+                    stats = calcular_estadisticas_activo(retornos, benchmark_returns, risk_free_rate)
+                    if stats:
+                        stats['Activo'] = nombre
+                        stats_activos.append(stats)
+            
+            if stats_activos:
+                df_activos = pd.DataFrame(stats_activos)
+                df_activos = df_activos.set_index('Activo')
+                # Formatear los valores para mejor visualización
+                format_dict = {
+                    'Retorno Anual': '{:.2%}',
+                    'Volatilidad Anual': '{:.2%}',
+                    'Ratio de Sharpe': '{:.2f}',
+                    'Ratio de Sortino': '{:.2f}',
+                    'Beta': '{:.2f}',
+                    'Alpha Anual': '{:.2%}',
+                    'R²': '{:.2f}',
+                    'Tracking Error': '{:.2%}',
+                    'Information Ratio': '{:.2f}',
+                    'Máximo Drawdown': '{:.2%}',
+                    'Días': '{:,.0f}'
+                }
+                # Aplicar formato
+                for col, fmt in format_dict.items():
+                    if col in df_activos.columns:
+                        df_activos[col] = df_activos[col].apply(lambda x: fmt.format(x) if pd.notnull(x) else 'N/A')
+        
+        # Calcular métricas del benchmark
+        benchmark_stats = {}
+        if not benchmark_returns.empty:
+            benchmark_returns_aligned = benchmark_returns[benchmark_returns.index.isin(portfolio_returns.index)]
+            if not benchmark_returns_aligned.empty:
+                benchmark_stats = {
+                    'Retorno Anual': benchmark_returns_aligned.mean() * 252,
+                    'Volatilidad Anual': benchmark_returns_aligned.std() * np.sqrt(252),
+                    'Ratio de Sharpe': (benchmark_returns_aligned.mean() * 252 - risk_free_rate) / (benchmark_returns_aligned.std() * np.sqrt(252)) if benchmark_returns_aligned.std() > 0 else 0,
+                    'Días': len(benchmark_returns_aligned)
+                }
+        
+        # Crear tabla resumen del portafolio
+        resumen_portafolio = {
+            'Métrica': [
+                'Retorno Anual',
+                'Volatilidad Anual',
+                'Ratio de Sharpe',
+                'Ratio de Sortino',
+                'Beta',
+                'Alpha Anual',
+                'R²',
+                'Tracking Error',
+                'Information Ratio',
+                'Máximo Drawdown',
+                'Días'
+            ],
+            'Portafolio': [
+                retorno_anual,
+                volatilidad_anual,
+                sharpe_ratio,
+                sortino_ratio,
+                beta,
+                alpha,
+                r_squared,
+                tracking_error,
+                information_ratio,
+                max_drawdown,
+                len(portfolio_aligned)
+            ]
+        }
+        
+        # Agregar benchmark al resumen si está disponible
+        if benchmark_stats:
+            resumen_portafolio['Benchmark'] = [
+                benchmark_stats.get('Retorno Anual', 'N/A'),
+                benchmark_stats.get('Volatilidad Anual', 'N/A'),
+                benchmark_stats.get('Ratio de Sharpe', 'N/A'),
+                'N/A',  # Sortino no calculado para benchmark
+                '1.00',  # Beta del benchmark es 1 por definición
+                '0.00%', # Alpha del benchmark es 0 por definición
+                '1.00',  # R² del benchmark es 1 por definición
+                '0.00%', # Tracking error del benchmark es 0
+                'N/A',   # Information ratio no aplica
+                'N/A',   # Drawdown no calculado
+                benchmark_stats.get('Días', 'N/A')
+            ]
+        
+        df_resumen = pd.DataFrame(resumen_portafolio)
+        df_resumen = df_resumen.set_index('Métrica')
+        
+        # Formatear los valores numéricos
+        for col in df_resumen.columns:
+            if col != 'Días':
+                df_resumen[col] = df_resumen[col].apply(
+                    lambda x: f"{x:.2%}" if isinstance(x, (int, float)) and col not in ['Ratio de Sharpe', 'Ratio de Sortino', 'Beta', 'R²', 'Information Ratio'] 
+                    else f"{x:.2f}" if isinstance(x, (int, float)) 
+                    else x
+                )
+        
+        # Mostrar las tablas en Streamlit
+        st.subheader("📊 Métricas del Portafolio")
+        st.dataframe(df_resumen, use_container_width=True)
+        
+        if not df_activos.empty:
+            st.subheader("📈 Métricas por Activo")
+            st.dataframe(df_activos, use_container_width=True)
         
         # Calcular covarianza y varianza directamente para mayor estabilidad
         cov_matrix = np.cov(benchmark_aligned, portfolio_aligned, ddof=1)
