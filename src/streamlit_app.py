@@ -2427,6 +2427,85 @@ def mostrar_movimientos_asesor():
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
+def mostrar_resumen_portafolio(portafolio, token_acceso):
+    """
+    Muestra un resumen del portafolio con métricas clave y visualizaciones.
+    
+    Args:
+        portafolio (dict): Diccionario con los datos del portafolio
+        token_acceso (str): Token de autenticación para la API de IOL
+    """
+    st.subheader("📊 Resumen del Portafolio")
+    
+    if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+        st.warning("No hay activos en el portafolio")
+        return
+    
+    # Calcular métricas básicas
+    valor_total = portafolio.get('valor_total', 0)
+    total_activos = len(portafolio['activos'])
+    
+    # Mostrar métricas principales
+    col1, col2, col3 = st.columns(3)
+    col1.metric("💰 Valor Total", f"${valor_total:,.2f}")
+    col2.metric("📊 Total de Activos", total_activos)
+    
+    # Calcular distribución por tipo de activo
+    if 'activos' in portafolio and portafolio['activos']:
+        df_activos = pd.DataFrame(portafolio['activos'])
+        if 'tipo' in df_activos.columns and 'valor' in df_activos.columns:
+            distribucion = df_activos.groupby('tipo')['valor'].sum().reset_index()
+            
+            # Mostrar gráfico de distribución
+            st.subheader("📈 Distribución por Tipo de Activo")
+            fig = px.pie(
+                distribucion, 
+                values='valor', 
+                names='tipo',
+                hole=0.4,
+                color_discrete_sequence=px.colors.sequential.RdBu
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Mostrar tabla de activos
+    st.subheader("📋 Lista de Activos")
+    if 'activos' in portafolio and portafolio['activos']:
+        df_display = pd.DataFrame(portafolio['activos'])
+        # Seleccionar solo las columnas relevantes para mostrar
+        if not df_display.empty:
+            columnas_a_mostrar = ['simbolo', 'descripcion', 'tipo', 'cantidad', 'precio', 'valor']
+            columnas_disponibles = [col for col in columnas_a_mostrar if col in df_display.columns]
+            
+            if columnas_disponibles:
+                st.dataframe(
+                    df_display[columnas_disponibles],
+                    use_container_width=True,
+                    height=400
+                )
+    
+    # Mostrar métricas de riesgo si están disponibles
+    if 'metricas' in portafolio and portafolio['metricas']:
+        st.subheader("📊 Métricas de Riesgo")
+        metricas = portafolio['metricas']
+        
+        # Mostrar métricas en columnas
+        col1, col2, col3 = st.columns(3)
+        
+        if 'volatilidad' in metricas:
+            col1.metric("📉 Volatilidad Anual", f"{metricas['volatilidad']*100:.2f}%")
+        if 'sharpe' in metricas:
+            col2.metric("⚖️ Índice de Sharpe", f"{metricas['sharpe']:.2f}")
+        if 'var_95' in metricas:
+            col3.metric("⚠️ VaR 95%", f"{metricas['var_95']*100:.2f}%")
+        
+        # Mostrar explicación de las métricas
+        with st.expander("ℹ️ ¿Qué significan estas métricas?"):
+            st.markdown("""
+            - **Volatilidad Anual**: Mide la variabilidad de los rendimientos (a mayor valor, mayor riesgo)
+            - **Índice de Sharpe**: Mide el rendimiento ajustado por riesgo (valores > 1 son buenos)
+            - **VaR 95%**: Pérdida máxima esperada con un 95% de confianza en un día
+            """)
+
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
