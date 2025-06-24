@@ -2659,17 +2659,17 @@ def mostrar_analisis_fci_portafolio(token_portador, portafolio):
                                 valores_activos.append(valor)
                         except Exception as e:
                             st.warning(f"No se pudo obtener el histórico para {simbolo}: {str(e)}")
-                elif tipo_activo == 'TitulosPublicos':
-                    # Para bonos, usar tasa efectiva si está disponible
-                    detalles_bono = obtener_detalle_titulo_publico(token_portador, simbolo)
-                    if detalles_bono and 'tasaEfectiva' in detalles_bono:
-                        retornos_activos.append(float(detalles_bono['tasaEfectiva']))
-                        valores_activos.append(valor)
-                    else:
-                        # Si no hay tasa efectiva, usar un valor por defecto basado en el tipo de bono
-                        tasa_default = 10.0  # Tasa default para bonos sin información
-                        retornos_activos.append(tasa_default)
-                        valores_activos.append(valor)
+                    elif tipo_activo == 'TitulosPublicos':
+                        # Para bonos, usar tasa efectiva si está disponible
+                        detalles_bono = obtener_detalle_titulo_publico(token_portador, simbolo)
+                        if detalles_bono and 'tasaEfectiva' in detalles_bono:
+                            retornos_activos.append(float(detalles_bono['tasaEfectiva']))
+                            valores_activos.append(valor)
+                        else:
+                            # Si no hay tasa efectiva, usar un valor por defecto basado en el tipo de bono
+                            tasa_default = 10.0  # Tasa default para bonos sin información
+                            retornos_activos.append(tasa_default)
+                            valores_activos.append(valor)
             
             # Calcular retorno ponderado total del portafolio
             if valores_activos and len(valores_activos) > 0:
