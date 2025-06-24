@@ -1765,51 +1765,53 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         cols[2].metric("Escenario Pesimista (5%)", 
                      f"{pesimista_pct:+.1f}%",
                      help="Peor escenario con 5% de confianza")
+        
+        # Probabilidades
+        st.subheader("🎯 Probabilidades")
+        cols = st.columns(4)
+        probs = metricas['probabilidades']
+        cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+        cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+        cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+        cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+        
+        # Análisis de Estrategia de Inversión
+        if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
+            st.subheader("🔍 Análisis de Estrategia de Inversión")
             
-            # Probabilidades
-            st.subheader("🎯 Probabilidades")
-            cols = st.columns(4)
-            probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+            # Mostrar la estrategia principal
+            estrategia = metricas['analisis_estrategia']
             
-            # Análisis de Estrategia de Inversión
-            if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
-                st.subheader("🔍 Análisis de Estrategia de Inversión")
+            # Tarjeta de estrategia
+            st.markdown(f"""
+            <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
+                        border-left: 5px solid #0d6efd;">
+                <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
+                <p>{estrategia['explicacion_estrategia']}</p>
+            </div>
+            """, unsafe_allow_html=True)
                 
-                # Mostrar la estrategia principal
-                estrategia = metricas['analisis_estrategia']
-                
-                # Tarjeta de estrategia
-                st.markdown(f"""
-                <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
-                            border-left: 5px solid #0d6efd;">
-                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
-                    <p>{estrategia['explicacion_estrategia']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Métricas clave
-                cols = st.columns(3)
-                cols[0].metric("Beta", f"{estrategia['beta']:.2f}", 
-                              help="Sensibilidad del portafolio respecto al mercado (1 = mismo riesgo que el mercado)")
-                cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']:+.2%}", 
-                              help="Rendimiento adicional sobre el mercado ajustado por riesgo")
-                cols[2].metric("Calidad de Cobertura", f"{estrategia['calidad_cobertura']}", 
-                              help=f"R² = {estrategia['r_cuadrado']:.2f}")
-                
-                # Explicación del rendimiento
-                st.markdown(f"""
-                <div style="background-color: #e8f4fd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {estrategia['rendimiento']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_rendimiento']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Explicación de la cobertura
-                st.markdown(f"""
+            # Métricas clave
+            cols = st.columns(3)
+            cols[0].metric("Beta del Portafolio", f"{estrategia['beta']:.2f}")
+            cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']*100:.2f}%")
+            cols[2].metric("Índice de Sharpe", f"{estrategia['sharpe']:.2f}")
+            
+            # Explicación detallada
+            st.markdown("### 📝 Explicación Detallada")
+            st.write(estrategia['explicacion_detallada'])
+            
+            # Recomendaciones
+            if 'recomendaciones' in estrategia and estrategia['recomendaciones']:
+                st.markdown("### 💡 Recomendaciones")
+                for rec in estrategia['recomendaciones']:
+                    st.markdown(f"- {rec}")
+            
+            # Advertencias
+            if 'advertencias' in estrategia and estrategia['advertencias']:
+                st.markdown("### ⚠️ Consideraciones")
+                for adv in estrategia['advertencias']:
+                    st.warning(adv)
                 <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
                     <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
                     <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
