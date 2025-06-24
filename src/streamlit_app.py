@@ -1695,8 +1695,9 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             # Calcular métricas de riesgo basadas en la distribución de retornos
             # (Aquí va el cálculo real o se elimina si no se usa)
 
-        cols[0].metric("Total de Activos", len(datos_activos))
-        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+    # Fuera del bucle de activos: visualización
+    cols[0].metric("Total de Activos", len(datos_activos))
+    cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
         cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
