@@ -5,14 +5,12 @@ import pandas as pd
 from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
 import numpy as np
-import pandas as pd
 import yfinance as yf
 import scipy.optimize as op
 from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
-from scipy.stats import linregress
 
 warnings.filterwarnings('ignore')
 
@@ -385,51 +383,96 @@ def mostrar_tasas_caucion(token_portador):
     """
     Muestra las tasas de caución en una tabla y gráfico de curva de tasas
     """
+    st.subheader("📊 Tasas de Caución")
+    
     try:
-        # Obtener las tasas de caución
-        df_cauciones = obtener_tasas_caucion(token_portador)
-        if df_cauciones is None or df_cauciones.empty:
-            st.warning("No se encontraron datos de tasas de caución.")
-            return
-
-        # Verificar columnas requeridas
-        required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-        missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-        if missing_columns:
-            st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-            return
-
-        # Mostrar tabla con las tasas
-        st.subheader('Tasas de Caucción')
-        st.dataframe(
-            df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                         else ['simbolo', 'plazo', 'ultimoPrecio']]
-            .rename(columns={
-                'simbolo': 'Instrumento',
-                'plazo': 'Plazo',
-                'ultimoPrecio': 'Tasa',
-                'monto': 'Monto (en millones)'
-            }),
-            use_container_width=True,
-            height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
-        )
-
-        # Graficar curva de tasas
-        graficar_curva_tasas(df_cauciones)
-
-        # Mostrar resumen estadístico
-        if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-                st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-            with col2:
-                st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-                st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
-
+        with st.spinner('Obteniendo tasas de caución...'):
+            df_cauciones = obtener_tasas_caucion(token_portador)
+            
+            # Verificar si se obtuvieron datos
+            if df_cauciones is None or df_cauciones.empty:
+                st.warning("No se encontraron datos de tasas de caución.")
+                return
+                
+            # Verificar columnas requeridas
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+            if missing_columns:
+                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+                return
+            
+            # Mostrar tabla con las tasas
+            st.dataframe(
+                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                             else ['simbolo', 'plazo', 'ultimoPrecio']]
+                .rename(columns={
+                    'simbolo': 'Instrumento',
+                    'plazo': 'Plazo',
+                    'ultimoPrecio': 'Tasa',
+                    'monto': 'Monto (en millones)'
+                }),
+                use_container_width=True,
+                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+            )
+            
+            # Crear gráfico de curva de tasas si hay suficientes puntos
+            if len(df_cauciones) > 1:
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_cauciones['plazo_dias'],
+                    y=df_cauciones['tasa_limpia'],
+                    mode='lines+markers+text',
+                    name='Tasa',
+                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                    textposition='top center',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=10, color='#1f77b4')
+                ))
+                
+                fig.update_layout(
+                    title='Curva de Tasas de Caución',
+                    xaxis_title='Plazo (días)',
+                    yaxis_title='Tasa Anual (%)',
+                    template='plotly_white',
+                    height=500,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar resumen estadístico
+            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+                with col2:
+                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+                    
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "ISO8601",
+        "mixed"
+    ]
+    
+    for fmt in formats_to_try:
+        try:
+            if fmt == "ISO8601":
+                return pd.to_datetime(datetime_string, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(datetime_string, format='mixed')
+            else:
+                return pd.to_datetime(datetime_string, format=fmt)
+        except Exception:
+            continue
 
     try:
         return pd.to_datetime(datetime_string, infer_datetime_format=True)
@@ -481,26 +524,6 @@ def parse_datetime_flexible(date_str: str):
     """
     if not isinstance(date_str, str):
         return None
-        
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(date_str, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(date_str, format='mixed')
-            else:
-                return pd.to_datetime(date_str, format=fmt)
-        except Exception:
-            continue
     try:
         # First try parsing with the exact format that matches the error
         try:
@@ -529,8 +552,8 @@ def procesar_respuesta_historico(data, tipo_activo):
     try:
         # Para series históricas estándar
         if isinstance(data, list):
-            fechas = []
             precios = []
+            fechas = []
             
             for item in data:
                 try:
@@ -556,18 +579,7 @@ def procesar_respuesta_historico(data, tipo_activo):
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
                 return df
-            
-            # Caso especial para FCIs
-            if tipo_activo == 'FCI':
-                fechas = []
-                precios = []
-                for item in data:
-                    if 'fecha' in item and 'valorCuota' in item:
-                        fechas.append(pd.to_datetime(item['fecha']))
-                        precios.append(float(item['valorCuota']))
-                if fechas and precios:
-                    return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
-                    
+        
         # Para respuestas que son un solo valor (ej: MEP)
         elif isinstance(data, (int, float)):
             df = pd.DataFrame({'fecha': [pd.Timestamp.now(tz='UTC').date()], 'precio': [float(data)]})
@@ -578,6 +590,111 @@ def procesar_respuesta_historico(data, tipo_activo):
     except Exception as e:
         st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
+
+def obtener_administradoras_fci(token_portador):
+    """
+    Obtiene el listado de administradoras de FCI
+    """
+    url = "https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras"
+    headers = {
+        "Authorization": f"Bearer {token_portador}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener administradoras FCI: {str(e)}")
+        return []
+
+def obtener_tipos_fondo(token_portador):
+    """
+    Obtiene los tipos de fondos disponibles
+    """
+    url = "https://api.invertironline.com/api/v2/Titulos/FCI/TipoFondos"
+    headers = {
+        "Authorization": f"Bearer {token_portador}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener tipos de fondo: {str(e)}")
+        return []
+
+def obtener_fondos_comunes(token_portador, administradora=None, tipo_fondo=None):
+    """
+    Obtiene la lista de fondos comunes de inversión disponibles
+    con opciones de filtrado por administradora y/o tipo de fondo
+    """
+    url = "https://api.invertironline.com/api/v2/Titulos/FCI"
+    headers = {
+        "Authorization": f"Bearer {token_portador}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        fondos = response.json()
+        
+        # Aplicar filtros si se especifican
+        if administradora:
+            fondos = [f for f in fondos if f.get('tipoAdministradoraTituloFCI', '').lower() == administradora.lower()]
+            
+        if tipo_fondo:
+            fondos = [f for f in fondos if f.get('tipoFondo', '') == tipo_fondo]
+            
+        return fondos
+    except Exception as e:
+        st.error(f"Error al obtener fondos comunes: {str(e)}")
+        return []
+
+def obtener_detalle_fci(token_portador, simbolo):
+    """
+    Obtiene el detalle de un FCI específico
+    """
+    url = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
+    headers = {
+        "Authorization": f"Bearer {token_portador}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener detalle del FCI {simbolo}: {str(e)}")
+        return None
+
+def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """
+    Obtiene la serie histórica de un fondo común de inversión
+    """
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Accept': 'application/json'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        # Procesar la respuesta para convertirla al formato esperado
+        if isinstance(data, list):
+            fechas = []
+            precios = []
+            for item in data:
+                if 'fecha' in item and 'valorCuota' in item:
+                    fechas.append(pd.to_datetime(item['fecha']))
+                    precios.append(float(item['valorCuota']))
+            if fechas and precios:
+                return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
+        return None
+    except requests.exceptions.RequestException as e:
         st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
         return None
 
@@ -676,7 +793,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
             
             if fechas and precios:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                # Eliminar duplicados manteniendo el último
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
                 print(f"Datos procesados: {len(df)} registros válidos")
@@ -730,8 +846,8 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
     Args:
         token_portador (str): Token de autenticación
         simbolo (str): Símbolo del FCI
-        fecha_desde (str): Fecha inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha fin (YYYY-MM-DD)
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
         
     Returns:
         pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
@@ -1228,53 +1344,38 @@ class PortfolioManager:
             st.error(f"❌ Error en load_data: {str(e)}")
             return False
     
-    def compute_portfolio(self, strategy='markowitz', target_return=None, ajustar_al_perfil=True):
-        """
-        Calcula el portafolio optimo usando diferentes estrategias.
-        
-        Args:
-            strategy (str): Estrategia de optimización ('markowitz', 'min_variance', 'equal_weight')
-            target_return (float): Retorno objetivo para Markowitz
-            ajustar_al_perfil (bool): Si True, ajusta el portafolio al perfil del inversor
-        """
+    def compute_portfolio(self, strategy='markowitz', target_return=None):
         if not self.data_loaded or self.returns is None:
             return None
         
         try:
             if self.manager:
-                # Obtener el perfil del inversor si está habilitado
-                if ajustar_al_perfil:
-                    perfil = obtener_perfil_inversor(self.token, self.id_cliente, self.portafolio)
-                    if perfil:
-                        # Ajustar el target_return según el perfil de riesgo
-                        if perfil.get('perfilSugerido', {}).get('nombre') == 'Conservador':
-                            target_return = 0.05  # 5% anual
-                        elif perfil.get('perfilSugerido', {}).get('nombre') == 'Moderado':
-                            target_return = 0.08  # 8% anual
-                        else:  # Agresivo
-                            target_return = 0.12  # 12% anual
-                
-                # Calcular el portafolio usando el manager
+                # Usar el manager avanzado
                 portfolio_output = self.manager.compute_portfolio(strategy, target_return)
-                
-                # Ajustar el portafolio según el perfil
-                if ajustar_al_perfil and perfil:
-                    composicion_sugerida = perfil.get('perfilSugerido', {}).get('perfilComposiciones', [])
-                    for asset in self.manager.rics:
-                        tipo = self._detectar_tipo_activo(asset)
-                        peso_sugerido = next((item['porcentaje'] for item in composicion_sugerida 
-                                            if item['nombre'].lower() == tipo.lower()), None)
-                        if peso_sugerido is not None:
-                            # Ajustar el peso del activo según el perfil sugerido
-                            self.manager.weights[asset] = peso_sugerido / 100
-                
                 return portfolio_output
             else:
-                st.error("Manager no inicializado")
-                return None
+                # Fallback a optimización básica
+                n_assets = len(self.returns.columns)
+                
+                if strategy == 'equi-weight':
+                    weights = np.array([1/n_assets] * n_assets)
+                else:
+                    weights = optimize_portfolio(self.returns, target_return=target_return)
+                
+                # Crear objeto de resultado básico
+                portfolio_returns = (self.returns * weights).sum(axis=1)
+                portfolio_output = output(portfolio_returns, self.notional)
+                portfolio_output.weights = weights
+                portfolio_output.dataframe_allocation = pd.DataFrame({
+                    'rics': list(self.returns.columns),
+                    'weights': weights,
+                    'volatilities': self.returns.std().values,
+                    'returns': self.returns.mean().values
+                })
+                
+                return portfolio_output
             
         except Exception as e:
-            st.error(f"Error en compute_portfolio: {str(e)}")
             return None
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
@@ -1352,332 +1453,9 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-
-def obtener_test_inversor(token_portador):
-    """
-    Obtiene las preguntas del test de perfil de inversor.
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        
-    Returns:
-        dict: Diccionario con las preguntas del test
-    """
-    url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
-    headers = obtener_encabezado_autorizacion(token_portador)
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error obteniendo el test de perfil: {str(e)}")
-        return None
-
-def obtener_perfil_inversor(token_portador, id_cliente, portafolio):
-    """
-    Obtiene el perfil sugerido para el inversor basado en su portafolio actual.
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        id_cliente (int): ID del cliente
-        portafolio (dict): Diccionario con el portafolio actual
-        
-    Returns:
-        dict: Diccionario con el perfil sugerido y su composición
-    """
-    url = f"https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente}"
-    headers = obtener_encabezado_autorizacion(token_portador)
-    
-    # Preparar datos del portafolio para el test
-    data = {
-        "enviarEmailCliente": False,
-        "instrumentosInvertidosAnteriormente": [1],  # Asumir experiencia básica
-        "nivelesConocimientoInstrumentos": [1],      # Asumir conocimiento básico
-        "idPlazoElegido": 3,                         # Plazo medio
-        "idEdadElegida": 3,                          # Edad media
-        "idObjetivoInversionElegida": 3,             # Objetivo de crecimiento
-        "idPolizaElegida": 1,                        # Sin seguro
-        "idCapacidadAhorroElegida": 3,               # Capacidad media de ahorro
-        "idPorcentajePatrimonioDedicado": 3         # Patrimonio medio
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=data, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error obteniendo el perfil de inversor: {str(e)}")
-        return None
-
-def comparar_perfil_con_portafolio(perfil_sugerido, portafolio_actual):
-    """
-    Compara el perfil sugerido con la composición actual del portafolio.
-    
-    Args:
-        perfil_sugerido (dict): Perfil sugerido obtenido de la API
-        portafolio_actual (dict): Composición actual del portafolio
-        
-    Returns:
-        dict: Diccionario con la comparación y recomendaciones
-    """
-    if not perfil_sugerido or not portafolio_actual:
-        return None
-    
-    # Obtener la composición sugerida
-    composicion_sugerida = {}
-    for item in perfil_sugerido.get('perfilSugerido', {}).get('perfilComposiciones', []):
-        composicion_sugerida[item['nombre']] = item['porcentaje']
-    
-    # Calcular la composición actual
-    composicion_actual = {}
-    total_valor = sum(item['valor'] for item in portafolio_actual.values())
-    
-    for simbolo, data in portafolio_actual.items():
-        # Clasificar el activo según su tipo
-        tipo = 'Acciones' if data.get('tipo') == 'Acciones' else 'Otros'
-        if tipo not in composicion_actual:
-            composicion_actual[tipo] = 0
-        composicion_actual[tipo] += (data['valor'] / total_valor) * 100
-    
-    # Comparar y generar recomendaciones
-    recomendaciones = []
-    for tipo in composicion_sugerida.keys():
-        sugerido = composicion_sugerida.get(tipo, 0)
-        actual = composicion_actual.get(tipo, 0)
-        diferencia = actual - sugerido
-        
-        if abs(diferencia) > 10:  # Umbral de diferencia significativa
-            recomendacion = f"Recomendación para {tipo}:"
-            if diferencia > 0:
-                recomendacion += f" Reducir {diferencia:.1f}%"
-            else:
-                recomendacion += f" Aumentar {-diferencia:.1f}%"
-            recomendaciones.append(recomendacion)
-    
-    return {
-        'comparacion': {
-            'sugerido': composicion_sugerida,
-            'actual': composicion_actual
-        },
-        'recomendaciones': recomendaciones
-    }
-def calcular_alpha_beta_portafolio(portafolio, token_portador, fecha_desde, fecha_hasta, risk_free_rate=0.0):
-    """
-    Calcula el Alpha y Beta de un portafolio completo respecto a múltiples benchmarks.
-    
-    Args:
-        portafolio (dict): Diccionario con los activos del portafolio
-        token_portador (str): Token de autenticación para InvertirOnline
-        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
-        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
-        risk_free_rate (float): Tasa libre de riesgo (anualizada)
-        
-    Returns:
-        dict: Diccionario con métricas para cada benchmark
-    """
-    # Obtener datos históricos del portafolio usando InvertirOnline
-    datos_portafolio = {}
-    
-    for simbolo, activo in portafolio.items():
-        try:
-            mercado = activo.get('mercado', 'BCBA')
-            df = obtener_serie_historica_iol(
-                token_portador=token_portador,
-                mercado=mercado,
-                simbolo=simbolo,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                ajustada="SinAjustar"
-            )
-            
-            if df is not None and not df.empty and 'precio' in df.columns:
-                datos_portafolio[simbolo] = df['precio']
-        except Exception as e:
-            print(f"Error obteniendo datos para {simbolo}: {str(e)}")
-    
-    if not datos_portafolio:
-        return {"error": "No se pudieron obtener datos del portafolio"}
-    
-    # Crear DataFrame con todos los precios del portafolio
-    df_portafolio = pd.DataFrame(datos_portafolio)
-    
-    # Calcular retornos diarios del portafolio (promedio ponderado por valor)
-    # Asumiendo que el valor está en activo['Valuación']
-    valor_total = sum(activo.get('Valuación', 0) for activo in portafolio.values())
-    pesos = {simbolo: activo.get('Valuación', 0)/valor_total 
-             for simbolo, activo in portafolio.items() 
-             if simbolo in df_portafolio.columns}
-    
-    # Calcular retornos diarios ponderados
-    retornos_diarios = (df_portafolio.pct_change().dropna() * pd.Series(pesos)).sum(axis=1)
-    
-    # Obtener datos de benchmarks con yfinance
-    benchmarks = {
-        '^MERV': 'MERVAL',
-        '^GSPC': 'S&P 500',
-        '^IXIC': 'NASDAQ',
-        '^DJI': 'Dow Jones',
-        '^STOXX50E': 'Euro Stoxx 50'
-    }
-    
-    resultados = {}
-    
-    for ticker, nombre in benchmarks.items():
-        try:
-            # Obtener datos del benchmark
-            df_bench = yf.download(ticker, start=fecha_desde, end=fecha_hasta)['Adj Close']
-            if df_bench.empty:
-                continue
-                
-            # Calcular retornos diarios del benchmark
-            bench_returns = df_bench.pct_change().dropna()
-            
-            # Alinear fechas entre portafolio y benchmark
-            aligned_data = pd.concat([retornos_diarios, bench_returns], axis=1, join='inner')
-            aligned_data.columns = ['portfolio', 'benchmark']
-            
-            if len(aligned_data) < 5:  # Mínimo de datos para regresión
-                continue
-                
-            # Calcular métricas
-            portfolio_ret = aligned_data['portfolio']
-            bench_ret = aligned_data['benchmark']
-            
-            # Calcular exceso de retornos
-            portfolio_excess = portfolio_ret - (risk_free_rate / 252)
-            bench_excess = bench_ret - (risk_free_rate / 252)
-            
-            # Regresión lineal
-            slope, intercept, r_value, p_value, std_err = linregress(bench_excess, portfolio_excess)
-            
-            # Calcular métricas adicionales
-            residuals = portfolio_excess - (slope * bench_excess + intercept)
-            tracking_error = np.std(residuals) * np.sqrt(252)
-            information_ratio = portfolio_excess.mean() / tracking_error if tracking_error != 0 else 0
-            
-            # Alpha ajustado
-            alpha = intercept - slope * (risk_free_rate / 252)
-            
-            # Guardar resultados
-            resultados[nombre] = {
-                'alpha': alpha,
-                'alpha_annual': alpha * 252,
-                'beta': slope,
-                'r_squared': r_value ** 2,
-                'p_value': p_value,
-                'tracking_error': tracking_error,
-                'information_ratio': information_ratio,
-                'correlacion': portfolio_ret.corr(bench_ret),
-                'observations': len(aligned_data),
-                'periodo': f"{aligned_data.index[0].strftime('%Y-%m-%d')} a {aligned_data.index[-1].strftime('%Y-%m-%d')}"
-            }
-            
-        except Exception as e:
-            print(f"Error procesando benchmark {nombre}: {str(e)}")
-    
-    # Ordenar por R² descendente
-    resultados_ordenados = dict(sorted(
-        resultados.items(), 
-        key=lambda x: x[1]['r_squared'], 
-        reverse=True
-    ))
-    
-    # Agregar resumen con el mejor benchmark
-    if resultados_ordenados:
-        mejor_bench = next(iter(resultados_ordenados))
-        resultados['_mejor_benchmark'] = {
-            'nombre': mejor_bench,
-            **resultados_ordenados[mejor_bench]
-        }
-    
-    return resultados
-
-def analizar_estrategia_inversion(alpha_beta_metrics):
-    """
-    Analiza la estrategia de inversión y cobertura basada en métricas de alpha y beta.
-    
-    Args:
-        alpha_beta_metrics (dict): Diccionario con las métricas de alpha y beta
-        
-    Returns:
-        dict: Diccionario con el análisis de la estrategia
-    """
-    beta = alpha_beta_metrics.get('beta', 1.0)
-    alpha_annual = alpha_beta_metrics.get('alpha_annual', 0)
-    r_squared = alpha_beta_metrics.get('r_squared', 0)
-    
-    # Análisis de estrategia basado en beta
-    if beta > 1.2:
-        estrategia = "Estrategia Agresiva"
-        explicacion = ("El portafolio es más volátil que el mercado (β > 1.2). "
-                      "Esta estrategia busca rendimientos superiores asumiendo mayor riesgo.")
-    elif beta > 0.8:
-        estrategia = "Estrategia de Crecimiento"
-        explicacion = ("El portafolio sigue de cerca al mercado (0.8 < β < 1.2). "
-                     "Busca rendimientos similares al mercado con un perfil de riesgo equilibrado.")
-    elif beta > 0.3:
-        estrategia = "Estrategia Defensiva"
-        explicacion = ("El portafolio es menos volátil que el mercado (0.3 < β < 0.8). "
-                     "Busca preservar capital con menor exposición a las fluctuaciones del mercado.")
-    elif beta > -0.3:
-        estrategia = "Estrategia de Ingresos"
-        explicacion = ("El portafolio tiene baja correlación con el mercado (-0.3 < β < 0.3). "
-                     "Ideal para generar ingresos con bajo riesgo de mercado.")
-    else:
-        estrategia = "Estrategia de Cobertura"
-        explicacion = ("El portafolio tiene correlación negativa con el mercado (β < -0.3). "
-                     "Diseñado para moverse en dirección opuesta al mercado, útil para cobertura.")
-    
-    # Análisis de desempeño basado en alpha
-    if alpha_annual > 0.05:  # 5% de alpha anual
-        rendimiento = "Excelente desempeño"
-        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
-                                 "superando significativamente al benchmark.")
-    elif alpha_annual > 0.02:  # 2% de alpha anual
-        rendimiento = "Buen desempeño"
-        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
-                                 "superando al benchmark.")
-    elif alpha_annual > -0.02:  # Entre -2% y 2%
-        rendimiento = "Desempeño en línea"
-        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
-                                 "en línea con el benchmark.")
-    else:
-        rendimiento = "Desempeño inferior"
-        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
-                                 "por debajo del benchmark.")
-    
-    # Calidad de la cobertura basada en R²
-    if r_squared > 0.7:
-        calidad_cobertura = "Alta"
-        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una fuerte relación con el benchmark. "
-                               "La cobertura será más efectiva.")
-    elif r_squared > 0.4:
-        calidad_cobertura = "Moderada"
-        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una relación moderada con el benchmark. "
-                               "La cobertura puede ser parcialmente efectiva.")
-    else:
-        calidad_cobertura = "Baja"
-        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una débil relación con el benchmark. "
-                               "La cobertura puede no ser efectiva.")
-    
-    return {
-        'estrategia': estrategia,
-        'explicacion_estrategia': explicacion,
-        'rendimiento': rendimiento,
-        'explicacion_rendimiento': explicacion_rendimiento,
-        'calidad_cobertura': calidad_cobertura,
-        'explicacion_cobertura': explicacion_cobertura,
-        'beta': beta,
-        'alpha_anual': alpha_annual,
-        'r_cuadrado': r_squared,
-        'observations': alpha_beta_metrics.get('observations', 0)
-    }
-
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
-{{ ... }}
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
@@ -1706,16 +1484,6 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         # Normalizar entre 0 y 1
         min_concentration = 1.0 / len(portafolio)
         concentracion = (sum_squares - min_concentration) / (1 - min_concentration)
-        
-    # Descargar datos del MERVAL para cálculo de Alpha y Beta
-    try:
-        merval_data = yf.download('^MERV', start=fecha_desde, end=fecha_hasta)['Close']
-        merval_returns = merval_data.pct_change().dropna()
-        merval_available = True
-    except Exception as e:
-        print(f"No se pudieron obtener datos del MERVAL: {str(e)}")
-        merval_available = False
-        merval_returns = None
     
     # Inicializar estructuras para cálculos
     retornos_diarios = {}
@@ -1880,7 +1648,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 pesos = np.array([metricas_activos[a]['peso'] for a in activos])
                 volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
                 
-                # Asegurarse de que las dimensiones coincidan
+                # Asegurar que las dimensiones coincidan
                 if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
                     # Calcular matriz de covarianza
                     matriz_cov = np.diag(volatilidades) @ df_correlacion.values @ np.diag(volatilidades)
@@ -1931,45 +1699,6 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
     prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
             
-    # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
-    alpha_beta_metrics = {}
-    if merval_available and len(retornos_diarios) > 1:
-        try:
-            # Calcular retornos diarios del portafolio (promedio ponderado de los activos)
-            df_port_returns = pd.DataFrame(retornos_diarios)
-            
-            # Asegurarse de que los pesos estén en el mismo orden que las columnas
-            pesos_ordenados = [metricas_activos[col]['peso'] for col in df_port_returns.columns]
-            df_port_returns['Portfolio'] = df_port_returns.dot(pesos_ordenados)
-            
-            # Alinear fechas con el MERVAL
-            merval_series = pd.Series(merval_returns, name='MERVAL')
-            aligned_data = pd.merge(
-                df_port_returns[['Portfolio']], 
-                merval_series, 
-                left_index=True, 
-                right_index=True,
-                how='inner'
-            )
-            
-            if len(aligned_data) > 5:  # Mínimo de datos para cálculo confiable
-                # Calcular métricas de Alpha y Beta
-                alpha_beta_metrics = calcular_alpha_beta(
-                    aligned_data['Portfolio'],  # Retornos del portafolio
-                    aligned_data['MERVAL'],      # Retornos del MERVAL
-                    risk_free_rate=0.40  # Tasa libre de riesgo para Argentina
-                )
-                
-                print(f"Alpha: {alpha_beta_metrics.get('alpha_annual', 0):.2%}, "
-                      f"Beta: {alpha_beta_metrics.get('beta', 0):.2f}, "
-                      f"R²: {alpha_beta_metrics.get('r_squared', 0):.2f}")
-            
-        except Exception as e:
-            print(f"Error al calcular Alpha/Beta: {str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    # Crear diccionario de probabilidades
     probabilidades = {
         'perdida': prob_perdida,
         'ganancia': prob_ganancia,
@@ -1977,33 +1706,15 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         'ganancia_mayor_10': prob_ganancia_10
     }
     
-    # Crear diccionario de resultados
-    resultados = {
+    return {
         'concentracion': concentracion,
         'std_dev_activo': volatilidad_portafolio,
         'retorno_esperado_anual': retorno_esperado_anual,
         'pl_esperado_min': pl_esperado_min,
         'pl_esperado_max': pl_esperado_max,
         'probabilidades': probabilidades,
-        'riesgo_anual': volatilidad_portafolio,  # Usamos la volatilidad como proxy de riesgo
-        'alpha': alpha_beta_metrics.get('alpha_annual', 0),
-        'beta': alpha_beta_metrics.get('beta', 0),
-        'r_cuadrado': alpha_beta_metrics.get('r_squared', 0),
-        'tracking_error': alpha_beta_metrics.get('tracking_error', 0),
-        'information_ratio': alpha_beta_metrics.get('information_ratio', 0)
+        'riesgo_anual': volatilidad_portafolio  # Usamos la volatilidad como proxy de riesgo
     }
-    
-    # Analizar la estrategia de inversión
-    analisis_estrategia = analizar_estrategia_inversion(alpha_beta_metrics)
-    resultados['analisis_estrategia'] = analisis_estrategia
-    
-    # Agregar métricas adicionales si están disponibles
-    if 'p_value' in alpha_beta_metrics:
-        resultados['p_value'] = alpha_beta_metrics['p_value']
-    if 'observations' in alpha_beta_metrics:
-        resultados['observaciones'] = alpha_beta_metrics['observations']
-    
-    return resultados
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
@@ -2183,71 +1894,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
             cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
             cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
-            
-            # Análisis de Estrategia de Inversión
-            if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
-                st.subheader("🔍 Análisis de Estrategia de Inversión")
-                
-                # Mostrar la estrategia principal
-                estrategia = metricas['analisis_estrategia']
-                
-                # Tarjeta de estrategia
-                st.markdown(f"""
-                <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
-                            border-left: 5px solid #0d6efd;">
-                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
-                    <p>{estrategia['explicacion_estrategia']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Métricas clave
-                cols = st.columns(3)
-                cols[0].metric("Beta", f"{estrategia['beta']:.2f}", 
-                              help="Sensibilidad del portafolio respecto al mercado (1 = mismo riesgo que el mercado)")
-                cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']:+.2%}", 
-                              help="Rendimiento adicional sobre el mercado ajustado por riesgo")
-                cols[2].metric("Calidad de Cobertura", f"{estrategia['calidad_cobertura']}", 
-                              help=f"R² = {estrategia['r_cuadrado']:.2f}")
-                
-                # Explicación del rendimiento
-                st.markdown(f"""
-                <div style="background-color: #e8f4fd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {estrategia['rendimiento']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_rendimiento']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Explicación de la cobertura
-                st.markdown(f"""
-                <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Interpretación del Beta
-                st.markdown("#### 📈 Interpretación del Beta")
-                if estrategia['beta'] > 1.2:
-                    st.info("""
-                    **Alta volatilidad (β > 1.2)**  
-                    El portafolio es más volátil que el mercado. Espere mayores oscilaciones en el valor de su inversión.
-                    """)
-                elif estrategia['beta'] > 0.8:
-                    st.info("""
-                    **Volatilidad similar al mercado (0.8 < β < 1.2)**  
-                    El portafolio tiende a moverse en línea con el mercado general.
-                    """)
-                elif estrategia['beta'] > 0:
-                    st.info("""
-                    **Baja volatilidad (0 < β < 0.8)**  
-                    El portafolio es menos volátil que el mercado, con movimientos más suaves.
-                    """)
-                else:
-                    st.info("""
-                    **Correlación negativa (β < 0)**  
-                    El portafolio tiende a moverse en dirección opuesta al mercado. Útil para estrategias de cobertura.
-                    """)
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
@@ -2831,6 +2478,109 @@ def mostrar_movimientos_asesor():
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
+def mostrar_analisis_fci_portafolio(token_portador, portafolio):
+    """Muestra el análisis detallado de los FCIs en el portafolio"""
+    # Filtrar solo los FCIs del portafolio
+    fcis_portafolio = [activo for activo in portafolio.get('activos', []) 
+                      if activo.get('tipo', '').lower() == 'fondocomundeinversion']
+    
+    if not fcis_portafolio:
+        st.info("No hay Fondos Comunes de Inversión en su portafolio.")
+        return
+    
+    # Mostrar resumen de FCIs
+    st.header("Fondos Comunes de Inversión en su Portafolio")
+    
+    # Crear tabla de resumen
+    resumen_data = []
+    for fci in fcis_portafolio:
+        simbolo = fci.get('simbolo', 'N/A')
+        cantidad = fci.get('cantidad', 0)
+        precio = fci.get('precio', 0)
+        valor = cantidad * precio
+        
+        # Obtener detalles adicionales del FCI
+        detalles = obtener_detalle_fci(token_portador, simbolo)
+        
+        resumen_data.append({
+            'Símbolo': simbolo,
+            'Descripción': detalles.get('descripcion', 'N/A') if detalles else 'N/A',
+            'Cantidad': f"{cantidad:,.2f}",
+            'Precio': f"${precio:,.2f}",
+            'Valor': f"${valor:,.2f}",
+            'Tipo': detalles.get('tipoFondo', 'N/A') if detalles else 'N/A',
+            'Horizonte': detalles.get('horizonteInversion', 'N/A') if detalles else 'N/A',
+            'Perfil': detalles.get('perfilInversor', 'N/A') if detalles else 'N/A',
+            'Variación 24h': f"{detalles.get('variacion', 0):.2f}%" if detalles else 'N/A',
+        })
+    
+    # Mostrar tabla de resumen
+    if resumen_data:
+        df_resumen = pd.DataFrame(resumen_data)
+        st.dataframe(df_resumen, use_container_width=True)
+        
+        # Mostrar detalles de rendimiento para cada FCI
+        st.subheader("Rendimiento Histórico")
+        
+        # Obtener fechas para el histórico (últimos 90 días)
+        fecha_hasta = date.today()
+        fecha_desde = fecha_hasta - timedelta(days=90)
+        
+        # Crear pestañas para cada FCI
+        tabs = st.tabs([f"{fci['simbolo']}" for fci in fcis_portafolio])
+        
+        for idx, tab in enumerate(tabs):
+            with tab:
+                fci = fcis_portafolio[idx]
+                simbolo = fci.get('simbolo')
+                
+                # Obtener datos históricos
+                historico = obtener_serie_historica_fci(token_portador, simbolo, 
+                                                      fecha_desde.strftime('%Y-%m-%d'), 
+                                                      fecha_hasta.strftime('%Y-%m-%d'))
+                
+                if historico is not None and not historico.empty:
+                    # Calcular métricas
+                    retorno_total = ((historico['precio'].iloc[-1] / historico['precio'].iloc[0]) - 1) * 100
+                    volatilidad = historico['precio'].pct_change().std() * np.sqrt(252) * 100  # Anualizada
+                    sharpe = (retorno_total - 40) / (volatilidad + 1e-10)  # Tasa libre de riesgo del 40%
+                    
+                    # Mostrar métricas
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Retorno Total", f"{retorno_total:.2f}%")
+                    with col2:
+                        st.metric("Volatilidad Anual", f"{volatilidad:.2f}%")
+                    with col3:
+                        st.metric("Ratio de Sharpe", f"{sharpe:.2f}")
+                    
+                    # Gráfico de evolución
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=historico['fecha'], 
+                        y=historico['precio'],
+                        mode='lines',
+                        name=f'Valor Cuotaparte {simbolo}'
+                    ))
+                    
+                    fig.update_layout(
+                        title=f'Evolución del Valor Cuotaparte - {simbolo}',
+                        xaxis_title='Fecha',
+                        yaxis_title='Valor Cuotaparte ($)',
+                        showlegend=True,
+                        height=400
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar tabla con datos históricos
+                    st.subheader("Datos Históricos")
+                    st.dataframe(historico, use_container_width=True)
+                else:
+                    st.warning(f"No se encontraron datos históricos para {simbolo}")
+    else:
+        st.info("No hay datos para mostrar.")
+
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
@@ -2844,21 +2594,24 @@ def mostrar_analisis_portafolio():
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
+    # Obtener datos del portafolio una sola vez
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    if not portafolio:
+        st.warning("No se pudo obtener el portafolio del cliente")
+        return
+    
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
+        "📊 FCIs",
         "🔄 Optimización"
     ])
 
     with tab1:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente")
+        mostrar_resumen_portafolio(portafolio, token_acceso)
     
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
@@ -2872,8 +2625,11 @@ def mostrar_analisis_portafolio():
     
     with tab4:
         mostrar_cotizaciones_mercado(token_acceso)
-    
+        
     with tab5:
+        mostrar_analisis_fci_portafolio(token_acceso, portafolio)
+    
+    with tab6:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
