@@ -1694,6 +1694,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             
             # Calcular métricas de riesgo basadas en la distribución de retornos
             # (Aquí va el cálculo real o se elimina si no se usa)
+        except Exception as e:
+            print(f"Error inesperado procesando {simbolo}: {e}")
 
     # Fuera del bucle de activos: visualización
     cols[0].metric("Total de Activos", len(datos_activos))
