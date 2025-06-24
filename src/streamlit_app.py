@@ -653,27 +653,42 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
     try:
+        print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
+        
         # Endpoint para FCIs (manejo especial)
         if mercado.upper() == 'FCI':
+            print("Es un FCI, usando función específica")
             return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
         
         # Construir URL según el tipo de activo y mercado
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
         
         headers = {
-            'Authorization': f'Bearer {token_portador}',
+            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
             'Accept': 'application/json'
         }
         
         # Realizar la solicitud
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers={
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }, timeout=30)
+        
+        # Verificar el estado de la respuesta
+        print(f"Estado de la respuesta: {response.status_code}")
         response.raise_for_status()
         
         # Procesar la respuesta
         data = response.json()
+        print(f"Tipo de datos recibidos: {type(data)}")
         
         # Procesar la respuesta según el formato esperado
         if isinstance(data, list):
+            print(f"Se recibió una lista con {len(data)} elementos")
+            if data:
+                print(f"Primer elemento: {data[0]}")
+                
             # Formato estándar para series históricas
             fechas = []
             precios = []
@@ -683,45 +698,83 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                     # Manejar diferentes formatos de fecha
                     fecha_str = item.get('fecha') or item.get('fechaHora')
                     if not fecha_str:
+                        print(f"  - Item sin fecha: {item}")
                         continue
                         
                     # Manejar diferentes formatos de precio
                     precio = item.get('ultimoPrecio') or item.get('precioCierre') or item.get('precio')
-                    if not precio:
+                    if precio is None:
+                        print(f"  - Item sin precio: {item}")
                         continue
                         
                     # Convertir fecha
-                    fecha = parse_datetime_flexible(fecha_str)
-                    if not pd.isna(fecha):
+                    try:
+                        fecha = parse_datetime_flexible(fecha_str)
+                        if pd.isna(fecha):
+                            print(f"  - Fecha inválida: {fecha_str}")
+                            continue
+                            
+                        precio_float = float(precio)
+                        if precio_float <= 0:
+                            print(f"  - Precio inválido: {precio}")
+                            continue
+                            
                         fechas.append(fecha)
-                        precios.append(float(precio))
+                        precios.append(precio_float)
                         
-                except (ValueError, TypeError, AttributeError) as e:
+                    except (ValueError, TypeError) as e:
+                        print(f"  - Error al convertir datos: {e}")
+                        continue
+                        
+                except Exception as e:
+                    print(f"  - Error inesperado al procesar item: {e}")
                     continue
             
             if fechas and precios:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
+                print(f"Datos procesados: {len(df)} registros válidos")
                 return df
+            else:
+                print("No se encontraron datos válidos en la respuesta")
+                return None
                 
         elif isinstance(data, dict):
+            print(f"Se recibió un diccionario: {data.keys()}")
             # Para respuestas que son un solo valor (ej: MEP)
             precio = data.get('ultimoPrecio') or data.get('precioCierre') or data.get('precio')
-            if precio:
+            if precio is not None:
+                print(f"Datos de un solo punto: precio={precio}")
                 return pd.DataFrame({
                     'fecha': [pd.Timestamp.now(tz='UTC')],
                     'precio': [float(precio)]
                 })
-        
-        st.warning(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
+            else:
+                print("No se encontró precio en la respuesta")
+        else:
+            print(f"Tipo de respuesta no manejado: {type(data)}")
+            
+        print(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
         return None
         
     except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión para {simbolo} en {mercado}: {str(e)}")
+        error_msg = f"Error de conexión para {simbolo} en {mercado}: {str(e)}"
+        if hasattr(e, 'response') and e.response is not None:
+            error_msg += f" - Status: {e.response.status_code}"
+            try:
+                error_msg += f" - Respuesta: {e.response.text[:200]}"
+            except:
+                pass
+        print(error_msg)
+        st.warning(error_msg)
         return None
     except Exception as e:
-        st.error(f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}")
+        error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        st.error(error_msg)
         return None
         return None
 
@@ -1380,23 +1433,40 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         try:
             # Obtener datos históricos usando el método estándar
             mercado = activo.get('mercado', 'BCBA')
+            tipo_activo = activo.get('Tipo', 'Desconocido')
+            
+            # Debug: Mostrar información del activo que se está procesando
+            print(f"\nProcesando activo: {simbolo} (Mercado: {mercado}, Tipo: {tipo_activo})")
             
             # Obtener la serie histórica
-            df_historico = obtener_serie_historica_iol(
-                token_portador=token_portador,
-                mercado=mercado,
-                simbolo=simbolo,
-                fecha_desde=fecha_desde,
-                fecha_hasta=fecha_hasta,
-                ajustada="SinAjustar"
-            )
+            try:
+                df_historico = obtener_serie_historica_iol(
+                    token_portador=token_portador,
+                    mercado=mercado,
+                    simbolo=simbolo,
+                    fecha_desde=fecha_desde,
+                    fecha_hasta=fecha_hasta,
+                    ajustada="SinAjustar"
+                )
+            except Exception as e:
+                print(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
+                continue
             
-            if df_historico is None or df_historico.empty:
+            if df_historico is None:
+                print(f"No se obtuvieron datos para {simbolo} (None)")
                 continue
                 
+            if df_historico.empty:
+                print(f"Datos vacíos para {simbolo}")
+                continue
+            
             # Asegurarse de que tenemos las columnas necesarias
             if 'fecha' not in df_historico.columns or 'precio' not in df_historico.columns:
+                print(f"Faltan columnas necesarias en los datos de {simbolo}")
+                print(f"Columnas disponibles: {df_historico.columns.tolist()}")
                 continue
+                
+            print(f"Datos obtenidos: {len(df_historico)} registros desde {df_historico['fecha'].min()} hasta {df_historico['fecha'].max()}")
                 
             # Ordenar por fecha y limpiar duplicados
             df_historico = df_historico.sort_values('fecha')
@@ -1420,6 +1490,12 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             ).dropna()
             
             if len(retornos_validos) < 5:  # Mínimo de datos para métricas confiables
+                print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
+                continue
+                
+            # Verificar si hay suficientes variaciones de precio
+            if retornos_validos.nunique() < 2:
+                print(f"No hay suficiente variación en los precios de {simbolo}")
                 continue
             
             # Calcular métricas básicas
@@ -1465,6 +1541,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             continue
     
     if not metricas_activos:
+        print("No se pudieron calcular métricas para ningún activo")
         return {
             'concentracion': concentracion,
             'std_dev_activo': 0,
@@ -1474,6 +1551,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
             'riesgo_anual': 0
         }
+    else:
+        print(f"\nMétricas calculadas para {len(metricas_activos)} activos")
     
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
