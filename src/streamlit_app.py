@@ -591,83 +591,22 @@ def procesar_respuesta_historico(data, tipo_activo):
         st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
 
-def obtener_administradoras_fci(token_portador):
-    """
-    Obtiene el listado de administradoras de FCI
-    """
-    url = "https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras"
-    headers = {
-        "Authorization": f"Bearer {token_portador}"
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"Error al obtener administradoras FCI: {str(e)}")
-        return []
-
-def obtener_tipos_fondo(token_portador):
-    """
-    Obtiene los tipos de fondos disponibles
-    """
-    url = "https://api.invertironline.com/api/v2/Titulos/FCI/TipoFondos"
-    headers = {
-        "Authorization": f"Bearer {token_portador}"
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"Error al obtener tipos de fondo: {str(e)}")
-        return []
-
-def obtener_fondos_comunes(token_portador, administradora=None, tipo_fondo=None):
+def obtener_fondos_comunes(token_portador):
     """
     Obtiene la lista de fondos comunes de inversión disponibles
-    con opciones de filtrado por administradora y/o tipo de fondo
     """
-    url = "https://api.invertironline.com/api/v2/Titulos/FCI"
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
     headers = {
-        "Authorization": f"Bearer {token_portador}"
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        fondos = response.json()
-        
-        # Aplicar filtros si se especifican
-        if administradora:
-            fondos = [f for f in fondos if f.get('tipoAdministradoraTituloFCI', '').lower() == administradora.lower()]
-            
-        if tipo_fondo:
-            fondos = [f for f in fondos if f.get('tipoFondo', '') == tipo_fondo]
-            
-        return fondos
-    except Exception as e:
-        st.error(f"Error al obtener fondos comunes: {str(e)}")
-        return []
-
-def obtener_detalle_fci(token_portador, simbolo):
-    """
-    Obtiene el detalle de un FCI específico
-    """
-    url = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
-    headers = {
-        "Authorization": f"Bearer {token_portador}"
+        'Authorization': f'Bearer {token_portador}'
     }
     
     try:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
-    except Exception as e:
-        st.error(f"Error al obtener detalle del FCI {simbolo}: {str(e)}")
-        return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener fondos comunes: {str(e)}")
+        return []
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
@@ -2478,345 +2417,6 @@ def mostrar_movimientos_asesor():
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
-def mostrar_analisis_fci_portafolio(token_portador, portafolio):
-    """Muestra el análisis detallado de los FCIs en el portafolio"""
-    # Filtrar solo los FCIs del portafolio
-    fcis_portafolio = [activo for activo in portafolio.get('activos', []) 
-                      if activo.get('tipo', '').lower() == 'fondocomundeinversion']
-    
-    if not fcis_portafolio:
-        st.info("No hay Fondos Comunes de Inversión en su portafolio.")
-        return
-    
-    # Mostrar resumen de FCIs
-    st.header("📊 Fondos Comunes de Inversión en su Portafolio")
-    
-    # Crear tabla de resumen
-    resumen_data = []
-    for fci in fcis_portafolio:
-        simbolo = fci.get('simbolo', 'N/A')
-        cantidad = fci.get('cantidad', 0)
-        precio = fci.get('precio', 0)
-        valor = cantidad * precio
-        
-        # Obtener detalles adicionales del FCI
-        detalles = obtener_detalle_fci(token_portador, simbolo)
-        
-        resumen_data.append({
-            'Símbolo': simbolo,
-            'Descripción': detalles.get('descripcion', 'N/A') if detalles else 'N/A',
-            'Cantidad': cantidad,
-            'Precio': precio,
-            'Valor': valor,
-            'Tipo': detalles.get('tipoFondo', 'N/A') if detalles else 'N/A',
-            'Horizonte': detalles.get('horizonteInversion', 'N/A') if detalles else 'N/A',
-            'Perfil': detalles.get('perfilInversor', 'N/A') if detalles else 'N/A',
-            'Var. 24h': detalles.get('variacion', 0) if detalles else 0,
-            'Var. Mensual': detalles.get('variacionMensual', 0) if detalles else 0,
-            'Var. Anual': detalles.get('variacionAnual', 0) if detalles else 0,
-        })
-    
-    # Mostrar tabla de resumen
-    if resumen_data:
-        df_resumen = pd.DataFrame(resumen_data)
-        
-        # Formatear columnas para visualización
-        display_columns = {
-            'Símbolo': 'Símbolo',
-            'Descripción': 'Descripción',
-            'Cantidad': st.column_config.NumberColumn('Cantidad', format='%.2f'),
-            'Precio': st.column_config.NumberColumn('Precio', format='$%.2f'),
-            'Valor': st.column_config.NumberColumn('Valor', format='$%.2f'),
-            'Tipo': 'Tipo',
-            'Horizonte': 'Horizonte',
-            'Perfil': 'Perfil',
-            'Var. 24h': st.column_config.NumberColumn('Var. 24h', format='%.2f%%'),
-            'Var. Mensual': st.column_config.NumberColumn('Var. Mensual', format='%.2f%%'),
-            'Var. Anual': st.column_config.NumberColumn('Var. Anual', format='%.2f%%')
-        }
-        
-        # Mostrar métricas de riesgo
-        st.subheader("⚖️ Análisis de Riesgo")
-        
-        # Calcular métricas de concentración
-        valores = df_resumen['Valor'].values
-        valor_total = valores.sum()
-        
-        if valor_total > 0:
-            # Calcular índice de Herfindahl-Hirschman (HHI) para medir concentración
-            participaciones = (valores / valor_total) * 100
-            hhi = np.sum(participaciones ** 2)
-            
-            # Determinar nivel de concentración
-            if hhi < 1000:
-                nivel_concentracion = "🟢 Baja"
-            elif hhi < 1800:
-                nivel_concentracion = "🟡 Moderada"
-            else:
-                nivel_concentracion = "🔴 Alta"
-            
-            # Calcular volatilidad promedio ponderada
-            volatilidad_ponderada = np.average(
-                [fci.get('volatilidad_anual', 0) for fci in fcis_portafolio],
-                weights=valores
-            )
-            
-            # Mostrar métricas en columnas
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Concentración", f"{hhi:.1f}")
-            with col2:
-                st.metric("Volatilidad Anual", f"{volatilidad_ponderada:.1f}%")
-            with col3:
-                st.metric("Nivel Concentración", nivel_concentracion)
-        
-        # Mostrar tabla de FCIs
-        st.subheader("📋 Resumen de FCIs")
-        st.dataframe(
-            df_resumen[display_columns.keys()],
-            column_config=display_columns,
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        # Configuración del período de análisis
-        st.subheader("📈 Configuración del Análisis")
-        
-        # Obtener fechas para el análisis histórico
-        hoy = datetime.now().date()
-        col1, col2 = st.columns(2)
-        with col1:
-            fecha_inicio = st.date_input("Fecha de inicio", 
-                                      value=hoy - timedelta(days=365),  # Último año por defecto
-                                      max_value=hoy - timedelta(days=1))
-        with col2:
-            fecha_fin = st.date_input("Fecha de fin", 
-                                    value=hoy,
-                                    min_value=fecha_inicio + timedelta(days=1),
-                                    max_value=hoy)
-        
-        # Validar fechas
-        if fecha_inicio >= fecha_fin:
-            st.error("La fecha de inicio debe ser anterior a la fecha de fin")
-            return
-            
-        # Mostrar proyecciones de rendimiento
-        st.subheader("📈 Proyecciones de Rendimiento")
-        
-        # Calcular retorno esperado ponderado del portafolio completo
-        if valor_total > 0:
-            # Obtener retornos de todos los activos del portafolio, no solo FCIs
-            retornos_activos = []
-            valores_activos = []
-            
-            # Mostrar mensaje de carga
-            with st.spinner('Calculando rendimientos...'):
-                # Procesar FCIs
-                for fci in fcis_portafolio:
-                    detalles = obtener_detalle_fci(token_portador, fci['simbolo'])
-                    if detalles and 'variacionAnual' in detalles and detalles['variacionAnual'] is not None:
-                        retornos_activos.append(detalles['variacionAnual'])
-                        valores_activos.append(fci.get('cantidad', 0) * fci.get('precio', 0))
-                
-                # Obtener datos reales de los FCIs
-                fcis_disponibles = obtener_fondos_comunes(token_portador)
-                fci_por_simbolo = {fci['simbolo']: fci for fci in fcis_disponibles} if fcis_disponibles else {}
-                
-                # Procesar otros activos del portafolio
-                for activo in portafolio.get('activos', []):
-                    valor = activo.get('cantidad', 0) * activo.get('precio', 0)
-                    if valor <= 0:
-                        continue
-                        
-                    simbolo = activo.get('simbolo', '')
-                    tipo_activo = activo.get('tipo', '')
-                    
-                    if tipo_activo.lower() == 'fondocomundeinversion':
-                        # Ya procesamos los FCIs en el paso anterior
-                        continue
-                    elif tipo_activo in ['CEDEARS', 'ACCIONES']:
-                        # Para acciones y CEDEARS, obtener el rendimiento histórico
-                        try:
-                            # Obtener datos históricos para calcular retorno
-                            fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
-                            fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
-                            
-                            with st.spinner(f'Obteniendo histórico para {simbolo}...'):
-                                historico = obtener_historico_activo(token_portador, simbolo, fecha_inicio_str, fecha_fin_str)
-                                
-                            if historico and len(historico) > 1:
-                                precio_inicial = float(historico[0]['ultimoPrecio'])
-                                precio_final = float(historico[-1]['ultimoPrecio'])
-                                retorno_anual = ((precio_final - precio_inicial) / precio_inicial) * 100
-                                
-                                # Ajustar a período anual si es necesario
-                                dias_periodo = (fecha_fin - fecha_inicio).days
-                                if dias_periodo > 0:
-                                    factor_anual = 365 / dias_periodo
-                                    retorno_anual = ((1 + retorno_anual/100) ** factor_anual - 1) * 100
-                                
-                                retornos_activos.append(retorno_anual)
-                                valores_activos.append(valor)
-                        except Exception as e:
-                            st.warning(f"No se pudo obtener el histórico para {simbolo}: {str(e)}")
-                    elif tipo_activo == 'TitulosPublicos':
-                        # For bonds, use historical price data like we do for stocks
-                        try:
-                            fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
-                            fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
-                            
-                            with st.spinner(f'Obteniendo histórico para bono {simbolo}...'):
-                                historico = obtener_historico_activo(token_portador, simbolo, fecha_inicio_str, fecha_fin_str)
-                                
-                            if historico and len(historico) > 1:
-                                precio_inicial = float(historico[0]['ultimoPrecio'])
-                                precio_final = float(historico[-1]['ultimoPrecio'])
-                                retorno_anual = ((precio_final - precio_inicial) / precio_inicial) * 100
-                                
-                                # Annualize if needed
-                                dias_periodo = (fecha_fin - fecha_inicio).days
-                                if dias_periodo > 0:
-                                    factor_anual = 365 / dias_periodo
-                                    retorno_anual = ((1 + retorno_anual/100) ** factor_anual - 1) * 100
-                                
-                                retornos_activos.append(retorno_anual)
-                                valores_activos.append(valor)
-                        except Exception as e:
-                            st.warning(f"No se pudo obtener el histórico para el bono {simbolo}: {str(e)}")
-                            # Skip this bond if we can't get historical data
-            
-            # Calcular retorno ponderado total del portafolio
-            if valores_activos and len(valores_activos) > 0:
-                valor_total_portafolio = sum(valores_activos)
-                if valor_total_portafolio > 0:
-                    retorno_ponderado = np.average(retornos_activos, weights=valores_activos)
-                    
-                    # Mostrar métricas
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Retorno Esperado Anual (Portafolio)", f"+{retorno_ponderado:.1f}%")
-                    with col2:
-                        # Mostrar composición de retornos
-                        st.metric("Retorno FCIs", 
-                                f"{np.average([r for r, v in zip(retornos_activos, valores_activos) if v in valores]):.1f}%" 
-                                if any(v in valores for v in valores_activos) else "N/A")
-                    
-                    # Mostrar desglose de retornos por tipo de activo
-                    with st.expander("🔍 Ver desglose de retornos"):
-                        st.write("Retorno esperado por tipo de activo:")
-                        for tipo, retorno in retornos_esperados.items():
-                            st.write(f"- {tipo}: {retorno}%")
-                    
-                    st.info("💡 El retorno esperado considera el rendimiento histórico de los FCIs y promedios del mercado para otros activos.")
-                    return
-            
-            # Si no se pudo calcular el retorno del portafolio completo, mostrar solo el de FCIs
-            retorno_fcis = np.average(
-                [fci.get('variacionAnual', 0) for fci in [d for d in [obtener_detalle_fci(token_portador, fci['simbolo']) 
-                                                              for fci in fcis_portafolio] if d]],
-                weights=valores
-            )
-            st.metric("Retorno Esperado Anual (Solo FCIs)", f"+{retorno_fcis:.1f}%")
-            st.warning("⚠️ No se pudo calcular el retorno del portafolio completo. Mostrando solo el retorno de los FCIs.")
-        
-        # Mostrar detalles de rendimiento para cada FCI
-        st.subheader("📊 Rendimiento Detallado")
-        
-        # Obtener fechas para el histórico (últimos 6 meses para mejor análisis)
-        fecha_hasta = date.today()
-        fecha_desde = fecha_hasta - timedelta(days=180)
-        
-        # Crear pestañas para cada FCI
-        tabs = st.tabs([f"{fci['simbolo']}" for fci in fcis_portafolio])
-        
-        for idx, tab in enumerate(tabs):
-            with tab:
-                fci = fcis_portafolio[idx]
-                simbolo = fci.get('simbolo')
-                detalles = obtener_detalle_fci(token_portador, simbolo)
-                
-                # Obtener datos históricos
-                historico = obtener_serie_historica_fci(token_portador, simbolo, 
-                                                      fecha_desde.strftime('%Y-%m-%d'), 
-                                                      fecha_hasta.strftime('%Y-%m-%d'))
-                
-                if historico is not None and not historico.empty:
-                    # Calcular métricas
-                    retorno_total = ((historico['precio'].iloc[-1] / historico['precio'].iloc[0]) - 1) * 100
-                    retorno_anualizado = ((1 + retorno_total/100) ** (252/len(historico)) - 1) * 100
-                    volatilidad = historico['precio'].pct_change().std() * np.sqrt(252) * 100  # Anualizada
-                    sharpe = (retorno_anualizado - 40) / (volatilidad + 1e-10)  # Tasa libre de riesgo del 40%
-                    
-                    # Usar el retorno anual del FCI si está disponible, de lo contrario usar el histórico
-                    retorno_final = detalles.get('variacionAnual', retorno_anualizado) if detalles else retorno_anualizado
-                    
-                    # Mostrar métricas en columnas
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Retorno Histórico", f"{retorno_anualizado:.1f}%")
-                    with col2:
-                        st.metric("Retorno FCI", f"{detalles.get('variacionAnual', 'N/A')}%" if detalles else "N/A")
-                    with col3:
-                        st.metric("Volatilidad Anual", f"{volatilidad:.1f}%")
-                    with col4:
-                        st.metric("Ratio de Sharpe", f"{sharpe:.2f}")
-                    
-                    # Gráfico de evolución
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=historico['fecha'], 
-                        y=historico['precio'],
-                        mode='lines',
-                        name=f'Valor Cuotaparte {simbolo}'
-                    ))
-                    
-                    fig.update_layout(
-                        title=f'Evolución del Valor Cuotaparte - {simbolo}',
-                        xaxis_title='Fecha',
-                        yaxis_title='Valor Cuotaparte ($)',
-                        showlegend=True,
-                        height=400,
-                        xaxis=dict(
-                            rangeselector=dict(
-                                buttons=list([
-                                    dict(count=1, label="1m", step="month", stepmode="backward"),
-                                    dict(count=3, label="3m", step="month", stepmode="backward"),
-                                    dict(count=6, label="6m", step="month", stepmode="backward"),
-                                    dict(step="all")
-                                ])
-                            ),
-                            rangeslider=dict(visible=True),
-                            type="date"
-                        )
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Mostrar información adicional del FCI
-                    if detalles:
-                        st.subheader("ℹ️ Información del Fondo")
-                        info_cols = st.columns(2)
-                        with info_cols[0]:
-                            st.write(f"**Administradora:** {detalles.get('tipoAdministradoraTituloFCI', 'N/A')}")
-                            st.write(f"**Horizonte de Inversión:** {detalles.get('horizonteInversion', 'N/A')}")
-                            st.write(f"**Perfil de Inversor:** {detalles.get('perfilInversor', 'N/A')}")
-                        with info_cols[1]:
-                            st.write(f"**Monto Mínimo:** ${detalles.get('montoMinimo', 'N/A')}")
-                            st.write(f"**Plazo de Rescate:** {detalles.get('rescate', 'N/A')}")
-                            st.write(f"**Moneda:** {detalles.get('moneda', 'N/A')}")
-                    
-                    # Mostrar tabla con datos históricos
-                    with st.expander("📋 Ver datos históricos completos"):
-                        st.dataframe(historico, use_container_width=True)
-                else:
-                    st.warning(f"No se encontraron datos históricos para {simbolo}")
-                    
-                    if detalles:
-                        st.subheader("ℹ️ Información del Fondo")
-                        st.json({k: v for k, v in detalles.items() if v is not None})
-    else:
-        st.info("No hay datos para mostrar.")
-
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
@@ -2830,24 +2430,21 @@ def mostrar_analisis_portafolio():
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
-    # Obtener datos del portafolio una sola vez
-    portafolio = obtener_portafolio(token_acceso, id_cliente)
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
-        return
-    
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "📊 FCIs",
         "🔄 Optimización"
     ])
 
     with tab1:
-        mostrar_resumen_portafolio(portafolio, token_acceso)
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if portafolio:
+            mostrar_resumen_portafolio(portafolio, token_acceso)
+        else:
+            st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
@@ -2861,11 +2458,8 @@ def mostrar_analisis_portafolio():
     
     with tab4:
         mostrar_cotizaciones_mercado(token_acceso)
-        
-    with tab5:
-        mostrar_analisis_fci_portafolio(token_acceso, portafolio)
     
-    with tab6:
+    with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
