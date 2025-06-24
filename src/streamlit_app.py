@@ -1395,36 +1395,77 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def calcular_beta_individual(asset_returns, benchmark_returns):
+def calcular_beta_individual(asset_returns, benchmark_returns, risk_free_rate=0.0):
     """
     Calcula el beta de un activo individual respecto a un benchmark sin restricciones.
     
     Args:
         asset_returns (pd.Series): Retornos del activo individual
         benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
+        risk_free_rate (float): Tasa libre de riesgo (anual)
         
     Returns:
-        float: Beta del activo
+        dict: Diccionario con beta, alpha, R² y métricas adicionales
     """
     # Asegurarse de que los datos estén alineados por fecha
     data = pd.concat([asset_returns, benchmark_returns], axis=1).dropna()
-    if len(data) < 2:
-        return np.nan
-        
+    
+    if len(data) < 10:  # Mínimo de observaciones para un cálculo confiable
+        return {
+            'beta': np.nan,
+            'alpha': np.nan,
+            'r_squared': 0,
+            'observations': len(data),
+            'error': 'Datos insuficientes' if len(data) < 2 else None
+        }
+    
     # Extraer las series limpias
     asset = data.iloc[:, 0]
     benchmark = data.iloc[:, 1]
     
+    # Calcular retornos en exceso sobre la tasa libre de riesgo (anual a diaria)
+    risk_free_daily = (1 + risk_free_rate) ** (1/252) - 1
+    excess_asset = asset - risk_free_daily
+    excess_benchmark = benchmark - risk_free_daily
+    
     # Calcular covarianza y varianza
-    cov_matrix = np.cov(asset, benchmark)
+    cov_matrix = np.cov(excess_asset, excess_benchmark, ddof=1)
+    var_benchmark = np.var(excess_benchmark, ddof=1)
     
-    # Beta = cov(activo, benchmark) / var(benchmark)
-    if cov_matrix[1, 1] == 0:
-        return np.nan
-        
-    beta = cov_matrix[0, 1] / cov_matrix[1, 1]
+    # Evitar división por cero
+    if var_benchmark == 0:
+        return {
+            'beta': np.nan,
+            'alpha': np.nan,
+            'r_squared': 0,
+            'observations': len(data),
+            'error': 'Varianza del benchmark es cero'
+        }
     
-    return beta
+    # Calcular beta y alpha (CAPM)
+    beta = cov_matrix[0, 1] / var_benchmark
+    alpha = np.mean(excess_asset) - beta * np.mean(excess_benchmark)
+    
+    # Calcular R²
+    y_pred = alpha + beta * excess_benchmark
+    ss_residual = np.sum((excess_asset - y_pred) ** 2)
+    ss_total = np.sum((excess_asset - np.mean(excess_asset)) ** 2)
+    r_squared = 1 - (ss_residual / ss_total) if ss_total > 0 else 0
+    
+    # Calcular error estándar del beta
+    n = len(data)
+    se_beta = np.sqrt((1 - r_squared) / ((n - 2) * var_benchmark)) if n > 2 else np.nan
+    
+    return {
+        'beta': beta,
+        'alpha': alpha * 252,  # Anualizado
+        'r_squared': r_squared,
+        'std_error': se_beta,
+        'observations': n,
+        't_stat': beta / se_beta if se_beta and se_beta > 0 else np.nan,
+        'p_value': 2 * (1 - stats.t.cdf(abs(beta / se_beta), n-2)) if se_beta and se_beta > 0 else np.nan,
+        'tracking_error': np.std(excess_asset - beta * excess_benchmark, ddof=1) * np.sqrt(252)
+    }
 
 
 def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
@@ -1558,46 +1599,66 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
         'observations': alpha_beta_metrics.get('observations', 0)
     }
 
-def calcular_betas_activos(activos, token_portador, dias_historial=252, benchmark_ticker='^MERV'):
+def calcular_betas_activos(activos, token_portador, dias_historial=252, benchmark_ticker='^MERV', risk_free_rate=0.0):
     """
-    Calcula los betas individuales de múltiples activos respecto a un benchmark.
+    Calcula métricas de riesgo sistemático para múltiples activos respecto a un benchmark.
     
     Args:
         activos (list): Lista de diccionarios con 'simbolo' y 'mercado' de cada activo
         token_portador (str): Token de autenticación para la API
-        dias_historial (int): Días de histórico a considerar
+        dias_historial (int): Días de histórico a considerar (días hábiles)
         benchmark_ticker (str): Ticker del benchmark (por defecto: MERVAL)
+        risk_free_rate (float): Tasa libre de riesgo anual (por defecto: 0.0)
         
     Returns:
-        dict: Diccionario con los betas de cada activo
+        dict: Diccionario con las métricas de riesgo sistemático de cada activo
     """
-    # Obtener fechas
+    # Obtener fechas (usamos más días para asegurar suficientes datos)
     fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-    fecha_desde = (datetime.now() - timedelta(days=dias_historial*2)).strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=int(dias_historial*1.5))).strftime('%Y-%m-%d')
     
     # Obtener datos del benchmark
     try:
-        benchmark_data = yf.download(benchmark_ticker, start=fecha_desde, end=fecha_hasta)['Adj Close']
-        benchmark_returns = benchmark_data.pct_change().dropna()
+        st.info(f"Obteniendo datos del benchmark {benchmark_ticker}...")
+        benchmark_data = yf.download(
+            benchmark_ticker, 
+            start=fecha_desde, 
+            end=fecha_hasta,
+            progress=False
+        )
+        
+        if benchmark_data.empty:
+            st.error("No se pudieron obtener datos del benchmark")
+            return {}
+            
+        benchmark_returns = benchmark_data['Adj Close'].pct_change().dropna()
+        
+        # Calcular volatilidad anualizada del benchmark para referencia
+        benchmark_vol = benchmark_returns.std() * np.sqrt(252)
+        st.info(f"Volatilidad anualizada del benchmark: {benchmark_vol*100:.1f}%")
+        
     except Exception as e:
         st.error(f"Error al obtener datos del benchmark: {str(e)}")
         return {}
     
-    betas = {}
+    resultados = {}
     
     for activo in activos:
         try:
+            simbolo = activo['simbolo']
+            st.info(f"Procesando {simbolo}...")
+            
             # Obtener datos históricos del activo
             historico = obtener_serie_historica_iol(
                 token_portador, 
                 activo['mercado'], 
-                activo['simbolo'], 
+                simbolo, 
                 fecha_desde, 
                 fecha_hasta
             )
             
             if historico is None or historico.empty:
-                st.warning(f"No se pudieron obtener datos para {activo['simbolo']}")
+                st.warning(f"No se pudieron obtener datos para {simbolo}")
                 continue
                 
             # Calcular retornos
@@ -1605,22 +1666,61 @@ def calcular_betas_activos(activos, token_portador, dias_historial=252, benchmar
             
             # Asegurar que las fechas coincidan
             common_dates = benchmark_returns.index.intersection(activo_returns.index)
-            if len(common_dates) < 5:  # Mínimo de puntos para un cálculo significativo
-                st.warning(f"No hay suficientes datos coincidentes para {activo['simbolo']}")
+            if len(common_dates) < 10:  # Mínimo de observaciones para un cálculo confiable
+                st.warning(f"No hay suficientes datos coincidentes para {simbolo} ({len(common_dates)} observaciones)")
                 continue
-                
-            # Calcular beta
-            beta = calcular_beta_individual(
+            
+            # Calcular métricas de riesgo sistemático
+            metricas = calcular_beta_individual(
                 activo_returns[common_dates],
-                benchmark_returns[common_dates]
+                benchmark_returns[common_dates],
+                risk_free_rate
             )
             
-            betas[activo['simbolo']] = beta
+            # Calcular métricas adicionales
+            if not np.isnan(metricas['beta']):
+                # Volatilidad del activo
+                asset_vol = activo_returns[common_dates].std() * np.sqrt(252)
+                metricas['volatilidad_anual'] = asset_vol
+                
+                # Riesgo sistemático vs. riesgo idiosincrático
+                riesgo_sistematico = (metricas['beta'] ** 2) * (benchmark_vol ** 2)
+                riesgo_total = asset_vol ** 2
+                riesgo_idiosincratico = max(0, riesgo_total - riesgo_sistematico)
+                
+                metricas['riesgo_sistematico'] = np.sqrt(riesgo_sistematico) if riesgo_sistematico > 0 else 0
+                metricas['riesgo_idiosincratico'] = np.sqrt(riesgo_idiosincratico) if riesgo_idiosincratico > 0 else 0
+                metricas['proporcion_riesgo_sistematico'] = riesgo_sistematico / riesgo_total if riesgo_total > 0 else 0
+                
+                # Calcular información adicional sobre la relación con el benchmark
+                metricas['correlacion'] = np.corrcoef(
+                    activo_returns[common_dates].values,
+                    benchmark_returns[common_dates].values
+                )[0, 1]
+                
+                # Interpretación del beta
+                if metricas['beta'] < 0.7:
+                    metricas['interpretacion_beta'] = 'Defensivo'
+                elif metricas['beta'] < 1.3:
+                    metricas['interpretacion_beta'] = 'Neutral'
+                else:
+                    metricas['interpretacion_beta'] = 'Agresivo'
+                
+                # Calcular estadísticas de error
+                if not np.isnan(metricas['t_stat']):
+                    if abs(metricas['t_stat']) < 1.96:  # 95% de confianza
+                        metricas['significancia'] = 'No significativo'
+                    else:
+                        metricas['significancia'] = 'Significativo'
+                else:
+                    metricas['significancia'] = 'No calculable'
+            
+            resultados[simbolo] = metricas
             
         except Exception as e:
-            st.error(f"Error al calcular beta para {activo['simbolo']}: {str(e)}")
+            st.error(f"Error al procesar {activo.get('simbolo', 'activo')}: {str(e)}")
     
-    return betas
+    return resultados
 
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
@@ -2059,42 +2159,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 'Cantidad': cantidad,
                 'Valuación': valuacion,
             })
-            
-            valor_total += valuacion
-        except Exception as e:
-            continue
     
-    if datos_activos:
-        df_activos = pd.DataFrame(datos_activos)
-        # Convert list to dictionary with symbols as keys
-        portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
-        
-        # Información General
-        cols = st.columns(4)
-        cols[0].metric("Total de Activos", len(datos_activos))
-        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
-        
-        if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
-            
-            # Mostrar concentración como porcentaje
-            concentracion_pct = metricas['concentracion'] * 100
-            cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.1f}%",
-                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
-            
-            # Mostrar volatilidad como porcentaje anual
-            volatilidad_pct = metricas['std_dev_activo'] * 100
-            cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.1f}%",
-                         help="Riesgo medido como desviación estándar de retornos anuales")
-            
-            # Nivel de concentración con colores
+    # Formatear columnas
+    df_activos['Precio'] = df_activos['Precio'].apply(lambda x: f"${x:,.2f}" if pd.notnull(x) else "N/A")
+    df_activos['Valor'] = df_activos['Valor'].apply(lambda x: f"${x:,.2f}" if pd.notnull(x) else "N/A")
+    df_activos['Peso'] = df_activos['Peso'].apply(lambda x: f"{x:.2f}%" if pd.notnull(x) else "N/A")
             if metricas['concentracion'] < 0.3:
                 concentracion_status = "🟢 Baja"
             elif metricas['concentracion'] < 0.6:
