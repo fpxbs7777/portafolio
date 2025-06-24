@@ -1907,6 +1907,138 @@ def mostrar_analisis_portafolio():
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
+def obtener_tokens(usuario, contraseña):
+    """
+    Obtiene los tokens de acceso y refresh de la API de IOL.
+    
+    Args:
+        usuario (str): Nombre de usuario de IOL
+        contraseña (str): Contraseña de IOL
+        
+    Returns:
+        tuple: (token_acceso, refresh_token) o (None, None) en caso de error
+    """
+    try:
+        # URL de autenticación de IOL
+        url = "https://api.invertironline.com/token"
+        
+        # Datos para la autenticación
+        data = {
+            'username': usuario,
+            'password': contraseña,
+            'grant_type': 'password'
+        }
+        
+        # Headers requeridos
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        # Realizar la petición POST
+        response = requests.post(url, data=data, headers=headers)
+        response.raise_for_status()  # Lanza error para códigos 4XX/5XX
+        
+        # Extraer tokens de la respuesta
+        datos_respuesta = response.json()
+        token_acceso = datos_respuesta.get('access_token')
+        refresh_token = datos_respuesta.get('refresh_token')
+        
+        if not token_acceso or not refresh_token:
+            raise ValueError("No se pudieron obtener los tokens de la respuesta")
+            
+        return token_acceso, refresh_token
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión con IOL: {str(e)}")
+        return None, None
+    except Exception as e:
+        st.error(f"Error al obtener tokens: {str(e)}")
+        return None, None
+
+def verificar_token(token_acceso):
+    """
+    Verifica si un token de acceso es válido.
+    
+    Args:
+        token_acceso (str): Token de acceso a verificar
+        
+    Returns:
+        bool: True si el token es válido, False en caso contrario
+    """
+    try:
+        url = "https://api.invertironline.com/api/v2/estadocuenta"
+        headers = {
+            'Authorization': f'Bearer {token_acceso}'
+        }
+        response = requests.get(url, headers=headers)
+        return response.status_code == 200
+    except:
+        return False
+
+def refrescar_token(refresh_token):
+    """
+    Obtiene un nuevo token de acceso usando el refresh token.
+    
+    Args:
+        refresh_token (str): Refresh token para obtener un nuevo access token
+        
+    Returns:
+        str: Nuevo token de acceso o None en caso de error
+    """
+    try:
+        url = "https://api.invertironline.com/token"
+        data = {
+            'grant_type': 'refresh_token',
+            'refresh_token': refresh_token
+        }
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        response = requests.post(url, data=data, headers=headers)
+        response.raise_for_status()
+        
+        return response.json().get('access_token')
+    except:
+        return None
+
+def obtener_lista_clientes(token_acceso):
+    """
+    Obtiene la lista de clientes asociados a la cuenta del asesor.
+    
+    Args:
+        token_acceso (str): Token de acceso de la API de IOL
+        
+    Returns:
+        list: Lista de diccionarios con información de los clientes
+    """
+    try:
+        url = "https://api.invertironline.com/api/v2/usuarios/me"
+        headers = {
+            'Authorization': f'Bearer {token_acceso}'
+        }
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        # Si el usuario tiene múltiples cuentas, devolver la lista de cuentas
+        data = response.json()
+        cuentas = data.get('cuentas', [])
+        
+        # Si no hay cuentas, devolver la cuenta principal
+        if not cuentas:
+            return [{
+                'id': data.get('id'),
+                'numeroCliente': data.get('numeroCliente'),
+                'apellidoYNombre': data.get('apellidoYNombre', 'Cliente')
+            }]
+            
+        return cuentas
+        
+    except Exception as e:
+        st.error(f"Error al obtener la lista de clientes: {str(e)}")
+        return []
+
 def main():
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
