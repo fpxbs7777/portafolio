@@ -12,6 +12,9 @@ import random
 import warnings
 import streamlit.components.v1 as components
 
+# Constantes de la API de InvertirOnline
+BASE_URL = 'https://api.invertironline.com'
+
 warnings.filterwarnings('ignore')
 
 # Configuración de la página con aspecto profesional
@@ -2415,170 +2418,340 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 def mostrar_perfil_inversor(token_acceso, id_cliente, cliente_info):
     st.markdown("## 📊 Perfil de Inversor")
     
-    # Obtener preguntas del test
-    with st.spinner("Cargando test de perfil de inversor..."):
-        test_data = obtener_test_inversor(token_acceso)
+    # Obtener el portafolio actual
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    analisis_portafolio = None
     
-    if not test_data:
-        st.warning("No se pudo cargar el test de perfil de inversor")
-        return
+    if portafolio:
+        analisis_portafolio = analizar_composicion_portafolio(portafolio)
     
-    # Mostrar formulario del test
-    with st.form("test_inversor_form"):
-        st.markdown("### Test de Perfil de Inversor")
-        st.markdown("Complete el siguiente cuestionario para determinar su perfil de inversor:")
+    # Crear pestañas para el análisis
+    tab1, tab2 = st.tabs(["📝 Test de Perfil", "📊 Análisis de Portafolio"])
+    
+    with tab1:
+        # Obtener preguntas del test
+        with st.spinner("Cargando test de perfil de inversor..."):
+            test_data = obtener_test_inversor(token_acceso)
         
-        respuestas = {
-            "enviarEmailCliente": False,
-            "instrumentosInvertidosAnteriormente": [],
-            "nivelesConocimientoInstrumentos": []
-        }
+        if not test_data:
+            st.warning("No se pudo cargar el test de perfil de inversor")
+            return
         
-        # Pregunta 1: Instrumentos invertidos anteriormente
-        st.markdown(f"**{test_data.get('instrumentosInvertidosAnteriormente', {}).get('pregunta', '¿En qué instrumentos ha invertido anteriormente?')}**")
-        instrumentos = test_data.get('instrumentosInvertidosAnteriormente', {}).get('instrumentos', [])
-        seleccionados = []
-        
-        for instrumento in instrumentos:
-            if st.checkbox(instrumento.get('nombre', ''), key=f"instrumento_{instrumento.get('id')}"):
-                seleccionados.append(instrumento['id'])
-        
-        respuestas["instrumentosInvertidosAnteriormente"] = seleccionados
-        
-        # Pregunta 2: Niveles de conocimiento
-        st.markdown(f"**{test_data.get('nivelesConocimientoInstrumentos', {}).get('pregunta', '¿Cuál es su nivel de conocimiento sobre instrumentos de inversión?')}**")
-        niveles = test_data.get('nivelesConocimientoInstrumentos', {}).get('niveles', [])
-        conocimiento_seleccionado = []
-        
-        for nivel in niveles:
-            opciones = nivel.get('opciones', [])
-            if opciones:
-                opcion_elegida = st.radio(
-                    nivel.get('nombre', ''),
-                    options=[(op['id'], op['nombre']) for op in opciones],
-                    format_func=lambda x: x[1],
-                    key=f"nivel_{nivel.get('id')}"
+        # Mostrar formulario del test
+        with st.form("test_inversor_form"):
+            st.markdown("### Test de Perfil de Inversor")
+            st.markdown("Complete el siguiente cuestionario para determinar su perfil de inversor:")
+            
+            respuestas = {
+                "enviarEmailCliente": False,
+                "instrumentosInvertidosAnteriormente": [],
+                "nivelesConocimientoInstrumentos": []
+            }
+            
+            # Pregunta 1: Instrumentos invertidos anteriormente
+            st.markdown(f"**{test_data.get('instrumentosInvertidosAnteriormente', {}).get('pregunta', '¿En qué instrumentos ha invertido anteriormente?')}**")
+            instrumentos = test_data.get('instrumentosInvertidosAnteriormente', {}).get('instrumentos', [])
+            seleccionados = []
+            
+            for instrumento in instrumentos:
+                if st.checkbox(instrumento.get('nombre', ''), key=f"instrumento_{instrumento.get('id')}"):
+                    seleccionados.append(instrumento['id'])
+            
+            respuestas["instrumentosInvertidosAnteriormente"] = seleccionados
+            
+            # Pregunta 2: Niveles de conocimiento
+            st.markdown(f"**{test_data.get('nivelesConocimientoInstrumentos', {}).get('pregunta', '¿Cuál es su nivel de conocimiento sobre instrumentos de inversión?')}**")
+            niveles = test_data.get('nivelesConocimientoInstrumentos', {}).get('niveles', [])
+            conocimiento_seleccionado = []
+            
+            for nivel in niveles:
+                opciones = nivel.get('opciones', [])
+                if opciones:
+                    opcion_elegida = st.radio(
+                        nivel.get('nombre', ''),
+                        options=[(op['id'], op['nombre']) for op in opciones],
+                        format_func=lambda x: x[1],
+                        key=f"nivel_{nivel.get('id')}"
+                    )
+                    if opcion_elegida:
+                        conocimiento_seleccionado.append(opcion_elegida[0])
+            
+            respuestas["nivelesConocimientoInstrumentos"] = conocimiento_seleccionado
+            
+            # Pregunta 3: Plazo de inversión
+            plazos = test_data.get('plazosInversion', {}).get('plazos', [])
+            if plazos:
+                plazo_elegido = st.selectbox(
+                    test_data.get('plazosInversion', {}).get('pregunta', '¿Cuál es su horizonte de inversión?'),
+                    options=[(p['id'], p['nombre']) for p in plazos],
+                    format_func=lambda x: x[1]
                 )
-                if opcion_elegida:
-                    conocimiento_seleccionado.append(opcion_elegida[0])
-        
-        respuestas["nivelesConocimientoInstrumentos"] = conocimiento_seleccionado
-        
-        # Pregunta 3: Plazo de inversión
-        plazos = test_data.get('plazosInversion', {}).get('plazos', [])
-        if plazos:
-            plazo_elegido = st.selectbox(
-                test_data.get('plazosInversion', {}).get('pregunta', '¿Cuál es su horizonte de inversión?'),
-                options=[(p['id'], p['nombre']) for p in plazos],
-                format_func=lambda x: x[1]
-            )
-            respuestas["idPlazoElegido"] = plazo_elegido[0] if plazo_elegido else 0
-        
-        # Pregunta 4: Edad
-        edades = test_data.get('edadesPosibles', {}).get('edades', [])
-        if edades:
-            edad_elegida = st.selectbox(
-                test_data.get('edadesPosibles', {}).get('pregunta', '¿Cuál es su rango de edad?'),
-                options=[(e['id'], e['nombre']) for e in edades],
-                format_func=lambda x: x[1]
-            )
-            respuestas["idEdadElegida"] = edad_elegida[0] if edad_elegida else 0
-        
-        # Pregunta 5: Objetivo de inversión
-        objetivos = test_data.get('objetivosInversion', {}).get('objetivos', [])
-        if objetivos:
-            objetivo_elegido = st.selectbox(
-                test_data.get('objetivosInversion', {}).get('pregunta', '¿Cuál es su objetivo de inversión?'),
-                options=[(o['id'], o['nombre']) for o in objetivos],
-                format_func=lambda x: x[1]
-            )
-            respuestas["idObjetivoInversionElegida"] = objetivo_elegido[0] if objetivo_elegido else 0
-        
-        # Pregunta 6: Póliza de seguro
-        polizas = test_data.get('polizasSeguro', {}).get('polizas', [])
-        if polizas:
-            poliza_elegida = st.selectbox(
-                test_data.get('polizasSeguro', {}).get('pregunta', '¿Tiene alguna póliza de seguro?'),
-                options=[(p['id'], p['nombre']) for p in polizas],
-                format_func=lambda x: x[1]
-            )
-            respuestas["idPolizaElegida"] = poliza_elegida[0] if poliza_elegida else 0
-        
-        # Pregunta 7: Capacidad de ahorro
-        capacidades = test_data.get('capacidadesAhorro', {}).get('capacidadesAhorro', [])
-        if capacidades:
-            capacidad_elegida = st.selectbox(
-                test_data.get('capacidadesAhorro', {}).get('pregunta', '¿Cuál es su capacidad de ahorro mensual?'),
-                options=[(c['id'], c['nombre']) for c in capacidades],
-                format_func=lambda x: x[1]
-            )
-            respuestas["idCapacidadAhorroElegida"] = capacidad_elegida[0] if capacidad_elegida else 0
-        
-        # Pregunta 8: Porcentaje de patrimonio
-        porcentajes = test_data.get('porcentajesPatrimonioDedicado', {}).get('porcentajesPatrimonioDedicado', [])
-        if porcentajes:
-            porcentaje_elegido = st.selectbox(
-                test_data.get('porcentajesPatrimonioDedicado', {}).get('pregunta', '¿Qué porcentaje de su patrimonio destinará a inversiones?'),
-                options=[(p['id'], p['nombre']) for p in porcentajes],
-                format_func=lambda x: x[1]
-            )
-            respuestas["idPorcentajePatrimonioDedicado"] = porcentaje_elegido[0] if porcentaje_elegido else 0
-        
-        # Opción para enviar email
-        respuestas["enviarEmailCliente"] = st.checkbox("Recibir resultados por correo electrónico")
-        
-        if st.form_submit_button("📊 Obtener perfil de inversor"):
-            with st.spinner("Analizando su perfil de inversor..."):
-                resultado = enviar_test_inversor(token_acceso, id_cliente, respuestas)
-                
-                if resultado and resultado.get('ok', False):
-                    perfil = resultado.get('perfilSugerido', {})
+                respuestas["idPlazoElegido"] = plazo_elegido[0] if plazo_elegido else 0
+            
+            # Pregunta 4: Edad
+            edades = test_data.get('edadesPosibles', {}).get('edades', [])
+            if edades:
+                edad_elegida = st.selectbox(
+                    test_data.get('edadesPosibles', {}).get('pregunta', '¿Cuál es su rango de edad?'),
+                    options=[(e['id'], e['nombre']) for e in edades],
+                    format_func=lambda x: x[1]
+                )
+                respuestas["idEdadElegida"] = edad_elegida[0] if edad_elegida else 0
+            
+            # Pregunta 5: Objetivo de inversión
+            objetivos = test_data.get('objetivosInversion', {}).get('objetivos', [])
+            if objetivos:
+                objetivo_elegido = st.selectbox(
+                    test_data.get('objetivosInversion', {}).get('pregunta', '¿Cuál es su objetivo de inversión?'),
+                    options=[(o['id'], o['nombre']) for o in objetivos],
+                    format_func=lambda x: x[1]
+                )
+                respuestas["idObjetivoInversionElegida"] = objetivo_elegido[0] if objetivo_elegido else 0
+            
+            # Pregunta 6: Póliza de seguro
+            polizas = test_data.get('polizasSeguro', {}).get('polizas', [])
+            if polizas:
+                poliza_elegida = st.selectbox(
+                    test_data.get('polizasSeguro', {}).get('pregunta', '¿Tiene alguna póliza de seguro?'),
+                    options=[(p['id'], p['nombre']) for p in polizas],
+                    format_func=lambda x: x[1]
+                )
+                respuestas["idPolizaElegida"] = poliza_elegida[0] if poliza_elegida else 0
+            
+            # Pregunta 7: Capacidad de ahorro
+            capacidades = test_data.get('capacidadesAhorro', {}).get('capacidadesAhorro', [])
+            if capacidades:
+                capacidad_elegida = st.selectbox(
+                    test_data.get('capacidadesAhorro', {}).get('pregunta', '¿Cuál es su capacidad de ahorro mensual?'),
+                    options=[(c['id'], c['nombre']) for c in capacidades],
+                    format_func=lambda x: x[1]
+                )
+                respuestas["idCapacidadAhorroElegida"] = capacidad_elegida[0] if capacidad_elegida else 0
+            
+            # Pregunta 8: Porcentaje de patrimonio
+            porcentajes = test_data.get('porcentajesPatrimonioDedicado', {}).get('porcentajesPatrimonioDedicado', [])
+            if porcentajes:
+                porcentaje_elegido = st.selectbox(
+                    test_data.get('porcentajesPatrimonioDedicado', {}).get('pregunta', '¿Qué porcentaje de su patrimonio destinará a inversiones?'),
+                    options=[(p['id'], p['nombre']) for p in porcentajes],
+                    format_func=lambda x: x[1]
+                )
+                respuestas["idPorcentajePatrimonioDedicado"] = porcentaje_elegido[0] if porcentaje_elegido else 0
+            
+            # Opción para enviar email
+            respuestas["enviarEmailCliente"] = st.checkbox("Recibir resultados por correo electrónico")
+            
+            if st.form_submit_button("📊 Obtener perfil de inversor"):
+                with st.spinner("Analizando su perfil de inversor..."):
+                    resultado = enviar_test_inversor(token_acceso, id_cliente, respuestas)
                     
-                    st.success("✅ Análisis de perfil completado con éxito")
+                    if resultado and resultado.get('ok', False):
+                        perfil = resultado.get('perfilSugerido', {})
                     
-                    # Mostrar resultados
-                    st.markdown(f"### 🎯 Perfil de Inversor: {perfil.get('nombre', 'No determinado')}")
-                    st.markdown(f"{perfil.get('detalle', '')}")
-                    
-                    # Mostrar composición recomendada
-                    st.markdown("### 📊 Composición Recomendada")
-                    composiciones = perfil.get('perfilComposiciones', [])
-                    
-                    if composiciones:
-                        # Crear gráfico de torta
-                        fig = go.Figure(data=[go.Pie(
-                            labels=[c.get('nombre', '') for c in composiciones],
-                            values=[c.get('porcentaje', 0) for c in composiciones],
-                            textinfo='label+percent',
-                            hole=.3
-                        )])
+                        st.success("✅ Análisis de perfil completado con éxito")
+                        
+                        # Mostrar resultados
+                        st.markdown(f"### 🎯 Perfil de Inversor: {perfil.get('nombre', 'No determinado')}")
+                        st.markdown(f"{perfil.get('detalle', '')}")
+                        
+                        # Mostrar composición recomendada
+                        st.markdown("### 📊 Composición Recomendada")
+                        composiciones = perfil.get('perfilComposiciones', [])
+                        
+                        if composiciones:
+                            # Crear gráfico de torta
+                            fig = go.Figure(data=[go.Pie(
+                                labels=[c.get('nombre', '') for c in composiciones],
+                                values=[c.get('porcentaje', 0) for c in composiciones],
+                                textinfo='label+percent',
+                                hole=.3
+                            )])
+                            
+                            fig.update_layout(
+                                title="Distribución Recomendada",
+                                showlegend=True,
+                                height=500
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Mostrar tabla con los porcentajes
+                            df_composicion = pd.DataFrame([
+                                {"Activo": c.get('nombre', ''), "Porcentaje": f"{c.get('porcentaje', 0)}%"} 
+                                for c in composiciones
+                            ])
+                            st.dataframe(df_composicion, use_container_width=True, hide_index=True)
+                        
+                        # Mostrar mensajes adicionales
+                        mensajes = resultado.get('messages', [])
+                        if mensajes:
+                            st.markdown("### 📝 Recomendaciones")
+                            for msg in mensajes:
+                                with st.expander(msg.get('title', 'Recomendación')):
+                                    st.write(msg.get('description', ''))
+                        
+                        # Si hay un análisis del portafolio, mostrar comparación
+                        if analisis_portafolio:
+                            st.markdown("---")
+                            st.markdown("### 🔄 Comparación con su portafolio actual")
+                            
+                            perfil_recomendado = perfil.get('nombre', '').lower()
+                            perfil_actual = analisis_portafolio['perfil_inferido']
+                            
+                            # Determinar si hay coincidencia
+                            if perfil_recomendado in perfil_actual.lower() or perfil_actual.lower() in perfil_recomendado:
+                                st.success(f"✅ Su portafolio actual es consistente con un perfil {perfil_actual} "
+                                         f"y la recomendación es un perfil {perfil_recomendado}.")
+                        else:
+                            st.warning(f"⚠️ Su portafolio actual sugiere un perfil {perfil_actual} "
+                                     f"mientras que la recomendación es un perfil {perfil_recomendado}.")
+                        
+                        # Mostrar comparación de composición
+                        st.markdown("#### Comparación de composición")
+                        
+                        # Obtener composición recomendada
+                        composicion_recomendada = {}
+                        for comp in perfil.get('perfilComposiciones', []):
+                            composicion_recomendada[comp['nombre']] = comp['porcentaje']
+                        
+                        # Preparar datos para el gráfico de comparación
+                        categorias = list(set(list(composicion_recomendada.keys()) + list(analisis_portafolio['composicion'].keys())))
+                        
+                        # Crear DataFrame para comparación
+                        datos_comparacion = []
+                        for cat in categorias:
+                            recomendado = composicion_recomendada.get(cat, 0)
+                            actual = analisis_portafolio['composicion'].get(cat, {}).get('porcentaje', 0)
+                            datos_comparacion.append({
+                                'Categoría': cat,
+                                'Tipo': 'Recomendado',
+                                'Porcentaje': recomendado
+                            })
+                            datos_comparacion.append({
+                                'Categoría': cat,
+                                'Tipo': 'Actual',
+                                'Porcentaje': actual
+                            })
+                        
+                        df_comparacion = pd.DataFrame(datos_comparacion)
+                        
+                        # Crear gráfico de barras agrupadas
+                        fig = px.bar(df_comparacion, 
+                                   x='Categoría', 
+                                   y='Porcentaje', 
+                                   color='Tipo',
+                                   barmode='group',
+                                   title='Comparación de Composición: Recomendado vs Actual',
+                                   labels={'Porcentaje': 'Porcentaje (%)', 'Categoría': 'Categoría de Activo'},
+                                   color_discrete_map={'Recomendado': '#1f77b4', 'Actual': '#ff7f0e'})
                         
                         fig.update_layout(
-                            title="Distribución Recomendada",
-                            showlegend=True,
+                            yaxis=dict(ticksuffix='%'),
+                            legend_title_text='',
                             height=500
                         )
+                        
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # Mostrar tabla con los porcentajes
-                        df_composicion = pd.DataFrame([
-                            {"Activo": c.get('nombre', ''), "Porcentaje": f"{c.get('porcentaje', 0)}%"} 
-                            for c in composiciones
-                        ])
-                        st.dataframe(df_composicion, use_container_width=True, hide_index=True)
-                    
-                    # Mostrar mensajes adicionales
-                    mensajes = resultado.get('messages', [])
-                    if mensajes:
-                        st.markdown("### 📝 Recomendaciones")
-                        for msg in mensajes:
-                            with st.expander(msg.get('title', 'Recomendación')):
-                                st.write(msg.get('description', ''))
+                        # Recomendaciones específicas
+                        st.markdown("#### Recomendaciones de ajuste")
+                        
+                        recomendaciones = []
+                        
+                        # Comparar categorías
+                        for cat, datos in analisis_portafolio['composicion'].items():
+                            actual = datos['porcentaje']
+                            recomendado = composicion_recomendada.get(cat, 0)
+                            diferencia = actual - recomendado
+                            
+                            if abs(diferencia) > 10:  # Umbral de diferencia significativa
+                                if diferencia > 0:
+                                    recomendaciones.append(
+                                        f"🔻 Reducir exposición a **{cat}** en aproximadamente {abs(diferencia):.1f}%"
+                                    )
+                                else:
+                                    recomendaciones.append(
+                                        f"🔺 Aumentar exposición a **{cat}** en aproximadamente {abs(diferencia):.1f}%"
+                                    )
+                        
+                        # Agregar categorías recomendadas que no están en el portafolio
+                        for cat in composicion_recomendada:
+                            if cat not in analisis_portafolio['composicion'] and composicion_recomendada[cat] > 5:
+                                recomendaciones.append(
+                                    f"➕ Considerar agregar exposición a **{cat}** (recomendado: {composicion_recomendada[cat]:.1f}%)"
+                                )
+                        
+                        if recomendaciones:
+                            for rec in recomendaciones:
+                                st.markdown(f"- {rec}")
+                        else:
+                            st.success("✅ Su portafolio está bien alineado con las recomendaciones de su perfil de riesgo.")
+                            
                 else:
                     st.error("❌ No se pudo determinar el perfil de inversor. Por favor, intente nuevamente.")
                     if resultado and 'messages' in resultado:
                         for msg in resultado['messages']:
                             st.warning(f"{msg.get('title', '')}: {msg.get('description', '')}")
+    
+    # Pestaña de análisis de portafolio
+    with tab2:
+        if not analisis_portafolio:
+            st.warning("No se pudo analizar la composición del portafolio actual.")
+            return
+        
+        st.markdown("### 📊 Composición Actual del Portafolio")
+        
+        # Mostrar perfil inferido
+        st.markdown(f"#### Perfil de Riesgo Inferido: **{analisis_portafolio['perfil_inferido']}**")
+        
+        # Mostrar gráfico de torta de la composición actual
+        if analisis_portafolio['composicion']:
+            # Crear DataFrame para la composición actual
+            df_composicion_actual = pd.DataFrame([
+                {
+                    'Categoría': cat,
+                    'Valor': datos['valor'],
+                    'Porcentaje': datos['porcentaje']
+                }
+                for cat, datos in analisis_portafolio['composicion'].items()
+            ])
+            
+            # Gráfico de torta
+            fig = px.pie(df_composicion_actual, 
+                        values='Porcentaje', 
+                        names='Categoría',
+                        title='Composición Actual del Portafolio',
+                        hover_data=['Porcentaje'],
+                        labels={'Porcentaje': 'Porcentaje (%)', 'Categoría': 'Categoría'})
+            
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            fig.update_layout(showlegend=False, height=500)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar tabla detallada
+            st.markdown("#### Detalle de la Composición")
+            df_detalle = pd.DataFrame([
+                {
+                    'Categoría': cat,
+                    'Valor': f"${datos['valor']:,.2f}",
+                    'Porcentaje': f"{datos['porcentaje']:.2f}%",
+                    'Número de Activos': len(datos['activos'])
+                }
+                for cat, datos in analisis_portafolio['composicion'].items()
+            ])
+            
+            st.dataframe(df_detalle, 
+                        column_config={
+                            'Valor': st.column_config.NumberColumn(
+                                'Valor',
+                                format='$%.2f',
+                            ),
+                            'Porcentaje': st.column_config.NumberColumn(
+                                'Porcentaje',
+                                format='%.2f%%',
+                            )
+                        },
+                        use_container_width=True,
+                        hide_index=True)
 
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
@@ -2755,6 +2928,89 @@ def mostrar_movimientos_asesor():
                 st.warning("No se encontraron movimientos o hubo un error en la consulta")
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
+
+def analizar_composicion_portafolio(portafolio):
+    """Analiza la composición actual del portafolio y la clasifica por categorías"""
+    if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+        return None
+    
+    # Clasificación de activos por categoría
+    categorias = {
+        'Renta Fija': ['BONOS', 'LETRAS', 'OBLIGACIONES', 'FIDEICOMISOS', 'CHEQUES'],
+        'Renta Variable': ['ACCIONES', 'CEDEARS', 'ETFS'],
+        'Fondos Comunes': ['FCI'],
+        'Monedas': ['DIVISAS'],
+        'Plazos Fijos': ['PLAZO_FIJO'],
+        'Otros': []
+    }
+    
+    # Inicializar valores
+    total_valor = sum(activo.get('valorMercado', 0) for activo in portafolio['activos'])
+    if total_valor <= 0:
+        return None
+    
+    composicion = {categoria: {'valor': 0, 'porcentaje': 0, 'activos': []} for categoria in categorias}
+    
+    # Clasificar cada activo
+    for activo in portafolio['activos']:
+        tipo = activo.get('tipo', '').upper()
+        valor = activo.get('valorMercado', 0)
+        porcentaje = (valor / total_valor) * 100
+        
+        # Buscar la categoría adecuada
+        categoria_encontrada = False
+        for categoria, tipos in categorias.items():
+            if tipo in tipos:
+                composicion[categoria]['valor'] += valor
+                composicion[categoria]['porcentaje'] += porcentaje
+                composicion[categoria]['activos'].append({
+                    'simbolo': activo.get('simbolo', ''),
+                    'descripcion': activo.get('descripcion', ''),
+                    'valor': valor,
+                    'porcentaje': porcentaje
+                })
+                categoria_encontrada = True
+                break
+        
+        # Si no se encontró en ninguna categoría específica, va a 'Otros'
+        if not categoria_encontrada:
+            composicion['Otros']['valor'] += valor
+            composicion['Otros']['porcentaje'] += porcentaje
+            composicion['Otros']['activos'].append({
+                'simbolo': activo.get('simbolo', ''),
+                'descripcion': activo.get('descripcion', ''),
+                'valor': valor,
+                'porcentaje': porcentaje
+            })
+    
+    # Filtrar solo categorías con valor
+    composicion = {k: v for k, v in composicion.items() if v['valor'] > 0}
+    
+    # Calcular perfil de riesgo basado en la composición
+    puntaje_riesgo = 0
+    if 'Renta Variable' in composicion:
+        puntaje_riesgo += composicion['Renta Variable']['porcentaje'] * 0.8
+    if 'Fondos Comunes' in composicion:
+        puntaje_riesgo += composicion['Fondos Comunes']['porcentaje'] * 0.6
+    if 'Renta Fija' in composicion:
+        puntaje_riesgo += composicion['Renta Fija']['porcentaje'] * 0.3
+    if 'Plazos Fijos' in composicion:
+        puntaje_riesgo += composicion['Plazos Fijos']['porcentaje'] * 0.1
+    
+    # Determinar perfil
+    if puntaje_riesgo >= 70:
+        perfil = "Agresivo"
+    elif puntaje_riesgo >= 40:
+        perfil = "Moderado"
+    else:
+        perfil = "Conservador"
+    
+    return {
+        'composicion': composicion,
+        'total_valor': total_valor,
+        'perfil_inferido': perfil,
+        'puntaje_riesgo': puntaje_riesgo
+    }
 
 def mostrar_analisis_portafolio(token_acceso, id_cliente, cliente_info=None):
     st.title("Análisis de Portafolio")
