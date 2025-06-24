@@ -255,6 +255,23 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
         st.error(f'Error al obtener cotización MEP: {str(e)}')
         return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
+def obtener_tasa_mep(token_portador):
+    """
+    Obtiene la tasa MEP para convertir USD a ARS
+    """
+    # Intentar con AL30 como referencia principal
+    cotizacion = obtener_cotizacion_mep(token_portador, "AL30", 48, 48)
+    
+    if not cotizacion or 'precio' not in cotizacion or not cotizacion['precio']:
+        # Si falla, intentar con GD30
+        cotizacion = obtener_cotizacion_mep(token_portador, "GD30", 48, 48)
+    
+    if cotizacion and 'precio' in cotizacion and cotizacion['precio']:
+        return float(cotizacion['precio'])
+    else:
+        st.warning("No se pudo obtener la cotización MEP. Usando tipo de cambio de respaldo.")
+        return 900.0  # Valor de respaldo conservador
+
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
@@ -307,7 +324,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
 
 def obtener_tasas_caucion(token_portador):
     """
-    Obtiene las tasas de caución desde la API de IOL con manejo mejorado de errores
+    Obtiene las tasas de caución desde la API de IOL
     
     Args:
         token_portador (str): Token de autenticación Bearer
@@ -315,151 +332,77 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
-    # Endpoints alternativos para obtener las tasas de caución
-    endpoints = [
-        "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos",
-        "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
-    ]
-    
+    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
     params = {
         'cotizacionInstrumentoModel.instrumento': 'cauciones',
         'cotizacionInstrumentoModel.pais': 'argentina'
     }
-    
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
     
-    for url in endpoints:
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=15)
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Manejar diferentes formatos de respuesta
-                if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
-                    df = pd.DataFrame(data['titulos'])
-                elif isinstance(data, list):
-                    df = pd.DataFrame(data)
-                else:
-                    continue
-                
-                # Normalizar nombres de columnas
-                df = df.rename(columns={
-                    'tasa': 'tasa_limpia',
-                    'tasaNominalAnual': 'tasa_limpia',
-                    'tasaAnual': 'tasa_limpia',
-                    'precio': 'ultimoPrecio',
-                    'volumen': 'monto',
-                    'monedaNombre': 'moneda',
-                    'monedaSimbolo': 'moneda'
-                })
+            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
+                df = pd.DataFrame(data['titulos'])
                 
                 # Filtrar solo las cauciónes y limpiar los datos
                 df = df[df['plazo'].notna()].copy()
                 
                 # Extraer el plazo en días
-                if 'plazo_dias' not in df.columns:
-                    if 'plazo' in df.columns:
-                        # Intentar extraer el número de días del campo plazo
-                        df['plazo_dias'] = df['plazo'].astype(str).str.extract('(\d+)').astype(float)
-                    elif 'dias' in df.columns:
-                        df['plazo_dias'] = df['dias'].astype(float)
+                df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
                 
-                # Asegurarse de que la tasa sea numérica
-                if 'tasa_limpia' not in df.columns and 'ultimoPrecio' in df.columns:
+                # Limpiar la tasa (convertir a float si es necesario)
+                if 'ultimoPrecio' in df.columns:
                     df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
-                elif 'tasa_limpia' in df.columns:
-                    df['tasa_limpia'] = df['tasa_limpia'].astype(str).str.rstrip('%').astype('float')
                 
-                # Asegurarse de que el monto sea numérico
-                if 'monto' in df.columns:
-                    df['monto'] = pd.to_numeric(df['monto'], errors='coerce')
-                
-                # Normalizar monedas
-                if 'moneda' in df.columns:
-                    df['moneda'] = df['moneda'].str.upper().str.strip()
-                    df['moneda'] = df['moneda'].replace({
-                        'PESOS': 'ARS',
-                        '$': 'ARS',
-                        'DOLARES': 'USD',
-                        'U$S': 'USD'
-                    })
+                # Asegurarse de que las columnas necesarias existan
+                if 'monto' not in df.columns and 'volumen' in df.columns:
+                    df['monto'] = df['volumen']
                 
                 # Ordenar por plazo
-                if 'plazo_dias' in df.columns:
-                    df = df.sort_values('plazo_dias')
+                df = df.sort_values('plazo_dias')
                 
                 # Seleccionar solo las columnas necesarias
                 columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
                 columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
                 
-                # Si encontramos datos válidos, los retornamos
-                if not df.empty and 'tasa_limpia' in df.columns and 'plazo_dias' in df.columns:
-                    return df[columnas_disponibles]
-                else:
-                    st.warning("No se encontraron datos válidos de tasas de caución en la respuesta")
-                    return None
-                
-        except requests.exceptions.RequestException as e:
-            print(f"Error de conexión al obtener datos de {url}: {str(e)}")
-            continue
-        except Exception as e:
-            print(f"Error inesperado al procesar datos de {url}: {str(e)}")
-            continue
-    
-    # Si llegamos aquí, ningún endpoint funcionó
-    st.error("No se pudieron obtener las tasas de caución de ninguna fuente")
-    return None
+                return df[columnas_disponibles]
+            
+            st.warning("No se encontraron datos de tasas de caución en la respuesta")
+            return None
+            
+        elif response.status_code == 401:
+            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
+            return None
+            
+        else:
+            error_msg = f"Error {response.status_code} al obtener tasas de caución"
+            try:
+                error_data = response.json()
+                error_msg += f": {error_data.get('message', 'Error desconocido')}"
+            except:
+                error_msg += f": {response.text}"
+            st.error(error_msg)
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
+        return None
 
 def mostrar_tasas_caucion(token_portador):
     """
-    Muestra un dashboard completo de tasas de caución con análisis detallado y visualizaciones interactivas
+    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
     """
-    st.markdown("## 📊 Análisis de Mercado de Caución")
-    
-    # Información contextual con pestañas
-    tab1, tab2 = st.tabs(["📊 Gráficos", "ℹ️ Información"])
-    
-    with tab2:
-        st.markdown("### ¿Qué son las tasas de caución?")
-        st.markdown("""
-        Las tasas de caución representan el costo de financiamiento en el mercado de dinero argentino. 
-        Son operaciones de préstamo de corto plazo donde se entregan títulos públicos como garantía.
-        
-        **Características principales:**
-        - **Plazo**: Generalmente de 1 a 30 días
-        - **Tasa**: Interés anualizado que se paga por el préstamo
-        - **Garantía**: Títulos públicos de bajo riesgo
-        - **Liquidación**: Normalmente operan con liquidación en 24 o 48 horas hábiles
-        
-        **Interpretación de la curva de tasas:**
-        - Pendiente positiva: Expectativas de suba de tasas
-        - Pendiente negativa: Expectativas de baja de tasas
-        - Curva plana: Incertidumbre en el mercado
-        """)
-    
-    # Mostrar selector de moneda
-    with st.sidebar:
-        st.subheader("Filtros")
-        moneda = st.radio("Moneda:", ["ARS", "USD"], horizontal=True)
-        
-        # Filtro de plazo máximo
-        plazo_max = st.slider(
-            "Plazo máximo (días):",
-            min_value=1,
-            max_value=30,
-            value=30,
-            step=1,
-            help="Filtrar por plazo máximo en días"
-        )
-        
-        # Opciones de visualización
-        st.subheader("Opciones de visualización")
-        show_table = st.checkbox("Mostrar tabla detallada", value=True)
-        show_stats = st.checkbox("Mostrar estadísticas", value=True)
+    st.subheader("📊 Tasas de Caución")
     
     try:
         with st.spinner('Obteniendo tasas de caución...'):
@@ -470,216 +413,62 @@ def mostrar_tasas_caucion(token_portador):
                 st.warning("No se encontraron datos de tasas de caución.")
                 return
                 
-            # Filtrar por moneda y plazo
-            df_cauciones = df_cauciones[
-                (df_cauciones['moneda'] == moneda) & 
-                (df_cauciones['plazo_dias'] <= plazo_max)
-            ].copy()
-            
-            if df_cauciones.empty:
-                st.warning(f"No hay datos disponibles para caución en {moneda} con plazo hasta {plazo_max} días")
-                return
-                
             # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia', 'monto']
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
             missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
             if missing_columns:
                 st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
                 return
             
-            # Calcular métricas adicionales
-            df_cauciones['tasa_anual_efectiva'] = ((1 + df_cauciones['tasa_limpia']/100/365)**df_cauciones['plazo_dias'] - 1) * (365/df_cauciones['plazo_dias']) * 100
+            # Mostrar tabla con las tasas
+            st.dataframe(
+                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                             else ['simbolo', 'plazo', 'ultimoPrecio']]
+                .rename(columns={
+                    'simbolo': 'Instrumento',
+                    'plazo': 'Plazo',
+                    'ultimoPrecio': 'Tasa',
+                    'monto': 'Monto (en millones)'
+                }),
+                use_container_width=True,
+                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+            )
             
-            with tab1:
-                # Crear pestañas para diferentes visualizaciones
-                tab_curva, tab_barras, tab_comp_moneda = st.tabs(["📈 Curva de Tasas", "📊 Análisis por Plazo", "🌐 Comparación por Moneda"])
+            # Crear gráfico de curva de tasas si hay suficientes puntos
+            if len(df_cauciones) > 1:
+                fig = go.Figure()
                 
-                with tab_curva:
-                    # Gráfico de curva de tasas principal
-                    fig_curva = go.Figure()
-                    
-                    # Agregar línea de tendencia si hay suficientes puntos
-                    if len(df_cauciones) > 2:
-                        z = np.polyfit(df_cauciones['plazo_dias'], df_cauciones['tasa_limpia'], 1)
-                        p = np.poly1d(z)
-                        df_cauciones['tendencia'] = p(df_cauciones['plazo_dias'])
-                        
-                        fig_curva.add_trace(go.Scatter(
-                            x=df_cauciones['plazo_dias'],
-                            y=df_cauciones['tendencia'],
-                            mode='lines',
-                            name='Tendencia',
-                            line=dict(color='red', width=2, dash='dash'),
-                            opacity=0.7
-                        ))
-                    
-                    # Agregar puntos de datos
-                    fig_curva.add_trace(go.Scatter(
-                        x=df_cauciones['plazo_dias'],
-                        y=df_cauciones['tasa_limpia'],
-                        mode='markers+text',
-                        name='Tasas',
-                        text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                        textposition='top center',
-                        marker=dict(
-                            size=12,
-                            color=df_cauciones['tasa_limpia'],
-                            colorscale='Viridis',
-                            showscale=True,
-                            colorbar=dict(title='Tasa %')
-                        ),
-                        customdata=df_cauciones[['plazo', 'monto']],
-                        hovertemplate=
-                            '<b>Plazo:</b> %{customdata[0]}<br>' +
-                            '<b>Tasa:</b> %{y:.2f}%<br>' +
-                            '<b>Monto:</b> %{customdata[1]:,.0f} M<extra></extra>'
-                    ))
-                    
-                    # Configuración del layout
-                    fig_curva.update_layout(
-                        title=f'Curva de Tasas de Caución - {moneda}',
-                        xaxis_title='Plazo (días)',
-                        yaxis_title='Tasa Anual (%)',
-                        template='plotly_white',
-                        height=500,
-                        hovermode='closest',
-                        showlegend=len(df_cauciones) > 2
-                    )
-                    
-                    st.plotly_chart(fig_curva, use_container_width=True)
+                fig.add_trace(go.Scatter(
+                    x=df_cauciones['plazo_dias'],
+                    y=df_cauciones['tasa_limpia'],
+                    mode='lines+markers+text',
+                    name='Tasa',
+                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                    textposition='top center',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=10, color='#1f77b4')
+                ))
                 
-                with tab_barras:
-                    # Gráfico de barras por plazo
-                    fig_barras = go.Figure()
-                    
-                    fig_barras.add_trace(go.Bar(
-                        x=df_cauciones['plazo'],
-                        y=df_cauciones['tasa_limpia'],
-                        name='Tasa',
-                        text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                        textposition='auto',
-                        marker_color='#636EFA',
-                        customdata=df_cauciones[['plazo_dias', 'monto']],
-                        hovertemplate=
-                            '<b>Plazo:</b> %{x}<br>' +
-                            '<b>Tasa:</b> %{y:.2f}%<br>' +
-                            '<b>Días:</b> %{customdata[0]}<br>' +
-                            '<b>Monto:</b> %{customdata[1]:,.0f} M<extra></extra>'
-                    ))
-                    
-                    fig_barras.update_layout(
-                        title=f'Tasas por Plazo - {moneda}',
-                        xaxis_title='Plazo',
-                        yaxis_title='Tasa Anual (%)',
-                        template='plotly_white',
-                        height=500
-                    )
-                    
-                    st.plotly_chart(fig_barras, use_container_width=True)
+                fig.update_layout(
+                    title='Curva de Tasas de Caución',
+                    xaxis_title='Plazo (días)',
+                    yaxis_title='Tasa Anual (%)',
+                    template='plotly_white',
+                    height=500,
+                    showlegend=False
+                )
                 
-                with tab_comp_moneda:
-                    # Obtener datos de la otra moneda para comparación
-                    otra_moneda = 'USD' if moneda == 'ARS' else 'ARS'
-                    df_otra_moneda = obtener_tasas_caucion(token_portador)
-                    
-                    if df_otra_moneda is not None and not df_otra_moneda.empty:
-                        df_otra_moneda = df_otra_moneda[df_otra_moneda['moneda'] == otra_moneda].copy()
-                        
-                        if not df_otra_moneda.empty:
-                            # Crear figura de comparación
-                            fig_comp = go.Figure()
-                            
-                            # Agregar tasas de la moneda principal
-                            fig_comp.add_trace(go.Scatter(
-                                x=df_cauciones['plazo_dias'],
-                                y=df_cauciones['tasa_limpia'],
-                                mode='lines+markers',
-                                name=f'Tasas {moneda}',
-                                line=dict(color='#1f77b4', width=2),
-                                marker=dict(size=8)
-                            ))
-                            
-                            # Agregar tasas de la otra moneda
-                            fig_comp.add_trace(go.Scatter(
-                                x=df_otra_moneda['plazo_dias'],
-                                y=df_otra_moneda['tasa_limpia'],
-                                mode='lines+markers',
-                                name=f'Tasas {otra_moneda}',
-                                line=dict(color='#ff7f0e', width=2),
-                                marker=dict(size=8)
-                            ))
-                            
-                            fig_comp.update_layout(
-                                title=f'Comparación de Tasas {moneda} vs {otra_moneda}',
-                                xaxis_title='Plazo (días)',
-                                yaxis_title='Tasa Anual (%)',
-                                template='plotly_white',
-                                height=500,
-                                legend=dict(orientation='h', y=1.1, yanchor='bottom')
-                            )
-                            
-                            st.plotly_chart(fig_comp, use_container_width=True)
-                        else:
-                            st.warning(f"No hay datos disponibles para caución en {otra_moneda}")
-                    else:
-                        st.warning("No se pudieron cargar datos para comparación de monedas")
-                
-                # Mostrar tabla detallada si está habilitado
-                if show_table:
-                    st.subheader("Detalle de Tasas")
-                    # Formatear montos en millones
-                    df_display = df_cauciones.copy()
-                    if 'monto' in df_display.columns:
-                        df_display['monto_millones'] = (df_display['monto'] / 1e6).round(2)
-                    
-                    # Ordenar por plazo
-                    df_display = df_display.sort_values('plazo_dias')
-                    
-                    # Mostrar tabla con columnas seleccionadas
-                    st.dataframe(
-                        df_display[['plazo', 'plazo_dias', 'tasa_limpia', 'tasa_anual_efectiva', 'monto_millones']]
-                        .rename(columns={
-                            'plazo': 'Plazo',
-                            'plazo_dias': 'Días',
-                            'tasa_limpia': 'Tasa N.A. (%)',
-                            'tasa_anual_efectiva': 'TEA (%)',
-                            'monto_millones': 'Monto (M)'
-                        })
-                        .style.format({
-                            'Tasa N.A. (%)': '{:.2f}%',
-                            'TEA (%)': '{:.2f}%',
-                            'Monto (M)': '{:,.2f}'
-                        }),
-                        use_container_width=True,
-                        height=min(400, 50 + len(df_cauciones) * 35)
-                    )
-                
-                # Mostrar estadísticas si está habilitado
-                if show_stats and not df_cauciones.empty and 'tasa_limpia' in df_cauciones.columns:
-                    st.subheader("Estadísticas")
-                    
-                    # Calcular métricas
-                    tasas = df_cauciones['tasa_limpia']
-                    plazos = df_cauciones['plazo_dias']
-                    
-                    # Crear columnas para métricas
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Tasa Mínima", f"{tasas.min():.2f}%")
-                        st.metric("Plazo Mínimo", f"{plazos.min():.0f} días")
-                    
-                    with col2:
-                        st.metric("Tasa Máxima", f"{tasas.max():.2f}%")
-                        st.metric("Plazo Máximo", f"{plazos.max():.0f} días")
-                    
-                    with col3:
-                        st.metric("Tasa Promedio", f"{tasas.mean():.2f}%")
-                        st.metric("Plazo Promedio", f"{plazos.mean():.1f} días")
-                    
-                    with col4:
-                        st.metric("Tasa Mediana", f"{tasas.median():.2f}%")
-                        st.metric("Cantidad de Plazos", len(df_cauciones))
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar resumen estadístico
+            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+                with col2:
+                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
                     
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
@@ -1623,144 +1412,7 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def detectar_benchmark(simbolo, mercado):
-    """
-    Detecta el benchmark apropiado basado en el símbolo y mercado del activo.
-    
-    Args:
-        simbolo (str): Símbolo del activo
-        mercado (str): Mercado del activo (BCBA, NASDAQ, NYSE, etc.)
-        
-    Returns:
-        str: Símbolo del benchmark correspondiente
-    """
-    mercado = str(mercado).upper()
-    simbolo = str(simbolo).upper()
-    
-    # Mapeo de mercados a sus benchmarks
-    benchmarks = {
-        'BCBA': '^MERV',      # MERVAL para Argentina
-        'NYSE': '^GSPC',      # S&P 500 para NYSE
-        'NASDAQ': '^IXIC',    # NASDAQ Composite
-        'AMEX': '^XAX',       # NYSE AMEX Composite
-        'BME': '^IBEX',       # IBEX 35 para España
-        'LSE': '^FTSE',       # FTSE 100 para Londres
-        'FRA': '^GDAXI',      # DAX para Alemania
-        'PAR': '^FCHI',       # CAC 40 para Francia
-        'MIL': 'FTSEMIB.MI',  # FTSE MIB para Italia
-        'SHA': '000001.SS',   # SSE Composite para China
-        'SHE': '399001.SZ',   # SZSE Component para Shenzhen
-        'TYO': '^N225',       # Nikkei 225 para Japón
-        'HKG': '^HSI',        # Hang Seng para Hong Kong
-        'ASX': '^AXJO',       # S&P/ASX 200 para Australia
-        'TSE': '^GSPTSE',     # S&P/TSX para Canadá
-        'BOVESPA': '^BVSP',   # Bovespa para Brasil
-        'MEX': '^MXX',        # IPC para México
-        'BCS': '^IPSA',       # IPSA para Chile
-        'BOG': 'COLCAP',      # COLCAP para Colombia
-    }
-    
-    # Verificar si el símbolo ya es un índice conocido
-    if simbolo.startswith('^') or any(simbolo.endswith(ext) for ext in ['.BA', '.MC', '.L', '.DE', '.PA', '.MI', '.SS', '.SZ', '.T', '.HK', '.AX', '.TO', '.SA', '.MX', '.SN', '.CO']):
-        return simbolo
-    
-    # Devolver benchmark basado en el mercado
-    return benchmarks.get(mercado, '^GSPC')  # Por defecto S&P 500
-
-def obtener_datos_benchmark(simbolo_benchmark, fecha_desde, fecha_hasta):
-    """
-    Obtiene los datos históricos del benchmark.
-    
-    Args:
-        simbolo_benchmark (str): Símbolo del benchmark
-        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
-        
-    Returns:
-        pd.Series: Serie de precios del benchmark
-    """
-    try:
-        if simbolo_benchmark == '^MERV':
-            # Usar yfinance para MERVAL
-            df = yf.download(simbolo_benchmark, start=fecha_desde, end=fecha_hasta)['Adj Close']
-        else:
-            # Para otros índices, intentar con yfinance
-            df = yf.download(simbolo_benchmark, start=fecha_desde, end=fecha_hasta)['Adj Close']
-        
-        return df.pct_change().dropna()
-    except Exception as e:
-        st.error(f"Error al obtener datos del benchmark {simbolo_benchmark}: {str(e)}")
-        return None
-
-def calcular_estadisticas_activo(activo_returns, benchmark_returns, risk_free_rate=0.0):
-    """
-    Calcula estadísticas detalladas para un activo individual.
-    
-    Args:
-        activo_returns (pd.Series): Retornos del activo
-        benchmark_returns (pd.Series): Retornos del benchmark
-        risk_free_rate (float): Tasa libre de riesgo
-        
-    Returns:
-        dict: Diccionario con métricas del activo
-    """
-    if activo_returns.empty or benchmark_returns.empty:
-        return None
-        
-    # Alinear fechas
-    aligned_data = pd.concat([activo_returns, benchmark_returns], axis=1).dropna()
-    if len(aligned_data) < 2:
-        return None
-        
-    activo = aligned_data.iloc[:, 0]
-    benchmark = aligned_data.iloc[:, 1]
-    
-    # Calcular métricas básicas
-    retorno_anual = activo.mean() * 252
-    volatilidad_anual = activo.std() * np.sqrt(252)
-    sharpe_ratio = (retorno_anual - risk_free_rate) / volatilidad_anual if volatilidad_anual > 0 else 0
-    
-    # Calcular beta y alpha
-    cov_matrix = np.cov(benchmark, activo, ddof=1)
-    beta = cov_matrix[0, 1] / cov_matrix[0, 0] if cov_matrix[0, 0] > 0 else 1.0
-    alpha = (activo.mean() - beta * benchmark.mean()) * 252  # Alpha anualizado
-    
-    # Calcular R-cuadrado
-    y_pred = beta * benchmark + (activo.mean() - beta * benchmark.mean())
-    ss_res = np.sum((activo - y_pred) ** 2)
-    ss_tot = np.sum((activo - activo.mean()) ** 2)
-    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-    
-    # Calcular tracking error e information ratio
-    tracking_error = np.std(activo - benchmark, ddof=1) * np.sqrt(252)
-    information_ratio = (activo.mean() - benchmark.mean()) * np.sqrt(252) / tracking_error if tracking_error > 0 else 0
-    
-    # Calcular drawdown máximo
-    cum_returns = (1 + activo).cumprod()
-    rolling_max = cum_returns.cummax()
-    drawdowns = (cum_returns - rolling_max) / rolling_max
-    max_drawdown = drawdowns.min()
-    
-    # Calcular ratio de Sortino (usando solo desviación a la baja)
-    negative_returns = activo[activo < 0]
-    downside_std = np.sqrt((negative_returns ** 2).mean()) * np.sqrt(252) if len(negative_returns) > 0 else 0
-    sortino_ratio = (retorno_anual - risk_free_rate) / downside_std if downside_std > 0 else 0
-    
-    return {
-        'Retorno Anual': retorno_anual,
-        'Volatilidad Anual': volatilidad_anual,
-        'Ratio de Sharpe': sharpe_ratio,
-        'Ratio de Sortino': sortino_ratio,
-        'Beta': beta,
-        'Alpha Anual': alpha,
-        'R²': r_squared,
-        'Tracking Error': tracking_error,
-        'Information Ratio': information_ratio,
-        'Máximo Drawdown': max_drawdown,
-        'Días': len(activo)
-    }
-
-def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0, activos_individuales=None, fechas=None):
+def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
     """
     Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
     
@@ -1768,235 +1420,13 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
         portfolio_returns (pd.Series): Retornos del portafolio
         benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
         risk_free_rate (float): Tasa libre de riesgo (anualizada)
-        activos_individuales (dict): Diccionario con retornos de activos individuales
-        fechas (tuple): Tupla con (fecha_desde, fecha_hasta) para análisis
         
     Returns:
         dict: Diccionario con alpha, beta, información de la regresión y métricas adicionales
     """
-    try:
-        # Alinear las series por fecha y eliminar NaN
-        aligned_data = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
-        
-        # Si no hay datos suficientes, devolver valores por defecto
-        if len(aligned_data) < 2:
-            return {
-                'alpha': 0,
-                'beta': 1.0,
-                'r_squared': 0,
-                'p_value': 1.0,
-                'tracking_error': 0,
-                'information_ratio': 0,
-                'observations': len(aligned_data),
-                'alpha_annual': 0,
-                'beta_std_error': 0,
-                'success': False,
-                'message': 'Datos insuficientes para el cálculo',
-                'estadisticas_activos': pd.DataFrame(),
-                'estadisticas_benchmark': {}
-            }
-        
-        portfolio_aligned = aligned_data.iloc[:, 0]
-        benchmark_aligned = aligned_data.iloc[:, 1]
-        
-        # Calcular métricas del portafolio
-        retorno_anual = portfolio_aligned.mean() * 252
-        volatilidad_anual = portfolio_aligned.std() * np.sqrt(252)
-        sharpe_ratio = (retorno_anual - risk_free_rate) / volatilidad_anual if volatilidad_anual > 0 else 0
-        
-        # Calcular beta y alpha del portafolio
-        cov_matrix = np.cov(benchmark_aligned, portfolio_aligned, ddof=1)
-        beta = cov_matrix[0, 1] / cov_matrix[0, 0] if cov_matrix[0, 0] > 0 else 1.0
-        alpha = (portfolio_aligned.mean() - beta * benchmark_aligned.mean()) * 252  # Alpha anualizado
-        
-        # Calcular R-cuadrado
-        y_pred = beta * benchmark_aligned + (portfolio_aligned.mean() - beta * benchmark_aligned.mean())
-        ss_res = np.sum((portfolio_aligned - y_pred) ** 2)
-        ss_tot = np.sum((portfolio_aligned - portfolio_aligned.mean()) ** 2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-        
-        # Calcular tracking error e information ratio
-        tracking_error = np.std(portfolio_aligned - benchmark_aligned, ddof=1) * np.sqrt(252)
-        information_ratio = (portfolio_aligned.mean() - benchmark_aligned.mean()) * np.sqrt(252) / tracking_error if tracking_error > 0 else 0
-        
-        # Calcular drawdown máximo del portafolio
-        cum_returns = (1 + portfolio_aligned).cumprod()
-        rolling_max = cum_returns.cummax()
-        drawdowns = (cum_returns - rolling_max) / rolling_max
-        max_drawdown = drawdowns.min()
-        
-        # Calcular ratio de Sortino
-        negative_returns = portfolio_aligned[portfolio_aligned < 0]
-        downside_std = np.sqrt((negative_returns ** 2).mean()) * np.sqrt(252) if len(negative_returns) > 0 else 0
-        sortino_ratio = (retorno_anual - risk_free_rate) / downside_std if downside_std > 0 else 0
-        
-        # Calcular métricas para cada activo individual si se proporcionan
-        df_activos = pd.DataFrame()
-        if activos_individuales and isinstance(activos_individuales, dict):
-            stats_activos = []
-            for nombre, retornos in activos_individuales.items():
-                if isinstance(retornos, pd.Series):
-                    stats = calcular_estadisticas_activo(retornos, benchmark_returns, risk_free_rate)
-                    if stats:
-                        stats['Activo'] = nombre
-                        stats_activos.append(stats)
-            
-            if stats_activos:
-                df_activos = pd.DataFrame(stats_activos)
-                df_activos = df_activos.set_index('Activo')
-                # Formatear los valores para mejor visualización
-                format_dict = {
-                    'Retorno Anual': '{:.2%}',
-                    'Volatilidad Anual': '{:.2%}',
-                    'Ratio de Sharpe': '{:.2f}',
-                    'Ratio de Sortino': '{:.2f}',
-                    'Beta': '{:.2f}',
-                    'Alpha Anual': '{:.2%}',
-                    'R²': '{:.2f}',
-                    'Tracking Error': '{:.2%}',
-                    'Information Ratio': '{:.2f}',
-                    'Máximo Drawdown': '{:.2%}',
-                    'Días': '{:,.0f}'
-                }
-                # Aplicar formato
-                for col, fmt in format_dict.items():
-                    if col in df_activos.columns:
-                        df_activos[col] = df_activos[col].apply(lambda x: fmt.format(x) if pd.notnull(x) else 'N/A')
-        
-        # Calcular métricas del benchmark
-        benchmark_stats = {}
-        if not benchmark_returns.empty:
-            benchmark_returns_aligned = benchmark_returns[benchmark_returns.index.isin(portfolio_returns.index)]
-            if not benchmark_returns_aligned.empty:
-                benchmark_stats = {
-                    'Retorno Anual': benchmark_returns_aligned.mean() * 252,
-                    'Volatilidad Anual': benchmark_returns_aligned.std() * np.sqrt(252),
-                    'Ratio de Sharpe': (benchmark_returns_aligned.mean() * 252 - risk_free_rate) / (benchmark_returns_aligned.std() * np.sqrt(252)) if benchmark_returns_aligned.std() > 0 else 0,
-                    'Días': len(benchmark_returns_aligned)
-                }
-        
-        # Crear tabla resumen del portafolio
-        resumen_portafolio = {
-            'Métrica': [
-                'Retorno Anual',
-                'Volatilidad Anual',
-                'Ratio de Sharpe',
-                'Ratio de Sortino',
-                'Beta',
-                'Alpha Anual',
-                'R²',
-                'Tracking Error',
-                'Information Ratio',
-                'Máximo Drawdown',
-                'Días'
-            ],
-            'Portafolio': [
-                retorno_anual,
-                volatilidad_anual,
-                sharpe_ratio,
-                sortino_ratio,
-                beta,
-                alpha,
-                r_squared,
-                tracking_error,
-                information_ratio,
-                max_drawdown,
-                len(portfolio_aligned)
-            ]
-        }
-        
-        # Agregar benchmark al resumen si está disponible
-        if benchmark_stats:
-            resumen_portafolio['Benchmark'] = [
-                benchmark_stats.get('Retorno Anual', 'N/A'),
-                benchmark_stats.get('Volatilidad Anual', 'N/A'),
-                benchmark_stats.get('Ratio de Sharpe', 'N/A'),
-                'N/A',  # Sortino no calculado para benchmark
-                '1.00',  # Beta del benchmark es 1 por definición
-                '0.00%', # Alpha del benchmark es 0 por definición
-                '1.00',  # R² del benchmark es 1 por definición
-                '0.00%', # Tracking error del benchmark es 0
-                'N/A',   # Information ratio no aplica
-                'N/A',   # Drawdown no calculado
-                benchmark_stats.get('Días', 'N/A')
-            ]
-        
-        df_resumen = pd.DataFrame(resumen_portafolio)
-        df_resumen = df_resumen.set_index('Métrica')
-        
-        # Formatear los valores numéricos
-        for col in df_resumen.columns:
-            if col != 'Días':
-                df_resumen[col] = df_resumen[col].apply(
-                    lambda x: f"{x:.2%}" if isinstance(x, (int, float)) and col not in ['Ratio de Sharpe', 'Ratio de Sortino', 'Beta', 'R²', 'Information Ratio'] 
-                    else f"{x:.2f}" if isinstance(x, (int, float)) 
-                    else x
-                )
-        
-        # Mostrar las tablas en Streamlit
-        st.subheader("📊 Métricas del Portafolio")
-        st.dataframe(df_resumen, use_container_width=True)
-        
-        if not df_activos.empty:
-            st.subheader("📈 Métricas por Activo")
-            st.dataframe(df_activos, use_container_width=True)
-        
-        # Calcular covarianza y varianza directamente para mayor estabilidad
-        cov_matrix = np.cov(benchmark_aligned, portfolio_aligned, ddof=1)
-        benchmark_variance = cov_matrix[0, 0]
-        
-        # Calcular beta usando covarianza/varianza
-        if benchmark_variance > 0:
-            beta = cov_matrix[0, 1] / benchmark_variance
-        else:
-            beta = 1.0  # Valor por defecto si no hay varianza
-        
-        # Calcular alpha usando la media de los retornos
-        alpha = np.mean(portfolio_aligned) - beta * np.mean(benchmark_aligned)
-        
-        # Calcular R-cuadrado manualmente
-        y_pred = beta * benchmark_aligned + alpha
-        ss_res = np.sum((portfolio_aligned - y_pred) ** 2)
-        ss_tot = np.sum((portfolio_aligned - np.mean(portfolio_aligned)) ** 2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-        
-        # Calcular error estándar del beta
-        if len(aligned_data) > 2:
-            se_beta = np.sqrt((1 - r_squared) * np.var(portfolio_aligned, ddof=1) / 
-                           (np.var(benchmark_aligned, ddof=1) * (len(aligned_data) - 2)))
-        else:
-            se_beta = 0
-        
-        # Calcular métricas adicionales
-        excess_returns = portfolio_aligned - benchmark_aligned
-        tracking_error = np.std(excess_returns, ddof=1) * np.sqrt(252)  # Anualizado
-        
-        if tracking_error > 0:
-            information_ratio = (np.mean(portfolio_aligned - benchmark_aligned) * 252) / tracking_error
-        else:
-            information_ratio = 0
-        
-        # Anualizar alpha (asumiendo 252 días hábiles)
-        alpha_annual = alpha * 252
-        
-        return {
-            'alpha': alpha,
-            'beta': beta,
-            'r_squared': max(0, min(1, r_squared)),  # Asegurar entre 0 y 1
-            'p_value': 0.0,  # No calculado en esta versión simplificada
-            'tracking_error': tracking_error,
-            'information_ratio': information_ratio,
-            'observations': len(aligned_data),
-            'alpha_annual': alpha_annual,
-            'beta_std_error': se_beta,
-            'success': True,
-            'message': 'Cálculo exitoso'
-        }
-        
-    except Exception as e:
-        import traceback
-        error_msg = f'Error en el cálculo: {str(e)}\n\n{traceback.format_exc()}'
-        st.error(f"Error en el cálculo de métricas: {error_msg}")
+    # Alinear las series por fecha y eliminar NaN
+    aligned_data = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
+    if len(aligned_data) < 5:  # Mínimo de datos para regresión
         return {
             'alpha': 0,
             'beta': 1.0,
@@ -2004,27 +1434,37 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
             'p_value': 1.0,
             'tracking_error': 0,
             'information_ratio': 0,
-            'observations': 0,
-            'alpha_annual': 0,
-            'beta_std_error': 0,
-            'success': False,
-            'message': error_msg,
-            'estadisticas_activos': pd.DataFrame(),
-            'estadisticas_benchmark': {},
-            'resumen_portafolio': pd.DataFrame(),
-            'retorno_anual': 0,
-            'volatilidad_anual': 0,
-            'sharpe_ratio': 0,
-            'sortino_ratio': 0,
-            'max_drawdown': 0,
-            'fecha_inicio': None,
-            'fecha_fin': None
+            'observations': len(aligned_data),
+            'alpha_annual': 0
         }
+    
+    portfolio_aligned = aligned_data.iloc[:, 0]
+    benchmark_aligned = aligned_data.iloc[:, 1]
+    
+    # Calcular regresión lineal
+    slope, intercept, r_value, p_value, std_err = linregress(benchmark_aligned, portfolio_aligned)
+    
+    # Calcular métricas adicionales
+    tracking_error = np.std(portfolio_aligned - benchmark_aligned) * np.sqrt(252)  # Anualizado
+    information_ratio = (portfolio_aligned.mean() - benchmark_aligned.mean()) / tracking_error if tracking_error != 0 else 0
+    
+    # Anualizar alpha (asumiendo 252 días hábiles)
+    alpha_annual = intercept * 252
+    
+    return {
+        'alpha': intercept,
+        'beta': slope,
+        'r_squared': r_value ** 2,
+        'p_value': p_value,
+        'tracking_error': tracking_error,
+        'information_ratio': information_ratio,
+        'observations': len(aligned_data),
+        'alpha_annual': alpha_annual
+    }
 
 def analizar_estrategia_inversion(alpha_beta_metrics):
     """
     Analiza la estrategia de inversión y cobertura basada en métricas de alpha y beta.
-{{ ... }
     
     Args:
         alpha_beta_metrics (dict): Diccionario con las métricas de alpha y beta
@@ -2130,22 +1570,11 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     elif len(portafolio) == 1:
         concentracion = 1.0
     else:
-        # Filtrar activos con valuación positiva
-        activos_con_valor = [activo for activo in portafolio.values() 
-                           if isinstance(activo, dict) and 'Valuación' in activo 
-                           and isinstance(activo['Valuación'], (int, float)) and activo['Valuación'] > 0]
-        
-        if not activos_con_valor:
-            concentracion = 0
-        elif len(activos_con_valor) == 1:
-            concentracion = 1.0
-        else:
-            # Calcular suma de cuadrados de las participaciones
-            sum_squares = sum((activo['Valuación'] / valor_total) ** 2 
-                           for activo in activos_con_valor)
-            # Normalizar entre 0 y 1
-            min_concentration = 1.0 / len(activos_con_valor)
-            concentracion = max(0, min(1, (sum_squares - min_concentration) / (1 - min_concentration)))
+        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
+                         for activo in portafolio.values())
+        # Normalizar entre 0 y 1
+        min_concentration = 1.0 / len(portafolio)
+        concentracion = (sum_squares - min_concentration) / (1 - min_concentration)
         
     # Descargar datos del MERVAL para cálculo de Alpha y Beta
     try:
@@ -2244,17 +1673,13 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             ret_neg = retornos_validos[retornos_validos < 0]
             n_total = len(retornos_validos)
             
-            # Calcular probabilidades asegurando que sumen 1
+            # Calcular probabilidades
             prob_ganancia = len(ret_pos) / n_total if n_total > 0 else 0.5
-            prob_perdida = 1 - prob_ganancia  # Asegurar que sumen 1
+            prob_perdida = len(ret_neg) / n_total if n_total > 0 else 0.5
             
             # Calcular probabilidades de movimientos extremos
             prob_ganancia_10 = len(ret_pos[ret_pos > 0.1]) / n_total if n_total > 0 else 0
             prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
-            
-            # Asegurar que las probabilidades extremas no excedan las totales
-            prob_ganancia_10 = min(prob_ganancia_10, prob_ganancia)
-            prob_perdida_10 = min(prob_perdida_10, prob_perdida)
             
             # Calcular el peso del activo en el portafolio
             peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
@@ -2370,14 +1795,10 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     retornos_simulados = np.array(retornos_simulados)
     total_simulaciones = len(retornos_simulados)
             
-    if total_simulaciones > 0:
-        prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones
-        prob_perdida = 1 - prob_ganancia  # Asegurar que sumen 1
-        prob_ganancia_10 = min(np.sum(retornos_simulados > 0.1) / total_simulaciones, prob_ganancia)
-        prob_perdida_10 = min(np.sum(retornos_simulados < -0.1) / total_simulaciones, prob_perdida)
-    else:
-        prob_ganancia = prob_perdida = 0.5
-        prob_ganancia_10 = prob_perdida_10 = 0
+    prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
+    prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
+    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
+    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
             
     # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
     alpha_beta_metrics = {}
@@ -2450,34 +1871,16 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         resultados['p_value'] = alpha_beta_metrics['p_value']
     if 'observations' in alpha_beta_metrics:
         resultados['observaciones'] = alpha_beta_metrics['observations']
-    
-    return resultados
-
-# --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
-    # Obtener cotización MEP para conversión USD a ARS
-    cotizacion_mep = obtener_cotizacion_mep(token_portador, "AL30", 1, 1)  # Usamos AL30 como referencia
-    tasa_mep = float(cotizacion_mep.get('precio', 0)) if cotizacion_mep and 'precio' in cotizacion_mep else 0
-    
-    # Obtener saldos en USD del estado de cuenta
-    saldo_usd = 0
-    monto_invertido_usd = 0
-    if 'estado_cuenta' in portafolio:
-        for cuenta in portafolio['estado_cuenta'].get('cuentas', []):
-            if cuenta.get('moneda', '').upper() == 'USD':
-                saldo_usd += float(cuenta.get('saldo', 0) or 0)
-                monto_invertido_usd += float(cuenta.get('montoInvertido', 0) or 0)
-    
-    # Convertir saldos USD a ARS usando MEP
-    saldo_usd_ars = saldo_usd * tasa_mep if tasa_mep > 0 else 0
-    monto_invertido_usd_ars = monto_invertido_usd * tasa_mep if tasa_mep > 0 else 0
+    # Obtener la tasa MEP
+    tasa_mep = obtener_tasa_mep(token_portador) if token_portador else 900.0
     
     activos = portafolio.get('activos', [])
     datos_activos = []
-    valor_total = 0
-    valor_total_ars = 0  # Para rastrear el total en ARS (activos en ARS + USD convertidos)
+    valor_total_ars = 0
+    valor_total_usd = 0
     
     for activo in activos:
         try:
@@ -2558,7 +1961,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2569,38 +1972,31 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     except (ValueError, TypeError):
                         pass
             
-            if valuacion > 0:
-                # Verificar si el activo está en USD
-                moneda_activo = activo.get('monedaCotizacion', 'ARS').upper()
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+            })
+            
+            # Clasificar por moneda y sumar al total correspondiente
+            moneda = titulo.get('monedaCotizacion', 'ARS').upper()
+            if moneda in ['USD', 'DOLARES']:
+                valor_total_usd += valuacion
+                valor_total_ars += valuacion * tasa_mep
+            else:
+                valor_total_ars += valuacion
                 
-                if moneda_activo == 'USD':
-                    if tasa_mep > 0:
-                        # Convertir el valor a ARS usando la tasa MEP
-                        valor_ars = valuacion * tasa_mep
-                        moneda_mostrar = 'USD (convertido a ARS)'
-                    else:
-                        valor_ars = 0
-                        moneda_mostrar = 'USD (sin tasa de cambio)'
-                    # Mantener el valor en USD para el total de activos USD
-                    valor_total_usd = valuacion
-                else:
-                    valor_ars = valuacion
-                    moneda_mostrar = 'ARS'
-                    valor_total_usd = 0
-                
-                valor_total_ars += valor_ars
-                
-                valor_total += valuacion
-                
-                # Agregar a datos para el DataFrame
-                datos_activos.append({
-                    'Símbolo': simbolo,
-                    'Descripción': descripcion,
-                    'Tipo': tipo,
-                    'Cantidad': f"{float(cantidad):,.2f}",
-                    'Valor': f"${valor_ars:,.2f}",
-                    'Moneda': moneda_mostrar
-                })
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Moneda': moneda,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+                'Valuación ARS': valuacion * (tasa_mep if moneda in ['USD', 'DOLARES'] else 1)
+            })
         except Exception as e:
             continue
     
@@ -2608,60 +2004,16 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        
-        # Calcular el valor total ajustado incluyendo el saldo en USD convertido a ARS
-        valor_total_ajustado = valor_total_ars + saldo_usd_ars
-        
-        # Calcular el valor total en ARS (incluyendo la conversión de USD a ARS)
-        valor_total_ars = sum(activo.get('valor_ars', 0) for activo in portafolio.get('activos', []))
-        
-        # Obtener métricas con el valor total en ARS
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total_ars, token_portador)
         
-        # Mostrar resumen de valores
-        st.markdown("### 📊 Resumen de Valores")
-        
-        # Primera fila - Totales generales
-        col1, col2, col3, col4 = st.columns(4)
-        
-        # Valor total de los activos en ARS
-        col1.metric("Valor Activos ARS", f"${valor_total_ars:,.2f}", 
-                   help="Valor total de los activos en pesos argentinos")
-        
-        # Calcular el valor total de los activos en USD (sin convertir)
-        valor_total_usd = sum(activo.get('valor_usd', 0) for activo in portafolio.get('activos', []) 
-                             if activo.get('monedaCotizacion', '').upper() == 'USD')
-        
-        # Mostrar el valor en USD y su conversión a ARS
-        col2.metric("Valor Activos USD", 
-                   f"${valor_total_usd:,.2f} USD",
-                   f"${valor_total_usd * tasa_mep:,.2f} ARS" if tasa_mep > 0 else "Tasa MEP no disponible",
-                   help="Valor total de activos en dólares y su equivalente en pesos")
-        
-        # Saldo en cuentas USD convertido a ARS
-        col3.metric("Saldo en Cuentas USD", f"${saldo_usd:,.2f} USD", 
-                   f"${saldo_usd_ars:,.2f} ARS" if tasa_mep > 0 else "Tasa MEP no disponible",
-                   help="Saldo en cuentas en dólares convertido a pesos")
-        
-        # Valor total ajustado (activos + saldo en USD convertido)
-        valor_total_ajustado = valor_total_ars + (saldo_usd * tasa_mep if tasa_mep > 0 else 0)
-        col4.metric("Valor Total Ajustado (ARS)", 
-                   f"${valor_total_ajustado:,.2f}", 
-                   "Incluye activos en ARS, USD convertidos y saldos",
-                   help="Valor total incluyendo activos en ARS, activos en USD convertidos y saldos en cuentas")
-        
-        # Mostrar tasa MEP utilizada
-        st.caption(f"*Tasa de cambio MEP utilizada: ${tasa_mep:,.2f} ARS/USD" if tasa_mep > 0 else "*No se pudo obtener la tasa MEP")
-        
-        # Segunda fila - Métricas generales
-        st.markdown("### 📈 Métricas Generales")
-        cols = st.columns(4)
+        # Información General
+        cols = st.columns(5)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Monto Invertido USD", 
-                      f"${monto_invertido_usd:,.2f} USD", 
-                      f"${monto_invertido_usd_ars:,.2f} ARS" if tasa_mep > 0 else "")
+        cols[3].metric("Valor Total USD", f"U$D {valor_total_usd:,.2f}")
+        cols[4].metric("Valor Total ARS", f"AR$ {valor_total_ars:,.2f}", 
+                      delta=f"Tipo de cambio: {tasa_mep:,.2f}" if token_portador else None)
         
         if metricas:
             # Métricas de Riesgo
@@ -2701,8 +2053,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                          help="Retorno anual esperado basado en datos históricos")
             
             # Mostrar escenarios como porcentaje del portafolio
-            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
-            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+            optimista_pct = (metricas['pl_esperado_max'] / valor_total_ars) * 100 if valor_total_ars > 0 else 0
+            pesimista_pct = (metricas['pl_esperado_min'] / valor_total_ars) * 100 if valor_total_ars > 0 else 0
             
             cols[1].metric("Escenario Optimista (95%)", 
                          f"{optimista_pct:+.1f}%",
@@ -2715,16 +2067,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.subheader("🎯 Probabilidades")
             cols = st.columns(4)
             probs = metricas['probabilidades']
-            # Asegurar que las probabilidades sean consistentes
-            prob_ganancia = min(probs['ganancia'], 1.0)  # No más del 100%
-            prob_perdida = min(probs['perdida'], 1.0)    # No más del 100%
-            prob_ganancia_10 = min(probs['ganancia_mayor_10'], prob_ganancia)  # No mayor que la probabilidad total
-            prob_perdida_10 = min(probs['perdida_mayor_10'], prob_perdida)    # No mayor que la probabilidad total
-            
-            cols[0].metric("Ganancia", f"{prob_ganancia*100:.1f}%")
-            cols[1].metric("Pérdida", f"{prob_perdida*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{prob_ganancia_10*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{prob_perdida_10*100:.1f}%")
+            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
             
             # Análisis de Estrategia de Inversión
             if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
@@ -2830,11 +2176,20 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Tabla de activos
         st.subheader("📋 Detalle de Activos")
         df_display = df_activos.copy()
-        df_display['Valuación'] = df_display['Valuación'].apply(
-            lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-        )
-        df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
+        
+        # Formatear valores según la moneda
+        def formatear_valor(fila):
+            if fila['Moneda'] in ['USD', 'DOLARES']:
+                return f"U$D {fila['Valuación']:,.2f} (AR$ {fila['Valuación ARS']:,.2f})"
+            else:
+                return f"AR$ {fila['Valuación']:,.2f}"
+        
+        df_display['Valuación'] = df_display.apply(formatear_valor, axis=1)
+        df_display['Peso (%)'] = (df_activos['Valuación ARS'] / valor_total_ars * 100).round(2)
         df_display = df_display.sort_values('Peso (%)', ascending=False)
+        
+        # Eliminar columna temporal
+        df_display = df_display.drop(columns=['Valuación ARS'])
         
         st.dataframe(df_display, use_container_width=True, height=400)
         
@@ -2871,33 +2226,76 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     else:
         st.warning("No se encontraron activos en el portafolio")
 
-def mostrar_estado_cuenta(estado_cuenta):
+def mostrar_estado_cuenta(estado_cuenta, token_portador=None):
     st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
+    # Obtener la tasa MEP
+    tasa_mep = obtener_tasa_mep(token_portador) if token_portador else 900.0
+    
     total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
     cuentas = estado_cuenta.get('cuentas', [])
     
-    cols = st.columns(3)
-    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-    cols[1].metric("Número de Cuentas", len(cuentas))
+    # Calcular totales por moneda
+    total_ars = 0.0
+    total_usd = 0.0
+    
+    for cuenta in cuentas:
+        moneda = cuenta.get('moneda', '').upper()
+        total_cuenta = float(cuenta.get('total', 0))
+        
+        if moneda == 'PESOS' or moneda == 'ARS':
+            total_ars += total_cuenta
+        elif moneda == 'DOLARES' or moneda == 'USD':
+            total_usd += total_cuenta
+    
+    # Convertir USD a ARS usando MEP
+    total_usd_ars = total_usd * tasa_mep
+    total_general_ars = total_ars + total_usd_ars
+    
+    # Mostrar métricas
+    cols = st.columns(4)
+    cols[0].metric("Total en Pesos", f"AR$ {total_ars:,.2f}")
+    cols[1].metric("Total en Dólares", f"U$D {total_usd:,.2f}")
+    cols[2].metric("Tipo de Cambio MEP", f"AR$ {tasa_mep:,.2f}")
+    cols[3].metric("Total en ARS (MEP)", f"AR$ {total_general_ars:,.2f}", 
+                  delta=f"{((total_general_ars/total_ars - 1)*100):.1f}% vs ARS" if total_ars > 0 else None)
     
     if cuentas:
         st.subheader("📊 Detalle de Cuentas")
         
         datos_cuentas = []
         for cuenta in cuentas:
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                'Total': f"${cuenta.get('total', 0):,.2f}",
-            })
+            moneda = cuenta.get('moneda', 'N/A').replace('_', ' ').title()
+            disponible = float(cuenta.get('disponible', 0))
+            saldo = float(cuenta.get('saldo', 0))
+            total = float(cuenta.get('total', 0))
+            
+            # Convertir a ARS si es USD
+            if moneda.upper() in ['DOLARES', 'USD'] and token_portador:
+                disponible_ars = disponible * tasa_mep
+                saldo_ars = saldo * tasa_mep
+                total_ars = total * tasa_mep
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': moneda,
+                    'Disponible': f"U$D {disponible:,.2f} (AR$ {disponible_ars:,.2f})",
+                    'Saldo': f"U$D {saldo:,.2f} (AR$ {saldo_ars:,.2f})",
+                    'Total': f"U$D {total:,.2f} (AR$ {total_ars:,.2f})",
+                })
+            else:
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': moneda,
+                    'Disponible': f"AR$ {disponible:,.2f}",
+                    'Saldo': f"AR$ {saldo:,.2f}",
+                    'Total': f"AR$ {total:,.2f}",
+                })
         
         df_cuentas = pd.DataFrame(datos_cuentas)
         st.dataframe(df_cuentas, use_container_width=True, height=300)
