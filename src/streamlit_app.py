@@ -1407,39 +1407,129 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
     Returns:
         dict: Diccionario con alpha, beta, información de la regresión y métricas adicionales
     """
-    # Asegurarse de que los índices coincidan y eliminar NaN
-    returns_df = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
-    if len(returns_df) < 2:
-        return {'alpha': None, 'beta': None, 'r_squared': None}
-        
-    port_ret = returns_df.iloc[:, 0]
-    bench_ret = returns_df.iloc[:, 1]
+    # Alinear las series por fecha y eliminar NaN
+    aligned_data = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
+    if len(aligned_data) < 5:  # Mínimo de datos para regresión
+        return {
+            'alpha': 0,
+            'beta': 1.0,
+            'r_squared': 0,
+            'p_value': 1.0,
+            'tracking_error': 0,
+            'information_ratio': 0,
+            'observations': len(aligned_data),
+            'alpha_annual': 0
+        }
     
-    # Calcular Beta (pendiente de la regresión lineal)
-    beta, alpha, r_value, p_value, std_err = linregress(bench_ret.values, port_ret.values)
+    portfolio_aligned = aligned_data.iloc[:, 0]
+    benchmark_aligned = aligned_data.iloc[:, 1]
+    
+    # Calcular regresión lineal
+    slope, intercept, r_value, p_value, std_err = linregress(benchmark_aligned, portfolio_aligned)
     
     # Calcular métricas adicionales
-    tracking_error = np.std(port_ret - bench_ret) * np.sqrt(252)  # Anualizado
-    information_ratio = (port_ret.mean() - bench_ret.mean()) / tracking_error * np.sqrt(252) if tracking_error != 0 else 0
+    tracking_error = np.std(portfolio_aligned - benchmark_aligned) * np.sqrt(252)  # Anualizado
+    information_ratio = (portfolio_aligned.mean() - benchmark_aligned.mean()) / tracking_error if tracking_error != 0 else 0
     
-    # Alpha anualizado
-    alpha_annual = alpha * 252
+    # Anualizar alpha (asumiendo 252 días hábiles)
+    alpha_annual = intercept * 252
     
     return {
-        'alpha': alpha,
-        'alpha_annual': alpha_annual,
-        'beta': beta,
+        'alpha': intercept,
+        'beta': slope,
         'r_squared': r_value ** 2,
+        'p_value': p_value,
         'tracking_error': tracking_error,
         'information_ratio': information_ratio,
-        'p_value': p_value,
-        'std_err': std_err,
-        'observations': len(returns_df)
+        'observations': len(aligned_data),
+        'alpha_annual': alpha_annual
+    }
+
+def analizar_estrategia_inversion(alpha_beta_metrics):
+    """
+    Analiza la estrategia de inversión y cobertura basada en métricas de alpha y beta.
+    
+    Args:
+        alpha_beta_metrics (dict): Diccionario con las métricas de alpha y beta
+        
+    Returns:
+        dict: Diccionario con el análisis de la estrategia
+    """
+    beta = alpha_beta_metrics.get('beta', 1.0)
+    alpha_annual = alpha_beta_metrics.get('alpha_annual', 0)
+    r_squared = alpha_beta_metrics.get('r_squared', 0)
+    
+    # Análisis de estrategia basado en beta
+    if beta > 1.2:
+        estrategia = "Estrategia Agresiva"
+        explicacion = ("El portafolio es más volátil que el mercado (β > 1.2). "
+                      "Esta estrategia busca rendimientos superiores asumiendo mayor riesgo.")
+    elif beta > 0.8:
+        estrategia = "Estrategia de Crecimiento"
+        explicacion = ("El portafolio sigue de cerca al mercado (0.8 < β < 1.2). "
+                     "Busca rendimientos similares al mercado con un perfil de riesgo equilibrado.")
+    elif beta > 0.3:
+        estrategia = "Estrategia Defensiva"
+        explicacion = ("El portafolio es menos volátil que el mercado (0.3 < β < 0.8). "
+                     "Busca preservar capital con menor exposición a las fluctuaciones del mercado.")
+    elif beta > -0.3:
+        estrategia = "Estrategia de Ingresos"
+        explicacion = ("El portafolio tiene baja correlación con el mercado (-0.3 < β < 0.3). "
+                     "Ideal para generar ingresos con bajo riesgo de mercado.")
+    else:
+        estrategia = "Estrategia de Cobertura"
+        explicacion = ("El portafolio tiene correlación negativa con el mercado (β < -0.3). "
+                     "Diseñado para moverse en dirección opuesta al mercado, útil para cobertura.")
+    
+    # Análisis de desempeño basado en alpha
+    if alpha_annual > 0.05:  # 5% de alpha anual
+        rendimiento = "Excelente desempeño"
+        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
+                                 "superando significativamente al benchmark.")
+    elif alpha_annual > 0.02:  # 2% de alpha anual
+        rendimiento = "Buen desempeño"
+        explicacion_rendimiento = (f"El portafolio ha generado un alpha anualizado de {alpha_annual:.1%}, "
+                                 "superando al benchmark.")
+    elif alpha_annual > -0.02:  # Entre -2% y 2%
+        rendimiento = "Desempeño en línea"
+        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
+                                 "en línea con el benchmark.")
+    else:
+        rendimiento = "Desempeño inferior"
+        explicacion_rendimiento = (f"El portafolio tiene un alpha anualizado de {alpha_annual:.1%}, "
+                                 "por debajo del benchmark.")
+    
+    # Calidad de la cobertura basada en R²
+    if r_squared > 0.7:
+        calidad_cobertura = "Alta"
+        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una fuerte relación con el benchmark. "
+                               "La cobertura será más efectiva.")
+    elif r_squared > 0.4:
+        calidad_cobertura = "Moderada"
+        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una relación moderada con el benchmark. "
+                               "La cobertura puede ser parcialmente efectiva.")
+    else:
+        calidad_cobertura = "Baja"
+        explicacion_cobertura = (f"El R² de {r_squared:.2f} indica una débil relación con el benchmark. "
+                               "La cobertura puede no ser efectiva.")
+    
+    return {
+        'estrategia': estrategia,
+        'explicacion_estrategia': explicacion,
+        'rendimiento': rendimiento,
+        'explicacion_rendimiento': explicacion_rendimiento,
+        'calidad_cobertura': calidad_cobertura,
+        'explicacion_cobertura': explicacion_cobertura,
+        'beta': beta,
+        'alpha_anual': alpha_annual,
+        'r_cuadrado': r_squared,
+        'observations': alpha_beta_metrics.get('observations', 0)
     }
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
+{{ ... }}
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
@@ -1755,6 +1845,10 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         'information_ratio': alpha_beta_metrics.get('information_ratio', 0)
     }
     
+    # Analizar la estrategia de inversión
+    analisis_estrategia = analizar_estrategia_inversion(alpha_beta_metrics)
+    resultados['analisis_estrategia'] = analisis_estrategia
+    
     # Agregar métricas adicionales si están disponibles
     if 'p_value' in alpha_beta_metrics:
         resultados['p_value'] = alpha_beta_metrics['p_value']
@@ -1941,7 +2035,71 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
             cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
             cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+            
+            # Análisis de Estrategia de Inversión
+            if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
+                st.subheader("🔍 Análisis de Estrategia de Inversión")
+                
+                # Mostrar la estrategia principal
+                estrategia = metricas['analisis_estrategia']
+                
+                # Tarjeta de estrategia
+                st.markdown(f"""
+                <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
+                            border-left: 5px solid #0d6efd;">
+                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
+                    <p>{estrategia['explicacion_estrategia']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Métricas clave
+                cols = st.columns(3)
+                cols[0].metric("Beta", f"{estrategia['beta']:.2f}", 
+                              help="Sensibilidad del portafolio respecto al mercado (1 = mismo riesgo que el mercado)")
+                cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']:+.2%}", 
+                              help="Rendimiento adicional sobre el mercado ajustado por riesgo")
+                cols[2].metric("Calidad de Cobertura", f"{estrategia['calidad_cobertura']}", 
+                              help=f"R² = {estrategia['r_cuadrado']:.2f}")
+                
+                # Explicación del rendimiento
+                st.markdown(f"""
+                <div style="background-color: #e8f4fd; border-radius: 10px; padding: 15px; margin: 10px 0;">
+                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {estrategia['rendimiento']}</h5>
+                    <p style="margin-bottom: 0;">{estrategia['explicacion_rendimiento']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Explicación de la cobertura
+                st.markdown(f"""
+                <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
+                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
+                    <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Interpretación del Beta
+                st.markdown("#### 📈 Interpretación del Beta")
+                if estrategia['beta'] > 1.2:
+                    st.info("""
+                    **Alta volatilidad (β > 1.2)**  
+                    El portafolio es más volátil que el mercado. Espere mayores oscilaciones en el valor de su inversión.
+                    """)
+                elif estrategia['beta'] > 0.8:
+                    st.info("""
+                    **Volatilidad similar al mercado (0.8 < β < 1.2)**  
+                    El portafolio tiende a moverse en línea con el mercado general.
+                    """)
+                elif estrategia['beta'] > 0:
+                    st.info("""
+                    **Baja volatilidad (0 < β < 0.8)**  
+                    El portafolio es menos volátil que el mercado, con movimientos más suaves.
+                    """)
+                else:
+                    st.info("""
+                    **Correlación negativa (β < 0)**  
+                    El portafolio tiende a moverse en dirección opuesta al mercado. Útil para estrategias de cobertura.
+                    """)
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
