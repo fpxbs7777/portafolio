@@ -2013,32 +2013,50 @@ def obtener_lista_clientes(token_acceso):
         list: Lista de diccionarios con información de los clientes
     """
     try:
-        # Usar el endpoint de usuarios
-        url = "https://api.invertironline.com/api/v2/usuarios/me"
+        # Intentar primero con el endpoint de clientes del asesor
+        url = "https://api.invertironline.com/api/v2/Asesores/Clientes"
         headers = {
             'Authorization': f'Bearer {token_acceso}',
             'Accept': 'application/json'
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            clientes_data = response.json()
+            if isinstance(clientes_data, list):
+                return clientes_data
+            elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
+                return clientes_data['clientes']
+            else:
+                return []
         
-        data = response.json()
+        # Si falla, intentar con el endpoint de usuarios
+        url = "https://api.invertironline.com/api/v2/usuarios/me"
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict):
+                if 'cuentas' in data and isinstance(data['cuentas'], list):
+                    return data['cuentas']
+                if 'id' in data:
+                    return [{
+                        'id': data.get('id'),
+                        'numeroCliente': data.get('numeroCliente', data.get('id')),
+                        'apellidoYNombre': f"{data.get('apellido', '')} {data.get('nombre', '')}".strip() or 'Cliente'
+                    }]
         
-        # Verificar si hay cuentas en la respuesta
-        if isinstance(data, dict):
-            # Si hay cuentas, devolverlas
-            if 'cuentas' in data and isinstance(data['cuentas'], list):
-                return data['cuentas']
-                
-            # Si hay información de usuario, crear una cuenta
-            if 'id' in data:
+        # Si todo falla, intentar con el endpoint de estado de cuenta
+        url = "https://api.invertironline.com/api/v2/estadocuenta"
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and 'cliente' in data:
                 return [{
-                    'id': data.get('id'),
-                    'numeroCliente': data.get('numeroCliente', data.get('id')),
-                    'apellidoYNombre': f"{data.get('apellido', '')} {data.get('nombre', '')}".strip() or 'Cliente'
+                    'id': data.get('cliente', {}).get('id'),
+                    'numeroCliente': data.get('cliente', {}).get('numeroCliente'),
+                    'apellidoYNombre': f"{data.get('cliente', {}).get('apellido', '')} {data.get('cliente', {}).get('nombre', '')}".strip() or 'Cliente'
                 }]
-                
+        
         return []
         
     except requests.exceptions.HTTPError as e:
