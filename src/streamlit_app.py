@@ -658,12 +658,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
             return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
         
         # Construir URL según el tipo de activo y mercado
-        if mercado.upper() in ['BCBA', 'ROFEX', 'BYMA', 'MAE']:
-            # Para mercados argentinos
-            url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        else:
-            # Para mercados internacionales (NYSE, NASDAQ, etc.)
-            url = f"https://api.invertironline.com/api/v2/cotizaciones-orleans-panel/acciones/{mercado}/Todos"
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
         
         headers = {
             'Authorization': f'Bearer {token_portador}',
@@ -677,47 +672,57 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         # Procesar la respuesta
         data = response.json()
         
-        # Si es un endpoint de cotizaciones, buscar el símbolo específico
-        if 'cotizaciones-orleans' in url and isinstance(data, list):
-            activo = next((item for item in data if item.get('simbolo') == simbolo), None)
-            if not activo:
-                return None
-            # Crear un DataFrame con el último precio disponible
-            fecha_actual = datetime.now().strftime('%Y-%m-%d')
-            return pd.DataFrame({
-                'fecha': [pd.to_datetime(fecha_actual)],
-                'precio': [activo.get('ultimoPrecio')]
-            })
+        # Procesar la respuesta según el formato esperado
+        if isinstance(data, list):
+            # Formato estándar para series históricas
+            fechas = []
+            precios = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes formatos de fecha
+                    fecha_str = item.get('fecha') or item.get('fechaHora')
+                    if not fecha_str:
+                        continue
+                        
+                    # Manejar diferentes formatos de precio
+                    precio = item.get('ultimoPrecio') or item.get('precioCierre') or item.get('precio')
+                    if not precio:
+                        continue
+                        
+                    # Convertir fecha
+                    fecha = parse_datetime_flexible(fecha_str)
+                    if not pd.isna(fecha):
+                        fechas.append(fecha)
+                        precios.append(float(precio))
+                        
+                except (ValueError, TypeError, AttributeError) as e:
+                    continue
+            
+            if fechas and precios:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
+                
+        elif isinstance(data, dict):
+            # Para respuestas que son un solo valor (ej: MEP)
+            precio = data.get('ultimoPrecio') or data.get('precioCierre') or data.get('precio')
+            if precio:
+                return pd.DataFrame({
+                    'fecha': [pd.Timestamp.now(tz='UTC')],
+                    'precio': [float(precio)]
+                })
         
-        # Para series históricas estándar
-        if isinstance(data, list) and data:
-            df = pd.DataFrame(data)
-            # Normalizar nombres de columnas
-            date_col = next((col for col in df.columns if 'fecha' in col.lower()), 'fecha')
-            price_col = next(
-                (col for col in df.columns 
-                 if any(x in col.lower() for x in ['ultimo', 'precio', 'cierre'])),
-                'precio'
-            )
-            
-            df = df.rename(columns={date_col: 'fecha', price_col: 'precio'})
-            df['fecha'] = pd.to_datetime(df['fecha'])
-            df = df[['fecha', 'precio']].dropna()
-            
-            # Si solo hay un dato, replicarlo para tener al menos 2 puntos
-            if len(df) == 1:
-                df = pd.concat([df, df], ignore_index=True)
-                df.at[1, 'fecha'] = df.at[0, 'fecha'] - pd.Timedelta(days=1)
-            
-            return df.sort_values('fecha')
-            
+        st.warning(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
         return None
         
     except requests.exceptions.RequestException as e:
-        st.error(f"Error en la solicitud para {simbolo} ({mercado}): {str(e)}")
+        st.warning(f"Error de conexión para {simbolo} en {mercado}: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"Error procesando datos para {simbolo} ({mercado}): {str(e)}")
+        st.error(f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}")
+        return None
         return None
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
@@ -727,51 +732,82 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
     Args:
         token_portador (str): Token de autenticación
         simbolo (str): Símbolo del FCI
-        fecha_desde (str): Fecha de inicio
-        fecha_hasta (str): Fecha de fin
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
         
     Returns:
-        pd.DataFrame: DataFrame con fechas y precios, o None si hay error
+        pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
     """
     try:
-        # Obtener el ID del FCI
-        url_fci = f"https://api.invertironline.com/api/v2/Titulos/FCI"
+        # Primero intentar obtener directamente la serie histórica
+        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
         headers = {
             'Authorization': f'Bearer {token_portador}',
             'Accept': 'application/json'
         }
         
-        response = requests.get(url_fci, headers=headers, timeout=30)
+        response = requests.get(url_serie, headers=headers, timeout=30)
         response.raise_for_status()
-        fc_data = response.json()
-        
-        # Buscar el FCI por símbolo
-        fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
-        if not fci:
-            return None
-            
-        # Obtener serie histórica
-        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}"
-        params = {
-            'fechaDesde': fecha_desde,
-            'fechaHasta': fecha_hasta
-        }
-        
-        response = requests.get(url_serie, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        
         data = response.json()
-        if isinstance(data, list) and data:
-            df = pd.DataFrame(data)
-            if 'fecha' in df.columns and 'valorCuota' in df.columns:
-                df = df.rename(columns={'fecha': 'fecha', 'valorCuota': 'precio'})
-                df['fecha'] = pd.to_datetime(df['fecha'])
-                return df[['fecha', 'precio']].sort_values('fecha')
         
+        # Procesar la respuesta según el formato esperado
+        if isinstance(data, list):
+            fechas = []
+            precios = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes formatos de fecha
+                    fecha_str = item.get('fecha') or item.get('fechaHora')
+                    if not fecha_str:
+                        continue
+                        
+                    # Obtener el valor de la cuota (puede venir en diferentes campos)
+                    precio = item.get('valorCuota') or item.get('precio') or item.get('ultimoPrecio')
+                    if not precio:
+                        continue
+                        
+                    # Convertir fecha
+                    fecha = parse_datetime_flexible(fecha_str)
+                    if not pd.isna(fecha):
+                        fechas.append(fecha)
+                        precios.append(float(precio))
+                        
+                except (ValueError, TypeError, AttributeError) as e:
+                    continue
+            
+            if fechas and precios:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
+        
+        # Si no se pudo obtener la serie histórica, intentar obtener el último valor
+        try:
+            # Obtener información del FCI
+            url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
+            response = requests.get(url_fci, headers=headers, timeout=30)
+            response.raise_for_status()
+            fc_data = response.json()
+            
+            # Buscar el FCI por símbolo
+            fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
+            if fci and 'ultimoValorCuotaParte' in fci:
+                return pd.DataFrame({
+                    'fecha': [pd.Timestamp.now(tz='UTC')],
+                    'precio': [float(fci['ultimoValorCuotaParte'])]
+                })
+        except Exception:
+            pass
+        
+        st.warning(f"No se pudieron obtener datos históricos para el FCI {simbolo}")
         return None
         
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Error de conexión al obtener datos del FCI {simbolo}: {str(e)}")
+        return None
     except Exception as e:
-        st.error(f"Error obteniendo datos de FCI {simbolo}: {str(e)}")
+        st.error(f"Error inesperado al procesar el FCI {simbolo}: {str(e)}")
         return None
 
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
