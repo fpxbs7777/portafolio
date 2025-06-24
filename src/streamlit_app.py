@@ -2018,21 +2018,22 @@ def refrescar_token(refresh_token):
     except:
         return None
 
-def obtener_lista_clientes(token_acceso):
+def obtener_lista_clientes():
     """
     Obtiene la lista de clientes asociados a la cuenta del asesor.
     
-    Args:
-        token_acceso (str): Token de acceso de la API de IOL
-        
     Returns:
         list: Lista de diccionarios con información de los clientes
     """
+    token_valido = obtener_token_valido()
+    if not token_valido:
+        return []
+    
     try:
         # Intentar primero con el endpoint de clientes del asesor
         url = "https://api.invertironline.com/api/v2/Asesores/Clientes"
         headers = {
-            'Authorization': f'Bearer {token_acceso}',
+            'Authorization': f'Bearer {token_valido}',
             'Accept': 'application/json'
         }
         
@@ -2079,16 +2080,6 @@ def obtener_lista_clientes(token_acceso):
         error_msg = f"Error HTTP al obtener clientes: {e.response.status_code}"
         if e.response.text:
             error_msg += f" - {e.response.text}"
-            
-        # Si es un error 401, intentar refrescar el token
-        if e.response.status_code == 401:
-            refresh_token = st.session_state.get('refresh_token')
-            if refresh_token:
-                nuevo_token = refrescar_token(refresh_token)
-                if nuevo_token:
-                    st.session_state.token_acceso = nuevo_token
-                    # Intentar nuevamente con el nuevo token
-                    return obtener_lista_clientes(nuevo_token)
         
         st.error(error_msg)
         return []
@@ -2099,21 +2090,24 @@ def obtener_lista_clientes(token_acceso):
         st.error(f"Error inesperado al obtener clientes: {str(e)}")
         return []
 
-def obtener_precios_historicos(token_portador, simbolos, dias=252):
+def obtener_precios_historicos(simbolos, dias=252):
     """
     Obtiene precios históricos de los activos usando la API de IOL
     
     Args:
-        token_portador (str): Token de autenticación
         simbolos (list): Lista de símbolos de activos
         dias (int): Número de días de histórico
         
     Returns:
         dict: Diccionario con los precios históricos de cada activo
     """
+    token_valido = obtener_token_valido()
+    if not token_valido:
+        return {}
+    
     precios_historicos = {}
     headers = {
-        'Authorization': f'Bearer {token_portador}',
+        'Authorization': f'Bearer {token_valido}',
         'Accept': 'application/json'
     }
     
@@ -2130,14 +2124,6 @@ def obtener_precios_historicos(token_portador, simbolos, dias=252):
                 precios = response.json()
                 if precios:
                     precios_historicos[simbolo] = [float(p['cierre']) for p in precios]
-            elif response.status_code == 401:
-                # Intentar refrescar el token
-                refresh_token = st.session_state.get('refresh_token')
-                if refresh_token:
-                    nuevo_token = refrescar_token(refresh_token)
-                    if nuevo_token:
-                        st.session_state.token_acceso = nuevo_token
-                        return obtener_precios_historicos(nuevo_token, simbolos, dias)
             else:
                 st.error(f"Error al obtener precios históricos para {simbolo}: {response.status_code} - {response.text}")
     except Exception as e:
@@ -2145,21 +2131,24 @@ def obtener_precios_historicos(token_portador, simbolos, dias=252):
     
     return precios_historicos
 
-def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
+def obtener_portafolio(id_cliente, pais='Argentina'):
     """
     Obtiene el portafolio de un cliente específico
     
     Args:
-        token_portador (str): Token de autenticación
         id_cliente (str): ID del cliente
         pais (str): País del portafolio
         
     Returns:
         dict: Diccionario con el portafolio o None en caso de error
     """
+    token_valido = obtener_token_valido()
+    if not token_valido:
+        return None
+    
     url = f"https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}"
     headers = {
-        'Authorization': f'Bearer {token_portador}',
+        'Authorization': f'Bearer {token_valido}',
         'Accept': 'application/json'
     }
     
@@ -2170,7 +2159,7 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
             if portafolio:
                 # Añadir precios históricos a cada activo
                 simbolos = [a['simbolo'] for a in portafolio['activos']]
-                precios_historicos = obtener_precios_historicos(token_portador, simbolos)
+                precios_historicos = obtener_precios_historicos(token_valido, simbolos)
                 
                 # Calcular retornos diarios para cada activo
                 for activo in portafolio['activos']:
@@ -2183,14 +2172,6 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
                             activo['volatilidad'] = np.std(retornos)
                             activo['retorno_medio'] = np.mean(retornos)
             return portafolio
-        elif response.status_code == 401:
-            # Intentar refrescar el token
-            refresh_token = st.session_state.get('refresh_token')
-            if refresh_token:
-                nuevo_token = refrescar_token(refresh_token)
-                if nuevo_token:
-                    st.session_state.token_acceso = nuevo_token
-                    return obtener_portafolio(nuevo_token, id_cliente, pais)
         else:
             st.error(f"Error al obtener portafolio: {response.status_code} - {response.text}")
             return None
@@ -2224,21 +2205,37 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
-    
-    # Inicializar session state
     if 'token_acceso' not in st.session_state:
         st.session_state.token_acceso = None
     if 'refresh_token' not in st.session_state:
         st.session_state.refresh_token = None
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = []
     if 'cliente_seleccionado' not in st.session_state:
         st.session_state.cliente_seleccionado = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
     if 'fecha_desde' not in st.session_state:
         st.session_state.fecha_desde = date.today() - timedelta(days=365)
     if 'fecha_hasta' not in st.session_state:
         st.session_state.fecha_hasta = date.today()
+    
+    # Función auxiliar para obtener token válido
+    def obtener_token_valido():
+        """Obtiene un token válido, refrescando si es necesario."""
+        if not st.session_state.token_acceso:
+            return None
+            
+        # Verificar si el token es válido
+        if verificar_token(st.session_state.token_acceso):
+            return st.session_state.token_acceso
+            
+        # Si el token no es válido, intentar refrescar
+        if st.session_state.refresh_token:
+            nuevo_token = refrescar_token(st.session_state.refresh_token)
+            if nuevo_token:
+                st.session_state.token_acceso = nuevo_token
+                return nuevo_token
+        
+        return None
     
     # Barra lateral - Autenticación
     with st.sidebar:
