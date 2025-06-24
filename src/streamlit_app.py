@@ -1766,6 +1766,9 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
         }
         
     except Exception as e:
+        import traceback
+        error_msg = f'Error en el cálculo: {str(e)}\n\n{traceback.format_exc()}'
+        st.error(f"Error en el cálculo de métricas: {error_msg}")
         return {
             'alpha': 0,
             'beta': 1.0,
@@ -1777,7 +1780,17 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
             'alpha_annual': 0,
             'beta_std_error': 0,
             'success': False,
-            'message': f'Error en el cálculo: {str(e)}'
+            'message': error_msg,
+            'estadisticas_activos': pd.DataFrame(),
+            'estadisticas_benchmark': {},
+            'resumen_portafolio': pd.DataFrame(),
+            'retorno_anual': 0,
+            'volatilidad_anual': 0,
+            'sharpe_ratio': 0,
+            'sortino_ratio': 0,
+            'max_drawdown': 0,
+            'fecha_inicio': None,
+            'fecha_fin': None
         }
 
 def analizar_estrategia_inversion(alpha_beta_metrics):
@@ -1889,11 +1902,22 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     elif len(portafolio) == 1:
         concentracion = 1.0
     else:
-        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
-                         for activo in portafolio.values())
-        # Normalizar entre 0 y 1
-        min_concentration = 1.0 / len(portafolio)
-        concentracion = (sum_squares - min_concentration) / (1 - min_concentration)
+        # Filtrar activos con valuación positiva
+        activos_con_valor = [activo for activo in portafolio.values() 
+                           if isinstance(activo, dict) and 'Valuación' in activo 
+                           and isinstance(activo['Valuación'], (int, float)) and activo['Valuación'] > 0]
+        
+        if not activos_con_valor:
+            concentracion = 0
+        elif len(activos_con_valor) == 1:
+            concentracion = 1.0
+        else:
+            # Calcular suma de cuadrados de las participaciones
+            sum_squares = sum((activo['Valuación'] / valor_total) ** 2 
+                           for activo in activos_con_valor)
+            # Normalizar entre 0 y 1
+            min_concentration = 1.0 / len(activos_con_valor)
+            concentracion = max(0, min(1, (sum_squares - min_concentration) / (1 - min_concentration)))
         
     # Descargar datos del MERVAL para cálculo de Alpha y Beta
     try:
@@ -1992,13 +2016,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             ret_neg = retornos_validos[retornos_validos < 0]
             n_total = len(retornos_validos)
             
-            # Calcular probabilidades
+            # Calcular probabilidades asegurando que sumen 1
             prob_ganancia = len(ret_pos) / n_total if n_total > 0 else 0.5
-            prob_perdida = len(ret_neg) / n_total if n_total > 0 else 0.5
+            prob_perdida = 1 - prob_ganancia  # Asegurar que sumen 1
             
             # Calcular probabilidades de movimientos extremos
             prob_ganancia_10 = len(ret_pos[ret_pos > 0.1]) / n_total if n_total > 0 else 0
             prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
+            
+            # Asegurar que las probabilidades extremas no excedan las totales
+            prob_ganancia_10 = min(prob_ganancia_10, prob_ganancia)
+            prob_perdida_10 = min(prob_perdida_10, prob_perdida)
             
             # Calcular el peso del activo en el portafolio
             peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
@@ -2114,10 +2142,14 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     retornos_simulados = np.array(retornos_simulados)
     total_simulaciones = len(retornos_simulados)
             
-    prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
-    prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
-    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
-    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
+    if total_simulaciones > 0:
+        prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones
+        prob_perdida = 1 - prob_ganancia  # Asegurar que sumen 1
+        prob_ganancia_10 = min(np.sum(retornos_simulados > 0.1) / total_simulaciones, prob_ganancia)
+        prob_perdida_10 = min(np.sum(retornos_simulados < -0.1) / total_simulaciones, prob_perdida)
+    else:
+        prob_ganancia = prob_perdida = 0.5
+        prob_ganancia_10 = prob_perdida_10 = 0
             
     # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
     alpha_beta_metrics = {}
@@ -2280,7 +2312,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2368,10 +2400,16 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.subheader("🎯 Probabilidades")
             cols = st.columns(4)
             probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+            # Asegurar que las probabilidades sean consistentes
+            prob_ganancia = min(probs['ganancia'], 1.0)  # No más del 100%
+            prob_perdida = min(probs['perdida'], 1.0)    # No más del 100%
+            prob_ganancia_10 = min(probs['ganancia_mayor_10'], prob_ganancia)  # No mayor que la probabilidad total
+            prob_perdida_10 = min(probs['perdida_mayor_10'], prob_perdida)    # No mayor que la probabilidad total
+            
+            cols[0].metric("Ganancia", f"{prob_ganancia*100:.1f}%")
+            cols[1].metric("Pérdida", f"{prob_perdida*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{prob_ganancia_10*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{prob_perdida_10*100:.1f}%")
             
             # Análisis de Estrategia de Inversión
             if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
