@@ -776,83 +776,139 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
         print(error_msg)
         import traceback
-        traceback.print_exc()
-        st.error(error_msg)
+    
+    """
+    Obtiene la cotización del dólar MEP para un bono específico.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo (str): Símbolo del bono (por defecto 'AL30')
+        id_plazo_compra (int): ID del plazo para la operación de compra (por defecto 1)
+        id_plazo_venta (int): ID del plazo para la operación de venta (por defecto 1)
+        
+    Returns:
+        float: Precio del dólar MEP o None en caso de error
+    """
+    url = "https://api.invertironline.com/api/v2/Cotizaciones/MEP"
+    headers = {
+        "Authorization": f"Bearer {token_portador}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        payload = {
+            "simbolo": simbolo,
+            "idPlazoOperatoriaCompra": id_plazo_compra,
+            "idPlazoOperatoriaVenta": id_plazo_venta
+        }
+        
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return float(response.text)
+    except Exception as e:
+        print(f"Error al obtener cotización MEP: {e}")
         return None
-        return None
+
+def convertir_a_usd(monto_ars, cotizacion_mep):
+    """
+    Convierte un monto en ARS a USD usando la cotización MEP.
+    
+    Args:
+        monto_ars (float): Monto en pesos argentinos
+        cotizacion_mep (float): Cotización del dólar MEP
+        
+    Returns:
+        float: Monto equivalente en USD
+    """
+    if not cotizacion_mep or cotizacion_mep <= 0:
+        return 0.0
+    return monto_ars / cotizacion_mep
+
+def procesar_datos_historicos(fechas, precios, fecha_str, precio):
+    """
+    Procesa los datos históricos de precios.
+    
+    Args:
+        fechas (list): Lista de fechas
+        precios (list): Lista de precios
+        fecha_str (str): Fecha en formato string
+        precio (float): Precio a agregar
+        
+    Returns:
+        tuple: (fechas, precios) actualizadas
+    """
+    try:
+        # Convertir fecha
+        fecha = parse_datetime_flexible(fecha_str)
+        if not pd.isna(fecha):
+            fechas.append(fecha)
+            precios.append(float(precio))
+    except (ValueError, TypeError, AttributeError) as e:
+        pass
+    return fechas, precios
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
-    Obtiene la serie histórica de un Fondo Común de Inversión.
+    Obtiene la serie histórica de un fondo común de inversión
     
     Args:
         token_portador (str): Token de autenticación
         simbolo (str): Símbolo del FCI
-        fecha_desde (str): Fecha inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha fin (YYYY-MM-DD)
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
         
     Returns:
-        pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
+        pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
     try:
-        # Primero intentar obtener directamente la serie histórica
-        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
-        headers = {
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }
+        fechas = []
+        precios = []
         
-        response = requests.get(url_serie, headers=headers, timeout=30)
+        # Obtener información del FCI
+        url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
+        headers = {"Authorization": f"Bearer {token_portador}"}
+        response = requests.get(url_fci, headers=headers, timeout=30)
         response.raise_for_status()
-        data = response.json()
+        fc_data = response.json()
         
-        # Procesar la respuesta según el formato esperado
-        if isinstance(data, list):
-            fechas = []
-            precios = []
+        # Buscar el FCI por símbolo
+        fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
+        if not fci:
+            st.warning(f"No se encontró el FCI con símbolo {simbolo}")
+            return None
             
-            for item in data:
-                try:
-                    # Manejar diferentes formatos de fecha
-                    fecha_str = item.get('fecha') or item.get('fechaHora')
-                    if not fecha_str:
-                        continue
-                        
-                    # Obtener el valor de la cuota (puede venir en diferentes campos)
-                    precio = item.get('valorCuota') or item.get('precio') or item.get('ultimoPrecio')
-                    if not precio:
-                        continue
-                        
-                    # Convertir fecha
-                    fecha = parse_datetime_flexible(fecha_str)
-                    if not pd.isna(fecha):
-                        fechas.append(fecha)
-                        precios.append(float(precio))
-                        
-                except (ValueError, TypeError, AttributeError) as e:
-                    continue
+        # Obtener el ID del FCI
+        fci_id = fci.get('id')
+        if not fci_id:
+            st.warning(f"No se pudo obtener el ID para el FCI {simbolo}")
+            return None
             
-            if fechas and precios:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                return df
+        # Obtener la serie histórica del FCI
+        url_historico = f"https://api.invertironline.com/api/v2/Titulos/FCI/{fci_id}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}"
+        response = requests.get(url_historico, headers=headers, timeout=30)
+        response.raise_for_status()
+        historico_data = response.json()
         
-        # Si no se pudo obtener la serie histórica, intentar obtener el último valor
-        try:
-            # Obtener información del FCI
-            url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
-            response = requests.get(url_fci, headers=headers, timeout=30)
-            response.raise_for_status()
-            fc_data = response.json()
+        # Procesar los datos históricos
+        for item in historico_data:
+            fechas, precios = procesar_datos_historicos(
+                fechas, precios, 
+                item.get('fecha'),
+                item.get('valorCuotaParte')
+            )
             
-            # Buscar el FCI por símbolo
-            fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
-            if fci and 'ultimoValorCuotaParte' in fci:
-                return pd.DataFrame({
-                    'fecha': [pd.Timestamp.now(tz='UTC')],
-                    'precio': [float(fci['ultimoValorCuotaParte'])]
-                })
+        if fechas and precios:
+            df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+            df = df.drop_duplicates(subset=['fecha'], keep='last')
+            df = df.sort_values('fecha')
+            return df
+            
+        # Si no hay datos históricos, devolver el último valor disponible
+        if 'ultimoValorCuotaParte' in fci:
+            return pd.DataFrame({
+                'fecha': [pd.Timestamp.now(tz='UTC')],
+                'precio': [float(fci['ultimoValorCuotaParte'])]
+            })
         except Exception:
             pass
         
@@ -2010,14 +2066,59 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
+        
+        # Obtener cotización MEP para conversión
+        cotizacion_mep = obtener_cotizacion_mep(token_portador)
+        
+        # Calcular métricas del portafolio
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General
-        cols = st.columns(4)
+        # Agrupar por moneda y calcular totales
+        df_activos['Moneda'] = df_activos['Tipo'].apply(
+            lambda x: 'PESO_ARGENTINO' if 'PESO' in str(x).upper() else 'DOLAR_ESTADOUNIDENSE'
+        )
+        totales_por_moneda = df_activos.groupby('Moneda')['Valuación'].sum()
+        
+        # Mostrar totales por moneda con conversión MEP
+        st.subheader("💰 Valores Totales por Moneda")
+        
+        # Obtener totales
+        total_pesos = totales_por_moneda.get('PESO_ARGENTINO', 0)
+        total_dolares = totales_por_moneda.get('DOLAR_ESTADOUNIDENSE', 0)
+        
+        # Convertir pesos a dólares usando MEP
+        total_dolares_mep = convertir_a_usd(total_pesos, cotizacion_mep) + total_dolares
+        
+        # Mostrar en columnas
+        col1, col2, col3 = st.columns(3)
+        
+        # Total en Pesos
+        col1.metric(
+            "Total en Pesos (ARS)", 
+            f"${total_pesos:,.2f}",
+            help="Valor total en Pesos Argentinos"
+        )
+        
+        # Total en Dólares (activos en USD)
+        col2.metric(
+            "Activos en Dólares (USD)", 
+            f"${total_dolares:,.2f}",
+            help="Valor total de activos en Dólares Estadounidenses"
+        )
+        
+        # Total en Dólares MEP (conversión total)
+        col3.metric(
+            "Total en Dólares MEP (ARS→USD)",
+            f"${total_dolares_mep:,.2f}",
+            help=f"Valor total convertido a USD usando MEP (Cotización: ${cotizacion_mep:,.2f} si se obtuvo correctamente)"
+        )
+        
+        # Mostrar información general
+        st.subheader("📊 Información General del Portafolio")
+        cols = st.columns(3)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
         
         if metricas:
             # Métricas de Riesgo
