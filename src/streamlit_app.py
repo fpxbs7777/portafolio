@@ -2854,7 +2854,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         "Seleccione un activo para análisis técnico:",
         options=simbolos
     )
-{{ ... }}
     
     if simbolo_seleccionado:
         st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
