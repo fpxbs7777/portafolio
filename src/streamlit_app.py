@@ -2688,15 +2688,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         activos_filtrados = activos_para_optimizacion
         capital_inicial = None
 
-        metodo_seleccion = st.selectbox(
-            "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
-            format_func=lambda x: {
-                'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
-            }[x]
-        )
-
     # Mostrar input de capital solo si corresponde
     if metodo_seleccion == 'aleatoria':
         # Filtro de tipo de activo solo en aleatoria
