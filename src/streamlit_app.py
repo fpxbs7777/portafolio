@@ -667,36 +667,6 @@ def obtener_tasas_caucion(token_portador):
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
 
-def plot_cauciones_yield_curve(df):
-    import plotly.graph_objects as go
-    
-    # Filter and sort by plazo (days)
-    df_plot = df[['simbolo', 'plazo', 'ultimoPrecio']].copy()
-    df_plot['plazo'] = pd.to_numeric(df_plot['plazo'])
-    df_plot = df_plot.sort_values('plazo')
-    
-    # Create the plot
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=df_plot['plazo'],
-        y=df_plot['ultimoPrecio'],
-        mode='lines+markers',
-        name='Tasa',
-        line=dict(color='royalblue', width=2),
-        marker=dict(size=8)
-    ))
-    
-    fig.update_layout(
-        title='Curva de Tasas de Caución',
-        xaxis_title='Plazo (días)',
-        yaxis_title='Tasa (%)',
-        hovermode='x unified',
-        template='plotly_white'
-    )
-    
-    return fig
-
 def mostrar_tasas_caucion(token_portador):
     """
     Muestra las tasas de caución en una tabla y gráfico de curva de tasas
@@ -735,7 +705,27 @@ def mostrar_tasas_caucion(token_portador):
             
             # Crear gráfico de curva de tasas si hay suficientes puntos
             if len(df_cauciones) > 1:
-                fig = plot_cauciones_yield_curve(df_cauciones)
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_cauciones['plazo_dias'],
+                    y=df_cauciones['tasa_limpia'],
+                    mode='lines+markers+text',
+                    name='Tasa',
+                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                    textposition='top center',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=10, color='#1f77b4')
+                ))
+                
+                fig.update_layout(
+                    title='Curva de Tasas de Caución',
+                    xaxis_title='Plazo (días)',
+                    yaxis_title='Tasa Anual (%)',
+                    template='plotly_white',
+                    height=500,
+                    showlegend=False
+                )
                 
                 st.plotly_chart(fig, use_container_width=True)
             
@@ -1074,6 +1064,91 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         traceback.print_exc()
         st.error(error_msg)
         return None
+        return None
+
+def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """
+    Obtiene la serie histórica de un Fondo Común de Inversión.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo (str): Símbolo del FCI
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
+        
+    Returns:
+        pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
+    """
+    try:
+        # Primero intentar obtener directamente la serie histórica
+        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
+        
+        response = requests.get(url_serie, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Procesar la respuesta según el formato esperado
+        if isinstance(data, list):
+            fechas = []
+            precios = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes formatos de fecha
+                    fecha_str = item.get('fecha') or item.get('fechaHora')
+                    if not fecha_str:
+                        continue
+                        
+                    # Obtener el valor de la cuota (puede venir en diferentes campos)
+                    precio = item.get('valorCuota') or item.get('precio') or item.get('ultimoPrecio')
+                    if not precio:
+                        continue
+                        
+                    # Convertir fecha
+                    fecha = parse_datetime_flexible(fecha_str)
+                    if not pd.isna(fecha):
+                        fechas.append(fecha)
+                        precios.append(float(precio))
+                        
+                except (ValueError, TypeError, AttributeError) as e:
+                    continue
+            
+            if fechas and precios:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
+        
+        # Si no se pudo obtener la serie histórica, intentar obtener el último valor
+        try:
+            # Obtener información del FCI
+            url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
+            response = requests.get(url_fci, headers=headers, timeout=30)
+            response.raise_for_status()
+            fc_data = response.json()
+            
+            # Buscar el FCI por símbolo
+            fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
+            if fci and 'ultimoValorCuotaParte' in fci:
+                return pd.DataFrame({
+                    'fecha': [pd.Timestamp.now(tz='UTC')],
+                    'precio': [float(fci['ultimoValorCuotaParte'])]
+                })
+        except Exception:
+            pass
+        
+        st.warning(f"No se pudieron obtener datos históricos para el FCI {simbolo}")
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Error de conexión al obtener datos del FCI {simbolo}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar el FCI {simbolo}: {str(e)}")
         return None
 
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
@@ -1454,7 +1529,7 @@ class PortfolioManager:
                     size=n_days
                 )
                 
-                # Asegurarse de que los retornos sean razonables
+                # Asegurar que los retornos sean razonables
                 daily_returns = np.clip(daily_returns, -0.3, 0.3)
                 
                 # Calcular trayectoria de precios
@@ -1474,8 +1549,8 @@ class PortfolioManager:
             expected_volatility = returns_paths.std(axis=1).mean()
             
             # Calcular métricas de riesgo
-            var_95 = np.percentile(final_returns, 5)
-            cvar_95 = final_returns[final_returns <= var_95].mean()
+            var_95 = np.percentile(returns_paths, 5)
+            cvar_95 = returns_paths[returns_paths <= var_95].mean()
             
             # Calcular drawdowns simulados
             max_drawdowns = []
@@ -1641,11 +1716,7 @@ class PortfolioManager:
         
         # 4. Riesgo (VaR)
         var_levels = np.arange(1, 11) * 10  # 10% a 100%
-        returns_data = self.returns.get(symbol, pd.Series())
-        if not returns_data.empty:
-            var_values = [np.percentile(returns_data, level) for level in var_levels]
-        else:
-            var_values = [0 for _ in var_levels]
+        var_values = [np.percentile(final_returns, level) for level in var_levels]
         
         fig.add_trace(
             go.Bar(
@@ -2301,7 +2372,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             except (ValueError, TypeError):
                                 continue
                 
-            # Intento final: consultar precio actual vía API si sigue en cero
+                # Intento final: consultar precio actual vía API si sigue en cero
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
@@ -2914,7 +2985,7 @@ def mostrar_movimientos_asesor():
             fecha_hasta = st.date_input("Fecha hasta", value=date.today())
         
         # Selección múltiple de clientes
-        cliente_opciones = [{"label": f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} ({c.get('numeroCliente', c.get('id'))})", 
+        cliente_opciones = [{"label": f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} ({c.get('numeroCliente', c.get('id', ''))})", 
                            "value": c.get('numeroCliente', c.get('id'))} for c in clientes]
         
         clientes_seleccionados = st.multiselect(
