@@ -2946,111 +2946,145 @@ def mostrar_analisis_portafolio():
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
-    
-    # Inicializar session state
-    if 'token_acceso' not in st.session_state:
-        st.session_state.token_acceso = None
-    if 'refresh_token' not in st.session_state:
-        st.session_state.refresh_token = None
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = []
-    if 'cliente_seleccionado' not in st.session_state:
-        st.session_state.cliente_seleccionado = None
-    if 'fecha_desde' not in st.session_state:
-        st.session_state.fecha_desde = date.today() - timedelta(days=365)
-    if 'fecha_hasta' not in st.session_state:
-        st.session_state.fecha_hasta = date.today()
-    
-    # Barra lateral - Autenticación
-    with st.sidebar:
-        st.header("🔐 Autenticación IOL")
-        
-        if st.session_state.token_acceso is None:
-            with st.form("login_form"):
-                st.subheader("Ingreso a IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-                
-                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
-        else:
-            st.success("✅ Conectado a IOL")
-            st.divider()
-            
-            st.subheader("Configuración de Fechas")
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_desde = st.date_input(
-                    "Desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
-                )
-            with col2:
-                fecha_hasta = st.date_input(
-                    "Hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
-            
-            st.session_state.fecha_desde = fecha_desde
-            st.session_state.fecha_hasta = fecha_hasta
-            
-            # Obtener lista de clientes
-            if not st.session_state.clientes and st.session_state.token_acceso:
-                with st.spinner("Cargando clientes..."):
-                    try:
-                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        if clientes:
-                            st.session_state.clientes = clientes
-                        else:
-                            st.warning("No se encontraron clientes")
-                    except Exception as e:
-                        st.error(f"Error al cargar clientes: {str(e)}")
-            
-            clientes = st.session_state.clientes
-            
-            if clientes:
-                st.subheader("Selección de Cliente")
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed"
-                )
-                
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
-                
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
-                    with st.spinner("Actualizando..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista actualizada")
-                        st.rerun()
-            else:
-                st.warning("No se encontraron clientes")
-
-    # Contenido principal
     try:
+        # Inicializar la aplicación
+        st.set_page_config(
+            page_title="IOL Portfolio Analyzer",
+            page_icon="📊",
+            layout="wide"
+        )
+        
+        # Establecer el tema oscuro
+        st.markdown("""
+        <style>
+        body {
+            background-color: #0e1117;
+            color: #ffffff;
+        }
+        .stTextInput label {
+            color: #ffffff;
+        }
+        .stMarkdown {
+            color: #ffffff;
+        }
+        .stButton button {
+            background-color: #2563eb;
+            color: white;
+        }
+        .stButton button:hover {
+            background-color: #1d4ed8;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Inicializar session state
+        if 'token_acceso' not in st.session_state:
+            st.session_state.token_acceso = None
+        if 'refresh_token' not in st.session_state:
+            st.session_state.refresh_token = None
+        if 'clientes' not in st.session_state:
+            st.session_state.clientes = []
+        if 'cliente_seleccionado' not in st.session_state:
+            st.session_state.cliente_seleccionado = None
+        if 'fecha_desde' not in st.session_state:
+            st.session_state.fecha_desde = date.today() - timedelta(days=365)
+        if 'fecha_hasta' not in st.session_state:
+            st.session_state.fecha_hasta = date.today()
+        
+        # Mostrar título
+        st.title("📊 IOL Portfolio Analyzer")
+        st.markdown("### Analizador Avanzado de Portafolios IOL")
+        
+        # Barra lateral - Autenticación
+        with st.sidebar:
+            st.header("🔐 Autenticación IOL")
+            
+            if st.session_state.token_acceso is None:
+                with st.form("login_form"):
+                    st.subheader("Ingreso a IOL")
+                    usuario = st.text_input("Usuario", placeholder="su_usuario")
+                    contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+                    
+                    if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
+                        if usuario and contraseña:
+                            with st.spinner("Conectando..."):
+                                token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                                
+                                if token_acceso:
+                                    st.session_state.token_acceso = token_acceso
+                                    st.session_state.refresh_token = refresh_token
+                                    st.success("✅ Conexión exitosa!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Error en la autenticación")
+                        else:
+                            st.warning("⚠️ Complete todos los campos")
+            else:
+                st.success("✅ Conectado a IOL")
+                st.divider()
+                
+                st.subheader("Configuración de Fechas")
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha_desde = st.date_input(
+                        "Desde:",
+                        value=st.session_state.fecha_desde,
+                        max_value=date.today()
+                    )
+                with col2:
+                    fecha_hasta = st.date_input(
+                        "Hasta:",
+                        value=st.session_state.fecha_hasta,
+                        max_value=date.today()
+                    )
+                
+                st.session_state.fecha_desde = fecha_desde
+                st.session_state.fecha_hasta = fecha_hasta
+                
+                # Obtener lista de clientes
+                if not st.session_state.clientes and st.session_state.token_acceso:
+                    with st.spinner("Cargando clientes..."):
+                        try:
+                            clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                            if clientes:
+                                st.session_state.clientes = clientes
+                            else:
+                                st.warning("No se encontraron clientes")
+                        except Exception as e:
+                            st.error(f"Error al cargar clientes: {str(e)}")
+                
+                clientes = st.session_state.clientes
+                
+                if clientes:
+                    st.subheader("Selección de Cliente")
+                    cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                    cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                    
+                    cliente_seleccionado = st.selectbox(
+                        "Seleccione un cliente:",
+                        options=cliente_ids,
+                        format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
+                        label_visibility="collapsed"
+                    )
+                    
+                    st.session_state.cliente_seleccionado = next(
+                        (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                        None
+                    )
+                    
+                    if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+                        with st.spinner("Actualizando..."):
+                            try:
+                                nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                                st.session_state.clientes = nuevos_clientes
+                                st.success("✅ Lista actualizada")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al actualizar: {str(e)}")
+                else:
+                    st.warning("No se encontraron clientes")
+
+        # Contenido principal
         if st.session_state.token_acceso:
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
@@ -3130,7 +3164,8 @@ def main():
                 - Estado de cuenta consolidado  
                 """)
     except Exception as e:
-        st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.error(f"Error en la aplicación: {str(e)}")
+        st.write("Por favor, refresque la página e intente nuevamente.")
 
 if __name__ == "__main__":
     main()
