@@ -2161,6 +2161,218 @@ class PortfolioManager:
             last_crossunder = recent_crossunders[recent_crossunders].index[-1]
             st.info(f'Last Bearish Crossunder: {last_crossunder.strftime("%Y-%m-%d")}')
     
+    def analyze_volume_weighted_ma(self, symbol, window=20):
+        """
+        Calculate and analyze Volume-Weighted Moving Average (VWMA) for a given symbol.
+        
+        Args:
+            symbol (str): Symbol of the asset
+            window (int): Window size for VWMA calculation (default: 20)
+            
+        Returns:
+            dict: Dictionary containing VWMA results and signals
+        """
+        try:
+            if not hasattr(self, 'prices') or symbol not in self.prices.columns:
+                return {
+                    'error': f"No hay datos de precios para {symbol}",
+                    'success': False
+                }
+                
+            if not hasattr(self, 'volumes') or symbol not in self.volumes.columns:
+                return {
+                    'error': f"No hay datos de volumen para {symbol}",
+                    'success': False
+                }
+            
+            # Get price and volume data
+            prices = self.prices[symbol].dropna()
+            volumes = self.volumes[symbol].dropna()
+            
+            # Align price and volume data
+            common_index = prices.index.intersection(volumes.index)
+            if len(common_index) == 0:
+                return {
+                    'error': "No hay datos coincidentes de precios y volúmenes",
+                    'success': False
+                }
+                
+            prices = prices[common_index]
+            volumes = volumes[common_index]
+            
+            # Calculate VWMA
+            vwma = (prices * volumes).rolling(window=window).sum() / volumes.rolling(window=window).sum()
+            
+            # Calculate signals
+            signals = pd.DataFrame(index=prices.index)
+            signals['price'] = prices
+            signals['vwma'] = vwma
+            signals['signal'] = 0  # 0: no signal, 1: buy, -1: sell
+            
+            # Generate signals (price crosses above/below VWMA)
+            signals['prev_price'] = signals['price'].shift(1)
+            signals['prev_vwma'] = signals['vwma'].shift(1)
+            
+            # Buy signal: price crosses above VWMA
+            signals.loc[(signals['price'] > signals['vwma']) & 
+                       (signals['prev_price'] <= signals['prev_vwma']), 'signal'] = 1
+            
+            # Sell signal: price crosses below VWMA
+            signals.loc[(signals['price'] < signals['vwma']) & 
+                       (signals['prev_price'] >= signals['prev_vwma']), 'signal'] = -1
+            
+            # Calculate returns
+            signals['daily_return'] = signals['price'].pct_change()
+            signals['strategy_return'] = signals['signal'].shift(1) * signals['daily_return']
+            
+            # Prepare result
+            result = {
+                'prices': prices,
+                'volumes': volumes,
+                'vwma': vwma,
+                'signals': signals[['signal']],
+                'returns': signals[['daily_return', 'strategy_return']],
+                'window': window,
+                'success': True
+            }
+            
+            # Store result for later use
+            self.vwma_results[symbol] = result
+            
+            return result
+            
+        except Exception as e:
+            return {
+                'error': f"Error en el análisis VWMA: {str(e)}",
+                'success': False
+            }
+    
+    def plot_vwma_analysis(self, symbol):
+        """
+        Generate interactive plot for VWMA analysis
+        """
+        if symbol not in self.vwma_results or not self.vwma_results[symbol]['success']:
+            st.warning(f"No hay datos de análisis VWMA para {symbol}")
+            return
+        
+        result = self.vwma_results[symbol]
+        
+        # Create figure with secondary y-axis for volume
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        # Add price line
+        fig.add_trace(
+            go.Scatter(
+                x=result['prices'].index,
+                y=result['prices'],
+                name="Precio",
+                line=dict(color='#1f77b4')
+            ),
+            secondary_y=False,
+        )
+        
+        # Add VWMA line
+        fig.add_trace(
+            go.Scatter(
+                x=result['vwma'].index,
+                y=result['vwma'],
+                name=f"VWMA ({result['window']} días)",
+                line=dict(color='#ff7f0e', dash='dash')
+            ),
+            secondary_y=False,
+        )
+        
+        # Add buy signals
+        buy_signals = result['signals'][result['signals']['signal'] == 1]
+        if not buy_signals.empty:
+            buy_prices = result['prices'].loc[buy_signals.index]
+            fig.add_trace(
+                go.Scatter(
+                    x=buy_signals.index,
+                    y=buy_prices,
+                    mode='markers',
+                    name='Señal Compra',
+                    marker=dict(
+                        symbol='triangle-up',
+                        size=10,
+                        color='green'
+                    )
+                ),
+                secondary_y=False,
+            )
+        
+        # Add sell signals
+        sell_signals = result['signals'][result['signals']['signal'] == -1]
+        if not sell_signals.empty:
+            sell_prices = result['prices'].loc[sell_signals.index]
+            fig.add_trace(
+                go.Scatter(
+                    x=sell_signals.index,
+                    y=sell_prices,
+                    mode='markers',
+                    name='Señal Venta',
+                    marker=dict(
+                        symbol='triangle-down',
+                        size=10,
+                        color='red'
+                    )
+                ),
+                secondary_y=False,
+            )
+        
+        # Add volume bars
+        fig.add_trace(
+            go.Bar(
+                x=result['volumes'].index,
+                y=result['volumes'],
+                name="Volumen",
+                opacity=0.3,
+                marker_color='#d3d3d3'
+            ),
+            secondary_y=True,
+        )
+        
+        # Update layout
+        fig.update_layout(
+            title=f"Análisis VWMA - {symbol}",
+            xaxis_title="Fecha",
+            yaxis_title="Precio",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            template='plotly_dark',
+            height=600,
+            showlegend=True
+        )
+        
+        # Update y-axes
+        fig.update_yaxes(title_text="Precio", secondary_y=False)
+        fig.update_yaxes(title_text="Volumen", secondary_y=True)
+        
+        # Show the plot
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Show strategy performance metrics if available
+        if 'strategy_return' in result['returns'].columns:
+            returns = result['returns']
+            cum_returns = (1 + returns).cumprod()
+            
+            # Calculate metrics
+            metrics = {
+                'Retorno Total': (cum_returns.iloc[-1] - 1) * 100,
+                'Volatilidad Anual': returns.std() * np.sqrt(252) * 100,
+                'Sharpe Ratio': (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0,
+                'Máxima Caída': (cum_returns / cum_returns.cummax() - 1).min() * 100
+            }
+            
+            # Display metrics
+            st.subheader("Métricas de Desempeño")
+            cols = st.columns(4)
+            for i, (metric, value) in enumerate(metrics.items()):
+                with cols[i % 4]:
+                    st.metric(
+                        label=metric,
+                        value=f"{value['strategy_return']:.2f}%" if isinstance(value, dict) else f"{value:.2f}%"
+                    )
+    
     def analyze_portfolio_risk(self, n_simulations=1000, time_horizon=30, confidence_level=0.95):
         """
         Realiza un análisis de riesgo completo del portafolio usando GARCH y Monte Carlo.
@@ -3882,78 +4094,169 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     with tab2:
         st.markdown("### 📊 Análisis VWMA (Media Móvil Ponderada por Volumen)")
         
-        # Date range selection
-        col1, col2 = st.columns(2)
+        # Date range selection with validation
+        col1, col2 = st.columns([1, 1])
         with col1:
             fecha_desde = st.date_input(
-                "Fecha desde", 
+                "📅 Fecha desde", 
                 value=date.today() - timedelta(days=365), 
                 max_value=date.today() - timedelta(days=1),
-                key="vwma_fecha_desde"
+                key="vwma_fecha_desde",
+                help="Seleccione la fecha de inicio para el análisis"
             )
         with col2:
             fecha_hasta = st.date_input(
-                "Fecha hasta", 
+                "📅 Fecha hasta", 
                 value=date.today(), 
                 max_value=date.today(),
-                key="vwma_fecha_hasta"
+                min_value=fecha_desde + timedelta(days=1) if fecha_desde else date.today(),
+                key="vwma_fecha_hasta",
+                help="Seleccione la fecha de fin para el análisis"
             )
         
-        # Asset selection
-        simbolo_vwma = st.selectbox(
-            "Seleccione un activo para análisis VWMA:",
-            options=simbolos,
-            format_func=lambda x: f"{x} - {simbolo_a_nombre[x]}" if x in simbolo_a_nombre else x,
-            key="vwma_selector"
-        )
+        # Asset selection with search
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            simbolo_vwma = st.selectbox(
+                "📈 Seleccione un activo para análisis VWMA:",
+                options=simbolos,
+                format_func=lambda x: f"{x} - {simbolo_a_nombre[x]}" if x in simbolo_a_nombre else x,
+                key="vwma_selector",
+                help="Seleccione el activo para analizar con VWMA"
+            )
         
-        # VWMA parameters
-        vwma_window = st.slider("Período de VWMA (días)", min_value=5, max_value=100, value=20, key="vwma_window")
+        # VWMA parameters with tooltips
+        with col2:
+            vwma_window = st.slider(
+                "📏 Período de VWMA",
+                min_value=5,
+                max_value=200,
+                value=20,
+                step=1,
+                key="vwma_window",
+                help="Número de días para el cálculo de la VWMA. Valores más altos suavizan la línea"
+            )
         
-        if st.button("Realizar Análisis VWMA", key="btn_vwma_analyze"):
-            if simbolo_vwma and fecha_desde and fecha_hasta and fecha_desde < fecha_hasta:
-                with st.spinner(f"Cargando datos para {simbolo_vwma}..."):
-                    try:
-                        # Create PortfolioManager instance
-                        pm = PortfolioManager(
-                            [{'titulo': {'simbolo': simbolo_vwma, 'tipo': 'ACCIONES', 'mercado': 'BCBA'}}],
-                            token_acceso,
-                            fecha_desde.strftime('%Y-%m-%d'),
-                            fecha_hasta.strftime('%Y-%m-%d')
+        # Add analysis button with validation
+        if st.button("🔍 Realizar Análisis VWMA", key="btn_vwma_analyze", 
+                    help="Ejecutar el análisis con los parámetros seleccionados"):
+            
+            # Validate date range
+            if fecha_desde >= fecha_hasta:
+                st.error("❌ La fecha desde debe ser anterior a la fecha hasta")
+                st.stop()
+                
+            if (fecha_hasta - fecha_desde).days < vwma_window:
+                st.warning(f"⚠️ El rango de fechas seleccionado es menor que el período de VWMA ({vwma_window} días). "
+                          "Considere aumentar el rango de fechas para obtener resultados más confiables.")
+            
+            with st.spinner(f"📊 Analizando {simbolo_vwma} con VWMA({vwma_window})..."):
+                try:
+                    # Create PortfolioManager instance with error handling
+                    pm = PortfolioManager(
+                        [{'titulo': {'simbolo': simbolo_vwma, 'tipo': 'ACCIONES', 'mercado': 'BCBA'}}],
+                        token_acceso,
+                        fecha_desde.strftime('%Y-%m-%d'),
+                        fecha_hasta.strftime('%Y-%m-%d')
+                    )
+                    
+                    # Load data with progress feedback
+                    progress_bar = st.progress(0)
+                    progress_bar.progress(20, "Cargando datos históricos...")
+                    
+                    if not pm.load_data():
+                        st.error("❌ No se pudieron cargar los datos históricos. Verifique la conexión y los parámetros.")
+                        st.stop()
+                    
+                    # Perform VWMA analysis with progress update
+                    progress_bar.progress(60, "Calculando VWMA y señales...")
+                    vwma_result = pm.analyze_volume_weighted_ma(simbolo_vwma, window=vwma_window)
+                    
+                    if vwma_result is not None:
+                        progress_bar.progress(80, "Generando visualizaciones...")
+                        st.success(f"✅ Análisis VWMA completado para {simbolo_a_nombre.get(simbolo_vwma, simbolo_vwma)}")
+                        
+                        # Display performance metrics in columns
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Retorno Total", f"{vwma_result.get('total_return', 0)*100:.2f}%")
+                        with col2:
+                            st.metric("Volatilidad Anual", f"{vwma_result.get('volatility', 0)*100:.2f}%")
+                        with col3:
+                            st.metric("Ratio de Sharpe", f"{vwma_result.get('sharpe_ratio', 0):.2f}")
+                        
+                        # Show buy/sell signals summary
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Señales de Compra", vwma_result.get('buy_signals', 0))
+                        with col2:
+                            st.metric("Señales de Venta", vwma_result.get('sell_signals', 0))
+                        
+                        # Display the main chart
+                        pm.plot_vwma_analysis(simbolo_vwma)
+                        
+                        # Add detailed performance metrics in expander
+                        with st.expander("📊 Métricas Detalladas", expanded=False):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Máxima Ganancia Diaria", f"{vwma_result.get('max_daily_return', 0)*100:.2f}%")
+                                st.metric("Máxima Pérdida Diaria", f"{vwma_result.get('min_daily_return', 0)*100:.2f}%")
+                            with col2:
+                                st.metric("Rango Promedio Verdadero (ATR)", f"{vwma_result.get('atr', 0):.2f}")
+                                st.metric("Drawdown Máximo", f"{vwma_result.get('max_drawdown', 0)*100:.2f}%")
+                        
+                        # Add export options
+                        st.download_button(
+                            label="💾 Exportar Datos",
+                            data=pd.DataFrame({
+                                'Fecha': vwma_result.get('dates', []),
+                                'Precio': vwma_result.get('prices', []),
+                                f'VWMA({vwma_window})': vwma_result.get('vwma_values', []),
+                                'Señal': vwma_result.get('signals', [])
+                            }).to_csv(index=False).encode('utf-8'),
+                            file_name=f"vwma_analysis_{simbolo_vwma}_{fecha_desde}_{fecha_hasta}.csv",
+                            mime='text/csv',
+                            help="Descargar los datos del análisis en formato CSV"
                         )
                         
-                        # Load data
-                        if pm.load_data():
-                            # Perform VWMA analysis
-                            vwma_result = pm.analyze_volume_weighted_ma(simbolo_vwma, window=vwma_window)
-                            if vwma_result is not None:
-                                # Display results
-                                st.success(f"Análisis VWMA completado para {simbolo_vwma}")
-                                pm.plot_vwma_analysis(simbolo_vwma)
-                            else:
-                                st.error("No se pudo completar el análisis VWMA. Verifique los datos disponibles.")
-                        else:
-                            st.error("No se pudieron cargar los datos históricos. Intente con otro rango de fechas.")
-                    except Exception as e:
-                        st.error(f"Error al realizar el análisis VWMA: {str(e)}")
-            else:
-                st.warning("Por favor seleccione un rango de fechas válido y un activo para continuar.")
+                    else:
+                        st.error("❌ No se pudo completar el análisis VWMA. Verifique los datos disponibles.")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error inesperado al realizar el análisis VWMA: {str(e)}")
+                    st.exception(e)  # Show full traceback in debug mode
+                finally:
+                    progress_bar.progress(100)
+                    time.sleep(0.5)
+                    progress_bar.empty()
         
-        # Add some explanation about VWMA
-        with st.expander("ℹ️ ¿Qué es el análisis VWMA?"):
+        # Add comprehensive VWMA documentation
+        with st.expander("📚 Guía de Análisis VWMA", expanded=False):
             st.markdown("""
-            **VWMA (Volume-Weighted Moving Average)** es un indicador técnico que muestra el precio promedio ponderado por volumen.
+            ### 📈 Media Móvil Ponderada por Volumen (VWMA)
             
-            - **Señales de trading**:
-              - **Compra**: Cuando el precio cruza por encima de la VWMA
-              - **Venta**: Cuando el precio cruza por debajo de la VWMA
+            La **VWMA (Volume-Weighted Moving Average)** es un indicador técnico que muestra el precio promedio ponderado por volumen, 
+            lo que significa que los períodos con mayor volumen tienen más peso en el cálculo.
             
-            - **Ventajas**:
-              - Da más peso a los períodos con mayor volumen
-              - Filtra el ruido del mercado mejor que las medias móviles simples
-              - Útil para identificar niveles de soporte y resistencia dinámicos
+            #### 📊 Interpretación de Señales:
+            - **Cruce Alcista (Compra)**: Cuando el precio cruza por encima de la línea VWMA
+            - **Cruce Bajista (Venta)**: Cuando el precio cruza por debajo de la línea VWMA
+            - **Soporte/Resistencia**: La línea VWMA puede actuar como soporte en tendencias alcistas y como resistencia en tendencias bajistas
             
-            El período seleccionado (por defecto 20 días) determina la sensibilidad de la media móvil.
+            #### ⚙️ Parámetros Recomendados:
+            - **Corto Plazo**: 5-20 días para trading activo
+            - **Medio Plazo**: 20-50 días para swing trading
+            - **Largo Plazo**: 50-200 días para tendencias principales
+            
+            #### 💡 Mejores Prácticas:
+            - Combinar con otros indicadores para confirmación
+            - Usar marcos de tiempo más altos para señales más confiables
+            - Considerar el volumen relativo (volumen mayor al promedio refuerza la señal)
+            
+            #### 📉 Limitaciones:
+            - Puede generar señales falsas en mercados laterales
+            - Funciona mejor en mercados con tendencia definida
+            - El retraso es inherente a todas las medias móviles
             """)
 
 def mostrar_movimientos_asesor():
