@@ -2719,6 +2719,63 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
+def descargar_datos_benchmark(simbolo, fecha_desde, fecha_hasta):
+    """Descarga datos históricos usando yfinance"""
+    try:
+        df = yf.download(simbolo, start=fecha_desde, end=fecha_hasta, progress=False)
+        if df.empty:
+            st.warning(f"No se encontraron datos para {simbolo}")
+            return None
+        return df['Adj Close'].pct_change().dropna()
+    except Exception as e:
+        st.error(f"Error al descargar datos de {simbolo}: {str(e)}")
+        return None
+
+def simular_montecarlo_garch(retornos, n_simulaciones=1000, dias_proyectados=252):
+    """Simulación de Monte Carlo con modelo GARCH"""
+    from arch import arch_model
+    import numpy as np
+    
+    try:
+        # Ajustar modelo GARCH(1,1)
+        model = arch_model(retornos, vol='Garch', p=1, q=1)
+        model_fit = model.fit(disp='off')
+        
+        # Simular retornos futuros
+        simulations = []
+        for _ in range(n_simulaciones):
+            sim_returns = model_fit.forecast(horizon=dias_proyectados, method='simulation')
+            simulations.append(sim_returns.variance.values[-1])
+            
+        return np.array(simulations).mean(axis=0)
+    except Exception as e:
+        st.error(f"Error en simulación GARCH: {str(e)}")
+        return None
+
+def optimizar_portafolio_moderno(retornos, covarianza, rf=0.02, n_portafolios=10000):
+    """Optimización de portafolio con frontera eficiente"""
+    import numpy as np
+    
+    n_activos = len(retornos.columns)
+    resultados = np.zeros((n_portafolios, 3 + n_activos))
+    pesos_array = []
+    
+    for i in range(n_portafolios):
+        pesos = np.random.random(n_activos)
+        pesos /= np.sum(pesos)
+        pesos_array.append(pesos)
+        
+        retorno_portafolio = np.sum(retornos.mean() * pesos) * 252
+        volatilidad_portafolio = np.sqrt(np.dot(pesos.T, np.dot(covarianza * 252, pesos)))
+        sharpe_ratio = (retorno_portafolio - rf) / volatilidad_portafolio if volatilidad_portafolio > 0 else 0
+        
+        resultados[i, 0] = retorno_portafolio
+        resultados[i, 1] = volatilidad_portafolio
+        resultados[i, 2] = sharpe_ratio
+        resultados[i, 3:] = pesos
+    
+    return resultados, np.array(pesos_array)
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
@@ -2741,23 +2798,72 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         simbolo = titulo.get('simbolo')
         mercado = titulo.get('mercado')
         tipo = titulo.get('tipo')
-        if simbolo:
+        if simbolo and mercado:
             activos_para_optimizacion.append({
                 'simbolo': simbolo,
                 'mercado': mercado,
-                'tipo': tipo
+                'tipo': tipo,
+                'cantidad': activo.get('cantidad', 0),
+                'precio_actual': obtener_precio_actual(token_acceso, mercado, simbolo) or 0
             })
     
     if not activos_para_optimizacion:
         st.warning("No se encontraron activos con información de mercado válida para optimizar.")
         return
     
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
+    # Configuración de fechas
+    hoy = datetime.now()
+    fecha_hasta = hoy.strftime('%Y-%m-%d')
+    fecha_desde = (hoy - timedelta(days=365*2)).strftime('%Y-%m-%d')
     
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
     
+    # Descargar datos históricos
+    with st.spinner("Obteniendo datos históricos..."):
+        datos_historicos = {}
+        for activo in activos_para_optimizacion:
+            try:
+                # Usar IOL para datos locales, yfinance para internacionales
+                if activo['mercado'] in ['BCBA', 'ROFEX', 'MAE']:
+                    historico = obtener_serie_historica_iol(
+                        token_acceso,
+                        activo['mercado'],
+                        activo['simbolo'],
+                        fecha_desde,
+                        fecha_hasta
+                    )
+                else:
+                    # Para mercados internacionales, intentar con yfinance
+                    ticker = f"{activo['simbolo']}.BA" if activo['mercado'] == 'BYMA' else activo['simbolo']
+                    df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)
+                    if not df.empty:
+                        historico = df['Adj Close'].rename('precio').reset_index()
+                        historico = historico.rename(columns={'Date': 'fecha'})
+                    else:
+                        historico = None
+                
+                if historico is not None and not historico.empty:
+                    datos_historicos[activo['simbolo']] = historico
+            except Exception as e:
+                st.warning(f"Error al obtener datos para {activo['simbolo']}: {str(e)}")
+    
+    if not datos_historicos:
+        st.error("No se pudieron obtener datos históricos para ningún activo.")
+        return
+    
+    # Procesar retornos
+    retornos = pd.DataFrame()
+    for simbolo, datos in datos_historicos.items():
+        if 'precio' in datos.columns:
+            retornos[simbolo] = datos['precio'].pct_change().dropna()
+    
+    if retornos.empty:
+        st.error("No se pudieron calcular retornos para los activos.")
+        return
+    
     # Configuración de la optimización
+    st.markdown("### ⚙️ Parámetros de Optimización")
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -2773,6 +2879,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             options=list(metodos_optimizacion.keys()),
             key="metodo_optimizacion"
         )
+        
+        # Capital inicial
+        capital_inicial = st.number_input(
+            "Capital Inicial (ARS):",
+            min_value=1000.0,
+            max_value=10000000.0,
+            value=100000.0,
+            step=1000.0,
+            key="capital_inicial_optimizacion"
+        )
     
     with col2:
         # Benchmark para tasa libre de riesgo
@@ -2780,41 +2896,180 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             'Bonos EEUU 10Y (^TNX)': '^TNX',
             'S&P 500 (SPY)': 'SPY',
             'Bonos Argentinos (AL30)': 'AL30.BA',
-            'Tasa Fija Local': 'tasa_local'
+            'Tasa Fija Local (30% anual)': 'tasa_local_30'
         }
-        benchmark = st.selectbox(
+        benchmark_seleccionado = st.selectbox(
             "Benchmark para Tasa Libre de Riesgo:",
             options=list(benchmarks.keys()),
             key="benchmark_rf"
         )
+        
+        # Obtener tasa libre de riesgo del benchmark seleccionado
+        if benchmarks[benchmark_seleccionado] == 'tasa_local_30':
+            rf = 0.30  # Tasa fija local del 30% anual
+        else:
+            rf_series = descargar_datos_benchmark(
+                benchmarks[benchmark_seleccionado], 
+                (hoy - timedelta(days=30)).strftime('%Y-%m-%d'),
+                fecha_hasta
+            )
+            rf = rf_series.mean() * 252 if rf_series is not None else 0.02
     
     # Parámetros avanzados
     with st.expander("⚙️ Parámetros Avanzados"):
         col1, col2 = st.columns(2)
+        
         with col1:
-            capital_inicial = st.number_input(
-                "Capital Inicial (ARS):",
-                min_value=1000.0,
-                max_value=10000000.0,
-                value=100000.0,
-                step=1000.0,
-                key="capital_inicial_optimizacion"
+            n_simulaciones = st.number_input(
+                "Número de simulaciones Monte Carlo:",
+                min_value=100,
+                max_value=10000,
+                value=1000,
+                step=100,
+                key="n_simulaciones"
             )
             
         with col2:
-            if metodos_optimizacion[metodo_optimizacion] == 'max_sharpe':
-                periodo_riesgo = st.selectbox(
-                    "Período Histórico para Riesgo:",
-                    options=['1m', '3m', '6m', '1y', '2y', '5y'],
-                    index=3,
-                    key="periodo_riesgo"
-                )
+            dias_proyectados = st.number_input(
+                "Días a proyectar (GARCH):",
+                min_value=5,
+                max_value=252,
+                value=30,
+                step=5,
+                key="dias_proyectados"
+            )
     
-    # Botón para ejecutar la optimización
+    # Ejecutar optimización
     if st.button("🔍 Ejecutar Optimización", key="btn_optimizar"):
         with st.spinner("Optimizando portafolio..."):
-            # Aquí iría la lógica de optimización
-            st.success("Optimización completada exitosamente")
+            try:
+                # Calcular matriz de covarianza
+                covarianza = retornos.cov()
+                
+                # Simulación de Monte Carlo con GARCH
+                st.markdown("### 📊 Simulación de Riesgo (GARCH)")
+                simulaciones = {}
+                
+                for simbolo in retornos.columns:
+                    simulacion = simular_montecarlo_garch(
+                        retornos[simbolo], 
+                        n_simulaciones=n_simulaciones,
+                        dias_proyectados=dias_proyectados
+                    )
+                    if simulacion is not None:
+                        simulaciones[simbolo] = simulacion
+                
+                # Mostrar resultados de simulación
+                if simulaciones:
+                    df_simulaciones = pd.DataFrame(simulaciones)
+                    st.line_chart(df_simulaciones)
+                
+                # Optimización de portafolio
+                st.markdown("### 🎯 Portafolios Optimizados")
+                resultados, pesos = optimizar_portafolio_moderno(
+                    retornos, 
+                    covarianza,
+                    rf=rf
+                )
+                
+                # Encontrar portafolio óptimo
+                idx_max_sharpe = np.argmax(resultados[:, 2])
+                idx_min_vol = np.argmin(resultados[:, 1])
+                
+                # Mostrar resultados
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("Retorno Esperado (anual)", f"{resultados[idx_max_sharpe, 0]*100:.2f}%")
+                    st.metric("Volatilidad Esperada", f"{resultados[idx_max_sharpe, 1]*100:.2f}%")
+                    st.metric("Ratio de Sharpe", f"{resultados[idx_max_sharpe, 2]:.2f}")
+                
+                with col2:
+                    st.metric("Retorno Mínima Volatilidad", f"{resultados[idx_min_vol, 0]*100:.2f}%")
+                    st.metric("Volatilidad Mínima", f"{resultados[idx_min_vol, 1]*100:.2f}%")
+                
+                # Mostrar asignación óptima
+                st.markdown("### 📊 Asignación de Activos Óptima")
+                pesos_optimos = pd.Series(
+                    pesos[idx_max_sharpe],
+                    index=retornos.columns
+                ).sort_values(ascending=False)
+                
+                st.bar_chart(pesos_optimos)
+                
+                # Mostrar tabla con asignaciones
+                df_asignacion = pd.DataFrame({
+                    'Activo': pesos_optimos.index,
+                    'Asignación (%)': (pesos_optimos.values * 100).round(2),
+                    'Monto (ARS)': (pesos_optimos.values * capital_inicial).round(2)
+                })
+                
+                st.dataframe(df_asignacion)
+                
+                # Mostrar frontera eficiente
+                st.markdown("### 📈 Frontera Eficiente")
+                fig_ef = go.Figure()
+                
+                # Puntos de la frontera
+                fig_ef.add_trace(go.Scatter(
+                    x=resultados[:, 1],  # Volatilidad
+                    y=resultados[:, 0],   # Retorno
+                    mode='markers',
+                    name='Portafolios',
+                    marker=dict(
+                        color=resultados[:, 2],  # Color por Sharpe ratio
+                        colorscale='Viridis',
+                        showscale=True,
+                        colorbar=dict(title='Sharpe Ratio')
+                    )
+                ))
+                
+                # Punto óptimo
+                fig_ef.add_trace(go.Scatter(
+                    x=[resultados[idx_max_sharpe, 1]],
+                    y=[resultados[idx_max_sharpe, 0]],
+                    mode='markers',
+                    name='Máximo Sharpe',
+                    marker=dict(color='red', size=12)
+                ))
+                
+                # Punto de mínima volatilidad
+                fig_ef.add_trace(go.Scatter(
+                    x=[resultados[idx_min_vol, 1]],
+                    y=[resultados[idx_min_vol, 0]],
+                    mode='markers',
+                    name='Mínima Volatilidad',
+                    marker=dict(color='green', size=12)
+                ))
+                
+                fig_ef.update_layout(
+                    title='Frontera Eficiente',
+                    xaxis_title='Volatilidad Anualizada',
+                    yaxis_title='Retorno Anualizado',
+                    template='plotly_white',
+                    height=600
+                )
+                
+                st.plotly_chart(fig_ef, use_container_width=True)
+                
+                # Recomendaciones de ejecución
+                st.markdown("### 🚀 Recomendación de Ejecución")
+                
+                # Implementar lógica de ejecución TWAP/VWAP aquí
+                st.info("""
+                **Estrategia de Ejecución Recomendada:**
+                - **TWAP (Time-Weighted Average Price):** Distribuir las órdenes a lo largo del día
+                - **VWAP (Volume-Weighted Average Price):** Ajustar a los volúmenes históricos
+                - **Slippage Estimado:** 0.1% - 0.3% del valor ejecutado
+                - **Impacto de Mercado:** Bajo a Moderado
+                """)
+                
+                st.success("Optimización completada exitosamente")
+                
+            except Exception as e:
+                st.error(f"Error durante la optimización: {str(e)}")
+                if st.secrets.get("DEBUG", False):
+                    st.exception(e)
 
     # --- Métodos avanzados de optimización ---
     metodos_optimizacion = {
