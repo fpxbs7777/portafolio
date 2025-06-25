@@ -1919,7 +1919,7 @@ class PortfolioManager:
             symbol: Asset symbol
             total_shares: Total shares to execute
             volume_profile: Dict with time buckets and volume percentages
-                          Example: {'09:00-09:30': 0.047, '09:30-10:00': 0.052, ...}
+                          Example: {'09:00-10:00': 0.047, '10:00-11:00': 0.052, ...}
         """
         execution_plan = {}
         for bucket, pct in volume_profile.items():
@@ -2013,6 +2013,22 @@ class PortfolioManager:
             print(f"Placing {quantity} {side} FloatPeg order for {symbol} with offset")
             # In real implementation, this would connect to broker API
             return {'status': 'pending', 'order_id': '12346'}
+    
+    def show_analysis_interface(self):
+        """Muestra la interfaz de análisis técnico"""
+        st.header("📈 Análisis Técnico")
+        
+        if hasattr(self, 'returns') and self.returns is not None:
+            st.subheader("Retornos Diarios")
+            st.line_chart(self.returns)
+            
+            st.subheader("Estadísticas")
+            st.dataframe(self.returns.describe())
+            
+            st.subheader("Correlaciones")
+            st.dataframe(self.returns.corr())
+        else:
+            st.warning("Primero cargue los datos para realizar el análisis")
     
     def optimize_random_universe(self, capital_ars, num_assets=10, panels=['acciones', 'cedears'], 
                                start_date='2021-01-01', end_date=None):
@@ -2307,33 +2323,62 @@ class PortfolioManager:
                         st.error("Ingrese un símbolo y precio válidos")
 
 def main():
+    # Configuración existente
     st.set_page_config(
-        page_title="Portfolio Manager",
+        page_title="IOL Portfolio Analyzer",
         page_icon="📊",
         layout="wide",
         initial_sidebar_state="expanded"
     )
     
-    # Initialize portfolio manager
-    pm = PortfolioManager()
+    # Inicialización con manejo de errores
+    try:
+        pm = PortfolioManager()
+    except Exception as e:
+        st.error(f"Error inicializando PortfolioManager: {str(e)}")
+        st.stop()
     
-    # Sidebar navigation
-    st.sidebar.title("Navegación")
-    app_mode = st.sidebar.radio("Seleccione módulo", 
-                              ["Análisis", "Optimización", "Trading Algos", "Reportes"])
+    # Navegación principal
+    st.sidebar.title("Menú Principal")
+    menu = st.sidebar.radio(
+        "Secciones",
+        ["Dashboard", "Análisis", "Optimización", "Trading", "Reportes"]
+    )
     
-    if app_mode == "Análisis":
-        pm.show_analysis_interface()
-    elif app_mode == "Optimización":
-        pm.show_optimization_interface()
-    elif app_mode == "Trading Algos":
-        pm.show_trading_interface()  # This will show our trading algorithms
-    elif app_mode == "Reportes":
-        pm.show_reports_interface()
-    
-    # Add footer
+    # Manejo de cada sección con try-except
+    try:
+        if menu == "Dashboard":
+            if hasattr(pm, 'show_dashboard'):
+                pm.show_dashboard()
+            else:
+                st.warning("Módulo Dashboard no implementado aún")
+        elif menu == "Análisis":
+            pm.show_analysis_interface()
+        elif menu == "Optimización":
+            if hasattr(pm, 'show_optimization'):
+                pm.show_optimization()
+            else:
+                st.warning("Módulo Optimización no implementado aún")
+        elif menu == "Trading":
+            if hasattr(pm, 'show_trading_interface'):
+                pm.show_trading_interface()
+            else:
+                st.warning("Módulo Trading no implementado aún")
+        elif menu == "Reportes":
+            if hasattr(pm, 'show_reports'):
+                pm.show_reports()
+            else:
+                st.warning("Módulo Reportes no implementado aún")
+    except Exception as e:
+        st.error(f"Error en el módulo {menu}: {str(e)}")
+        
+    # Footer
     st.sidebar.markdown("---")
-    st.sidebar.info("Portfolio Manager v2.0 | 2023")
+    st.sidebar.caption("Portfolio Manager v2.0 | 2023")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Error crítico: {str(e)}")
+        st.stop()
