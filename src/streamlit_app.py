@@ -1454,7 +1454,7 @@ class PortfolioManager:
                     size=n_days
                 )
                 
-                # Asegurar que los retornos sean razonables
+                # Asegurarse de que los retornos sean razonables
                 daily_returns = np.clip(daily_returns, -0.3, 0.3)
                 
                 # Calcular trayectoria de precios
@@ -1641,7 +1641,11 @@ class PortfolioManager:
         
         # 4. Riesgo (VaR)
         var_levels = np.arange(1, 11) * 10  # 10% a 100%
-        var_values = [np.percentile(final_returns, level) for level in var_levels]
+        returns_data = self.returns.get(symbol, pd.Series())
+        if not returns_data.empty:
+            var_values = [np.percentile(returns_data, level) for level in var_levels]
+        else:
+            var_values = [0 for _ in var_levels]
         
         fig.add_trace(
             go.Bar(
