@@ -1009,7 +1009,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                             
                         fechas.append(fecha)
                         precios.append(precio_float)
-                        
                     except (ValueError, TypeError) as e:
                         print(f"  - Error al convertir datos: {e}")
                         continue
@@ -1113,7 +1112,6 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
                     if not pd.isna(fecha):
                         fechas.append(fecha)
                         precios.append(float(precio))
-                        
                 except (ValueError, TypeError, AttributeError) as e:
                     continue
             
@@ -2098,3 +2096,169 @@ class PortfolioManager:
             print(f"Placing {quantity} {side} FloatPeg order for {symbol} with offset")
             # In real implementation, this would connect to broker API
             return {'status': 'pending', 'order_id': '12346'}
+    
+    def optimize_random_universe(self, capital_ars, num_assets=10, panels=['acciones', 'cedears'], 
+                               start_date='2021-01-01', end_date=None):
+        """
+        Optimize portfolio using random ticker selection with capital constraints
+        
+        Args:
+            capital_ars: Available capital in ARS
+            num_assets: Number of assets to select per panel
+            panels: List of panels to select from (e.g. ['acciones', 'cedears'])
+            start_date: Start date for historical data
+            end_date: End date for historical data (default: today)
+        
+        Returns:
+            dict: {'selected_assets': list, 'portfolio_value': pd.Series, 
+                  'weights': dict, 'metrics': dict}
+        """
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            
+        # Get tokens
+        token_portador, token_refresco = self._get_tokens()
+        if not token_portador:
+            return {'error': 'Failed to get API tokens'}
+            
+        # Get tickers by panel
+        tickers_by_panel, _ = self._get_tickers_by_panel(token_portador, panels, 'Argentina')
+        
+        # Select random assets within capital constraints
+        selected_assets = []
+        remaining_capital = capital_ars
+        
+        for panel in panels:
+            if panel not in tickers_by_panel:
+                continue
+                
+            # Shuffle and select assets
+            tickers = tickers_by_panel[panel]
+            random.shuffle(tickers)
+            
+            for symbol in tickers:
+                if len(selected_assets) >= num_assets:
+                    break
+                    
+                # Get historical data
+                data = self._get_historical_data(symbol, 'BCBA', start_date, end_date, token_portador)
+                if not data or len(data) == 0:
+                    continue
+                    
+                # Get last price
+                last_price = self._get_last_price(data)
+                if not last_price or last_price <= 0:
+                    continue
+                    
+                # Check if we can afford at least 1 share
+                if last_price <= remaining_capital:
+                    selected_assets.append({
+                        'symbol': symbol,
+                        'panel': panel,
+                        'price': last_price,
+                        'data': data
+                    })
+                    remaining_capital -= last_price
+        
+        if len(selected_assets) < 2:
+            return {'error': 'Not enough affordable assets found for given capital'}
+            
+        # Calculate portfolio metrics
+        portfolio_value = self._calculate_portfolio_value(selected_assets)
+        weights = {a['symbol']: a['price']/capital_ars for a in selected_assets}
+        
+        # Calculate risk metrics
+        returns = portfolio_value.pct_change().dropna()
+        metrics = {
+            'sharpe': self._calculate_sharpe(returns),
+            'volatility': returns.std(),
+            'max_drawdown': self._calculate_max_drawdown(portfolio_value)
+        }
+        
+        return {
+            'selected_assets': selected_assets,
+            'portfolio_value': portfolio_value,
+            'weights': weights,
+            'metrics': metrics
+        }
+        
+    def _get_tokens(self):
+        """Helper to get API tokens"""
+        token_url = 'https://api.invertironline.com/token'
+        payload = {
+            'username': self.username,
+            'password': self.password,
+            'grant_type': 'password'
+        }
+        response = requests.post(token_url, data=payload)
+        if response.status_code == 200:
+            tokens = response.json()
+            return tokens['access_token'], tokens['refresh_token']
+        return None, None
+        
+    def _get_tickers_by_panel(self, token, panels, country):
+        """Helper to get tickers by panel"""
+        tickers = {}
+        for panel in panels:
+            url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{country}/Operables'
+            response = requests.get(url, headers={'Authorization': f'Bearer {token}'})
+            if response.status_code == 200:
+                tickers[panel] = [t['simbolo'] for t in response.json().get('titulos', [])]
+        return tickers, None
+        
+    def _get_historical_data(self, symbol, market, start_date, end_date, token):
+        """Helper to get historical data"""
+        url = f"https://api.invertironline.com/api/v2/{market}/Titulos/{symbol}/Cotizacion/seriehistorica/{start_date}/{end_date}/SinAjustar"
+        response = requests.get(url, headers={'Authorization': f'Bearer {token}'})
+        return response.json() if response.status_code == 200 else None
+        
+    def _get_last_price(self, data):
+        """Helper to extract last price from historical data"""
+        if not data or not isinstance(data, list):
+            return None
+            
+        df = pd.DataFrame(data)
+        for col in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+            if col in df.columns:
+                return df[col].iloc[-1]
+        return None
+        
+    def _calculate_portfolio_value(self, assets):
+        """Helper to calculate portfolio value over time"""
+        portfolio = pd.DataFrame()
+        
+        for asset in assets:
+            df = pd.DataFrame(asset['data'])
+            for col in ['fecha', 'date', 'fechaHora']:
+                if col in df.columns:
+                    df['date'] = pd.to_datetime(df[col])
+                    break
+            
+            for col in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                if col in df.columns:
+                    df = df[['date', col]].rename(columns={col: 'price'})
+                    df['symbol'] = asset['symbol']
+                    portfolio = pd.concat([portfolio, df])
+                    break
+        
+        if portfolio.empty:
+            return None
+            
+        # Pivot and sum
+        portfolio = portfolio.pivot(index='date', columns='symbol', values='price')
+        return portfolio.sum(axis=1)
+        
+    def _calculate_sharpe(self, returns, risk_free_rate=0):
+        """Helper to calculate Sharpe ratio"""
+        if len(returns) == 0:
+            return 0
+        return (returns.mean() - risk_free_rate) / returns.std()
+        
+    def _calculate_max_drawdown(self, portfolio_value):
+        """Helper to calculate max drawdown"""
+        if portfolio_value is None or len(portfolio_value) == 0:
+            return 0
+            
+        cumulative = portfolio_value.cummax()
+        drawdown = (portfolio_value - cumulative) / cumulative
+        return drawdown.min()
