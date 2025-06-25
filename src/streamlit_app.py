@@ -2761,20 +2761,113 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         )
 
     show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
-    
+
+    # --- Scheduling y tipo de orden ---
+    scheduling_methods = {
+        'TWAP (Time-Weighted)': 'twap',
+        'VWAP (Volume-Weighted)': 'vwap'
+    }
+    scheduling_ui = st.selectbox(
+        "Algoritmo de Scheduling:",
+        options=list(scheduling_methods.keys()),
+        key="opt_scheduling"
+    )
+    scheduling = scheduling_methods[scheduling_ui]
+
+    order_types = {
+        'Market Order': 'mo',
+        'Limit Order': 'lo',
+        'Peg Order': 'peg',
+        'Float Peg': 'float_peg',
+        'Fill or Kill': 'fok',
+        'Immediate or Cancel': 'ioc'
+    }
+    order_type_ui = st.selectbox(
+        "Tipo de Orden:",
+        options=list(order_types.keys()),
+        key="opt_order_type"
+    )
+    order_type = order_types[order_type_ui]
+
     # Input de capital inicial
     capital_inicial = st.number_input(
         "Capital Inicial para Optimización (ARS):",
         min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
         help="El monto máximo a invertir en la selección y optimización de activos"
     )
-    
+
+    # Widget TradingView (requiere streamlit-tradingview-widget instalado)
+    try:
+        from streamlit_tradingview_ta import TradingViewWidget
+        st.subheader("Gráfico interactivo TradingView")
+        TradingViewWidget(
+            symbol="NASDAQ:AAPL",  # Cambia por símbolo seleccionado
+            interval="D",
+            theme="dark",
+            studies=["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
+            height=600,
+            width="100%",
+        )
+    except ImportError:
+        st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
+
     col1, col2 = st.columns(2)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-    
+
+    # --- Funciones de simulación de scheduling ---
+    def ejecutar_twap(volumen_total, n_intervalos):
+        return [volumen_total // n_intervalos] * (n_intervalos - 1) + [volumen_total - (volumen_total // n_intervalos) * (n_intervalos - 1)]
+
+    def ejecutar_vwap(volumen_total, perfil_volumen):
+        return [int(volumen_total * p) for p in perfil_volumen]
+
+    def simular_ejecucion(volumen, scheduling, order_type):
+        import numpy as np
+        import plotly.graph_objects as go
+        n_intervalos = 10
+        if scheduling == 'twap':
+            cantidades = ejecutar_twap(volumen, n_intervalos)
+        else:
+            # Simula un perfil de volumen creciente (como VWAP real)
+            perfil = np.linspace(1, 2, n_intervalos)
+            perfil = perfil / perfil.sum()
+            cantidades = ejecutar_vwap(volumen, perfil)
+        # Simula precios de ejecución
+        precio_base = 100
+        if order_type == 'mo':
+            precios = [precio_base + np.random.normal(0, 0.2) for _ in cantidades]
+        elif order_type == 'lo':
+            precios = [precio_base + np.random.normal(-0.1, 0.1) for _ in cantidades]
+        elif order_type == 'peg':
+            precios = [precio_base + np.sin(i/3)*0.05 for i in range(n_intervalos)]
+        elif order_type == 'float_peg':
+            precios = [precio_base + np.cos(i/3)*0.07 for i in range(n_intervalos)]
+        elif order_type == 'fok':
+            precios = [precio_base + 0.05 if np.random.rand() > 0.2 else None for _ in cantidades]
+        elif order_type == 'ioc':
+            precios = [precio_base + 0.03 if np.random.rand() > 0.1 else None for _ in cantidades]
+        else:
+            precios = [precio_base for _ in cantidades]
+        # Calcula ejecución efectiva
+        ejecucion = [c if p is not None else 0 for c, p in zip(cantidades, precios)]
+        precios_efectivos = [p if p is not None else 0 for p in precios]
+        # Métricas
+        total_ejecutado = sum(ejecucion)
+        precio_promedio = np.average([p for p in precios if p is not None], weights=[c for c,p in zip(cantidades, precios) if p is not None]) if total_ejecutado > 0 else 0
+        # Gráfico
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=list(range(1, n_intervalos+1)), y=ejecucion, name="Volumen Ejecutado"))
+        fig.add_trace(go.Scatter(x=list(range(1, n_intervalos+1)), y=precios_efectivos, name="Precio de Ejecución", yaxis="y2"))
+        fig.update_layout(title="Simulación de Ejecución ({} / {})".format(scheduling_ui, order_type_ui),
+                          xaxis_title="Intervalo",
+                          yaxis=dict(title="Volumen"),
+                          yaxis2=dict(title="Precio", overlaying="y", side="right"),
+                          legend=dict(orientation="h"))
+        return fig, total_ejecutado, precio_promedio
+
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
@@ -2881,6 +2974,13 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 st.plotly_chart(fig_frontier, use_container_width=True)
                             except Exception as e:
                                 st.warning(f"No se pudo calcular la frontera eficiente: {e}")
+                        # Simulación de ejecución
+                        st.markdown("---")
+                        st.subheader("Simulación de Ejecución Algorítmica")
+                        volumen_total = int(capital_inicial // portfolio_result.price if hasattr(portfolio_result, 'price') and portfolio_result.price > 0 else capital_inicial // 100)
+                        fig_exec, total_exec, avg_price = simular_ejecucion(volumen_total, scheduling, order_type)
+                        st.plotly_chart(fig_exec, use_container_width=True)
+                        st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
                     else:
                         st.error("❌ Error en la optimización")
                 else:
