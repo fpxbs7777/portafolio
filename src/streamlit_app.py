@@ -26,20 +26,152 @@ st.set_page_config(
 st.markdown("""
 <style>
     /* Estilos generales dark theme */
-    .stApp {
-        background-color: #0f172a;
-        color: #e2e8f0;
+    .stApp, 
+    .stApp > div[data-testid="stAppViewContainer"],
+    .stApp > div[data-testid="stAppViewContainer"] > div {
+        background-color: #0f172a !important;
+        color: #f8f9fa !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     
+    /* Asegurar que todo el texto sea claro */
+    body, p, div, span, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button,
+    .stSelectbox div[data-baseweb="select"] div,
+    .stDateInput div[data-baseweb="input"] input,
+    .stTextInput div[data-baseweb="input"] input,
+    .stNumberInput div[data-baseweb="input"] input,
+    .stTextArea div[data-baseweb="textarea"] textarea,
+    .stAlert,
+    .stAlert p,
+    .stAlert div,
+    .stAlert span,
+    .stTooltip,
+    .stTooltip p,
+    .stTooltip div,
+    .stTooltip span,
+    .stMarkdown,
+    .stMarkdown p,
+    .stMarkdown div,
+    .stMarkdown span,
+    a,
+    a:visited,
+    a:hover,
+    .st-bb,
+    .st-bj,
+    .st-bk,
+    .st-bn,
+    .st-bo,
+    .st-bp,
+    .st-bq,
+    .st-br,
+    .st-bs,
+    .st-bt {
+        color: #f8f9fa !important;
+    }
+    
+    /* Asegurar que los enlaces sean visibles */
+    a {
+        color: #4CAF50 !important;
+        text-decoration: none;
+    }
+    
+    a:hover {
+        color: #45a049 !important;
+        text-decoration: underline;
+    }
+    
+    /* Mejorar la visibilidad de los placeholders */
+    ::placeholder {
+        color: #94a3b8 !important;
+        opacity: 1;
+    }
+    
+    /* Mejorar la visibilidad de los tooltips */
+    .stTooltip {
+        background-color: #1e293b !important;
+        border: 1px solid #4CAF50 !important;
+        color: #f8f9fa !important;
+    }
+    
+    /* Estilos para menús desplegables */
+    div[data-baseweb="select"] div,
+    div[data-baseweb="select"] input,
+    div[data-baseweb="select"] div[role="button"],
+    div[data-baseweb="select"] div[role="listbox"] {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+        border-color: #4CAF50 !important;
+    }
+    
+    /* Estilos para las opciones de los menús desplegables */
+    div[role="option"] {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+    }
+    
+    div[role="option"]:hover {
+        background-color: #2d3748 !important;
+    }
+    
+    /* Mejorar la visibilidad de los mensajes */
+    .stAlert {
+        background-color: rgba(30, 41, 59, 0.9) !important;
+        border-left: 4px solid #4CAF50 !important;
+        border-radius: 8px !important;
+        padding: 1rem !important;
+    }
+    
+    /* Ajustes para gráficos */
+    .stPlotlyChart {
+        background-color: #1e293b !important;
+        border-radius: 8px;
+        padding: 1rem;
+    }
+    
+    /* Asegurar que los checkboxes y radio buttons sean visibles */
+    .stCheckbox > label,
+    .stRadio > label,
+    .stCheckbox > div,
+    .stRadio > div {
+        color: #f8f9fa !important;
+    }
+    
+    /* Estilos para las pestañas activas */
+    [data-baseweb="tab"] {
+        color: #f8f9fa !important;
+    }
+    
+    [data-baseweb="tab"]:hover {
+        background-color: #2d3748 !important;
+    }
+    
+    /* Estilos para los mensajes de error */
+    .stAlert.stAlert-warning {
+        border-left: 4px solid #ff9800 !important;
+    }
+    
+    .stAlert.stAlert-error {
+        border-left: 4px solid #f44336 !important;
+    }
+    
+    .stAlert.stAlert-success {
+        border-left: 4px solid #4CAF50 !important;
+    }
+    
+    .stAlert.stAlert-info {
+        border-left: 4px solid #2196F3 !important;
+    }
+    
     /* Mejora de tarjetas y métricas */
-    .stMetric {
-        background-color: #1e293b;
+    .stMetric, 
+    .stMetric > div > div,
+    .stMetric > div > div > div {
+        background-color: #1e293b !important;
         border-radius: 10px;
         padding: 15px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         border-left: 4px solid #4CAF50;
-        color: #e2e8f0 !important;
+        color: #f8f9fa !important;
     }
     
     .stMetric > div > div {
