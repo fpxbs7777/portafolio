@@ -1065,90 +1065,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         return None
         return None
 
-def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene la serie histórica de un Fondo Común de Inversión.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        simbolo (str): Símbolo del FCI
-        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
-        
-    Returns:
-        pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
-    """
-    try:
-        # Primero intentar obtener directamente la serie histórica
-        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
-        headers = {
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }
-        
-        response = requests.get(url_serie, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Procesar la respuesta según el formato esperado
-        if isinstance(data, list):
-            fechas = []
-            precios = []
-            
-            for item in data:
-                try:
-                    # Manejar diferentes formatos de fecha
-                    fecha_str = item.get('fecha') or item.get('fechaHora')
-                    if not fecha_str:
-                        continue
-                        
-                    # Obtener el valor de la cuota (puede venir en diferentes campos)
-                    precio = item.get('valorCuota') or item.get('precio') or item.get('ultimoPrecio')
-                    if not precio:
-                        continue
-                        
-                    # Convertir fecha
-                    fecha = parse_datetime_flexible(fecha_str)
-                    if not pd.isna(fecha):
-                        fechas.append(fecha)
-                        precios.append(float(precio))
-                except (ValueError, TypeError, AttributeError) as e:
-                    continue
-            
-            if fechas and precios:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                return df
-        
-        # Si no se pudo obtener la serie histórica, intentar obtener el último valor
-        try:
-            # Obtener información del FCI
-            url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
-            response = requests.get(url_fci, headers=headers, timeout=30)
-            response.raise_for_status()
-            fc_data = response.json()
-            
-            # Buscar el FCI por símbolo
-            fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
-            if fci and 'ultimoValorCuotaParte' in fci:
-                return pd.DataFrame({
-                    'fecha': [pd.Timestamp.now(tz='UTC')],
-                    'precio': [float(fci['ultimoValorCuotaParte'])]
-                })
-        except Exception:
-            pass
-        
-        st.warning(f"No se pudieron obtener datos históricos para el FCI {simbolo}")
-        return None
-        
-    except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión al obtener datos del FCI {simbolo}: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error inesperado al procesar el FCI {simbolo}: {str(e)}")
-        return None
-
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
     """
     Obtiene datos históricos para optimización usando el mercado específico de cada activo.
@@ -1893,9 +1809,9 @@ class PortfolioManager:
             # Inicializar el manager si no existe
             if not hasattr(self, 'manager') or not self.manager:
                 self.manager = manager(
-                    rics=self.returns.columns.tolist(),
-                    notional=self.notional,
-                    data=self.prices.to_dict('series')
+                    self.returns.columns.tolist(),
+                    self.notional,
+                    self.prices.to_dict('series')
                 )
                 
                 # Cargar datos y calcular covarianzas
@@ -2262,3 +2178,129 @@ class PortfolioManager:
         cumulative = portfolio_value.cummax()
         drawdown = (portfolio_value - cumulative) / cumulative
         return drawdown.min()
+
+class PortfolioManager:
+    def show_trading_interface(self):
+        """Display the trading algorithm interface in Streamlit"""
+        st.header("Algoritmos de Trading")
+        
+        # Create tabs for different algorithms
+        tab1, tab2, tab3, tab4 = st.tabs(["TWAP", "VWAP", "SOR", "Órdenes"])
+        
+        with tab1:
+            st.subheader("Time-Weighted Average Price (TWAP)")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                symbol = st.text_input("Símbolo", key="twap_symbol")
+            with col2:
+                shares = st.number_input("Acciones totales", min_value=1, value=1000, key="twap_shares")
+            with col3:
+                duration = st.number_input("Duración (horas)", min_value=1, value=4, key="twap_duration")
+            interval = st.slider("Intervalo (minutos)", 1, 60, 30, key="twap_interval")
+            
+            if st.button("Ejecutar TWAP", key="run_twap"):
+                if symbol:
+                    result = self.run_twap_schedule(symbol, shares, duration, interval)
+                    st.success(f"Programado: {result['intervals']} intervalos de {result['shares_per_interval']} acciones")
+                    st.json(result)
+                else:
+                    st.error("Ingrese un símbolo válido")
+        
+        with tab2:
+            st.subheader("Volume-Weighted Average Price (VWAP)")
+            col1, col2 = st.columns(2)
+            with col1:
+                symbol = st.text_input("Símbolo", key="vwap_symbol")
+                shares = st.number_input("Acciones totales", min_value=1, value=1000, key="vwap_shares")
+            
+            st.write("Perfil de volumen (porcentajes por horario)")
+            time_buckets = {
+                '09:00-10:00': 0.15,
+                '10:00-11:00': 0.20,
+                '11:00-12:00': 0.25,
+                '12:00-13:00': 0.15,
+                '13:00-14:00': 0.10,
+                '14:00-15:00': 0.10,
+                '15:00-16:00': 0.05
+            }
+            
+            # Let user adjust volume percentages
+            volume_profile = {}
+            for bucket, default in time_buckets.items():
+                volume_profile[bucket] = st.slider(
+                    f"% volumen {bucket}", 
+                    min_value=0.0, 
+                    max_value=1.0, 
+                    value=default
+                )
+            
+            if st.button("Ejecutar VWAP", key="run_vwap"):
+                if symbol and sum(volume_profile.values()) > 0:
+                    result = self.run_vwap_schedule(symbol, shares, volume_profile)
+                    st.success("Plan de ejecución VWAP creado")
+                    st.json(result)
+                else:
+                    st.error("Ingrese un símbolo y porcentajes válidos")
+        
+        with tab3:
+            st.subheader("Smart Order Routing")
+            col1, col2 = st.columns(2)
+            with col1:
+                symbol = st.text_input("Símbolo", key="sor_symbol")
+                quantity = st.number_input("Cantidad", min_value=1, value=1000, key="sor_quantity")
+                side = st.selectbox("Lado", ["buy", "sell"], key="sor_side")
+            
+            st.write("Configurar mercados")
+            venues = ["BYMA", "NYSE", "NASDAQ", "ROFEX"]
+            venue_config = {}
+            
+            for venue in venues:
+                with st.expander(venue):
+                    venue_config[venue] = {
+                        "ranking": st.number_input(f"Ranking {venue}", min_value=1, value=1, key=f"sor_rank_{venue}"),
+                        "cost": st.number_input(f"Costo {venue}", min_value=0.0, value=0.01, step=0.001, key=f"sor_cost_{venue}")
+                    }
+            
+            if st.button("Ejecutar SOR", key="run_sor"):
+                if symbol:
+                    result = self.smart_order_routing(
+                        symbol, 
+                        quantity, 
+                        "buy" if side == "Compra" else "sell",
+                        [{"name": k, **v} for k, v in venue_config.items()]
+                    )
+                    st.success("Órdenes distribuidas")
+                    st.json(result)
+                else:
+                    st.error("Ingrese un símbolo válido")
+        
+        with tab4:
+            st.subheader("Ejecución de Órdenes")
+            order_type = st.radio("Tipo de orden", ["Mercado", "Límite"], key="order_type")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                symbol = st.text_input("Símbolo", key="order_symbol")
+                quantity = st.number_input("Cantidad", min_value=1, value=100, key="order_quantity")
+                side = st.selectbox("Lado", ["buy", "sell"], key="order_side")
+            
+            if order_type == "Mercado":
+                market_type = st.selectbox("Tipo de mercado", ["IoC", "FoK"], key="market_type")
+                if st.button("Enviar Orden", key="send_market"):
+                    if symbol:
+                        result = self.execute_market_order(symbol, quantity, side, market_type)
+                        st.success(f"Orden ejecutada: {result['status']}")
+                        st.json(result)
+                    else:
+                        st.error("Ingrese un símbolo válido")
+            else:
+                with col2:
+                    price = st.number_input("Precio", min_value=0.01, value=100.0, key="limit_price")
+                limit_type = st.selectbox("Tipo", ["Peg", "FloatPeg"], key="limit_type")
+                if st.button("Enviar Orden", key="send_limit"):
+                    if symbol and price > 0:
+                        result = self.execute_limit_order(symbol, quantity, side, price, limit_type)
+                        st.success(f"Orden colocada: {result['status']}")
+                        st.json(result)
+                    else:
+                        st.error("Ingrese un símbolo y precio válidos")
