@@ -2811,13 +2811,68 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     except ImportError:
         st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+    with col3:
+        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
 
-    # --- Funciones de simulación de scheduling ---
+    def obtener_cotizaciones_cauciones(bearer_token):
+        import requests
+        import pandas as pd
+        url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {bearer_token}'
+        }
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            if 'titulos' in data:
+                return pd.DataFrame(data['titulos'])
+        return None
+
+    def graficar_cauciones(df):
+        import plotly.express as px
+        if df is not None and not df.empty:
+            fig = px.line(df, x='plazo', y='tasa', markers=True, title='Tasas de Cauciones por Plazo',
+                          labels={'plazo': 'Plazo (días)', 'tasa': 'Tasa (%)'})
+            fig.update_traces(mode='lines+markers')
+            return fig
+        return None
+
+    if 'bearer_token' not in st.session_state:
+        st.session_state['bearer_token'] = None
+    if mostrar_cauciones:
+        # Se asume que tienes funciones obtener_tokens y refrescar_token en tokens.py
+        try:
+            from tokens import obtener_tokens, refrescar_token
+            username = st.secrets.get('iol_user', '') if hasattr(st, 'secrets') else ''
+            password = st.secrets.get('iol_pass', '') if hasattr(st, 'secrets') else ''
+            if not username or not password:
+                username = st.text_input('Usuario IOL', type='default', value='')
+                password = st.text_input('Password IOL', type='password', value='')
+            if st.button('Obtener Token Cauciones'):
+                bearer_token, _ = obtener_tokens(username, password)
+                st.session_state['bearer_token'] = bearer_token
+            if st.session_state['bearer_token']:
+                df_cauciones = obtener_cotizaciones_cauciones(st.session_state['bearer_token'])
+                if df_cauciones is not None:
+                    st.dataframe(df_cauciones)
+                    fig_cauc = graficar_cauciones(df_cauciones)
+                    if fig_cauc:
+                        st.plotly_chart(fig_cauc, use_container_width=True)
+                    else:
+                        st.warning('No se pudieron graficar los datos de cauciones.')
+                else:
+                    st.warning('No se pudieron obtener cauciones. Verifica el token.')
+            else:
+                st.info('Ingresa usuario y password y haz click en "Obtener Token Cauciones".')
+        except ImportError:
+            st.warning('No se encontró el módulo tokens.py. Agrega tus funciones de autenticación.')
+     # --- Funciones de simulación de scheduling ---
     def ejecutar_twap(volumen_total, n_intervalos):
         return [volumen_total // n_intervalos] * (n_intervalos - 1) + [volumen_total - (volumen_total // n_intervalos) * (n_intervalos - 1)]
 
