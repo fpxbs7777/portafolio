@@ -2896,6 +2896,59 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
                             st.markdown("#### 📈 Métricas del Portafolio")
                             st.json(portfolio_result_aleatorio.get_metrics_dict())
+                    # --- Comparación visual de retornos ---
+                    st.markdown("#### 📊 Comparación de Distribución de Retornos")
+                    import plotly.graph_objects as go
+                    fig_hist = go.Figure()
+                    if portfolio_result_actual is not None:
+                        fig_hist.add_trace(go.Histogram(
+                            x=portfolio_result_actual.returns,
+                            name="Actual",
+                            opacity=0.6,
+                            marker_color="#1f77b4"
+                        ))
+                    if portfolio_result_aleatorio is not None:
+                        fig_hist.add_trace(go.Histogram(
+                            x=portfolio_result_aleatorio.returns,
+                            name="Aleatorio",
+                            opacity=0.6,
+                            marker_color="#ff7f0e"
+                        ))
+                    fig_hist.update_layout(
+                        barmode="overlay",
+                        title="Distribución de Retornos: Actual vs Aleatorio",
+                        xaxis_title="Retorno Diario",
+                        yaxis_title="Frecuencia",
+                        template="plotly_white"
+                    )
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                    # --- Comparación visual de frontera eficiente ---
+                    st.markdown("#### 📈 Comparación de Frontera Eficiente")
+                    try:
+                        fe_actual = None
+                        fe_aleatorio = None
+                        if manager_actual and manager_actual.load_data():
+                            fe_actual, ret_actual, vol_actual = manager_actual.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+                        if manager_aleatorio and manager_aleatorio.load_data():
+                            fe_aleatorio, ret_aleatorio, vol_aleatorio = manager_aleatorio.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+                        fig_fe = go.Figure()
+                        if fe_actual is not None:
+                            fig_fe.add_trace(go.Scatter(
+                                x=vol_actual, y=ret_actual, mode='lines', name='Frontera Actual', line=dict(color='#1f77b4')
+                            ))
+                        if fe_aleatorio is not None:
+                            fig_fe.add_trace(go.Scatter(
+                                x=vol_aleatorio, y=ret_aleatorio, mode='lines', name='Frontera Aleatoria', line=dict(color='#ff7f0e')
+                            ))
+                        fig_fe.update_layout(
+                            title="Frontera Eficiente: Actual vs Aleatorio",
+                            xaxis_title="Volatilidad Anual",
+                            yaxis_title="Retorno Anual",
+                            template="plotly_white"
+                        )
+                        st.plotly_chart(fig_fe, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"No se pudo calcular la frontera eficiente comparada: {e}")
                     st.info("Comparación completada. Puedes analizar cuál estrategia resulta superior en tu contexto.")
                     return
                 # --- Selección de universo de activos (modo tradicional) ---
