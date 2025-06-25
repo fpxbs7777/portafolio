@@ -667,6 +667,36 @@ def obtener_tasas_caucion(token_portador):
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
 
+def plot_cauciones_yield_curve(df):
+    import plotly.graph_objects as go
+    
+    # Filter and sort by plazo (days)
+    df_plot = df[['simbolo', 'plazo', 'ultimoPrecio']].copy()
+    df_plot['plazo'] = pd.to_numeric(df_plot['plazo'])
+    df_plot = df_plot.sort_values('plazo')
+    
+    # Create the plot
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=df_plot['plazo'],
+        y=df_plot['ultimoPrecio'],
+        mode='lines+markers',
+        name='Tasa',
+        line=dict(color='royalblue', width=2),
+        marker=dict(size=8)
+    ))
+    
+    fig.update_layout(
+        title='Curva de Tasas de Caución',
+        xaxis_title='Plazo (días)',
+        yaxis_title='Tasa (%)',
+        hovermode='x unified',
+        template='plotly_white'
+    )
+    
+    return fig
+
 def mostrar_tasas_caucion(token_portador):
     """
     Muestra las tasas de caución en una tabla y gráfico de curva de tasas
@@ -705,27 +735,7 @@ def mostrar_tasas_caucion(token_portador):
             
             # Crear gráfico de curva de tasas si hay suficientes puntos
             if len(df_cauciones) > 1:
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=df_cauciones['plazo_dias'],
-                    y=df_cauciones['tasa_limpia'],
-                    mode='lines+markers+text',
-                    name='Tasa',
-                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                    textposition='top center',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=10, color='#1f77b4')
-                ))
-                
-                fig.update_layout(
-                    title='Curva de Tasas de Caución',
-                    xaxis_title='Plazo (días)',
-                    yaxis_title='Tasa Anual (%)',
-                    template='plotly_white',
-                    height=500,
-                    showlegend=False
-                )
+                fig = plot_cauciones_yield_curve(df_cauciones)
                 
                 st.plotly_chart(fig, use_container_width=True)
             
