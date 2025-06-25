@@ -2838,10 +2838,14 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         import requests
         import pandas as pd
         url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
-{{ ... }}
-                          yaxis=dict(title="Volumen"),
-                          yaxis2=dict(title="Precio", overlaying="y", side="right"),
-                          legend=dict(orientation="h"))
+        # ... (resto del código de la función)
+        fig = go.Figure()
+        # ... (resto del código de la función)
+        fig.update_layout(
+            yaxis=dict(title="Volumen"),
+            yaxis2=dict(title="Precio", overlaying="y", side="right"),
+            legend=dict(orientation="h")
+        )
         return fig, total_ejecutado, precio_promedio
 
     if ejecutar_optimizacion:
