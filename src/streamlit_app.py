@@ -2773,6 +2773,40 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
         )
 
+    # --- Tasa libre de riesgo basada en benchmark ---
+    import yfinance as yf
+    benchmarks = {
+        'Bonos EEUU 10Y ("^TNX")': '^TNX',
+        'S&P 500 ETF (SPY)': 'SPY',
+        'Bonos Largos EEUU (TLT)': 'TLT',
+        'Bonos ARS (AL30)': 'AL30.BA',
+        'Bonos USD (GD30)': 'GD30.BA',
+        'Índice Merval (IMV)': 'IMV.BA',
+        'ETF Bonos Globales (AGG)': 'AGG',
+    }
+    benchmark_ui = st.selectbox(
+        "Benchmark para Tasa Libre de Riesgo:",
+        options=list(benchmarks.keys()),
+        key="opt_benchmark_rf"
+    )
+    benchmark_ticker = benchmarks[benchmark_ui]
+    periodo_rf = st.selectbox("Periodo histórico para tasa libre de riesgo:", options=["1y", "3y", "5y"], key="opt_rf_periodo")
+    try:
+        data_rf = yf.download(benchmark_ticker, period=periodo_rf, progress=False)
+        if 'Adj Close' in data_rf and len(data_rf) > 2:
+            rf_ret = (data_rf['Adj Close'][-1] / data_rf['Adj Close'][0]) ** (252/len(data_rf)) - 1
+            rf_ret = float(rf_ret)
+        else:
+            rf_ret = 0.02
+    except Exception:
+        rf_ret = 0.02
+    tasa_libre_riesgo = st.number_input(
+        "Tasa Libre de Riesgo (anual, decimal):",
+        min_value=-0.05, max_value=0.30, value=round(rf_ret,4), step=0.0001,
+        help=f"Calculada automáticamente del benchmark seleccionado ({benchmark_ticker}), pero editable si lo deseas.",
+        key="opt_rf_input"
+    )
+
     show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
 
     # --- Scheduling y tipo de orden ---
