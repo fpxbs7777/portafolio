@@ -2658,8 +2658,30 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
 
-    # --- Importación de función de selección aleatoria ---
-    from seleccion_aleatoria_activos_con_capital import seleccion_aleatoria_activos_con_capital
+    # --- Función de selección aleatoria de activos respetando el capital ---
+    def seleccion_aleatoria_activos_con_capital(activos, token, capital):
+        '''
+        Selecciona activos aleatorios de la lista sin superar el capital, usando el precio actual de cada activo.
+        Retorna lista de activos seleccionados y el total invertido.
+        '''
+        import random
+        random.shuffle(activos)
+        seleccionados = []
+        capital_restante = capital
+        total_invertido = 0
+        for activo in activos:
+            simbolo = activo.get('simbolo')
+            mercado = activo.get('mercado')
+            if not simbolo or not mercado:
+                continue
+            precio = obtener_precio_actual(token, mercado, simbolo)
+            if precio is not None and precio > 0 and precio <= capital_restante:
+                seleccionados.append({'simbolo': simbolo, 'mercado': mercado, 'precio': precio})
+                capital_restante -= precio
+                total_invertido += precio
+            if capital_restante < 1:
+                break
+        return seleccionados, total_invertido
     
     # Configuración de selección de universo y optimización
     col_sel, col1, col2, col3 = st.columns(4)
