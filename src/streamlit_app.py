@@ -8,7 +8,7 @@ from scipy.stats import norm
 import matplotlib.pyplot as plt
 import yfinance as yf
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import scipy.optimize as op
 from scipy import stats
 import random
