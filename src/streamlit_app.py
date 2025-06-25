@@ -93,23 +93,86 @@ st.markdown("""
         color: #f8f9fa !important;
     }
     
-    /* Estilos para menús desplegables */
+    /* Estilos para menús desplegables y listas */
+    /* Select principal */
     div[data-baseweb="select"] div,
     div[data-baseweb="select"] input,
     div[data-baseweb="select"] div[role="button"],
-    div[data-baseweb="select"] div[role="listbox"] {
+    div[data-baseweb="select"] div[role="listbox"],
+    div[data-baseweb="select"] div[role="combobox"] {
         background-color: #1e293b !important;
         color: #f8f9fa !important;
         border-color: #4CAF50 !important;
     }
     
-    /* Estilos para las opciones de los menús desplegables */
-    div[role="option"] {
+    /* Opciones del menú desplegable */
+    div[role="listbox"],
+    div[role="listbox"] ul,
+    div[role="listbox"] li,
+    div[role="option"],
+    div[role="option"] > div,
+    div[role="option"] > span,
+    div[role="listbox"] > div,
+    div[role="listbox"] > div > div {
         background-color: #1e293b !important;
         color: #f8f9fa !important;
     }
     
-    div[role="option"]:hover {
+    /* Efecto hover en opciones */
+    div[role="option"]:hover,
+    div[role="option"]:hover > div,
+    div[role="option"]:hover > span,
+    div[role="listbox"] > div:hover,
+    div[role="listbox"] > div > div:hover {
+        background-color: #2d3748 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Opción seleccionada */
+    div[aria-selected="true"],
+    div[aria-selected="true"] > div,
+    div[aria-selected="true"] > span {
+        background-color: #4CAF50 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Estilos para los elementos de entrada */
+    input[type="text"],
+    input[type="number"],
+    input[type="date"],
+    input[type="time"],
+    input[type="password"],
+    input[type="email"],
+    input[type="search"],
+    select,
+    textarea {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+        border-color: #4CAF50 !important;
+    }
+    
+    /* Placeholder */
+    input::placeholder,
+    textarea::placeholder {
+        color: #94a3b8 !important;
+        opacity: 1;
+    }
+    
+    /* Estilos para las listas de selección múltiple */
+    .stMultiSelect [role="button"],
+    .stMultiSelect [role="button"]:hover,
+    .stMultiSelect [role="button"]:focus {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+        border-color: #4CAF50 !important;
+    }
+    
+    .stMultiSelect [role="option"] {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+    }
+    
+    .stMultiSelect [role="option"]:hover {
         background-color: #2d3748 !important;
     }
     
