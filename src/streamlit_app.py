@@ -4027,7 +4027,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         return
     
     # Create tabs for different analysis types
-    tab1, tab2 = st.tabs(["📈 TradingView", "📊 VWMA Analysis"])
+    tab1, tab2, tab3 = st.tabs(["📈 TradingView", "📊 VWMA Analysis", "💰 Análisis de Cauciones"])
     
     with tab1:
         st.markdown("### 📊 Análisis con TradingView")
@@ -4258,6 +4258,225 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
             - Funciona mejor en mercados con tendencia definida
             - El retraso es inherente a todas las medias móviles
             """)
+
+    with tab3:
+        st.markdown("### 📊 Análisis de Cauciones")
+        
+        try:
+            with st.spinner('Obteniendo tasas de caución...'):
+                df_cauciones = obtener_tasas_caucion(token_acceso)
+                
+                if df_cauciones is None or df_cauciones.empty:
+                    st.warning("No se encontraron datos de tasas de caución.")
+                else:
+                    # Mostrar tabla de tasas
+                    st.dataframe(
+                        df_cauciones.rename(columns={
+                            'simbolo': 'Símbolo',
+                            'plazo': 'Plazo',
+                            'ultimoPrecio': 'Tasa',
+                            'plazo_dias': 'Días',
+                            'tasa_limpia': 'Tasa Anualizada',
+                            'monto': 'Monto',
+                            'moneda': 'Moneda'
+                        }),
+                        use_container_width=True,
+                        height=400
+                    )
+                    
+                    # Gráfico de curva de tasas
+                    st.markdown("### 📈 Curva de Tasas de Caución")
+                    
+                    fig = go.Figure()
+                    
+                    # Agregar línea de tasas
+                    fig.add_trace(go.Scatter(
+                        x=df_cauciones['plazo'],
+                        y=df_cauciones['tasa_limpia'],
+                        mode='lines+markers',
+                        name='Tasa Anualizada',
+                        line=dict(color='#4CAF50', width=2),
+                        hovertemplate='Plazo: %{x}<br>Tasa: %{y:.2f}%<extra></extra>'
+                    ))
+                    
+                    # Configuración del diseño
+                    fig.update_layout(
+                        title='Curva de Tasas de Caución',
+                        xaxis_title='Plazo',
+                        yaxis_title='Tasa Anualizada (%)',
+                        template='plotly_dark',
+                        height=500,
+                        showlegend=True
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Sección de optimización
+                    st.markdown("### 🚀 Optimización de Inversión")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        monto = st.number_input(
+                            "Monto a Invertir (ARS)",
+                            min_value=1000.0,
+                            value=100000.0,
+                            step=1000.0
+                        )
+                        
+                        plazo_min = st.select_slider(
+                            "Plazo Mínimo (días)",
+                            options=sorted(df_cauciones['plazo_dias'].unique()),
+                            value=min(df_cauciones['plazo_dias'].min(), 30)
+                        )
+                    
+                    with col2:
+                        plazo_max = st.select_slider(
+                            "Plazo Máximo (días)",
+                            options=sorted(df_cauciones['plazo_dias'].unique()),
+                            value=df_cauciones['plazo_dias'].max()
+                        )
+                        
+                        riesgo = st.select_slider(
+                            "Perfil de Riesgo",
+                            options=['Conservador', 'Moderado', 'Arriesgado'],
+                            value='Moderado'
+                        )
+                    
+                    # Botón para optimizar
+                    if st.button("🔍 Optimizar Inversión", key="btn_optimizar_caucion"):
+                        with st.spinner("Optimizando cartera de cauciones..."):
+                            try:
+                                # Filtrar por rango de plazos
+                                tasas_filtradas = df_cauciones[
+                                    (df_cauciones['plazo_dias'] >= plazo_min) & 
+                                    (df_cauciones['plazo_dias'] <= plazo_max)
+                                ].copy()
+                                
+                                if tasas_filtradas.empty:
+                                    st.warning("No hay tasas disponibles para el rango de plazos seleccionado.")
+                                else:
+                                    # Aplicar ponderación según perfil de riesgo
+                                    if riesgo == 'Conservador':
+                                        tasas_filtradas['Peso'] = tasas_filtradas['tasa_limpia'] ** 0.5
+                                    elif riesgo == 'Arriesgado':
+                                        tasas_filtradas['Peso'] = tasas_filtradas['tasa_limpia'] ** 2
+                                    else:  # Moderado
+                                        tasas_filtradas['Peso'] = tasas_filtradas['tasa_limpia']
+                                    
+                                    # Normalizar pesos
+                                    total_pesos = tasas_filtradas['Peso'].sum()
+                                    if total_pesos > 0:
+                                        tasas_filtradas['Asignación (%)'] = (tasas_filtradas['Peso'] / total_pesos) * 100
+                                        tasas_filtradas['Monto Asignado'] = (tasas_filtradas['Asignación (%)'] / 100) * monto
+                                        
+                                        # Mostrar resultados
+                                        st.success("✅ Optimización completada")
+                                        
+                                        # Mostrar asignación recomendada
+                                        st.markdown("### 💰 Asignación Recomendada")
+                                        
+                                        # Crear gráfico de torta
+                                        fig_pie = px.pie(
+                                            tasas_filtradas,
+                                            values='Asignación (%)',
+                                            names='plazo',
+                                            hover_data=['tasa_limpia'],
+                                            labels={'plazo': 'Plazo', 'tasa_limpia': 'TEA %'},
+                                            template='plotly_dark',
+                                            hole=0.4
+                                        )
+                                        
+                                        fig_pie.update_traces(
+                                            textposition='inside',
+                                            textinfo='percent+label',
+                                            hovertemplate='%{label}<br>TEA: %{customdata[0]:.2f}%<br>Asignación: %{percent}'
+                                        )
+                                        
+                                        st.plotly_chart(fig_pie, use_container_width=True)
+                                        
+                                        # Mostrar tabla detallada
+                                        st.markdown("### 📋 Detalle de la Asignación")
+                                        
+                                        # Formatear columnas para mejor visualización
+                                        df_detalle = tasas_filtradas[[
+                                            'plazo', 'tasa_limpia', 
+                                            'Asignación (%)', 'Monto Asignado'
+                                        ]].copy()
+                                        
+                                        # Agregar fila de totales
+                                        total_row = pd.DataFrame([{
+                                            'plazo': 'TOTAL',
+                                            'tasa_limpia': (tasas_filtradas['tasa_limpia'] * tasas_filtradas['Asignación (%)']).sum() / 100,
+                                            'Asignación (%)': 100,
+                                            'Monto Asignado': monto
+                                        }])
+                                        
+                                        df_detalle = pd.concat([df_detalle, total_row], ignore_index=True)
+                                        
+                                        # Aplicar formato
+                                        st.dataframe(
+                                            df_detalle.rename(columns={
+                                                'plazo': 'Plazo',
+                                                'tasa_limpia': 'Tasa Promedio Ponderada (%)',
+                                                'Asignación (%)': 'Asignación (%)',
+                                                'Monto Asignado': 'Monto Asignado (ARS)'
+                                            }),
+                                            column_config={
+                                                'Tasa Promedio Ponderada (%)': st.column_config.NumberColumn(
+                                                    format='%.2f%%'
+                                                ),
+                                                'Asignación (%)': st.column_config.NumberColumn(
+                                                    format='%.2f%%'
+                                                ),
+                                                'Monto Asignado (ARS)': st.column_config.NumberColumn(
+                                                    format='$%.2f'
+                                                )
+                                            },
+                                            use_container_width=True,
+                                            height=400
+                                        )
+                                        
+                                        # Calcular métricas de rentabilidad
+                                        tasa_promedio = (tasas_filtradas['tasa_limpia'] * tasas_filtradas['Asignación (%)']).sum() / 100
+                                        rendimiento_anual = (tasa_promedio / 100) * monto
+                                        plazo_promedio = (tasas_filtradas['plazo_dias'] * tasas_filtradas['Asignación (%)']).sum() / 100
+                                        
+                                        # Mostrar métricas en columnas
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Tasa Promedio Ponderada", f"{tasa_promedio:.2f}%")
+                                        with col2:
+                                            st.metric("Rendimiento Anual Estimado", f"ARS {rendimiento_anual:,.2f}")
+                                        with col3:
+                                            st.metric("Plazo Promedio Ponderado", f"{plazo_promedio:.1f} días")
+                                        
+                                        # Agregar botón de exportación
+                                        csv = tasas_filtradas[[
+                                            'plazo', 'tasa_limpia', 'Asignación (%)', 'Monto Asignado'
+                                        ]].rename(columns={
+                                            'plazo': 'Plazo',
+                                            'tasa_limpia': 'Tasa Anualizada (%)',
+                                            'Asignación (%)': 'Asignacion (%)',
+                                            'Monto Asignado': 'Monto Asignado (ARS)'
+                                        }).to_csv(index=False, encoding='utf-8-sig')
+                                        
+                                        st.download_button(
+                                            "💾 Exportar Asignación",
+                                            data=csv,
+                                            file_name=f"asignacion_cauciones_{date.today().strftime('%Y%m%d')}.csv",
+                                            mime='text/csv',
+                                            help="Descargar la asignación recomendada en formato CSV"
+                                        )
+                                    else:
+                                        st.warning("No se pudo calcular la asignación. Verifique los datos de tasas.")
+                                        
+                            except Exception as e:
+                                st.error(f"❌ Error al optimizar la cartera de cauciones: {str(e)}")
+                                st.exception(e)
+        except Exception as e:
+            st.error(f"Error al obtener tasas de caución: {str(e)}")
+            st.exception(e)
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
