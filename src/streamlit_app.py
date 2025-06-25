@@ -1871,20 +1871,6 @@ class PortfolioManager:
             st.error(f"Error al cargar datos: {str(e)}")
             st.exception(e)
             return False
-                portfolio_returns = (self.returns * weights).sum(axis=1)
-                portfolio_output = output(portfolio_returns, self.notional)
-                portfolio_output.weights = weights
-                portfolio_output.dataframe_allocation = pd.DataFrame({
-                    'rics': list(self.returns.columns),
-                    'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
-                })
-                
-                return portfolio_output
-            
-        except Exception as e:
-            return None
 
     def compute_portfolio(self, strategy='max_sharpe', target_return=None):
         """
