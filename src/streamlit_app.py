@@ -6,42 +6,6 @@ from plotly.subplots import make_subplots
 from arch import arch_model
 from scipy.stats import norm
 import matplotlib.pyplot as plt
-import scipy.stats as stats
-
-def graficar_histograma_portafolio(returns, portfolio_name="Portafolio del Cliente"):
-    """
-    Grafica el histograma de los retornos del portafolio y muestra estadísticas relevantes usando Streamlit.
-    """
-    import streamlit as st
-    import numpy as np
-    returns = np.array(returns)
-    mean_daily = np.mean(returns)
-    volatility_daily = np.std(returns)
-    sharpe_ratio = mean_daily / volatility_daily if volatility_daily != 0 else np.nan
-    var_95 = np.percentile(returns, 5)
-    skewness = stats.skew(returns)
-    kurtosis = stats.kurtosis(returns)
-    jb_stat, p_value = stats.jarque_bera(returns)
-    is_normal = p_value > 0.05
-    decimals = 4
-    str_title = f'{portfolio_name} Portfolio Returns\n' + \
-                'mean_daily=' + str(np.round(mean_daily, decimals)) + ' | ' + \
-                'volatility_daily=' + str(np.round(volatility_daily, decimals)) + '\n' + \
-                'sharpe_ratio=' + str(np.round(sharpe_ratio, decimals)) + ' | ' + \
-                'var_95=' + str(np.round(var_95, decimals)) + '\n' + \
-                'skewness=' + str(np.round(skewness, decimals)) + ' | ' + \
-                'kurtosis=' + str(np.round(kurtosis, decimals)) + '\n' + \
-                'JB stat=' + str(np.round(jb_stat, decimals)) + ' | ' + \
-                'p-value=' + str(np.round(p_value, decimals)) + '\n' + \
-                'is_normal=' + str(is_normal)
-    fig, ax = plt.subplots()
-    ax.hist(returns, bins=40, color='#4CAF50', alpha=0.8, edgecolor='black')
-    ax.set_title(str_title, fontsize=10)
-    ax.set_xlabel('Retorno')
-    ax.set_ylabel('Frecuencia')
-    st.pyplot(fig)
-    st.caption(str_title)
-
 import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta, date
@@ -705,136 +669,75 @@ def obtener_tasas_caucion(token_portador):
 
 def mostrar_tasas_caucion(token_portador):
     """
-    Muestra las tasas de caución en una tabla interactiva y gráfico de curva de tasas
+    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
     """
-    st.title("📈 Análisis de Tasas de Caución")
+    st.subheader("📊 Tasas de Caución")
     
     try:
         with st.spinner('Obteniendo tasas de caución...'):
             df_cauciones = obtener_tasas_caucion(token_portador)
             
+            # Verificar si se obtuvieron datos
             if df_cauciones is None or df_cauciones.empty:
                 st.warning("No se encontraron datos de tasas de caución.")
                 return
                 
-            # Asegurarse de que las columnas necesarias existan
-            if 'tasa_limpia' not in df_cauciones.columns and 'ultimoPrecio' in df_cauciones.columns:
-                df_cauciones['tasa_limpia'] = df_cauciones['ultimoPrecio']
-                
-            if 'plazo_dias' not in df_cauciones.columns and 'plazo' in df_cauciones.columns:
-                # Extraer días del string de plazo (ej: "1 día" -> 1)
-                df_cauciones['plazo_dias'] = df_cauciones['plazo'].str.extract('(\d+)').astype(float)
+            # Verificar columnas requeridas
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+            if missing_columns:
+                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+                return
             
-            # Ordenar por plazo
-            df_cauciones = df_cauciones.sort_values('plazo_dias')
-            
-            # Mostrar resumen rápido
-            st.markdown("### 📊 Resumen de Tasas")
-            
-            # Métricas principales
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-            with col2:
-                st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-            with col3:
-                st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-            with col4:
-                st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
-            
-            # Gráfico de curva de tasas
-            st.markdown("### 📈 Curva de Tasas")
-            
-            # Personalización del gráfico
-            fig = go.Figure()
-            
-            # Añadir línea principal
-            fig.add_trace(go.Scatter(
-                x=df_cauciones['plazo_dias'],
-                y=df_cauciones['tasa_limpia'],
-                mode='lines+markers+text',
-                name='Tasa',
-                text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                textposition='top center',
-                line=dict(color='#4CAF50', width=3),
-                marker=dict(size=10, color='#2E7D32'),
-                hovertemplate='<b>Plazo:</b> %{x} días<br>' +
-                              '<b>Tasa:</b> %{y:.2f}%<br>',
-            ))
-            
-            # Configuración del diseño
-            fig.update_layout(
-                title='Curva de Tasas de Caución por Plazo',
-                xaxis_title='Plazo (días)',
-                yaxis_title='Tasa Anual (%)',
-                template='plotly_white',
-                height=600,
-                hovermode='x unified',
-                showlegend=False,
-                xaxis=dict(
-                    tickmode='linear',
-                    tick0=0,
-                    dtick=1,
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='LightGrey'
-                ),
-                yaxis=dict(
-                    gridcolor='LightGrey',
-                    gridwidth=1
-                ),
-                margin=dict(l=50, r=50, t=80, b=50)
-            )
-            
-            # Mostrar el gráfico
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Tabla detallada
-            st.markdown("### 📋 Detalle de Tasas")
-            
-            # Formatear columnas para mostrar
-            df_display = df_cauciones.rename(columns={
-                'simbolo': 'Instrumento',
-                'plazo': 'Plazo',
-                'ultimoPrecio': 'Tasa (%)',
-                'plazo_dias': 'Días',
-                'tasa_limpia': 'Tasa Anual (%)',
-                'monto': 'Monto (MM)'
-            })
-            
-            # Seleccionar columnas a mostrar
-            columns_to_show = ['Instrumento', 'Plazo', 'Días', 'Tasa Anual (%)']
-            if 'Monto (MM)' in df_display.columns:
-                columns_to_show.append('Monto (MM)')
-            
-            # Mostrar tabla con formato condicional
+            # Mostrar tabla con las tasas
             st.dataframe(
-                df_display[columns_to_show],
+                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                             else ['simbolo', 'plazo', 'ultimoPrecio']]
+                .rename(columns={
+                    'simbolo': 'Instrumento',
+                    'plazo': 'Plazo',
+                    'ultimoPrecio': 'Tasa',
+                    'monto': 'Monto (en millones)'
+                }),
                 use_container_width=True,
-                height=min(400, 50 + len(df_cauciones) * 35),
-                column_config={
-                    'Tasa Anual (%)': st.column_config.NumberColumn(
-                        format="%.2f %"
-                    ),
-                    'Días': st.column_config.NumberColumn(
-                        format="%d"
-                    )
-                }
+                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
             )
             
-            # Exportar datos
-            csv = df_display.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Exportar a CSV",
-                data=csv,
-                file_name=f'tasas_caucion_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
-                mime='text/csv',
-                key='btn_exportar_tasas'
-            )
+            # Crear gráfico de curva de tasas si hay suficientes puntos
+            if len(df_cauciones) > 1:
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_cauciones['plazo_dias'],
+                    y=df_cauciones['tasa_limpia'],
+                    mode='lines+markers+text',
+                    name='Tasa',
+                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                    textposition='top center',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=10, color='#1f77b4')
+                ))
+                
+                fig.update_layout(
+                    title='Curva de Tasas de Caución',
+                    xaxis_title='Plazo (días)',
+                    yaxis_title='Tasa Anual (%)',
+                    template='plotly_white',
+                    height=500,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
             
-    except Exception as e:
-        st.error(f"Error al mostrar las tasas de caución: {str(e)}")
-        st.exception(e) if st.secrets.get("DEBUG", False) else None
+            # Mostrar resumen estadístico
+            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+                with col2:
+                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
                     
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
@@ -2719,63 +2622,6 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
-def descargar_datos_benchmark(simbolo, fecha_desde, fecha_hasta):
-    """Descarga datos históricos usando yfinance"""
-    try:
-        df = yf.download(simbolo, start=fecha_desde, end=fecha_hasta, progress=False)
-        if df.empty:
-            st.warning(f"No se encontraron datos para {simbolo}")
-            return None
-        return df['Adj Close'].pct_change().dropna()
-    except Exception as e:
-        st.error(f"Error al descargar datos de {simbolo}: {str(e)}")
-        return None
-
-def simular_montecarlo_garch(retornos, n_simulaciones=1000, dias_proyectados=252):
-    """Simulación de Monte Carlo con modelo GARCH"""
-    from arch import arch_model
-    import numpy as np
-    
-    try:
-        # Ajustar modelo GARCH(1,1)
-        model = arch_model(retornos, vol='Garch', p=1, q=1)
-        model_fit = model.fit(disp='off')
-        
-        # Simular retornos futuros
-        simulations = []
-        for _ in range(n_simulaciones):
-            sim_returns = model_fit.forecast(horizon=dias_proyectados, method='simulation')
-            simulations.append(sim_returns.variance.values[-1])
-            
-        return np.array(simulations).mean(axis=0)
-    except Exception as e:
-        st.error(f"Error en simulación GARCH: {str(e)}")
-        return None
-
-def optimizar_portafolio_moderno(retornos, covarianza, rf=0.02, n_portafolios=10000):
-    """Optimización de portafolio con frontera eficiente"""
-    import numpy as np
-    
-    n_activos = len(retornos.columns)
-    resultados = np.zeros((n_portafolios, 3 + n_activos))
-    pesos_array = []
-    
-    for i in range(n_portafolios):
-        pesos = np.random.random(n_activos)
-        pesos /= np.sum(pesos)
-        pesos_array.append(pesos)
-        
-        retorno_portafolio = np.sum(retornos.mean() * pesos) * 252
-        volatilidad_portafolio = np.sqrt(np.dot(pesos.T, np.dot(covarianza * 252, pesos)))
-        sharpe_ratio = (retorno_portafolio - rf) / volatilidad_portafolio if volatilidad_portafolio > 0 else 0
-        
-        resultados[i, 0] = retorno_portafolio
-        resultados[i, 1] = volatilidad_portafolio
-        resultados[i, 2] = sharpe_ratio
-        resultados[i, 3:] = pesos
-    
-    return resultados, np.array(pesos_array)
-
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
@@ -2798,278 +2644,109 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         simbolo = titulo.get('simbolo')
         mercado = titulo.get('mercado')
         tipo = titulo.get('tipo')
-        if simbolo and mercado:
-            activos_para_optimizacion.append({
-                'simbolo': simbolo,
-                'mercado': mercado,
-                'tipo': tipo,
-                'cantidad': activo.get('cantidad', 0),
-                'precio_actual': obtener_precio_actual(token_acceso, mercado, simbolo) or 0
-            })
+        if simbolo:
+            activos_para_optimizacion.append({'simbolo': simbolo,
+                                              'mercado': mercado,
+                                              'tipo': tipo})
     
     if not activos_para_optimizacion:
         st.warning("No se encontraron activos con información de mercado válida para optimizar.")
         return
     
-    # Configuración de fechas
-    hoy = datetime.now()
-    fecha_hasta = hoy.strftime('%Y-%m-%d')
-    fecha_desde = (hoy - timedelta(days=365*2)).strftime('%Y-%m-%d')
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
     
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
+
+    # --- Función de selección aleatoria de activos respetando el capital ---
+    def seleccion_aleatoria_activos_con_capital(activos, token, capital):
+        '''
+        Selecciona activos aleatorios de la lista sin superar el capital, usando el precio actual de cada activo.
+        Retorna lista de activos seleccionados y el total invertido.
+        '''
+        import random
+        random.shuffle(activos)
+        seleccionados = []
+        capital_restante = capital
+        total_invertido = 0
+        for activo in activos:
+            simbolo = activo.get('simbolo')
+            mercado = activo.get('mercado')
+            if not simbolo or not mercado:
+                continue
+            precio = obtener_precio_actual(token, mercado, simbolo)
+            if precio is not None and precio > 0 and precio <= capital_restante:
+                seleccionados.append({'simbolo': simbolo, 'mercado': mercado, 'precio': precio})
+                capital_restante -= precio
+                total_invertido += precio
+            if capital_restante < 1:
+                break
+        return seleccionados, total_invertido
     
-    # Descargar datos históricos
-    with st.spinner("Obteniendo datos históricos..."):
-        datos_historicos = {}
-        for activo in activos_para_optimizacion:
-            try:
-                # Usar IOL para datos locales, yfinance para internacionales
-                if activo['mercado'] in ['BCBA', 'ROFEX', 'MAE']:
-                    historico = obtener_serie_historica_iol(
-                        token_acceso,
-                        activo['mercado'],
-                        activo['simbolo'],
-                        fecha_desde,
-                        fecha_hasta
-                    )
-                else:
-                    # Para mercados internacionales, intentar con yfinance
-                    ticker = f"{activo['simbolo']}.BA" if activo['mercado'] == 'BYMA' else activo['simbolo']
-                    df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)
-                    if not df.empty:
-                        historico = df['Adj Close'].rename('precio').reset_index()
-                        historico = historico.rename(columns={'Date': 'fecha'})
-                    else:
-                        historico = None
-                
-                if historico is not None and not historico.empty:
-                    datos_historicos[activo['simbolo']] = historico
-            except Exception as e:
-                st.warning(f"Error al obtener datos para {activo['simbolo']}: {str(e)}")
-    
-    if not datos_historicos:
-        st.error("No se pudieron obtener datos históricos para ningún activo.")
-        return
-    
-    # Procesar retornos
-    retornos = pd.DataFrame()
-    for simbolo, datos in datos_historicos.items():
-        if 'precio' in datos.columns:
-            retornos[simbolo] = datos['precio'].pct_change().dropna()
-    
-    if retornos.empty:
-        st.error("No se pudieron calcular retornos para los activos.")
-        return
-    
-    # Configuración de la optimización
-    st.markdown("### ⚙️ Parámetros de Optimización")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Métodos de optimización
-        metodos_optimizacion = {
-            'Maximizar Ratio de Sharpe': 'max_sharpe',
-            'Minimizar Volatilidad': 'min_vol',
-            'Retorno Máximo': 'max_return',
-            'Pesos Iguales': 'equi_weight'
-        }
-        metodo_optimizacion = st.selectbox(
-            "Estrategia de Optimización:",
-            options=list(metodos_optimizacion.keys()),
-            key="metodo_optimizacion"
+    # Configuración de selección de universo y optimización
+    col_sel, col1, col2, col3 = st.columns(4)
+
+    with col_sel:
+        metodo_seleccion = st.selectbox(
+            "Método de Selección de Activos:",
+            options=['actual', 'aleatoria'],
+            format_func=lambda x: {
+                'actual': 'Portafolio actual',
+                'aleatoria': 'Selección aleatoria'
+            }[x]
         )
-        
-        # Capital inicial
+
+    # Mostrar input de capital y filtro de tipo de activo solo si corresponde
+    if metodo_seleccion == 'aleatoria':
+        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+        tipo_seleccionado = st.selectbox(
+            "Filtrar por tipo de activo:",
+            options=['Todos'] + tipos_disponibles,
+            format_func=lambda x: "Todos" if x == 'Todos' else x
+        )
+        activos_filtrados = activos_para_optimizacion
+        if tipo_seleccionado != 'Todos':
+            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
         capital_inicial = st.number_input(
-            "Capital Inicial (ARS):",
-            min_value=1000.0,
-            max_value=10000000.0,
-            value=100000.0,
-            step=1000.0,
-            key="capital_inicial_optimizacion"
+            "Capital Inicial para Optimización (ARS):",
+            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
+            help="El monto máximo a invertir en la selección aleatoria de activos"
         )
-    
-    with col2:
-        # Benchmark para tasa libre de riesgo
-        benchmarks = {
-            'Bonos EEUU 10Y (^TNX)': '^TNX',
-            'S&P 500 (SPY)': 'SPY',
-            'Bonos Argentinos (AL30)': 'AL30.BA',
-            'Tasa Fija Local (30% anual)': 'tasa_local_30'
-        }
-        benchmark_seleccionado = st.selectbox(
-            "Benchmark para Tasa Libre de Riesgo:",
-            options=list(benchmarks.keys()),
-            key="benchmark_rf"
+    else:
+        activos_filtrados = activos_para_optimizacion
+        capital_inicial = None
+
+        metodo_seleccion = st.selectbox(
+            "Método de Selección de Activos:",
+            options=['actual', 'aleatoria'],
+            format_func=lambda x: {
+                'actual': 'Portafolio actual',
+                'aleatoria': 'Selección aleatoria'
+            }[x]
         )
-        
-        # Obtener tasa libre de riesgo del benchmark seleccionado
-        if benchmarks[benchmark_seleccionado] == 'tasa_local_30':
-            rf = 0.30  # Tasa fija local del 30% anual
+
+    # Mostrar input de capital solo si corresponde
+    if metodo_seleccion == 'aleatoria':
+        # Filtro de tipo de activo solo en aleatoria
+        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+        tipo_seleccionado = st.selectbox(
+            "Filtrar por tipo de activo:",
+            options=['Todos'] + tipos_disponibles,
+            key="opt_tipo_activo"
+        )
+        if tipo_seleccionado != 'Todos':
+            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
         else:
-            rf_series = descargar_datos_benchmark(
-                benchmarks[benchmark_seleccionado], 
-                (hoy - timedelta(days=30)).strftime('%Y-%m-%d'),
-                fecha_hasta
-            )
-            rf = rf_series.mean() * 252 if rf_series is not None else 0.02
-    
-    # Parámetros avanzados
-    with st.expander("⚙️ Parámetros Avanzados"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            n_simulaciones = st.number_input(
-                "Número de simulaciones Monte Carlo:",
-                min_value=100,
-                max_value=10000,
-                value=1000,
-                step=100,
-                key="n_simulaciones"
-            )
-            
-        with col2:
-            dias_proyectados = st.number_input(
-                "Días a proyectar (GARCH):",
-                min_value=5,
-                max_value=252,
-                value=30,
-                step=5,
-                key="dias_proyectados"
-            )
-    
-    # Ejecutar optimización
-    if st.button("🔍 Ejecutar Optimización", key="btn_optimizar"):
-        with st.spinner("Optimizando portafolio..."):
-            try:
-                # Calcular matriz de covarianza
-                covarianza = retornos.cov()
-                
-                # Simulación de Monte Carlo con GARCH
-                st.markdown("### 📊 Simulación de Riesgo (GARCH)")
-                simulaciones = {}
-                
-                for simbolo in retornos.columns:
-                    simulacion = simular_montecarlo_garch(
-                        retornos[simbolo], 
-                        n_simulaciones=n_simulaciones,
-                        dias_proyectados=dias_proyectados
-                    )
-                    if simulacion is not None:
-                        simulaciones[simbolo] = simulacion
-                
-                # Mostrar resultados de simulación
-                if simulaciones:
-                    df_simulaciones = pd.DataFrame(simulaciones)
-                    st.line_chart(df_simulaciones)
-                
-                # Optimización de portafolio
-                st.markdown("### 🎯 Portafolios Optimizados")
-                resultados, pesos = optimizar_portafolio_moderno(
-                    retornos, 
-                    covarianza,
-                    rf=rf
-                )
-                
-                # Encontrar portafolio óptimo
-                idx_max_sharpe = np.argmax(resultados[:, 2])
-                idx_min_vol = np.argmin(resultados[:, 1])
-                
-                # Mostrar resultados
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.metric("Retorno Esperado (anual)", f"{resultados[idx_max_sharpe, 0]*100:.2f}%")
-                    st.metric("Volatilidad Esperada", f"{resultados[idx_max_sharpe, 1]*100:.2f}%")
-                    st.metric("Ratio de Sharpe", f"{resultados[idx_max_sharpe, 2]:.2f}")
-                
-                with col2:
-                    st.metric("Retorno Mínima Volatilidad", f"{resultados[idx_min_vol, 0]*100:.2f}%")
-                    st.metric("Volatilidad Mínima", f"{resultados[idx_min_vol, 1]*100:.2f}%")
-                
-                # Mostrar asignación óptima
-                st.markdown("### 📊 Asignación de Activos Óptima")
-                pesos_optimos = pd.Series(
-                    pesos[idx_max_sharpe],
-                    index=retornos.columns
-                ).sort_values(ascending=False)
-                
-                st.bar_chart(pesos_optimos)
-                
-                # Mostrar tabla con asignaciones
-                df_asignacion = pd.DataFrame({
-                    'Activo': pesos_optimos.index,
-                    'Asignación (%)': (pesos_optimos.values * 100).round(2),
-                    'Monto (ARS)': (pesos_optimos.values * capital_inicial).round(2)
-                })
-                
-                st.dataframe(df_asignacion)
-                
-                # Mostrar frontera eficiente
-                st.markdown("### 📈 Frontera Eficiente")
-                fig_ef = go.Figure()
-                
-                # Puntos de la frontera
-                fig_ef.add_trace(go.Scatter(
-                    x=resultados[:, 1],  # Volatilidad
-                    y=resultados[:, 0],   # Retorno
-                    mode='markers',
-                    name='Portafolios',
-                    marker=dict(
-                        color=resultados[:, 2],  # Color por Sharpe ratio
-                        colorscale='Viridis',
-                        showscale=True,
-                        colorbar=dict(title='Sharpe Ratio')
-                    )
-                ))
-                
-                # Punto óptimo
-                fig_ef.add_trace(go.Scatter(
-                    x=[resultados[idx_max_sharpe, 1]],
-                    y=[resultados[idx_max_sharpe, 0]],
-                    mode='markers',
-                    name='Máximo Sharpe',
-                    marker=dict(color='red', size=12)
-                ))
-                
-                # Punto de mínima volatilidad
-                fig_ef.add_trace(go.Scatter(
-                    x=[resultados[idx_min_vol, 1]],
-                    y=[resultados[idx_min_vol, 0]],
-                    mode='markers',
-                    name='Mínima Volatilidad',
-                    marker=dict(color='green', size=12)
-                ))
-                
-                fig_ef.update_layout(
-                    title='Frontera Eficiente',
-                    xaxis_title='Volatilidad Anualizada',
-                    yaxis_title='Retorno Anualizado',
-                    template='plotly_white',
-                    height=600
-                )
-                
-                st.plotly_chart(fig_ef, use_container_width=True)
-                
-                # Recomendaciones de ejecución
-                st.markdown("### 🚀 Recomendación de Ejecución")
-                
-                # Implementar lógica de ejecución TWAP/VWAP aquí
-                st.info("""
-                **Estrategia de Ejecución Recomendada:**
-                - **TWAP (Time-Weighted Average Price):** Distribuir las órdenes a lo largo del día
-                - **VWAP (Volume-Weighted Average Price):** Ajustar a los volúmenes históricos
-                - **Slippage Estimado:** 0.1% - 0.3% del valor ejecutado
-                - **Impacto de Mercado:** Bajo a Moderado
-                """)
-                
-                st.success("Optimización completada exitosamente")
-                
-            except Exception as e:
-                st.error(f"Error durante la optimización: {str(e)}")
-                if st.secrets.get("DEBUG", False):
-                    st.exception(e)
+            activos_filtrados = activos_para_optimizacion
+        capital_inicial = st.number_input(
+            "Capital Inicial para Optimización (ARS):",
+            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
+            help="El monto máximo a invertir en la selección aleatoria de activos",
+            key="opt_capital_aleatoria"
+        )
+    else:
+        activos_filtrados = activos_para_optimizacion
+        capital_inicial = None
 
     # --- Métodos avanzados de optimización ---
     metodos_optimizacion = {
@@ -3095,45 +2772,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             min_value=0.01, value=0.10, step=0.01, format="%.4f",
             help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
         )
-
-    # --- Tasa libre de riesgo basada en benchmark ---
-    import yfinance as yf
-    benchmarks = {
-        'Bonos EEUU 10Y ("^TNX")': '^TNX',
-        'S&P 500 ETF (SPY)': 'SPY',
-        'Bonos Largos EEUU (TLT)': 'TLT',
-        'Bonos ARS (AL30)': 'AL30.BA',
-        'Bonos USD (GD30)': 'GD30.BA',
-        'Índice Merval (IMV)': 'IMV.BA',
-        'ETF Bonos Globales (AGG)': 'AGG',
-    }
-    benchmark_ui = st.selectbox(
-        "Benchmark para Tasa Libre de Riesgo:",
-        options=list(benchmarks.keys()),
-        key="opt_benchmark_rf"
-    )
-    benchmark_ticker = benchmarks[benchmark_ui]
-    periodo_rf = st.selectbox("Periodo histórico para tasa libre de riesgo:", options=["1y", "3y", "5y"], key="opt_rf_periodo_benchmark")
-    try:
-        data_rf = yf.download(benchmark_ticker, period=periodo_rf, progress=False)
-        if data_rf is not None and not data_rf.empty and 'Adj Close' in data_rf and len(data_rf) > 2:
-            fecha_inicio = data_rf.index[0]
-            fecha_fin = data_rf.index[-1]
-            st.info(f"Datos descargados desde: {fecha_inicio.date()} hasta {fecha_fin.date()} ({len(data_rf)} días)")
-            rf_ret = (data_rf['Adj Close'][-1] / data_rf['Adj Close'][0]) ** (252/len(data_rf)) - 1
-            rf_ret = float(rf_ret)
-        else:
-            st.warning("No se pudieron descargar datos históricos válidos para el benchmark y período seleccionado.")
-            rf_ret = 0.02
-    except Exception as ex:
-        st.warning(f"Error al descargar datos de tasa libre de riesgo: {ex}")
-        rf_ret = 0.02
-    tasa_libre_riesgo = st.number_input(
-        "Tasa Libre de Riesgo (anual, decimal):",
-        min_value=-0.05, max_value=0.30, value=round(rf_ret,4), step=0.0001,
-        help=f"Calculada automáticamente del benchmark seleccionado ({benchmark_ticker}), pero editable si lo deseas.",
-        key="opt_rf_input"
-    )
 
     show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
 
@@ -3197,9 +2835,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     def obtener_cotizaciones_cauciones(bearer_token):
         import requests
         import pandas as pd
-        import matplotlib.pyplot as plt
-        import numpy as np
-        from datetime import datetime
         url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
         headers = {
             'Accept': 'application/json',
@@ -3208,23 +2843,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             data = response.json()
-            df = pd.DataFrame(data['titulos'])
-            df['plazo_dias'] = pd.to_numeric(df['plazo'].str.extract('(\d+)')[0])
-            df = df.sort_values('plazo_dias')
-            plt.figure(figsize=(12, 6))
-            plt.plot(df['plazo_dias'], df['ultimoPrecio'], marker='o', linestyle='-', color='b')
-            plt.title('Curva de Tasas - Cauciones', fontsize=14, fontweight='bold')
-            plt.xlabel('Plazo (días)', fontsize=12)
-            plt.ylabel('Tasa (%)', fontsize=12)
-            plt.grid(True, linestyle='--', alpha=0.7)
-            for i, txt in enumerate(df['ultimoPrecio']):
-                plt.annotate(f"{txt:.2f}%", 
-                            (df['plazo_dias'].iloc[i], df['ultimoPrecio'].iloc[i]),
-                            textcoords="offset points",
-                            xytext=(0,10),
-                            ha='center')
-            plt.tight_layout()
-            plt.show()
+            if 'titulos' in data:
+                return pd.DataFrame(data['titulos'])
         return None
 
     def graficar_cauciones(df):
@@ -3254,64 +2874,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                               legend=dict(orientation="h"))
             return fig
         return None
-
-    def graficar_curva_tasas(df):
-        """
-        Genera un gráfico de la curva de tasas para diferentes plazos
-        
-        Args:
-            df (pd.DataFrame): DataFrame con las columnas 'plazo' y 'ultimoPrecio'
-        """
-        try:
-            # Crear la figura
-            fig = go.Figure()
-            
-            # Ordenar por plazo
-            df = df.sort_values('plazo')
-            
-            # Agregar la línea de la curva de tasas
-            fig.add_trace(go.Scatter(
-                x=df['plazo'],
-                y=df['ultimoPrecio'],
-                mode='lines+markers+text',
-                name='Tasa',
-                text=df['ultimoPrecio'].round(2).astype(str) + '%',
-                textposition='top center',
-                line=dict(color='#4CAF50', width=2),
-                marker=dict(size=10, color='#2E7D32')
-            ))
-            
-            # Personalizar el diseño
-            fig.update_layout(
-                title=dict(
-                    text='<b>Curva de Tasas - Cauciones</b>',
-                    x=0.5,
-                    font=dict(size=20)
-                ),
-                xaxis=dict(
-                    title='Plazo',
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='LightGrey'
-                ),
-                yaxis=dict(
-                    title='Tasa Anual (%)',
-                    tickformat='.2f',
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='LightGrey'
-                ),
-                plot_bgcolor='white',
-                showlegend=False,
-                height=600,
-                margin=dict(l=50, r=50, t=80, b=50)
-            )
-            
-            # Mostrar el gráfico en Streamlit
-            st.plotly_chart(fig, use_container_width=True)
-            
-        except Exception as e:
-            st.error(f"Error al generar el gráfico de curva de tasas: {str(e)}")
 
     if 'bearer_token' not in st.session_state:
         st.session_state['bearer_token'] = None
