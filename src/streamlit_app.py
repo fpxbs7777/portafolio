@@ -2729,7 +2729,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format_func=lambda x: {
                 'actual': 'Portafolio actual',
                 'aleatoria': 'Selección aleatoria'
-            }[x]
+            }[x],
+            key="metodo_seleccion_activos"
         )
 
     # Mostrar input de capital y filtro de tipo de activo solo si corresponde
@@ -2738,47 +2739,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         tipo_seleccionado = st.selectbox(
             "Filtrar por tipo de activo:",
             options=['Todos'] + tipos_disponibles,
-            format_func=lambda x: "Todos" if x == 'Todos' else x
+            format_func=lambda x: "Todos" if x == 'Todos' else x,
+            key="filtro_tipo_activo"
         )
+        
         activos_filtrados = activos_para_optimizacion
         if tipo_seleccionado != 'Todos':
             activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
-        capital_inicial = st.number_input(
-            "Capital Inicial para Optimización (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección aleatoria de activos"
-        )
-    else:
-        activos_filtrados = activos_para_optimizacion
-        capital_inicial = None
-
-        metodo_seleccion = st.selectbox(
-            "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
-            format_func=lambda x: {
-                'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
-            }[x]
-        )
-
-    # Mostrar input de capital solo si corresponde
-    if metodo_seleccion == 'aleatoria':
-        # Filtro de tipo de activo solo en aleatoria
-        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
-        tipo_seleccionado = st.selectbox(
-            "Filtrar por tipo de activo:",
-            options=['Todos'] + tipos_disponibles,
-            key="opt_tipo_activo"
-        )
-        if tipo_seleccionado != 'Todos':
-            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
-        else:
-            activos_filtrados = activos_para_optimizacion
+            
         capital_inicial = st.number_input(
             "Capital Inicial para Optimización (ARS):",
             min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
             help="El monto máximo a invertir en la selección aleatoria de activos",
-            key="opt_capital_aleatoria"
+            key="capital_inicial_optimizacion"
         )
     else:
         activos_filtrados = activos_para_optimizacion
@@ -2910,6 +2883,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     def obtener_cotizaciones_cauciones(bearer_token):
         import requests
         import pandas as pd
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from datetime import datetime
         url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
         headers = {
             'Accept': 'application/json',
@@ -2918,8 +2894,23 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             data = response.json()
-            if 'titulos' in data:
-                return pd.DataFrame(data['titulos'])
+            df = pd.DataFrame(data['titulos'])
+            df['plazo_dias'] = pd.to_numeric(df['plazo'].str.extract('(\d+)')[0])
+            df = df.sort_values('plazo_dias')
+            plt.figure(figsize=(12, 6))
+            plt.plot(df['plazo_dias'], df['ultimoPrecio'], marker='o', linestyle='-', color='b')
+            plt.title('Curva de Tasas - Cauciones', fontsize=14, fontweight='bold')
+            plt.xlabel('Plazo (días)', fontsize=12)
+            plt.ylabel('Tasa (%)', fontsize=12)
+            plt.grid(True, linestyle='--', alpha=0.7)
+            for i, txt in enumerate(df['ultimoPrecio']):
+                plt.annotate(f"{txt:.2f}%", 
+                            (df['plazo_dias'].iloc[i], df['ultimoPrecio'].iloc[i]),
+                            textcoords="offset points",
+                            xytext=(0,10),
+                            ha='center')
+            plt.tight_layout()
+            plt.show()
         return None
 
     def graficar_cauciones(df):
@@ -2949,6 +2940,64 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                               legend=dict(orientation="h"))
             return fig
         return None
+
+    def graficar_curva_tasas(df):
+        """
+        Genera un gráfico de la curva de tasas para diferentes plazos
+        
+        Args:
+            df (pd.DataFrame): DataFrame con las columnas 'plazo' y 'ultimoPrecio'
+        """
+        try:
+            # Crear la figura
+            fig = go.Figure()
+            
+            # Ordenar por plazo
+            df = df.sort_values('plazo')
+            
+            # Agregar la línea de la curva de tasas
+            fig.add_trace(go.Scatter(
+                x=df['plazo'],
+                y=df['ultimoPrecio'],
+                mode='lines+markers+text',
+                name='Tasa',
+                text=df['ultimoPrecio'].round(2).astype(str) + '%',
+                textposition='top center',
+                line=dict(color='#4CAF50', width=2),
+                marker=dict(size=10, color='#2E7D32')
+            ))
+            
+            # Personalizar el diseño
+            fig.update_layout(
+                title=dict(
+                    text='<b>Curva de Tasas - Cauciones</b>',
+                    x=0.5,
+                    font=dict(size=20)
+                ),
+                xaxis=dict(
+                    title='Plazo',
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGrey'
+                ),
+                yaxis=dict(
+                    title='Tasa Anual (%)',
+                    tickformat='.2f',
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGrey'
+                ),
+                plot_bgcolor='white',
+                showlegend=False,
+                height=600,
+                margin=dict(l=50, r=50, t=80, b=50)
+            )
+            
+            # Mostrar el gráfico en Streamlit
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Error al generar el gráfico de curva de tasas: {str(e)}")
 
     if 'bearer_token' not in st.session_state:
         st.session_state['bearer_token'] = None
