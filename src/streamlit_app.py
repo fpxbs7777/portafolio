@@ -2793,12 +2793,17 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     periodo_rf = st.selectbox("Periodo histórico para tasa libre de riesgo:", options=["1y", "3y", "5y"], key="opt_rf_periodo_benchmark")
     try:
         data_rf = yf.download(benchmark_ticker, period=periodo_rf, progress=False)
-        if 'Adj Close' in data_rf and len(data_rf) > 2:
+        if data_rf is not None and not data_rf.empty and 'Adj Close' in data_rf and len(data_rf) > 2:
+            fecha_inicio = data_rf.index[0]
+            fecha_fin = data_rf.index[-1]
+            st.info(f"Datos descargados desde: {fecha_inicio.date()} hasta {fecha_fin.date()} ({len(data_rf)} días)")
             rf_ret = (data_rf['Adj Close'][-1] / data_rf['Adj Close'][0]) ** (252/len(data_rf)) - 1
             rf_ret = float(rf_ret)
         else:
+            st.warning("No se pudieron descargar datos históricos válidos para el benchmark y período seleccionado.")
             rf_ret = 0.02
-    except Exception:
+    except Exception as ex:
+        st.warning(f"Error al descargar datos de tasa libre de riesgo: {ex}")
         rf_ret = 0.02
     tasa_libre_riesgo = st.number_input(
         "Tasa Libre de Riesgo (anual, decimal):",
