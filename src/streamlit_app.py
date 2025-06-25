@@ -2657,6 +2657,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     fecha_hasta = st.session_state.fecha_hasta
     
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
+
+    # --- Importación de función de selección aleatoria ---
+    from seleccion_aleatoria_activos_con_capital import seleccion_aleatoria_activos_con_capital
     
     # Configuración de selección de universo y optimización
     col_sel, col1, col2, col3 = st.columns(4)
@@ -2670,6 +2673,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'aleatoria': 'Selección aleatoria'
             }[x]
         )
+
+    # Mostrar input de capital solo si corresponde
+    if metodo_seleccion == 'aleatoria':
+        capital_inicial = st.number_input(
+            "Capital Inicial para Optimización (ARS):",
+            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
+            help="El monto máximo a invertir en la selección aleatoria de activos"
+        )
+    else:
+        capital_inicial = None
 
     with col1:
         estrategia = st.selectbox(
@@ -2713,6 +2726,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 # --- Selección de universo de activos ---
                 if metodo_seleccion == 'aleatoria':
                     st.info("🔀 Selección aleatoria de activos respetando el capital inicial")
+                    if capital_inicial is None:
+                        st.warning("Debe ingresar el capital inicial para la selección aleatoria.")
+                        return
                     seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
                         activos_para_optimizacion, token_acceso, capital_inicial
                     )
