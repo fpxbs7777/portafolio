@@ -1,18 +1,27 @@
 import streamlit as st
-import requests
-import plotly.graph_objects as go
 import pandas as pd
-from plotly.subplots import make_subplots
-from arch import arch_model
-from scipy.stats import norm
-import matplotlib.pyplot as plt
-import yfinance as yf
 import numpy as np
-from datetime import datetime, timedelta, date
-import scipy.optimize as op
-from scipy import stats
-import random
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.express as px
+from datetime import datetime, date, timedelta, time
+import requests
+import json
+import os
+from typing import Dict, List, Optional, Tuple, Union, Any
+import scipy.stats as stats
+from scipy.optimize import minimize
 import warnings
+import arch
+from arch import arch_model
+import statsmodels.api as sm
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import norm, t, skew, kurtosis, jarque_bera
+import traceback
+from portfolio_strategies import EstrategiasTradingAlgoritmico, analizar_portafoliornings
 import streamlit.components.v1 as components
 
 warnings.filterwarnings('ignore')
@@ -1009,7 +1018,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                             
                         fechas.append(fecha)
                         precios.append(precio_float)
-                        
                     except (ValueError, TypeError) as e:
                         print(f"  - Error al convertir datos: {e}")
                         continue
@@ -1384,7 +1392,9 @@ class output:
             xaxis_title="Retorno",
             yaxis_title="Frecuencia",
             showlegend=False,
-            template='plotly_white'
+            template='plotly_white',
+            height=500,
+            margin=dict(l=50, r=50, t=80, b=50)
         )
         
         return fig
@@ -2614,6 +2624,8 @@ def mostrar_analisis_portafolio():
                 self.volumes = volumes
                 
             self.data_loaded = True
+            # Inicializar estrategias de trading algorítmico
+            self.inicializar_estrategias()
             return True
             
         except Exception as e:
@@ -2621,9 +2633,17 @@ def mostrar_analisis_portafolio():
             st.exception(e)
             return False
 
+    def inicializar_estrategias(self):
+        """Inicializa las estrategias de trading algorítmico."""
+        if self.historical_data:
+            self.estrategias = EstrategiasTradingAlgoritmico(self.historical_data)
+        else:
+            print("Advertencia: No hay datos históricos para inicializar estrategias")
+
     def compute_portfolio(self, strategy='max_sharpe', target_return=None):
         """
         Calcula la cartera óptima según la estrategia especificada.
+{{ ... }}
         
         Args:
             strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight')
