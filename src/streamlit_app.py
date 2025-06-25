@@ -2658,9 +2658,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
     
-    # Configuración de optimización extendida
-    col1, col2, col3 = st.columns(3)
-    
+    # Configuración de selección de universo y optimización
+    col_sel, col1, col2, col3 = st.columns(4)
+
+    with col_sel:
+        metodo_seleccion = st.selectbox(
+            "Método de Selección de Activos:",
+            options=['actual', 'aleatoria'],
+            format_func=lambda x: {
+                'actual': 'Portafolio actual',
+                'aleatoria': 'Selección aleatoria'
+            }[x]
+        )
+
     with col1:
         estrategia = st.selectbox(
             "Estrategia de Optimización:",
@@ -2700,26 +2710,39 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
-                # Crear manager de portafolio con la lista de activos (símbolo y mercado) y capital inicial
-                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta, capital=capital_inicial)
-                
-                # Cargar datos
+                # --- Selección de universo de activos ---
+                if metodo_seleccion == 'aleatoria':
+                    st.info("🔀 Selección aleatoria de activos respetando el capital inicial")
+                    seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
+                        activos_para_optimizacion, token_acceso, capital_inicial
+                    )
+                    if not seleccionados:
+                        st.warning("No se pudieron seleccionar activos aleatorios dentro del capital disponible.")
+                        return
+                    else:
+                        st.success(f"✅ Selección aleatoria completada. Total invertido: {total_invertido:.2f} ARS")
+                        df_sel = pd.DataFrame(seleccionados)
+                        df_sel['Peso (%)'] = (df_sel['precio'] / total_invertido) * 100
+                        st.dataframe(df_sel[['simbolo', 'mercado', 'precio', 'Peso (%)']], use_container_width=True)
+                        # Solo optimizar sobre los activos seleccionados
+                        universo_para_opt = [a for a in activos_para_optimizacion if a['simbolo'] in [s['simbolo'] for s in seleccionados]]
+                else:
+                    universo_para_opt = activos_para_optimizacion
+
+                # --- Optimización sobre el universo seleccionado ---
+                if not universo_para_opt:
+                    st.warning("No hay activos suficientes para optimizar.")
+                    return
+                manager_inst = PortfolioManager(universo_para_opt, token_acceso, fecha_desde, fecha_hasta, capital=capital_inicial)
                 if manager_inst.load_data():
-                    # Computar optimización
                     use_target = target_return if estrategia == 'markowitz' else None
                     portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
-                    
                     if portfolio_result:
                         st.success("✅ Optimización completada")
-                        
-                        # Mostrar advertencia si la suma de pesos supera el capital
                         total_invertido = (portfolio_result.weights * capital_inicial).sum()
                         if total_invertido > capital_inicial + 1e-6:
                             st.warning(f"La suma de pesos ({total_invertido:.2f}) supera el capital inicial ({capital_inicial:.2f})")
-                        
-                        # Mostrar resultados extendidos
                         col1, col2 = st.columns(2)
-                        
                         with col1:
                             st.markdown("#### 📊 Pesos Optimizados")
                             if portfolio_result.dataframe_allocation is not None:
@@ -2727,7 +2750,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 weights_df['Peso (%)'] = weights_df['weights'] * 100
                                 weights_df = weights_df.sort_values('Peso (%)', ascending=False)
                                 st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                        
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
                             metricas = portfolio_result.get_metrics_dict()
