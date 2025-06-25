@@ -2727,12 +2727,25 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 
     # Mostrar input de capital solo si corresponde
     if metodo_seleccion == 'aleatoria':
+        # Filtro de tipo de activo solo en aleatoria
+        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+        tipo_seleccionado = st.selectbox(
+            "Filtrar por tipo de activo:",
+            options=['Todos'] + tipos_disponibles,
+            key="opt_tipo_activo"
+        )
+        if tipo_seleccionado != 'Todos':
+            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+        else:
+            activos_filtrados = activos_para_optimizacion
         capital_inicial = st.number_input(
             "Capital Inicial para Optimización (ARS):",
             min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección aleatoria de activos"
+            help="El monto máximo a invertir en la selección aleatoria de activos",
+            key="opt_capital_aleatoria"
         )
     else:
+        activos_filtrados = activos_para_optimizacion
         capital_inicial = None
 
     # --- Métodos avanzados de optimización ---
@@ -2835,18 +2848,37 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         return None
 
     def graficar_cauciones(df):
-        import plotly.express as px
+        import plotly.graph_objects as go
+        import pandas as pd
         if df is not None and not df.empty:
-            fig = px.line(df, x='plazo', y='tasa', markers=True, title='Tasas de Cauciones por Plazo',
-                          labels={'plazo': 'Plazo (días)', 'tasa': 'Tasa (%)'})
-            fig.update_traces(mode='lines+markers')
+            # Agrupar por plazo y calcular tasa promedio
+            curva_prom = df.groupby('plazo')['tasa'].mean().reset_index()
+            fig = go.Figure()
+            # Scatter de todos los puntos
+            fig.add_trace(go.Scatter(
+                x=df['plazo'], y=df['tasa'],
+                mode='markers',
+                name='Tasa Individual',
+                marker=dict(color='rgba(99, 110, 250, 0.6)', size=8)
+            ))
+            # Línea curva promedio
+            fig.add_trace(go.Scatter(
+                x=curva_prom['plazo'], y=curva_prom['tasa'],
+                mode='lines+markers',
+                name='Curva Promedio',
+                line=dict(color='firebrick', width=3)
+            ))
+            fig.update_layout(title='Curva Promedio y Tasas de Cauciones por Plazo',
+                              xaxis_title='Plazo (días)',
+                              yaxis_title='Tasa (%)',
+                              legend=dict(orientation="h"))
             return fig
         return None
 
     if 'bearer_token' not in st.session_state:
         st.session_state['bearer_token'] = None
     if mostrar_cauciones:
-        # Se asume que tienes funciones obtener_tokens y refrescar_token en tokens.py
+        st.subheader('Cauciones: Curva Promedio y Tasas por Plazo')
         try:
             from tokens import obtener_tokens, refrescar_token
             username = st.secrets.get('iol_user', '') if hasattr(st, 'secrets') else ''
@@ -2860,12 +2892,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             if st.session_state['bearer_token']:
                 df_cauciones = obtener_cotizaciones_cauciones(st.session_state['bearer_token'])
                 if df_cauciones is not None:
-                    st.dataframe(df_cauciones)
                     fig_cauc = graficar_cauciones(df_cauciones)
                     if fig_cauc:
                         st.plotly_chart(fig_cauc, use_container_width=True)
-                    else:
-                        st.warning('No se pudieron graficar los datos de cauciones.')
+                    st.dataframe(df_cauciones)
                 else:
                     st.warning('No se pudieron obtener cauciones. Verifica el token.')
             else:
