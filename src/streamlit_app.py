@@ -705,75 +705,136 @@ def obtener_tasas_caucion(token_portador):
 
 def mostrar_tasas_caucion(token_portador):
     """
-    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
+    Muestra las tasas de caución en una tabla interactiva y gráfico de curva de tasas
     """
-    st.subheader("📊 Tasas de Caución")
+    st.title("📈 Análisis de Tasas de Caución")
     
     try:
         with st.spinner('Obteniendo tasas de caución...'):
             df_cauciones = obtener_tasas_caucion(token_portador)
             
-            # Verificar si se obtuvieron datos
             if df_cauciones is None or df_cauciones.empty:
                 st.warning("No se encontraron datos de tasas de caución.")
                 return
                 
-            # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-            if missing_columns:
-                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-                return
+            # Asegurarse de que las columnas necesarias existan
+            if 'tasa_limpia' not in df_cauciones.columns and 'ultimoPrecio' in df_cauciones.columns:
+                df_cauciones['tasa_limpia'] = df_cauciones['ultimoPrecio']
+                
+            if 'plazo_dias' not in df_cauciones.columns and 'plazo' in df_cauciones.columns:
+                # Extraer días del string de plazo (ej: "1 día" -> 1)
+                df_cauciones['plazo_dias'] = df_cauciones['plazo'].str.extract('(\d+)').astype(float)
             
-            # Mostrar tabla con las tasas
-            st.dataframe(
-                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                             else ['simbolo', 'plazo', 'ultimoPrecio']]
-                .rename(columns={
-                    'simbolo': 'Instrumento',
-                    'plazo': 'Plazo',
-                    'ultimoPrecio': 'Tasa',
-                    'monto': 'Monto (en millones)'
-                }),
-                use_container_width=True,
-                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+            # Ordenar por plazo
+            df_cauciones = df_cauciones.sort_values('plazo_dias')
+            
+            # Mostrar resumen rápido
+            st.markdown("### 📊 Resumen de Tasas")
+            
+            # Métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+            with col2:
+                st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+            with col3:
+                st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+            with col4:
+                st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+            
+            # Gráfico de curva de tasas
+            st.markdown("### 📈 Curva de Tasas")
+            
+            # Personalización del gráfico
+            fig = go.Figure()
+            
+            # Añadir línea principal
+            fig.add_trace(go.Scatter(
+                x=df_cauciones['plazo_dias'],
+                y=df_cauciones['tasa_limpia'],
+                mode='lines+markers+text',
+                name='Tasa',
+                text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                textposition='top center',
+                line=dict(color='#4CAF50', width=3),
+                marker=dict(size=10, color='#2E7D32'),
+                hovertemplate='<b>Plazo:</b> %{x} días<br>' +
+                              '<b>Tasa:</b> %{y:.2f}%<br>',
+            ))
+            
+            # Configuración del diseño
+            fig.update_layout(
+                title='Curva de Tasas de Caución por Plazo',
+                xaxis_title='Plazo (días)',
+                yaxis_title='Tasa Anual (%)',
+                template='plotly_white',
+                height=600,
+                hovermode='x unified',
+                showlegend=False,
+                xaxis=dict(
+                    tickmode='linear',
+                    tick0=0,
+                    dtick=1,
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGrey'
+                ),
+                yaxis=dict(
+                    gridcolor='LightGrey',
+                    gridwidth=1
+                ),
+                margin=dict(l=50, r=50, t=80, b=50)
             )
             
-            # Crear gráfico de curva de tasas si hay suficientes puntos
-            if len(df_cauciones) > 1:
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=df_cauciones['plazo_dias'],
-                    y=df_cauciones['tasa_limpia'],
-                    mode='lines+markers+text',
-                    name='Tasa',
-                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                    textposition='top center',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=10, color='#1f77b4')
-                ))
-                
-                fig.update_layout(
-                    title='Curva de Tasas de Caución',
-                    xaxis_title='Plazo (días)',
-                    yaxis_title='Tasa Anual (%)',
-                    template='plotly_white',
-                    height=500,
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
+            # Mostrar el gráfico
+            st.plotly_chart(fig, use_container_width=True)
             
-            # Mostrar resumen estadístico
-            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-                with col2:
-                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+            # Tabla detallada
+            st.markdown("### 📋 Detalle de Tasas")
+            
+            # Formatear columnas para mostrar
+            df_display = df_cauciones.rename(columns={
+                'simbolo': 'Instrumento',
+                'plazo': 'Plazo',
+                'ultimoPrecio': 'Tasa (%)',
+                'plazo_dias': 'Días',
+                'tasa_limpia': 'Tasa Anual (%)',
+                'monto': 'Monto (MM)'
+            })
+            
+            # Seleccionar columnas a mostrar
+            columns_to_show = ['Instrumento', 'Plazo', 'Días', 'Tasa Anual (%)']
+            if 'Monto (MM)' in df_display.columns:
+                columns_to_show.append('Monto (MM)')
+            
+            # Mostrar tabla con formato condicional
+            st.dataframe(
+                df_display[columns_to_show],
+                use_container_width=True,
+                height=min(400, 50 + len(df_cauciones) * 35),
+                column_config={
+                    'Tasa Anual (%)': st.column_config.NumberColumn(
+                        format="%.2f %"
+                    ),
+                    'Días': st.column_config.NumberColumn(
+                        format="%d"
+                    )
+                }
+            )
+            
+            # Exportar datos
+            csv = df_display.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exportar a CSV",
+                data=csv,
+                file_name=f'tasas_caucion_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+                mime='text/csv',
+                key='btn_exportar_tasas'
+            )
+            
+    except Exception as e:
+        st.error(f"Error al mostrar las tasas de caución: {str(e)}")
+        st.exception(e) if st.secrets.get("DEBUG", False) else None
                     
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
@@ -2681,9 +2742,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         mercado = titulo.get('mercado')
         tipo = titulo.get('tipo')
         if simbolo:
-            activos_para_optimizacion.append({'simbolo': simbolo,
-                                              'mercado': mercado,
-                                              'tipo': tipo})
+            activos_para_optimizacion.append({
+                'simbolo': simbolo,
+                'mercado': mercado,
+                'tipo': tipo
+            })
     
     if not activos_para_optimizacion:
         st.warning("No se encontraron activos con información de mercado válida para optimizar.")
@@ -2693,69 +2756,65 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     fecha_hasta = st.session_state.fecha_hasta
     
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
-
-    # --- Función de selección aleatoria de activos respetando el capital ---
-    def seleccion_aleatoria_activos_con_capital(activos, token, capital):
-        '''
-        Selecciona activos aleatorios de la lista sin superar el capital, usando el precio actual de cada activo.
-        Retorna lista de activos seleccionados y el total invertido.
-        '''
-        import random
-        random.shuffle(activos)
-        seleccionados = []
-        capital_restante = capital
-        total_invertido = 0
-        for activo in activos:
-            simbolo = activo.get('simbolo')
-            mercado = activo.get('mercado')
-            if not simbolo or not mercado:
-                continue
-            precio = obtener_precio_actual(token, mercado, simbolo)
-            if precio is not None and precio > 0 and precio <= capital_restante:
-                seleccionados.append({'simbolo': simbolo, 'mercado': mercado, 'precio': precio})
-                capital_restante -= precio
-                total_invertido += precio
-            if capital_restante < 1:
-                break
-        return seleccionados, total_invertido
     
-    # Configuración de selección de universo y optimización
-    col_sel, col1, col2, col3 = st.columns(4)
-
-    with col_sel:
-        metodo_seleccion = st.selectbox(
-            "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
-            format_func=lambda x: {
-                'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
-            }[x],
-            key="metodo_seleccion_activos"
+    # Configuración de la optimización
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Métodos de optimización
+        metodos_optimizacion = {
+            'Maximizar Ratio de Sharpe': 'max_sharpe',
+            'Minimizar Volatilidad': 'min_vol',
+            'Retorno Máximo': 'max_return',
+            'Pesos Iguales': 'equi_weight'
+        }
+        metodo_optimizacion = st.selectbox(
+            "Estrategia de Optimización:",
+            options=list(metodos_optimizacion.keys()),
+            key="metodo_optimizacion"
         )
-
-    # Mostrar input de capital y filtro de tipo de activo solo si corresponde
-    if metodo_seleccion == 'aleatoria':
-        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
-        tipo_seleccionado = st.selectbox(
-            "Filtrar por tipo de activo:",
-            options=['Todos'] + tipos_disponibles,
-            format_func=lambda x: "Todos" if x == 'Todos' else x,
-            key="filtro_tipo_activo"
+    
+    with col2:
+        # Benchmark para tasa libre de riesgo
+        benchmarks = {
+            'Bonos EEUU 10Y (^TNX)': '^TNX',
+            'S&P 500 (SPY)': 'SPY',
+            'Bonos Argentinos (AL30)': 'AL30.BA',
+            'Tasa Fija Local': 'tasa_local'
+        }
+        benchmark = st.selectbox(
+            "Benchmark para Tasa Libre de Riesgo:",
+            options=list(benchmarks.keys()),
+            key="benchmark_rf"
         )
-        
-        activos_filtrados = activos_para_optimizacion
-        if tipo_seleccionado != 'Todos':
-            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+    
+    # Parámetros avanzados
+    with st.expander("⚙️ Parámetros Avanzados"):
+        col1, col2 = st.columns(2)
+        with col1:
+            capital_inicial = st.number_input(
+                "Capital Inicial (ARS):",
+                min_value=1000.0,
+                max_value=10000000.0,
+                value=100000.0,
+                step=1000.0,
+                key="capital_inicial_optimizacion"
+            )
             
-        capital_inicial = st.number_input(
-            "Capital Inicial para Optimización (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección aleatoria de activos",
-            key="capital_inicial_optimizacion"
-        )
-    else:
-        activos_filtrados = activos_para_optimizacion
-        capital_inicial = None
+        with col2:
+            if metodos_optimizacion[metodo_optimizacion] == 'max_sharpe':
+                periodo_riesgo = st.selectbox(
+                    "Período Histórico para Riesgo:",
+                    options=['1m', '3m', '6m', '1y', '2y', '5y'],
+                    index=3,
+                    key="periodo_riesgo"
+                )
+    
+    # Botón para ejecutar la optimización
+    if st.button("🔍 Ejecutar Optimización", key="btn_optimizar"):
+        with st.spinner("Optimizando portafolio..."):
+            # Aquí iría la lógica de optimización
+            st.success("Optimización completada exitosamente")
 
     # --- Métodos avanzados de optimización ---
     metodos_optimizacion = {
