@@ -1464,8 +1464,8 @@ class PortfolioManager:
             expected_volatility = returns_paths.std(axis=1).mean()
             
             # Calcular métricas de riesgo
-            var_95 = np.percentile(returns_paths, 5)
-            cvar_95 = returns_paths[returns_paths <= var_95].mean()
+            var_95 = np.percentile(final_returns, 5)
+            cvar_95 = final_returns[final_returns <= var_95].mean()
             
             # Calcular drawdowns simulados
             max_drawdowns = []
@@ -1631,7 +1631,7 @@ class PortfolioManager:
         
         # 4. Riesgo (VaR)
         var_levels = np.arange(1, 11) * 10  # 10% a 100%
-        var_values = [np.percentile(returns_paths, level) for level in var_levels]
+        var_values = [np.percentile(final_returns, level) for level in var_levels]
         
         fig.add_trace(
             go.Bar(
