@@ -17,4 +17,4 @@ fpdf
 arch
 statsmodels
 tradingview
-widget
+
