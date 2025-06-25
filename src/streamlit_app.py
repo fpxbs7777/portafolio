@@ -2746,7 +2746,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     }
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
-        options=list(metodos_optimizacion.keys())
+        options=list(metodos_optimizacion.keys()),
+        key="opt_metodo_selectbox"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
