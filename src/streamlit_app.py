@@ -95,11 +95,13 @@ st.markdown("""
     
     /* Estilos para menús desplegables y listas */
     /* Select principal */
+    div[data-baseweb="select"],
     div[data-baseweb="select"] div,
     div[data-baseweb="select"] input,
     div[data-baseweb="select"] div[role="button"],
     div[data-baseweb="select"] div[role="listbox"],
-    div[data-baseweb="select"] div[role="combobox"] {
+    div[data-baseweb="select"] div[role="combobox"],
+    div[data-baseweb="select"] div[data-baseweb="select"] {
         background-color: #1e293b !important;
         color: #f8f9fa !important;
         border-color: #4CAF50 !important;
@@ -113,8 +115,32 @@ st.markdown("""
     div[role="option"] > div,
     div[role="option"] > span,
     div[role="listbox"] > div,
-    div[role="listbox"] > div > div {
+    div[role="listbox"] > div > div,
+    div[data-baseweb*="popover"] *,
+    div[data-baseweb*="popover"] div,
+    div[data-baseweb*="popover"] span,
+    div[data-baseweb*="popover"] li,
+    div[data-baseweb*="popover"] ul,
+    div[data-baseweb*="popover"] p,
+    div[data-baseweb*="popover"] a,
+    div[data-baseweb*="popover"] button,
+    div[data-baseweb*="popover"] input,
+    div[data-baseweb*="popover"] select,
+    div[data-baseweb*="popover"] option {
         background-color: #1e293b !important;
+        color: #f8f9fa !important;
+    }
+    
+    /* Asegurar que el texto dentro de los popovers sea visible */
+    div[data-baseweb*="popover"] {
+        background-color: #1e293b !important;
+        border: 1px solid #4CAF50 !important;
+    }
+    
+    /* Asegurar que el texto de las opciones sea visible */
+    div[role="option"] *,
+    div[role="option"] span,
+    div[role="option"] div {
         color: #f8f9fa !important;
     }
     
