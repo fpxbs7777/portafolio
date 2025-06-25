@@ -2417,15 +2417,35 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
     
-    with st.expander("🏦 Tasas de Caución", expanded=True):
-        if st.button("🔄 Actualizar Tasas"):
-            with st.spinner("Consultando tasas de caución..."):
-                tasas_caucion = obtener_tasas_caucion(token_acceso)
-            
-            if tasas_caucion is not None and not tasas_caucion.empty:
+    # Verificar si hay portafolio antes de continuar
     if not portafolio:
         st.error("No se pudo obtener el portafolio")
         return
+
+    # Obtener datos históricos
+    datos_historicos = {}
+    for simbolo in portafolio.keys():
+        # Determinar el mercado basado en el símbolo
+        mercado = detectar_mercado(None, simbolo)
+        
+        # Obtener datos históricos para cada activo
+        datos = obtener_serie_historica_iol(token_acceso, mercado, simbolo, 
+                                           str(st.session_state.fecha_desde), 
+                                           str(st.session_state.fecha_hasta))
+        if datos is not None and not datos.empty:
+            datos_historicos[simbolo] = datos
+
+    if not datos_historicos:
+        st.warning("No hay datos históricos disponibles para optimizar")
+        return
+
+    # Crear DataFrame con todos los precios
+    df_precios = pd.DataFrame()
+    for simbolo, datos in datos_historicos.items():
+        df_precios[simbolo] = datos['precio']
+
+    # Crear MarketPredictor
+    market_predictor = MarketPredictor(token_acceso, st.session_state.chart_widget)
     
     # Obtener datos históricos
     datos_historicos = {}
