@@ -2790,7 +2790,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         key="opt_benchmark_rf"
     )
     benchmark_ticker = benchmarks[benchmark_ui]
-    periodo_rf = st.selectbox("Periodo histórico para tasa libre de riesgo:", options=["1y", "3y", "5y"], key="opt_rf_periodo")
+    periodo_rf = st.selectbox("Periodo histórico para tasa libre de riesgo:", options=["1y", "3y", "5y"], key="opt_rf_periodo_benchmark")
     try:
         data_rf = yf.download(benchmark_ticker, period=periodo_rf, progress=False)
         if 'Adj Close' in data_rf and len(data_rf) > 2:
