@@ -2683,6 +2683,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 break
         return seleccionados, total_invertido
     
+    # --- Filtro por tipo de activo ---
+    tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+    tipo_seleccionado = st.selectbox(
+        "Filtrar por tipo de activo:",
+        options=['Todos'] + tipos_disponibles,
+        format_func=lambda x: "Todos" if x == 'Todos' else x
+    )
+    if tipo_seleccionado != 'Todos':
+        activos_para_optimizacion = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+
     # Configuración de selección de universo y optimización
     col_sel, col1, col2, col3 = st.columns(4)
 
