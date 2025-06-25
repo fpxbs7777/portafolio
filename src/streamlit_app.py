@@ -2517,17 +2517,75 @@ def mostrar_cotizaciones_mercado(token_acceso):
     
     # Recalcular la matriz de covarianza con los retornos logarítmicos
     cov_matrix = retornos_log.cov()
-                            with col_b:
-                                st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                                st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                                st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                                normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                                st.metric("Normalidad", normalidad)
-                        
-                        # Gráfico de distribución de retornos
-                        if portfolio_result.returns is not None:
-                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                            fig = portfolio_result.plot_histogram_streamlit()
+    
+    # Mostrar métricas en la UI
+    col_a, col_b = st.columns(2)
+    
+    with col_a:
+        st.subheader("Métricas de Riesgo y Retorno")
+        df_metrics = pd.DataFrame({
+            'Símbolo': list(retornos_esperados.keys()),
+            'Retorno Esperado': list(retornos_esperados.values()),
+            'Volatilidad': list(volatilidades.values())
+        })
+        st.dataframe(df_metrics.style.format({
+            'Retorno Esperado': '{:.2%}',
+            'Volatilidad': '{:.2%}'
+        }), use_container_width=True)
+    
+    with col_b:
+        st.subheader("Métricas de Simulación Monte Carlo")
+        df_mc = pd.DataFrame.from_dict({
+            k: v for k, v in mc_metrics.items()
+        }, orient='index')
+        df_mc.index.name = 'Símbolo'
+        df_mc.reset_index(inplace=True)
+        st.dataframe(df_mc.style.format({
+            'mean': '{:.2f}',
+            'std': '{:.2f}',
+            'var_95': '{:.2f}'
+        }), use_container_width=True)
+    
+    # Optimizar portafolio usando las métricas calculadas
+    try:
+        manager_inst = PortfolioManager(list(retornos_esperados.keys()), token_acceso, 
+                                     fecha_desde=st.session_state.fecha_desde, 
+                                     fecha_hasta=st.session_state.fecha_hasta)
+        
+        # Calcular portafolio optimizado
+        portfolio_result = manager_inst.compute_portfolio(
+            strategy='markowitz',
+            target_return=st.session_state.target_return
+        )
+        
+        if portfolio_result:
+            # Mostrar métricas del portafolio optimizado
+            metricas = portfolio_result.get_metrics_dict()
+            
+            # Mostrar métricas en dos columnas
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
+                st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
+                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+            
+            with col2:
+                st.metric("Skewness", f"{metricas['Skewness']:.4f}")
+                st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+                st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+                normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
+                st.metric("Normalidad", normalidad)
+            
+            # Gráfico de distribución de retornos
+            if portfolio_result.returns is not None:
+                st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
+                fig = portfolio_result.plot_histogram_streamlit()
+                st.plotly_chart(fig, use_container_width=True)
+            
+    except Exception as e:
+        st.error(f"Error al optimizar el portafolio: {str(e)}")
                             st.plotly_chart(fig, use_container_width=True)
                         
                         # Gráfico de pesos
