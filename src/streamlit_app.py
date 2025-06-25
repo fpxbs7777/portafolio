@@ -1019,6 +1019,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
             
             if fechas and precios:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                # Eliminar duplicados manteniendo el último
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
                 print(f"Datos procesados: {len(df)} registros válidos")
@@ -1828,7 +1829,7 @@ class PortfolioManager:
                 if portfolio_output is None:
                     st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
                     n_assets = len(self.returns.columns)
-                    weights = np.array([1/n_assets] * n_assets)
+                    weights = np.ones(n_assets) / n_assets
                     portfolio_returns = (self.returns * weights).sum(axis=1)
                     portfolio_output = output(portfolio_returns, self.notional)
                     portfolio_output.weights = weights
@@ -1843,7 +1844,7 @@ class PortfolioManager:
                 
             elif strategy == 'equi-weight':
                 n_assets = len(self.returns.columns)
-                weights = np.array([1/n_assets] * n_assets)
+                weights = np.ones(n_assets) / n_assets
                 portfolio_returns = (self.returns * weights).sum(axis=1)
                 portfolio_output = output(portfolio_returns, self.notional)
                 portfolio_output.weights = weights
@@ -2304,3 +2305,35 @@ class PortfolioManager:
                         st.json(result)
                     else:
                         st.error("Ingrese un símbolo y precio válidos")
+
+def main():
+    st.set_page_config(
+        page_title="Portfolio Manager",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Initialize portfolio manager
+    pm = PortfolioManager()
+    
+    # Sidebar navigation
+    st.sidebar.title("Navegación")
+    app_mode = st.sidebar.radio("Seleccione módulo", 
+                              ["Análisis", "Optimización", "Trading Algos", "Reportes"])
+    
+    if app_mode == "Análisis":
+        pm.show_analysis_interface()
+    elif app_mode == "Optimización":
+        pm.show_optimization_interface()
+    elif app_mode == "Trading Algos":
+        pm.show_trading_interface()  # This will show our trading algorithms
+    elif app_mode == "Reportes":
+        pm.show_reports_interface()
+    
+    # Add footer
+    st.sidebar.markdown("---")
+    st.sidebar.info("Portfolio Manager v2.0 | 2023")
+
+if __name__ == "__main__":
+    main()
