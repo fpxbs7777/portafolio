@@ -3,18 +3,17 @@ import requests
 import plotly.graph_objects as go
 import pandas as pd
 from plotly.subplots import make_subplots
-from datetime import date, timedelta, datetime
-import numpy as np
+from arch import arch_model
+from scipy.stats import norm
+import matplotlib.pyplot as plt
 import yfinance as yf
+import numpy as np
+from datetime import datetime, timedelta
 import scipy.optimize as op
 from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
-from arch import arch_model
-from arch.univariate import GARCH, Normal
-import matplotlib.pyplot as plt
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
 warnings.filterwarnings('ignore')
 
@@ -1447,113 +1446,6 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     
     return portfolios, valid_returns, volatilities
 
-class VolatilityAnalyzer:
-    def __init__(self, returns_series):
-        """
-        Inicializa el analizador de volatilidad con una serie de retornos.
-        
-        Args:
-            returns_series (pd.Series): Serie de tiempo de retornos diarios
-        """
-        self.returns = returns_series.dropna()
-        self.garch_model = None
-        self.forecast = None
-        self.simulated_returns = None
-    
-    def fit_garch(self, p=1, q=1):
-        """
-        Ajusta un modelo GARCH(p,q) a los retornos.
-        
-        Args:
-            p (int): Orden del componente ARCH
-            q (int): Orden del componente GARCH
-            
-        Returns:
-            arch.univariate.base.ARCHModelResult: Modelo GARCH ajustado
-        """
-        # Ajustar modelo GARCH(1,1) por defecto
-        self.garch_model = arch_model(
-            self.returns * 100,  # Multiplicar por 100 para mejor estabilidad numérica
-            vol='Garch',
-            p=p,
-            q=q,
-            dist='normal'
-        )
-        self.forecast = self.garch_model.fit(disp='off')
-        return self.forecast
-    
-    def plot_volatility(self):
-        """Grafica la volatilidad condicional estimada."""
-        if self.forecast is None:
-            raise ValueError("Primero debe ajustar el modelo GARCH")
-            
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(self.returns.index, self.forecast.conditional_volatility / 100, 
-               label='Volatilidad Condicional (GARCH)')
-        ax.set_title('Volatilidad Condicional Estimada')
-        ax.set_ylabel('Volatilidad')
-        ax.legend()
-        ax.grid(True)
-        return fig
-    
-    def monte_carlo_simulation(self, n_simulations=1000, days_ahead=30):
-        """
-        Realiza una simulación de Monte Carlo para predecir retornos futuros.
-        
-        Args:
-            n_simulations (int): Número de simulaciones a realizar
-            days_ahead (int): Número de días a simular
-            
-        Returns:
-            np.ndarray: Matriz de retornos simulados (días x simulaciones)
-        """
-        if self.forecast is None:
-            self.fit_garch()
-            
-        # Obtener la última varianza condicional
-        last_vol = self.forecast.conditional_volatility[-1] / 100  # Dividir por 100 por la escala
-        
-        # Generar retornos aleatorios usando distribución normal
-        np.random.seed(42)  # Para reproducibilidad
-        self.simulated_returns = np.random.normal(
-            loc=self.returns.mean(),
-            scale=last_vol,
-            size=(days_ahead, n_simulations)
-        )
-        
-        return self.simulated_returns
-    
-    def plot_simulation_results(self):
-        """Grafica los resultados de la simulación de Monte Carlo."""
-        if self.simulated_returns is None:
-            raise ValueError("Primero debe ejecutar la simulación de Monte Carlo")
-            
-        # Calcular trayectorias acumuladas
-        cum_returns = np.cumprod(1 + self.simulated_returns, axis=0)
-        
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Graficar algunas trayectorias de muestra
-        for i in range(min(100, self.simulated_returns.shape[1])):
-            ax.plot(cum_returns[:, i], color='blue', alpha=0.1)
-        
-        # Calcular y graficar percentiles
-        lower = np.percentile(cum_returns, 5, axis=1)
-        upper = np.percentile(cum_returns, 95, axis=1)
-        mean = np.mean(cum_returns, axis=1)
-        
-        ax.plot(mean, color='red', linewidth=2, label='Media')
-        ax.fill_between(range(len(mean)), lower, upper, color='red', alpha=0.2, label='Intervalo 90%')
-        
-        ax.set_title('Simulación de Monte Carlo - Trayectorias de Retorno')
-        ax.set_xlabel('Días')
-        ax.set_ylabel('Retorno Acumulado')
-        ax.legend()
-        ax.grid(True)
-        
-        return fig
-
-
 class PortfolioManager:
     def __init__(self, activos, token, fecha_desde, fecha_hasta):
         self.activos = activos
@@ -1563,142 +1455,422 @@ class PortfolioManager:
         self.data_loaded = False
         self.returns = None
         self.prices = None
+        self.volumes = None
         self.notional = 100000  # Valor nominal por defecto
         self.manager = None
-        self.volatility_analyzer = None
+        self.garch_models = {}
+        self.monte_carlo_results = {}
+        self.volatility_forecasts = {}
     
-    def load_data(self):
+    def analyze_volatility(self, symbol, returns, volumes=None, n_simulations=1000, n_days=30):
+        """
+        Analiza la volatilidad usando GARCH y simulación de Monte Carlo
+        
+        Args:
+            symbol (str): Símbolo del activo
+            returns (pd.Series): Serie de retornos
+            volumes (pd.Series, optional): Serie de volúmenes
+            n_simulations (int): Número de simulaciones Monte Carlo (default: 1000)
+            n_days (int): Número de días a pronosticar (default: 30)
+            
+        Returns:
+            dict: Resultados del análisis de volatilidad
+        """
         try:
-            # Convertir lista de activos a formato adecuado
-            symbols = []
-            markets = []
-            tipos = []
-            def detectar_mercado(tipo_raw: str, mercado_raw: str) -> str:
-                """
-                Determina el mercado basado en la información proporcionada.
+            # Asegurarse de que no haya valores NaN
+            returns = returns.dropna()
+            if len(returns) < 30:  # Mínimo de datos para un análisis significativo
+                st.warning(f"No hay suficientes datos para analizar la volatilidad de {symbol}")
+                return None
                 
-                Args:
-                    tipo_raw: Tipo de activo (no utilizado en esta versión)
-                    mercado_raw: Mercado del activo
-                    
-                Returns:
-                    str: Nombre del mercado normalizado
-                """
-                # Usar el mercado proporcionado o BCBA como valor por defecto
-                mercado = mercado_raw.strip().title() if mercado_raw.strip() else 'BCBA'
-                return mercado
+            # 1. Ajustar modelo GARCH(1,1)
+            garch_model = arch_model(
+                returns * 100,  # Multiplicar por 100 para mejorar la convergencia
+                vol='Garch',
+                p=1,
+                q=1,
+                dist='normal'
+            )
             
-            for activo in self.activos:
-                if isinstance(activo, dict):
-                    simbolo = activo.get('simbolo', '')
-                    tipo_raw = (activo.get('tipo') or '')
-                    mercado_raw = (activo.get('mercado') or '')
-                    
-                    if not simbolo:
-                        continue
-                    symbols.append(simbolo)
-                    tipos.append(tipo_raw)
-                    markets.append(detectar_mercado(tipo_raw, mercado_raw))
+            # Ajustar el modelo con supresión de salida
+            with st.spinner(f"Ajustando modelo GARCH para {symbol}..."):
+                garch_fit = garch_model.fit(disp='off')
+                
+            self.garch_models[symbol] = garch_fit
+            
+            # 2. Pronóstico de volatilidad
+            forecast = garch_fit.forecast(horizon=5)
+            forecast_volatility = np.sqrt(forecast.variance.iloc[-1] / 100)  # Deshacer el escalado
+            
+            # 3. Simulación de Monte Carlo
+            last_price = returns.iloc[-1] if hasattr(returns, 'iloc') else 1.0
+            last_vol = np.sqrt(garch_fit.conditional_volatility.iloc[-1] / 100)
+            
+            # Inicializar matrices para almacenar resultados
+            price_paths = np.zeros((n_simulations, n_days))
+            returns_paths = np.zeros((n_simulations, n_days))
+            
+            # Mostrar barra de progreso para simulaciones
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
+            
+            # Simular trayectorias de precios
+            for i in range(n_simulations):
+                # Actualizar barra de progreso
+                if i % 100 == 0:
+                    progress = (i + 1) / n_simulations
+                    progress_bar.progress(progress)
+                    progress_text.text(f"Simulando trayectorias: {i+1}/{n_simulations}")
+                
+                # Generar retornos aleatorios con la volatilidad estimada
+                daily_returns = np.random.normal(
+                    loc=returns.mean(),
+                    scale=last_vol,
+                    size=n_days
+                )
+                
+                # Asegurar que los retornos sean razonables
+                daily_returns = np.clip(daily_returns, -0.3, 0.3)
+                
+                # Calcular trayectoria de precios
+                price_path = last_price * (1 + daily_returns).cumprod()
+                
+                # Almacenar resultados
+                price_paths[i] = price_path
+                returns_paths[i] = daily_returns
+            
+            # Limpiar barra de progreso
+            progress_bar.empty()
+            progress_text.empty()
+            
+            # Calcular métricas de la simulación
+            final_prices = price_paths[:, -1]
+            expected_return = final_prices.mean() / last_price - 1
+            expected_volatility = returns_paths.std(axis=1).mean()
+            
+            # Calcular métricas de riesgo
+            var_95 = np.percentile(returns_paths, 5)
+            cvar_95 = returns_paths[returns_paths <= var_95].mean()
+            
+            # Calcular drawdowns simulados
+            max_drawdowns = []
+            for path in price_paths:
+                peak = path[0]
+                max_dd = 0
+                for price in path:
+                    if price > peak:
+                        peak = price
+                    dd = (peak - price) / peak
+                    if dd > max_dd:
+                        max_dd = dd
+                max_drawdowns.append(max_dd)
+            
+            avg_max_drawdown = np.mean(max_drawdowns)
+            
+            # Almacenar resultados
+            self.monte_carlo_results[symbol] = {
+                'price_paths': price_paths,
+                'returns_paths': returns_paths,
+                'expected_return': expected_return,
+                'expected_volatility': expected_volatility,
+                'var_95': var_95,
+                'cvar_95': cvar_95,
+                'max_drawdown': avg_max_drawdown,
+                'last_price': last_price,
+                'forecast_dates': [pd.Timestamp.now() + pd.Timedelta(days=i+1) for i in range(n_days)],
+                'simulation_date': pd.Timestamp.now()
+            }
+            
+            # Mostrar resumen de métricas
+            st.success(f"Análisis de volatilidad completado para {symbol}")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Retorno Esperado", f"{expected_return*100:.2f}%")
+            with col2:
+                st.metric("Volatilidad Esperada", f"{expected_volatility*100:.2f}%")
+            with col3:
+                st.metric("VaR 95% (1 día)", f"{var_95*100:.2f}%")
+            with col4:
+                st.metric("Drawdown Máx. Promedio", f"{avg_max_drawdown*100:.2f}%")
+            
+            return {
+                'garch_model': garch_fit,
+                'forecast_volatility': forecast_volatility,
+                'monte_carlo': self.monte_carlo_results[symbol]
+            }
+            
+        except Exception as e:
+            st.error(f"Error en el análisis de volatilidad para {symbol}: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
+            return None
+
+    def plot_volatility_analysis(self, symbol):
+        """
+        Genera gráficos para el análisis de volatilidad
+        """
+        if symbol not in self.monte_carlo_results:
+            st.warning(f"No hay datos de análisis de volatilidad para {symbol}")
+            return
+            
+        mc_result = self.monte_carlo_results[symbol]
+        
+        # Crear figura con subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                'Trayectorias de Precio Simuladas',
+                'Distribución de Retornos Esperados',
+                'Volatilidad Pronosticada',
+                'Riesgo (VaR)'
+            ),
+            specs=[[{"secondary_y": True}, {}],
+                 [{"secondary_y": True}, {}]]
+        )
+        
+        # 1. Trayectorias de precios simuladas
+        for i in range(min(100, len(mc_result['price_paths']))):
+            fig.add_trace(
+                go.Scatter(
+                    x=mc_result['forecast_dates'],
+                    y=mc_result['price_paths'][i],
+                    line=dict(color='rgba(0, 100, 255, 0.1)'),
+                    showlegend=False
+                ),
+                row=1, col=1
+            )
+        
+        # Añadir media y percentiles
+        mean_prices = np.mean(mc_result['price_paths'], axis=0)
+        p5 = np.percentile(mc_result['price_paths'], 5, axis=0)
+        p95 = np.percentile(mc_result['price_paths'], 95, axis=0)
+        
+        fig.add_trace(
+            go.Scatter(
+                x=mc_result['forecast_dates'],
+                y=mean_prices,
+                line=dict(color='red', width=2),
+                name='Media'
+            ),
+            row=1, col=1, secondary_y=False
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=mc_result['forecast_dates'],
+                y=p5,
+                line=dict(color='green', width=1, dash='dash'),
+                name='Percentil 5%'
+            ),
+            row=1, col=1, secondary_y=False
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=mc_result['forecast_dates'],
+                y=p95,
+                line=dict(color='blue', width=1, dash='dash'),
+                name='Percentil 95%'
+            ),
+            row=1, col=1, secondary_y=False
+        )
+        
+        # 2. Histograma de retornos
+        final_returns = (mc_result['price_paths'][:, -1] / mc_result['last_price'] - 1) * 100
+        fig.add_trace(
+            go.Histogram(
+                x=final_returns,
+                nbinsx=50,
+                name='Distribución de Retornos',
+                marker_color='#1f77b4',
+                opacity=0.7
+            ),
+            row=1, col=2
+        )
+        
+        # Añadir línea para el VaR
+        var_95 = np.percentile(final_returns, 5)
+        fig.add_vline(
+            x=var_95,
+            line=dict(color='red', width=2, dash='dash'),
+            row=1, col=2,
+            annotation_text=f'VaR 95%: {var_95:.2f}%',
+            annotation_position='top right'
+        )
+        
+        # 3. Volatilidad pronosticada
+        if symbol in self.garch_models:
+            garch_fit = self.garch_models[symbol]
+            volatilities = np.sqrt(garch_fit.conditional_volatility / 100)  # Deshacer escalado
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=self.prices.index[-len(volatilities):],
+                    y=volatilities * 100,  # Convertir a porcentaje
+                    line=dict(color='purple', width=2),
+                    name='Volatilidad Condicional',
+                    yaxis='y2'
+                ),
+                row=2, col=1, secondary_y=False
+            )
+        
+        # 4. Riesgo (VaR)
+        var_levels = np.arange(1, 11) * 10  # 10% a 100%
+        var_values = [np.percentile(final_returns, level) for level in var_levels]
+        
+        fig.add_trace(
+            go.Bar(
+                x=var_levels,
+                y=var_values,
+                name='Value at Risk',
+                marker_color='#ff7f0e'
+            ),
+            row=2, col=2
+        )
+        
+        # Actualizar diseño
+        fig.update_layout(
+            title=f'Análisis de Volatilidad - {symbol}',
+            showlegend=True,
+            height=800,
+            template='plotly_dark'
+        )
+        
+        # Actualizar ejes
+        fig.update_xaxes(title_text='Fecha', row=1, col=1)
+        fig.update_yaxes(title_text='Precio', row=1, col=1)
+        fig.update_xaxes(title_text='Retorno (%)', row=1, col=2)
+        fig.update_yaxes(title_text='Frecuencia', row=1, col=2)
+        fig.update_xaxes(title_text='Fecha', row=2, col=1)
+        fig.update_yaxes(title_text='Volatilidad Anualizada (%)', row=2, col=1)
+        fig.update_xaxes(title_text='Nivel de Confianza (%)', row=2, col=2)
+        fig.update_yaxes(title_text='Pérdida Máxima Esperada (%)', row=2, col=2)
+        
+        return fig
+        
+    def load_data(self):
+        # Convertir lista de activos a formato adecuado
+        symbols = []
+        markets = []
+        tipos = []
+        
+        # Función auxiliar para detectar mercado
+        def detectar_mercado(tipo_raw: str, mercado_raw: str) -> str:
+            """
+            Determina el mercado basado en la información proporcionada.
+            
+            Args:
+                tipo_raw: Tipo de activo (ej: 'Acciones', 'Bonos', 'Cedears')
+                mercado_raw: Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
+                
+            Returns:
+                str: Mercado normalizado para la API
+            """
+            # Mapeo de mercados comunes
+            mercado = str(mercado_raw).upper()
+            
+            # Si el mercado está vacío, intentar deducirlo del tipo
+            if not mercado or mercado == 'NONE':
+                tipo = str(tipo_raw).lower()
+                if 'cedear' in tipo:
+                    return 'BCBA'  # Asumir que los CEDEARs son de BCBA
+                elif 'bono' in tipo or 'letra' in tipo or 'obligacion' in tipo:
+                    return 'BCBA'  # Asumir bonos en BCBA
+                elif 'accion' in tipo:
+                    return 'BCBA'  # Asumir acciones en BCBA por defecto
                 else:
-                    symbols.append(activo)
-                    markets.append('BCBA')  # Default market
-            
-            if not symbols:
-                st.error("❌ No se encontraron símbolos válidos para procesar")
-                return False
-            
-            # Obtener datos históricos
-            data_frames = {}
-            
-            with st.spinner("Obteniendo datos históricos..."):
-                for simbolo, mercado in zip(symbols, markets):
-                    df = obtener_serie_historica_iol(
-                        self.token,
-                        mercado,
-                        simbolo,
-                        self.fecha_desde,
-                        self.fecha_hasta
-                    )
+                    return 'BCBA'  # Valor por defecto
                     
-                    if df is not None and not df.empty:
-                        # Usar la columna de último precio si está disponible
-                        precio_columns = ['ultimoPrecio', 'ultimo_precio', 'precio']
-                        precio_col = next((col for col in precio_columns if col in df.columns), None)
-                        
-                        if precio_col:
-                            df = df[['fecha', precio_col]].copy()
-                            df.columns = ['fecha', 'precio']  # Normalizar el nombre de la columna
-                            
-                            # Convertir fechaHora a fecha y asegurar que sea única
-                            df['fecha'] = pd.to_datetime(df['fecha']).dt.date
-                            
-                            # Eliminar duplicados manteniendo el último valor
-                            df = df.drop_duplicates(subset=['fecha'], keep='last')
-                            
-                            df.set_index('fecha', inplace=True)
-                            data_frames[simbolo] = df
-                        else:
-                            st.warning(f"⚠️ No se encontró columna de precio válida para {simbolo}")
-                    else:
-                        st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
+            # Normalizar mercados conocidos
+            mercado_map = {
+                'BCBA': 'BCBA',
+                'BYMA': 'BCBA',
+                'ROFEX': 'ROFEX',
+                'NYSE': 'NYSE',
+                'NASDAQ': 'NASDAQ',
+                'AMEX': 'AMEX',
+                'BME': 'BME',
+                'BVC': 'BVC',
+                'BVL': 'BVL',
+                'B3': 'B3',
+                'BVMF': 'BVMF',
+                'EURONEXT': 'EURONEXT',
+                'LSE': 'LSE',
+                'FWB': 'FWB',
+                'SWX': 'SWX',
+                'TSX': 'TSX',
+                'TSXV': 'TSXV',
+                'ASX': 'ASX',
+                'NSE': 'NSE',
+                'BSE': 'BSE',
+                'TSE': 'TSE',
+                'HKEX': 'HKEX',
+                'SSE': 'SSE',
+                'SZSE': 'SZSE',
+                'KRX': 'KRX',
+                'TASE': 'TASE',
+                'MOEX': 'MOEX',
+                'JSE': 'JSE'
+            }
             
-            if not data_frames:
-                st.error("❌ No se pudieron obtener datos históricos para ningún activo")
+            return mercado_map.get(mercado, 'BCBA')  # Default a BCBA si no se reconoce
+            
+        # Procesar cada activo
+        for activo in self.activos:
+            if 'simbolo' not in activo:
+                continue
+                
+            simbolo = activo['simbolo']
+            tipo = activo.get('tipo', '')
+            mercado = activo.get('mercado', '')
+            
+            # Determinar mercado
+            mercado_normalizado = detectar_mercado(tipo, mercado)
+            
+            # Agregar a las listas
+            symbols.append(simbolo)
+            markets.append(mercado_normalizado)
+            tipos.append(tipo)
+        
+        # Obtener datos históricos
+        try:
+            historical_data = get_historical_data_for_optimization(
+                self.token,
+                [{'simbolo': s, 'mercado': m} for s, m in zip(symbols, markets)],
+                self.fecha_desde,
+                self.fecha_hasta
+            )
+            
+            if not historical_data:
+                st.error("No se pudieron cargar los datos históricos")
                 return False
+                
+            # Procesar datos en un DataFrame
+            prices = pd.DataFrame()
+            volumes = pd.DataFrame()
             
-            # Combinar todos los DataFrames
-            df_precios = pd.concat(data_frames.values(), axis=1, keys=data_frames.keys())
-            
-            # Limpiar datos
-            # Primero verificar si hay fechas duplicadas
-            if not df_precios.index.is_unique:
-                st.warning("⚠️ Se encontraron fechas duplicadas en los datos")
-                # Eliminar duplicados manteniendo el último valor de cada fecha
-                df_precios = df_precios.groupby(df_precios.index).last()
-            
-            # Luego llenar y eliminar valores faltantes
-            df_precios = df_precios.fillna(method='ffill')
-            df_precios = df_precios.dropna()
-            
-            if df_precios.empty:
-                st.error("❌ No hay datos suficientes después del preprocesamiento")
-                return False
+            for symbol, data in historical_data.items():
+                if data is not None and not data.empty:
+                    prices[symbol] = data['precio']
+                    if 'volumen' in data.columns:
+                        volumes[symbol] = data['volumen']
             
             # Calcular retornos
-            self.returns = df_precios.pct_change().dropna()
+            returns = prices.pct_change().dropna()
             
-            # Calcular estadísticas
-            self.mean_returns = self.returns.mean()
-            self.cov_matrix = self.returns.cov()
+            # Guardar datos
+            self.prices = prices
+            self.returns = returns
+            if not volumes.empty:
+                self.volumes = volumes
+                
             self.data_loaded = True
-            
-            # Crear manager para optimización avanzada
-            self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
-            
             return True
+            
         except Exception as e:
-            st.error(f"❌ Error en load_data: {str(e)}")
+            st.error(f"Error al cargar datos: {str(e)}")
+            st.exception(e)
             return False
-    
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
-        if not self.data_loaded or self.returns is None:
-            return None
-        
-        try:
-            if self.manager:
-                # Usar el manager avanzado
-                portfolio_output = self.manager.compute_portfolio(strategy, target_return)
-                return portfolio_output
-            else:
-                # Fallback a optimización básica
-                n_assets = len(self.returns.columns)
-                
-                if strategy == 'equi-weight':
-                    weights = np.array([1/n_assets] * n_assets)
-                else:
-                    weights = optimize_portfolio(self.returns, target_return=target_return)
-                
-                # Crear objeto de resultado básico
                 portfolio_returns = (self.returns * weights).sum(axis=1)
                 portfolio_output = output(portfolio_returns, self.notional)
                 portfolio_output.weights = weights
@@ -1714,18 +1886,97 @@ class PortfolioManager:
         except Exception as e:
             return None
 
+    def compute_portfolio(self, strategy='max_sharpe', target_return=None):
+        """
+        Calcula la cartera óptima según la estrategia especificada.
+        
+        Args:
+            strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight')
+            target_return (float, optional): Retorno objetivo para estrategias que lo requieran
+            
+        Returns:
+            output: Objeto output con la cartera optimizada o None en caso de error
+        """
+        if not self.data_loaded or self.returns is None or self.returns.empty:
+            st.error("No hay datos de retornos disponibles")
+            return None
+            
+        try:
+            # Inicializar el manager si no existe
+            if not hasattr(self, 'manager') or not self.manager:
+                self.manager = manager(
+                    rics=self.returns.columns.tolist(),
+                    notional=self.notional,
+                    data=self.prices.to_dict('series')
+                )
+                
+                # Cargar datos y calcular covarianzas
+                self.manager.returns = self.returns
+                self.manager.compute_covariance()
+                
+            # Calcular cartera según estrategia
+            if strategy in ['max_sharpe', 'min_vol']:
+                portfolio_output = self.manager.compute_portfolio(
+                    portfolio_type=strategy,
+                    target_return=target_return
+                )
+                
+                if portfolio_output is None:
+                    st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
+                    n_assets = len(self.returns.columns)
+                    weights = np.array([1/n_assets] * n_assets)
+                    portfolio_returns = (self.returns * weights).sum(axis=1)
+                    portfolio_output = output(portfolio_returns, self.notional)
+                    portfolio_output.weights = weights
+                    portfolio_output.dataframe_allocation = pd.DataFrame({
+                        'rics': list(self.returns.columns),
+                        'weights': weights,
+                        'volatilities': self.returns.std().values,
+                        'returns': self.returns.mean().values
+                    })
+                
+                return portfolio_output
+                
+            elif strategy == 'equi-weight':
+                n_assets = len(self.returns.columns)
+                weights = np.array([1/n_assets] * n_assets)
+                portfolio_returns = (self.returns * weights).sum(axis=1)
+                portfolio_output = output(portfolio_returns, self.notional)
+                portfolio_output.weights = weights
+                portfolio_output.dataframe_allocation = pd.DataFrame({
+                    'rics': list(self.returns.columns),
+                    'weights': weights,
+                    'volatilities': self.returns.std().values,
+                    'returns': self.returns.mean().values
+                })
+                return portfolio_output
+                
+            else:
+                st.error(f"Estrategia no soportada: {strategy}")
+                return None
+                
+        except Exception as e:
+            st.error(f"Error al calcular la cartera: {str(e)}")
+            st.exception(e)
+            return None
+    
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
-        if not self.data_loaded or not self.manager:
+        if not self.data_loaded or not hasattr(self, 'prices') or self.prices is None:
+            st.error("No hay datos de precios disponibles")
             return None, None, None
         
         try:
             portfolios, returns, volatilities = compute_efficient_frontier(
-                self.manager.rics, self.notional, target_return, include_min_variance, 
+                self.prices.columns.tolist(), 
+                self.notional, 
+                target_return, 
+                include_min_variance,
                 self.prices.to_dict('series')
             )
             return portfolios, returns, volatilities
         except Exception as e:
+            st.error(f"Error al calcular la frontera eficiente: {str(e)}")
             return None, None, None
 
 # --- Historical Data Methods ---
@@ -2819,21 +3070,26 @@ def mostrar_analisis_portafolio():
     token_acceso = st.session_state.token_acceso
 
     if not cliente:
-        st.error("No hay cliente seleccionado")
+        st.error("No se ha seleccionado ningún cliente")
         return
+        
+    # Inicializar el gestor de portafolio en session_state si no existe
+    if 'portfolio_manager' not in st.session_state:
+        st.session_state.portfolio_manager = None
 
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
 
-    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+    st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Optimización"
+        "🔄 Optimización",
+        "📉 Análisis de Volatilidad"
     ])
 
     with tab1:
@@ -2858,6 +3114,91 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+        
+    with tab6:
+        st.header("📊 Análisis de Volatilidad")
+        
+        # Obtener datos históricos
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+            st.warning("No hay activos en el portafolio para analizar")
+        else:
+            # Mostrar selector de activos
+            activos = portafolio['activos']
+            simbolos = [a['titulo']['simbolo'] for a in activos if 'titulo' in a and 'simbolo' in a['titulo']]
+            
+            if not simbolos:
+                st.warning("No se encontraron símbolos válidos para analizar")
+            else:
+                simbolo_seleccionado = st.selectbox(
+                    "Seleccione un activo para analizar:",
+                    options=simbolos,
+                    key="vol_asset_selector"
+                )
+                
+                # Configuración del análisis
+                with st.expander("⚙️ Configuración del análisis", expanded=False):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        n_simulaciones = st.number_input(
+                            "Número de simulaciones",
+                            min_value=100,
+                            max_value=10000,
+                            value=1000,
+                            step=100,
+                            help="Cantidad de trayectorias a simular en el análisis de Monte Carlo"
+                        )
+                    with col2:
+                        dias_proyeccion = st.number_input(
+                            "Días de proyección",
+                            min_value=5,
+                            max_value=365,
+                            value=30,
+                            step=5,
+                            help="Horizonte temporal para las proyecciones"
+                        )
+                
+                # Botón para ejecutar el análisis
+                if st.button("🔍 Analizar Volatilidad", use_container_width=True):
+                    with st.spinner("Realizando análisis de volatilidad..."):
+                        try:
+                            # Inicializar el gestor de portafolio si no existe
+                            if st.session_state.portfolio_manager is None:
+                                st.session_state.portfolio_manager = PortfolioManager(
+                                    activos=[{'simbolo': s} for s in simbolos],
+                                    token=token_acceso,
+                                    fecha_desde=(date.today() - timedelta(days=365)).strftime('%Y-%m-%d'),
+                                    fecha_hasta=date.today().strftime('%Y-%m-%d')
+                                )
+                                
+                                # Cargar datos históricos
+                                if not st.session_state.portfolio_manager.load_data():
+                                    st.error("Error al cargar datos históricos")
+                                    return
+                            
+                            # Obtener retornos del activo seleccionado
+                            if simbolo_seleccionado in st.session_state.portfolio_manager.returns:
+                                returns = st.session_state.portfolio_manager.returns[simbolo_seleccionado]
+                                
+                                # Realizar análisis de volatilidad
+                                result = st.session_state.portfolio_manager.analyze_volatility(
+                                    symbol=simbolo_seleccionado,
+                                    returns=returns,
+                                    n_simulations=n_simulaciones,
+                                    n_days=dias_proyeccion
+                                )
+                                
+                                if result is not None:
+                                    # Mostrar gráficos
+                                    fig = st.session_state.portfolio_manager.plot_volatility_analysis(simbolo_seleccionado)
+                                    if fig is not None:
+                                        st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.warning(f"No se encontraron datos de retornos para {simbolo_seleccionado}")
+                                
+                        except Exception as e:
+                            st.error(f"Error en el análisis de volatilidad: {str(e)}")
+                            st.exception(e)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
