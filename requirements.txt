@@ -16,3 +16,4 @@ bayesian-optimization
 fpdf
 arch
 statsmodels
+streamlit-tradingview-widget
