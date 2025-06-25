@@ -1461,6 +1461,7 @@ class PortfolioManager:
         self.garch_models = {}
         self.monte_carlo_results = {}
         self.volatility_forecasts = {}
+        self.vwma_results = {}  # Store VWMA analysis results
     
     def analyze_volatility(self, symbol, returns, volumes=None, n_simulations=1000, n_days=30):
         """
@@ -1605,6 +1606,190 @@ class PortfolioManager:
             st.error(traceback.format_exc())
             return None
 
+    def analyze_volume_weighted_ma(self, symbol, window=20):
+        """
+        Calculate and analyze Volume-Weighted Moving Average (VWMA) for a given symbol.
+        
+        Args:
+            symbol (str): Symbol of the asset
+            window (int): Window size for VWMA calculation (default: 20)
+            
+        Returns:
+            dict: Dictionary containing VWMA results and signals
+        """
+        try:
+            if not hasattr(self, 'prices') or symbol not in self.prices.columns:
+                st.warning(f"No price data available for {symbol}")
+                return None
+                
+            if not hasattr(self, 'volumes') or symbol not in self.volumes.columns:
+                st.warning(f"No volume data available for {symbol}")
+                return None
+                
+            # Get price and volume data
+            prices = self.prices[symbol]
+            volumes = self.volumes[symbol]
+            
+            # Calculate VWMA
+            vwma = (prices * volumes).rolling(window=window).sum() / volumes.rolling(window=window).sum()
+            
+            # Generate signals
+            price_above_vwma = prices > vwma
+            price_below_vwma = prices < vwma
+            
+            # Calculate crossovers
+            crossover = (prices > vwma) & (prices.shift(1) <= vwma.shift(1))
+            crossunder = (prices < vwma) & (prices.shift(1) >= vwma.shift(1))
+            
+            # Store results
+            self.vwma_results[symbol] = {
+                'vwma': vwma,
+                'price': prices,
+                'volume': volumes,
+                'price_above_vwma': price_above_vwma,
+                'price_below_vwma': price_below_vwma,
+                'crossover': crossover,
+                'crossunder': crossunder,
+                'window': window
+            }
+            
+            return self.vwma_results[symbol]
+            
+        except Exception as e:
+            st.error(f"Error in VWMA analysis for {symbol}: {str(e)}")
+            return None
+            
+    def plot_vwma_analysis(self, symbol):
+        """
+        Generate interactive plot for VWMA analysis
+        """
+        if symbol not in getattr(self, 'vwma_results', {}):
+            st.warning(f"No VWMA analysis available for {symbol}")
+            return
+            
+        data = self.vwma_results[symbol]
+        
+        # Create figure with secondary y-axis
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        # Add price and VWMA
+        fig.add_trace(
+            go.Scatter(
+                x=data['price'].index,
+                y=data['price'],
+                name='Price',
+                line=dict(color='#1f77b4')
+            ),
+            secondary_y=False,
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=data['vwma'].index,
+                y=data['vwma'],
+                name=f'VWMA({data["window"]})',
+                line=dict(color='#ff7f0e')
+            ),
+            secondary_y=False,
+        )
+        
+        # Add volume as bars
+        fig.add_trace(
+            go.Bar(
+                x=data['volume'].index,
+                y=data['volume'],
+                name='Volume',
+                opacity=0.3,
+                marker_color='#7f7f7f'
+            ),
+            secondary_y=True,
+        )
+        
+        # Add markers for crossovers
+        crossovers = data['price'][data['crossover']]
+        if not crossovers.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=crossovers.index,
+                    y=crossovers,
+                    mode='markers',
+                    marker=dict(color='green', size=10, symbol='triangle-up'),
+                    name='Bullish Crossover',
+                    hovertemplate='%{y:.2f}<extra></extra>'
+                ),
+                secondary_y=False,
+            )
+            
+        # Add markers for crossunders
+        crossunders = data['price'][data['crossunder']]
+        if not crossunders.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=crossunders.index,
+                    y=crossunders,
+                    mode='markers',
+                    marker=dict(color='red', size=10, symbol='triangle-down'),
+                    name='Bearish Crossunder',
+                    hovertemplate='%{y:.2f}<extra></extra>'
+                ),
+                secondary_y=False,
+            )
+        
+        # Update layout
+        fig.update_layout(
+            title=f'VWMA Analysis - {symbol}',
+            xaxis_title='Date',
+            yaxis_title='Price',
+            yaxis2=dict(title='Volume', overlaying='y', side='right'),
+            hovermode='x unified',
+            template='plotly_dark',
+            showlegend=True,
+            height=600,
+            margin=dict(l=50, r=50, t=80, b=50)
+        )
+        
+        # Update y-axes
+        fig.update_yaxes(title_text='Price', secondary_y=False)
+        fig.update_yaxes(title_text='Volume', secondary_y=True)
+        
+        # Show the figure
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Show summary statistics
+        st.subheader('VWMA Analysis Summary')
+        
+        # Current status
+        current_price = data['price'].iloc[-1]
+        current_vwma = data['vwma'].iloc[-1]
+        current_volume = data['volume'].iloc[-1]
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric('Current Price', f'{current_price:.2f}')
+        with col2:
+            st.metric(f'VWMA({data["window"]})', f'{current_vwma:.2f}')
+        with col3:
+            st.metric('Current Volume', f'{current_volume:,.0f}')
+        
+        # Signal interpretation
+        st.subheader('Signal Interpretation')
+        if current_price > current_vwma:
+            st.success('🟢 Price is ABOVE VWMA - Bullish Signal')
+        else:
+            st.warning('🔴 Price is BELOW VWMA - Bearish Signal')
+        
+        # Recent signals
+        recent_crossovers = data['crossover'].tail(5)
+        recent_crossunders = data['crossunder'].tail(5)
+        
+        if recent_crossovers.any():
+            last_crossover = recent_crossovers[recent_crossovers].index[-1]
+            st.info(f'Last Bullish Crossover: {last_crossover.strftime("%Y-%m-%d")}')
+            
+        if recent_crossunders.any():
+            last_crossunder = recent_crossunders[recent_crossunders].index[-1]
+            st.info(f'Last Bearish Crossunder: {last_crossunder.strftime("%Y-%m-%d")}')
+    
     def plot_volatility_analysis(self, symbol):
         """
         Genera gráficos para el análisis de volatilidad
@@ -2890,74 +3075,162 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         st.warning("El portafolio está vacío")
         return
     
+    # Get symbols and their full names
     simbolos = []
+    simbolo_a_nombre = {}
     for activo in activos:
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo', '')
+        nombre = titulo.get('descripcion', simbolo)
         if simbolo:
             simbolos.append(simbolo)
+            simbolo_a_nombre[simbolo] = nombre
     
     if not simbolos:
         st.warning("No se encontraron símbolos válidos")
         return
     
-    simbolo_seleccionado = st.selectbox(
-        "Seleccione un activo para análisis técnico:",
-        options=simbolos
-    )
+    # Create tabs for different analysis types
+    tab1, tab2 = st.tabs(["📈 TradingView", "📊 VWMA Analysis"])
     
-    if simbolo_seleccionado:
-        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
+    with tab1:
+        st.markdown("### 📊 Análisis con TradingView")
+        simbolo_seleccionado = st.selectbox(
+            "Seleccione un activo para análisis técnico:",
+            options=simbolos,
+            format_func=lambda x: f"{x} - {simbolo_a_nombre[x]}" if x in simbolo_a_nombre else x,
+            key="tradingview_selector"
+        )
         
-        # Widget de TradingView
-        tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-          "container_id": "tradingview_{simbolo_seleccionado}",
-          "width": "100%",
-          "height": 650,
-          "symbol": "{simbolo_seleccionado}",
-          "interval": "D",
-          "timezone": "America/Argentina/Buenos_Aires",
-          "theme": "light",
-          "style": "1",
-          "locale": "es",
-          "toolbar_bg": "#f4f7f9",
-          "enable_publishing": false,
-          "allow_symbol_change": true,
-          "hide_side_toolbar": false,
-          "studies": [
-            "MACD@tv-basicstudies",
-            "RSI@tv-basicstudies",
-            "StochasticRSI@tv-basicstudies",
-            "Volume@tv-basicstudies",
-            "Moving Average@tv-basicstudies"
-          ],
-          "drawings_access": {{
-            "type": "black",
-            "tools": [
-              {{"name": "Trend Line"}},
-              {{"name": "Horizontal Line"}},
-              {{"name": "Fibonacci Retracement"}},
-              {{"name": "Rectangle"}},
-              {{"name": "Text"}}
-            ]
-          }},
-          "enabled_features": [
-            "study_templates",
-            "header_indicators",
-            "header_compare",
-            "header_screenshot",
-            "header_fullscreen_button",
-            "header_settings",
-            "header_symbol_search"
-          ]
-        }});
-        </script>
-        """
-        components.html(tv_widget, height=680)
+        if simbolo_seleccionado:
+            st.info(f"Mostrando gráfico de TradingView para: {simbolo_a_nombre.get(simbolo_seleccionado, simbolo_seleccionado)}")
+            
+            # TradingView Widget
+            tv_widget = f"""
+            <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+            <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+            <script type="text/javascript">
+            new TradingView.widget({{
+              "container_id": "tradingview_{simbolo_seleccionado}",
+              "width": "100%",
+              "height": 650,
+              "symbol": "{simbolo_seleccionado}",
+              "interval": "D",
+              "timezone": "America/Argentina/Buenos_Aires",
+              "theme": "light",
+              "style": "1",
+              "locale": "es",
+              "toolbar_bg": "#f4f7f9",
+              "enable_publishing": false,
+              "allow_symbol_change": true,
+              "hide_side_toolbar": false,
+              "studies": [
+                "MACD@tv-basicstudies",
+                "RSI@tv-basicstudies",
+                "StochasticRSI@tv-basicstudies",
+                "Volume@tv-basicstudies",
+                "Moving Average@tv-basicstudies"
+              ],
+              "drawings_access": {{
+                "type": "black",
+                "tools": [
+                  {{"name": "Trend Line"}},
+                  {{"name": "Horizontal Line"}},
+                  {{"name": "Fibonacci Retracement"}},
+                  {{"name": "Rectangle"}},
+                  {{"name": "Text"}}
+                ]
+              }},
+              "enabled_features": [
+                "study_templates",
+                "header_indicators",
+                "header_compare",
+                "header_screenshot",
+                "header_fullscreen_button",
+                "header_settings",
+                "header_symbol_search"
+              ]
+            }});
+            </script>
+            """
+            components.html(tv_widget, height=700)
+    
+    with tab2:
+        st.markdown("### 📊 Análisis VWMA (Media Móvil Ponderada por Volumen)")
+        
+        # Date range selection
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde = st.date_input(
+                "Fecha desde", 
+                value=date.today() - timedelta(days=365), 
+                max_value=date.today() - timedelta(days=1),
+                key="vwma_fecha_desde"
+            )
+        with col2:
+            fecha_hasta = st.date_input(
+                "Fecha hasta", 
+                value=date.today(), 
+                max_value=date.today(),
+                key="vwma_fecha_hasta"
+            )
+        
+        # Asset selection
+        simbolo_vwma = st.selectbox(
+            "Seleccione un activo para análisis VWMA:",
+            options=simbolos,
+            format_func=lambda x: f"{x} - {simbolo_a_nombre[x]}" if x in simbolo_a_nombre else x,
+            key="vwma_selector"
+        )
+        
+        # VWMA parameters
+        vwma_window = st.slider("Período de VWMA (días)", min_value=5, max_value=100, value=20, key="vwma_window")
+        
+        if st.button("Realizar Análisis VWMA", key="btn_vwma_analyze"):
+            if simbolo_vwma and fecha_desde and fecha_hasta and fecha_desde < fecha_hasta:
+                with st.spinner(f"Cargando datos para {simbolo_vwma}..."):
+                    try:
+                        # Create PortfolioManager instance
+                        pm = PortfolioManager(
+                            [{'titulo': {'simbolo': simbolo_vwma, 'tipo': 'ACCIONES', 'mercado': 'BCBA'}}],
+                            token_acceso,
+                            fecha_desde.strftime('%Y-%m-%d'),
+                            fecha_hasta.strftime('%Y-%m-%d')
+                        )
+                        
+                        # Load data
+                        if pm.load_data():
+                            # Perform VWMA analysis
+                            vwma_result = pm.analyze_volume_weighted_ma(simbolo_vwma, window=vwma_window)
+                            if vwma_result is not None:
+                                # Display results
+                                st.success(f"Análisis VWMA completado para {simbolo_vwma}")
+                                pm.plot_vwma_analysis(simbolo_vwma)
+                            else:
+                                st.error("No se pudo completar el análisis VWMA. Verifique los datos disponibles.")
+                        else:
+                            st.error("No se pudieron cargar los datos históricos. Intente con otro rango de fechas.")
+                    except Exception as e:
+                        st.error(f"Error al realizar el análisis VWMA: {str(e)}")
+            else:
+                st.warning("Por favor seleccione un rango de fechas válido y un activo para continuar.")
+        
+        # Add some explanation about VWMA
+        with st.expander("ℹ️ ¿Qué es el análisis VWMA?"):
+            st.markdown("""
+            **VWMA (Volume-Weighted Moving Average)** es un indicador técnico que muestra el precio promedio ponderado por volumen.
+            
+            - **Señales de trading**:
+              - **Compra**: Cuando el precio cruza por encima de la VWMA
+              - **Venta**: Cuando el precio cruza por debajo de la VWMA
+            
+            - **Ventajas**:
+              - Da más peso a los períodos con mayor volumen
+              - Filtra el ruido del mercado mejor que las medias móviles simples
+              - Útil para identificar niveles de soporte y resistencia dinámicos
+            
+            El período seleccionado (por defecto 20 días) determina la sensibilidad de la media móvil.
+            """)
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
