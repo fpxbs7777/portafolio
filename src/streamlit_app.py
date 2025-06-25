@@ -593,145 +593,240 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
 
 def obtener_tasas_caucion(token_portador):
     """
-    Obtiene todas las tasas de caución para todos los plazos desde la API de IOL usando el endpoint correcto.
+    Obtiene todas las tasas de caución para todos los plazos desde la API de IOL.
+    
     Args:
         token_portador (str): Token de autenticación Bearer
+    
     Returns:
         DataFrame: DataFrame con la información de todas las cauciones/plazos o None en caso de error
     """
-    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
-    params = {
-        'cotizacionInstrumentoModel.instrumento': 'cauciones',
-        'cotizacionInstrumentoModel.pais': 'argentina'
-    }
+    url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
+    
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
-                df = pd.DataFrame(data['titulos'])
-                # Incluir TODOS los instrumentos y plazos reportados por la API
-                # Extraer el plazo en días (puede venir como '7 días', '14 días', etc)
-                if 'plazo' in df.columns:
-                    df['plazo_dias'] = df['plazo'].astype(str).str.extract(r'(\d+)').astype(float)
-                else:
-                    df['plazo_dias'] = np.nan
-                # Limpiar la tasa (convertir a float si es necesario)
-                if 'ultimoPrecio' in df.columns:
-                    df['tasa_limpia'] = pd.to_numeric(df['ultimoPrecio'], errors='coerce')
-                else:
-                    df['tasa_limpia'] = np.nan
-                # Si hay columna 'volumen', usarla como monto
-                if 'monto' not in df.columns and 'volumen' in df.columns:
-                    df['monto'] = df['volumen']
-                # Ordenar por plazo si está disponible
-                if 'plazo_dias' in df.columns:
-                    df = df.sort_values('plazo_dias')
-                # Seleccionar columnas útiles, pero mostrar todo lo que venga de la API
-                columnas_utiles = ['simbolo', 'descripcion', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda', 'volumen']
-                columnas_disponibles = [col for col in columnas_utiles if col in df.columns]
-                return df[columnas_disponibles]
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()  # Lanza una excepción para códigos de error HTTP
+        
+        data = response.json()
+        if not data or 'titulos' not in data or not data['titulos']:
             st.warning("No se encontraron datos de tasas de caución en la respuesta")
             return None
-        elif response.status_code == 401:
-            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
-            return None
-        else:
-            error_msg = f"Error {response.status_code} al obtener tasas de caución"
+            
+        # Crear DataFrame con los datos de las cauciones
+        df = pd.DataFrame(data['titulos'])
+        
+        # Procesar los datos para mejor legibilidad
+        if 'plazo' in df.columns:
+            # Extraer el número de días del plazo (ej: "7 días" -> 7)
+            df['plazo_dias'] = df['plazo'].str.extract(r'(\d+)').astype(float)
+        
+        # Asegurarse de que tenemos los precios como números
+        if 'ultimoPrecio' in df.columns:
+            df['tasa'] = pd.to_numeric(df['ultimoPrecio'], errors='coerce')
+        
+        # Ordenar por plazo si está disponible
+        if 'plazo_dias' in df.columns:
+            df = df.sort_values('plazo_dias')
+        
+        # Seleccionar y renombrar columnas relevantes
+        column_mapping = {
+            'simbolo': 'símbolo',
+            'descripcion': 'descripción',
+            'ultimoPrecio': 'tasa',
+            'volumen': 'volumen_operado',
+            'cantidadOperaciones': 'operaciones'
+        }
+        
+        # Mantener solo las columnas que existen en el DataFrame
+        available_columns = [col for col in column_mapping.keys() if col in df.columns]
+        df = df[available_columns].rename(columns=column_mapping)
+        
+        # Agregar columnas calculadas si es necesario
+        if 'tasa' in df.columns:
+            df['tasa_anual'] = df['tasa'] * 365 / (df.get('plazo_dias', 1) if 'plazo_dias' in df.columns else 1)
+        
+        return df
+        
+    except requests.exceptions.HTTPError as http_err:
+        error_msg = f"Error HTTP al obtener tasas de caución: {http_err}"
+        if hasattr(http_err, 'response') and hasattr(http_err.response, 'text'):
             try:
-                error_data = response.json()
-                error_msg += f": {error_data.get('message', 'Error desconocido')}"
+                error_data = http_err.response.json()
+                error_msg += f" - {error_data.get('message', '')}"
             except:
-                error_msg += f": {response.text}"
-            st.error(error_msg)
-            return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error de conexión: {str(e)}")
+                error_msg += f" - {http_err.response.text}"
+        st.error(error_msg)
         return None
+        
+    except requests.exceptions.RequestException as req_err:
+        st.error(f"Error de conexión al obtener tasas de caución: {str(req_err)}")
+        return None
+        
     except Exception as e:
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def mostrar_tasas_caucion(token_portador):
     """
-    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
+    Muestra las tasas de caución en una tabla y gráfico de curva de tasas optimizado
     """
-    st.subheader("📊 Tasas de Caución")
+    st.subheader("📊 Curva de Tasas de Caución")
     
     try:
-        with st.spinner('Obteniendo tasas de caución...'):
-            df_cauciones = obtener_tasas_caucion(token_portador)
+        # Obtener datos de caución
+        df_cauciones = obtener_tasas_caucion(token_portador)
+        
+        # Verificar si se obtuvieron datos
+        if df_cauciones is None or df_cauciones.empty:
+            st.warning("No se encontraron datos de tasas de caución.")
+            return
             
-            # Verificar si se obtuvieron datos
-            if df_cauciones is None or df_cauciones.empty:
-                st.warning("No se encontraron datos de tasas de caución.")
-                return
-                
-            # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-            if missing_columns:
-                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-                return
+        # Verificar columnas requeridas
+        required_columns = ['símbolo', 'plazo', 'tasa', 'plazo_dias', 'tasa_anual']
+        missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+        if missing_columns:
+            st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+            st.dataframe(df_cauciones.head())  # Mostrar datos disponibles para depuración
+            return
+        
+        # Crear pestañas para diferentes vistas
+        tab1, tab2 = st.tabs(["📈 Gráfico", "📊 Datos"])
+        
+        with tab1:
+            # Crear gráfico de curva de tasas
+            fig = go.Figure()
             
-            # Mostrar tabla con las tasas
-            st.dataframe(
-                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                             else ['simbolo', 'plazo', 'ultimoPrecio']]
-                .rename(columns={
-                    'simbolo': 'Instrumento',
-                    'plazo': 'Plazo',
-                    'ultimoPrecio': 'Tasa',
-                    'monto': 'Monto (en millones)'
-                }),
-                use_container_width=True,
-                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+            # Añadir línea de tendencia
+            z = np.polyfit(df_cauciones['plazo_dias'], df_cauciones['tasa_anual'], 1)
+            p = np.poly1d(z)
+            
+            # Línea de tendencia
+            fig.add_trace(go.Scatter(
+                x=df_cauciones['plazo_dias'],
+                y=p(df_cauciones['plazo_dias']),
+                mode='lines',
+                name='Tendencia',
+                line=dict(color='#ff7f0e', width=2, dash='dash'),
+                showlegend=True
+            ))
+            
+            # Puntos de datos
+            fig.add_trace(go.Scatter(
+                x=df_cauciones['plazo_dias'],
+                y=df_cauciones['tasa_anual'],
+                mode='markers+text',
+                name='Tasas',
+                text=df_cauciones['plazo'].astype(str) + '<br>' + df_cauciones['tasa_anual'].round(2).astype(str) + '%',
+                textposition='top center',
+                marker=dict(
+                    size=12,
+                    color=df_cauciones['tasa_anual'],
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title='Tasa %')
+                ),
+                hovertemplate='<b>Plazo:</b> %{x} días<br>' +
+                              '<b>Tasa Anual:</b> %{y:.2f}%<br>' +
+                              '<b>Descripción:</b> ' + df_cauciones['descripción'].astype(str) +
+                              '<extra></extra>',
+                showlegend=False
+            ))
+            
+            # Configuración del layout
+            fig.update_layout(
+                title='Curva de Tasas de Caución por Plazo',
+                xaxis_title='Plazo (días)',
+                yaxis_title='Tasa Anual Efectiva (%)',
+                template='plotly_dark',
+                height=600,
+                hovermode='closest',
+                xaxis=dict(
+                    tickmode='linear',
+                    tick0=0,
+                    dtick=1,
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)'
+                ),
+                yaxis=dict(
+                    tickformat=".2f%",
+                    gridcolor='rgba(128,128,128,0.2)'
+                ),
+                margin=dict(l=50, r=50, t=80, b=50),
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white')
             )
             
-            # Crear gráfico de curva de tasas si hay suficientes puntos
-            if len(df_cauciones) > 1:
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=df_cauciones['plazo_dias'],
-                    y=df_cauciones['tasa_limpia'],
-                    mode='lines+markers+text',
-                    name='Tasa',
-                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                    textposition='top center',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=10, color='#1f77b4')
-                ))
-                
-                fig.update_layout(
-                    title='Curva de Tasas de Caución',
-                    xaxis_title='Plazo (días)',
-                    yaxis_title='Tasa Anual (%)',
-                    template='plotly_white',
-                    height=500,
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
+            # Mostrar el gráfico
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
             
-            # Mostrar resumen estadístico
-            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-                with col2:
-                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
-                    
+            # Mostrar métricas clave
+            st.subheader("📊 Resumen de Tasas")
+            
+            # Calcular métricas
+            tasa_min = df_cauciones['tasa_anual'].min()
+            tasa_max = df_cauciones['tasa_anual'].max()
+            tasa_prom = df_cauciones['tasa_anual'].mean()
+            plazo_prom = df_cauciones['plazo_dias'].mean()
+            
+            # Mostrar métricas en columnas
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Tasa Mínima", f"{tasa_min:.2f}%", delta=None)
+            with col2:
+                st.metric("Tasa Máxima", f"{tasa_max:.2f}%", delta=None)
+            with col3:
+                st.metric("Tasa Promedio", f"{tasa_prom:.2f}%", delta=None)
+            with col4:
+                st.metric("Plazo Promedio", f"{plazo_prom:.1f} días", delta=None)
+            
+            # Mostrar tendencia
+            st.markdown("""
+            **Análisis de Tendencia:**
+            - Línea naranja punteada: Muestra la tendencia general de las tasas
+            - Círculos coloreados: Representan las tasas de cada plazo
+            - El color más oscuro indica tasas más bajas, más claro indica tasas más altas
+            """)
+            
+        with tab2:
+            # Mostrar tabla con los datos completos
+            st.dataframe(
+                df_cauciones[['símbolo', 'descripción', 'plazo', 'plazo_dias', 'tasa_anual']]
+                .sort_values('plazo_dias')
+                .assign(tasa_anual=lambda x: x['tasa_anual'].round(2).astype(str) + '%')
+                .rename(columns={
+                    'símbolo': 'Símbolo',
+                    'descripción': 'Descripción',
+                    'plazo': 'Plazo',
+                    'plazo_dias': 'Días',
+                    'tasa_anual': 'Tasa Anual'
+                }),
+                use_container_width=True,
+                height=min(600, 50 + len(df_cauciones) * 35),
+                hide_index=True
+            )
+            
+            # Botón para descargar datos
+            csv = df_cauciones.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(
+                label="📥 Descargar datos en CSV",
+                data=csv,
+                file_name=f'tasas_caucion_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
+                mime='text/csv'
+            )
+            
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
-        st.exception(e)  # Mostrar el traceback completo para depuración
+        # Mostrar solo el error sin el traceback completo para mejor experiencia de usuario
+        if st.button("Mostrar detalles del error"):
+            st.exception(e)
     formats_to_try = [
         "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S",
