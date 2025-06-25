@@ -2670,37 +2670,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 
     # Mostrar input de capital y filtro de tipo de activo solo si corresponde
     if metodo_seleccion == 'aleatoria':
-        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
-        tipo_seleccionado = st.selectbox(
-            "Filtrar por tipo de activo:",
-            options=['Todos'] + tipos_disponibles,
-            format_func=lambda x: "Todos" if x == 'Todos' else x
-        )
-        activos_filtrados = activos_para_optimizacion
-        if tipo_seleccionado != 'Todos':
-            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
-        capital_inicial = st.number_input(
-            "Capital Inicial para Optimización (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección aleatoria de activos"
-        )
-    else:
-        activos_filtrados = activos_para_optimizacion
-        capital_inicial = None
-
-    # Mostrar input de capital solo si corresponde
-    if metodo_seleccion == 'aleatoria':
         # Filtro de tipo de activo solo en aleatoria
         tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
         tipo_seleccionado = st.selectbox(
             "Filtrar por tipo de activo:",
             options=['Todos'] + tipos_disponibles,
-            key="opt_tipo_activo"
+            key="opt_tipo_activo",
+            format_func=lambda x: "Todos" if x == 'Todos' else x
         )
         if tipo_seleccionado != 'Todos':
             activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
         else:
             activos_filtrados = activos_para_optimizacion
+            
         capital_inicial = st.number_input(
             "Capital Inicial para Optimización (ARS):",
             min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
