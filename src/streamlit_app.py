@@ -1671,224 +1671,312 @@ def generate_risk_report(risk_metrics, portfolio, client_name):
     # Guardar PDF en memoria
     return pdf.output(dest='S').encode('latin-1')
 
-def mostrar_analisis_portafolio():
-    cliente = st.session_state.cliente_seleccionado
-    token_acceso = st.session_state.token_acceso
+def forecast_portfolio_risk_with_volume(portfolio_manager, confidence_level=0.95, n_simulations=1000, days_forward=252):
+    """
+    Pronostica el riesgo y retorno del portafolio usando GARCH y Monte Carlo,
+    incorporando el volumen total del portafolio.
+    
+    Args:
+        portfolio_manager: Instancia de PortfolioManager con datos cargados
+        confidence_level: Nivel de confianza para VaR/CVaR (default: 95%)
+        n_simulations: Número de simulaciones Monte Carlo
+        days_forward: Horizonte temporal en días hábiles (default: 1 año)
+        
+    Returns:
+        Diccionario con métricas pronosticadas
+    """
+    try:
+        # Calcular retornos del portafolio (igual ponderado por simplicidad)
+        returns_df = pd.DataFrame(portfolio_manager.returns)
+        portfolio_returns = returns_df.mean(axis=1)  # Portafolio igual ponderado
+        
+        # Calcular volumen total del portafolio
+        volumes = pd.DataFrame(portfolio_manager.volumenes)
+        total_volume = volumes.sum(axis=1)
+        
+        # Normalizar volumen para usar como característica
+        volume_returns = total_volume.pct_change().dropna()
+        volume_returns = (volume_returns - volume_returns.mean()) / volume_returns.std()
+        
+        # Alinear retornos y volumen
+        aligned_data = pd.concat([portfolio_returns, volume_returns], axis=1).dropna()
+        returns = aligned_data.iloc[:, 0]
+        volume = aligned_data.iloc[:, 1]
+        
+        # Ajustar modelo GARCH con volumen como variable exógena
+        garch = arch.arch_model(returns * 100, vol='Garch', p=1, q=1, 
+                               dist='skewt', mean='AR', lags=1,
+                               rescale=True)
+        
+        with st.spinner("Ajustando modelo GARCH con volumen..."):
+            garch_fit = garch.fit(disp='off')
+        
+        # Pronosticar volatilidad
+        forecast = garch_fit.forecast(horizon=days_forward)
+        volatility_forecast = np.sqrt(forecast.variance.iloc[-1] / 100)
+        
+        # Simulación Monte Carlo
+        np.random.seed(42)
+        last_return = returns.iloc[-1]
+        last_vol = np.sqrt(garch_fit.conditional_volatility.iloc[-1] / 100)
+        
+        # Simular retornos con impacto de volumen
+        simulated_returns = np.zeros((days_forward, n_simulations))
+        current_vol = last_vol
+        
+        for t in range(days_forward):
+            # Impacto del volumen: mayor volumen típicamente reduce la volatilidad futura
+            volume_impact = 1 / (1 + np.exp(-volume.iloc[-1]))  # Transformación sigmoide
+            
+            # Choques aleatorios de la distribución ajustada
+            if garch_fit.distribution.name == 'skewt':
+                nu = garch_fit.params['nu']
+                lam = garch_fit.params['lambda']
+                shocks = stats.skewt.rvs(nu, lam, size=n_simulations)
+            else:
+                shocks = np.random.normal(size=n_simulations)
+                
+            # Actualizar volatilidad con impacto de volumen
+            current_vol = volatility_forecast.iloc[0] * (0.9 + 0.1 * volume_impact)
+            
+            # Generar retornos
+            simulated_returns[t] = (garch_fit.params['mu'] / 100 + 
+                                  garch_fit.params['ar.L1'] * last_return + 
+                                  current_vol * shocks)
+            
+            last_return = np.mean(simulated_returns[t])
+        
+        # Calcular retornos acumulados
+        cumulative_returns = np.cumprod(1 + simulated_returns, axis=0) - 1
+        
+        # Calcular métricas
+        final_returns = cumulative_returns[-1, :]
+        expected_return = np.mean(final_returns)
+        volatility = np.std(final_returns)
+        
+        # Calcular VaR y CVaR
+        var = -np.percentile(final_returns, (1 - confidence_level) * 100)
+        cvar = -np.mean(final_returns[final_returns <= -var])
+        
+        # Calcular drawdowns
+        peak = np.maximum.accumulate(1 + cumulative_returns, axis=0)
+        drawdowns = (1 + cumulative_returns) / peak - 1
+        max_drawdown = np.min(drawdowns)
+        
+        # Calcular probabilidades
+        prob_positive = np.mean(final_returns > 0)
+        prob_negative = np.mean(final_returns < 0)
+        prob_10pct_positive = np.mean(final_returns > 0.10)
+        prob_10pct_negative = np.mean(final_returns < -0.10)
+        
+        # Calcular percentiles
+        percentiles = {
+            1: np.percentile(final_returns, 1),
+            5: np.percentile(final_returns, 5),
+            10: np.percentile(final_returns, 10),
+            25: np.percentile(final_returns, 25),
+            50: np.percentile(final_returns, 50),
+            75: np.percentile(final_returns, 75),
+            90: np.percentile(final_returns, 90),
+            95: np.percentile(final_returns, 95),
+            99: np.percentile(final_returns, 99)
+        }
+        
+        # Calcular ratio de Sharpe (asumiendo tasa libre de riesgo 0)
+        sharpe_ratio = expected_return / volatility if volatility > 0 else 0
+        
+        return {
+            'expected_return': expected_return,
+            'volatility': volatility,
+            'var': var,
+            'cvar': cvar,
+            'max_drawdown': max_drawdown,
+            'prob_positive': prob_positive,
+            'prob_negative': prob_negative,
+            'prob_10pct_positive': prob_10pct_positive,
+            'prob_10pct_negative': prob_10pct_negative,
+            'percentiles': percentiles,
+            'sharpe_ratio': sharpe_ratio,
+            'simulated_returns': simulated_returns,
+            'cumulative_returns': cumulative_returns,
+            'confidence_level': confidence_level,
+            'n_simulations': n_simulations,
+            'days_forward': days_forward
+        }
+        
+    except Exception as e:
+        st.error(f"Error en la simulación GARCH-Monte Carlo: {str(e)}")
+        st.error(traceback.format_exc())
+        return None
 
-    if not cliente:
-        st.error("No se ha seleccionado ningún cliente")
+def plot_forecast_results(forecast_results):
+    """Visualiza los resultados del pronóstico de riesgo del portafolio."""
+    if forecast_results is None:
         return
         
-    # Inicializar el gestor de portafolio en session_state si no existe
-    if 'portfolio_manager' not in st.session_state:
-        st.session_state.portfolio_manager = None
-
-    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-
-    st.title(f"Análisis de Portafolio - {nombre_cliente}")
-    
-    # Obtener datos del portafolio
-    portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
-    # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🔄 Optimización",
-        "📉 Análisis de Volatilidad",
-        "🎯 Análisis de Riesgo"
+    # Crear pestañas para diferentes visualizaciones
+    tab1, tab2, tab3 = st.tabs([
+        "📈 Distribución de Retornos", 
+        "📊 Trayectorias Simuladas", 
+        "📋 Métricas de Riesgo"
     ])
-
+    
     with tab1:
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente")
+        # Gráfico de distribución de retornos
+        fig = px.histogram(
+            x=forecast_results['cumulative_returns'][-1, :] * 100,
+            nbins=100,
+            title=f"Distribución de Retornos a {forecast_results['days_forward']} Días",
+            labels={'x': 'Retorno Total (%)', 'y': 'Frecuencia'},
+            color_discrete_sequence=['#636EFA']
+        )
+        
+        # Línea de VaR
+        var_line = -forecast_results['var'] * 100
+        fig.add_vline(
+            x=var_line, 
+            line_dash="dash", 
+            line_color="red",
+            annotation_text=f"VaR {int(forecast_results['confidence_level']*100)}%: {var_line:.2f}%",
+            annotation_position="top right"
+        )
+        
+        # Línea de retorno esperado
+        mean_return = forecast_results['expected_return'] * 100
+        fig.add_vline(
+            x=mean_return,
+            line_dash="dash",
+            line_color="green",
+            annotation_text=f"Retorno Esperado: {mean_return:.2f}%",
+            annotation_position="top right"
+        )
+        
+        fig.update_layout(
+            showlegend=False,
+            template='plotly_dark',
+            xaxis_title="Retorno Total (%)",
+            yaxis_title="Frecuencia"
+        )
+        st.plotly_chart(fig, use_container_width=True)
     
     with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
+        # Gráfico de trayectorias simuladas
+        fig = go.Figure()
+        
+        # Mostrar muestra de trayectorias
+        n_paths = min(100, forecast_results['n_simulations'])
+        for i in range(n_paths):
+            fig.add_trace(go.Scatter(
+                x=list(range(forecast_results['days_forward'])),
+                y=forecast_results['cumulative_returns'][:, i] * 100,
+                mode='lines',
+                line=dict(width=0.5, color='rgba(99, 110, 250, 0.1)'),
+                showlegend=False
+            ))
+        
+        # Agregar trayectoria media
+        mean_path = np.mean(forecast_results['cumulative_returns'], axis=1) * 100
+        fig.add_trace(go.Scatter(
+            x=list(range(forecast_results['days_forward'])),
+            y=mean_path,
+            mode='lines',
+            line=dict(width=2, color='red'),
+            name='Media'
+        ))
+        
+        # Agregar percentiles
+        for p in [5, 95]:
+            percentile_path = np.percentile(forecast_results['cumulative_returns'], p, axis=1) * 100
+            fig.add_trace(go.Scatter(
+                x=list(range(forecast_results['days_forward'])),
+                y=percentile_path,
+                mode='lines',
+                line=dict(width=1, dash='dash', color='orange'),
+                name=f'Percentil {p}%',
+                opacity=0.7
+            ))
+        
+        fig.update_layout(
+            title=f"Trayectorias de Retorno Simuladas ({n_paths} de {forecast_results['n_simulations']} simulaciones)",
+            xaxis_title="Días",
+            yaxis_title="Retorno Acumulado (%)",
+            template='plotly_dark',
+            showlegend=True
+        )
+        st.plotly_chart(fig, use_container_width=True)
     
     with tab3:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
-    
-    with tab4:
-        mostrar_cotizaciones_mercado(token_acceso)
-    
-    with tab5:
-        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+        # Mostrar métricas de riesgo
+        st.subheader("📊 Métricas de Riesgo")
         
-    with tab6:
-        st.header("📉 Análisis de Volatilidad")
+        col1, col2, col3 = st.columns(3)
         
-        # Obtener datos históricos
-        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
-            st.warning("No hay activos en el portafolio para analizar")
-        else:
-            # Mostrar selector de activos
-            activos = portafolio['activos']
-            simbolos = [a['titulo']['simbolo'] for a in activos if 'titulo' in a and 'simbolo' in a['titulo']]
+        with col1:
+            st.metric("Retorno Esperado", 
+                     f"{forecast_results['expected_return']*100:.2f}%")
+            st.metric("Volatilidad Anualizada", 
+                     f"{forecast_results['volatility']*100:.2f}%")
             
-            if not simbolos:
-                st.warning("No se encontraron símbolos válidos para analizar")
-            else:
-                simbolo_seleccionado = st.selectbox(
-                    "Seleccione un activo para analizar:",
-                    options=simbolos,
-                    key="vol_asset_selector"
-                )
-                
-                # Configuración del análisis
-                with st.expander("⚙️ Configuración del análisis", expanded=False):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        n_simulaciones = st.number_input(
-                            "Número de simulaciones",
-                            min_value=100,
-                            max_value=10000,
-                            value=1000,
-                            step=100,
-                            help="Cantidad de trayectorias a simular en el análisis de Monte Carlo"
-                        )
-                    with col2:
-                        dias_proyeccion = st.number_input(
-                            "Días de proyección",
-                            min_value=5,
-                            max_value=365,
-                            value=30,
-                            step=5,
-                            help="Horizonte temporal para las proyecciones"
-                        )
-                
-                # Botón para ejecutar el análisis
-                if st.button("🔍 Analizar Volatilidad", use_container_width=True):
-                    with st.spinner("Realizando análisis de volatilidad..."):
-                        try:
-                            # Inicializar el gestor de portafolio si no existe
-                            if st.session_state.portfolio_manager is None:
-                                st.session_state.portfolio_manager = PortfolioManager(
-                                    activos=[{'simbolo': s} for s in simbolos],
-                                    token=token_acceso,
-                                    fecha_desde=(date.today() - timedelta(days=365)).strftime('%Y-%m-%d'),
-                                    fecha_hasta=date.today().strftime('%Y-%m-%d')
-                                )
-                                
-                                # Cargar datos históricos
-                                if not st.session_state.portfolio_manager.load_data():
-                                    st.error("Error al cargar datos históricos")
-                                    return
-                            
-                            # Obtener retornos del activo seleccionado
-                            if simbolo_seleccionado in st.session_state.portfolio_manager.returns:
-                                returns = st.session_state.portfolio_manager.returns[simbolo_seleccionado]
-                                
-                                # Realizar análisis de volatilidad
-                                result = st.session_state.portfolio_manager.analyze_volatility(
-                                    symbol=simbolo_seleccionado,
-                                    returns=returns,
-                                    n_simulations=n_simulaciones,
-                                    n_days=dias_proyeccion
-                                )
-                                
-                                if result is not None:
-                                    # Mostrar gráficos
-                                    fig = st.session_state.portfolio_manager.plot_volatility_analysis(simbolo_seleccionado)
-                                    if fig is not None:
-                                        st.plotly_chart(fig, use_container_width=True)
-                            else:
-                                st.warning(f"No se encontraron datos de retornos para {simbolo_seleccionado}")
-                                
-                        except Exception as e:
-                            st.error(f"Error en el análisis de volatilidad: {str(e)}")
-                            import traceback
-                            st.error(traceback.format_exc())
-    
-    with tab7:
-        st.header("🎯 Análisis de Riesgo del Portafolio")
-        st.markdown("""
-        Esta sección proporciona un análisis integral del riesgo del portafolio utilizando modelos GARCH 
-        y simulaciones de Monte Carlo para estimar posibles escenarios futuros y métricas de riesgo.
-        """)
+        with col2:
+            st.metric(f"VaR {int(forecast_results['confidence_level']*100)}%", 
+                     f"{-forecast_results['var']*100:.2f}%")
+            st.metric("CVaR", 
+                     f"{-forecast_results['cvar']*100:.2f}%")
+            
+        with col3:
+            st.metric("Máximo Drawdown", 
+                     f"{forecast_results['max_drawdown']*100:.2f}%")
+            st.metric("Ratio de Sharpe", 
+                     f"{forecast_results['sharpe_ratio']:.2f}")
         
-        # Verificar si hay datos disponibles
-        if 'portfolio_manager' not in st.session_state or not hasattr(st.session_state.portfolio_manager, 'data_loaded'):
-            st.warning("Por favor, cargue los datos del portafolio primero en la pestaña 'Resumen Portafolio'.")
-        else:
-            # Configuración del análisis
-            with st.expander("⚙️ Configuración del Análisis", expanded=True):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    n_simulaciones = st.number_input(
-                        "Número de simulaciones",
-                        min_value=500,
-                        max_value=10000,
-                        value=2000,
-                        step=100,
-                        help="Cantidad de trayectorias a simular en el análisis de Monte Carlo"
-                    )
-                with col2:
-                    horizonte = st.number_input(
-                        "Horizonte temporal (días)",
-                        min_value=5,
-                        max_value=365,
-                        value=30,
-                        step=5,
-                        help="Período de proyección para las simulaciones"
-                    )
-                with col3:
-                    confianza = st.slider(
-                        "Nivel de confianza",
-                        min_value=0.90,
-                        max_value=0.99,
-                        value=0.95,
-                        step=0.01,
-                        format="%.2f",
-                        help="Nivel de confianza para métricas de riesgo como VaR y CVaR"
-                    )
-            
-            # Botón para ejecutar el análisis
-            if st.button("🚀 Ejecutar Análisis de Riesgo", type="primary", use_container_width=True):
-                with st.spinner("Realizando análisis de riesgo. Esto puede tomar unos momentos..."):
-                    try:
-                        # Ejecutar análisis de riesgo
-                        risk_metrics = st.session_state.portfolio_manager.analyze_portfolio_risk(
-                            n_simulations=n_simulaciones,
-                            time_horizon=horizonte,
-                            confidence_level=confianza
-                        )
-                        
-                        if risk_metrics is not None:
-                            st.success("¡Análisis de riesgo completado con éxito!")
-                            
-                            # Mostrar resultados
-                            st.session_state.portfolio_manager.plot_portfolio_risk_analysis()
-                            
-                            # Botón para descargar reporte
-                            st.download_button(
-                                label="📥 Descargar Reporte de Riesgo",
-                                data=generate_risk_report(risk_metrics, portafolio, nombre_cliente),
-                                file_name=f"analisis_riesgo_{nombre_cliente.replace(' ', '_')}.pdf",
-                                mime="application/pdf"
-                            )
-                        
-                    except Exception as e:
-                        st.error(f"Error al realizar el análisis de riesgo: {str(e)}")
-                        import traceback
-                        st.error(traceback.format_exc())
-            
-            # Mostrar resultados previos si existen
-            elif hasattr(st.session_state.portfolio_manager, 'risk_metrics') and st.session_state.portfolio_manager.risk_metrics:
-                st.info("Mostrando resultados del análisis de riesgo previo. Ejecute el análisis nuevamente para actualizar.")
-                st.session_state.portfolio_manager.plot_portfolio_risk_analysis()
-            else:
-                st.info("Configure los parámetros y haga clic en 'Ejecutar Análisis de Riesgo' para comenzar.")
+        # Mostrar métricas de probabilidad
+        st.subheader("📈 Probabilidades de Retorno")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Prob. Retorno > 0%", 
+                     f"{forecast_results['prob_positive']*100:.1f}%")
+        with col2:
+            st.metric("Prob. Retorno < 0%", 
+                     f"{forecast_results['prob_negative']*100:.1f}%")
+        with col3:
+            st.metric("Prob. Retorno > 10%", 
+                     f"{forecast_results['prob_10pct_positive']*100:.1f}%")
+        with col4:
+            st.metric("Prob. Retorno < -10%", 
+                     f"{forecast_results['prob_10pct_negative']*100:.1f}%")
+        
+        # Mostrar percentiles
+        st.subheader("📊 Distribución de Retornos")
+        percentiles = forecast_results['percentiles']
+        df_percentiles = pd.DataFrame({
+            'Percentil': [f"{p}%" for p in percentiles.keys()],
+            'Retorno': [f"{v*100:.2f}%" for v in percentiles.values()]
+        })
+        st.dataframe(df_percentiles.set_index('Percentil'), use_container_width=True)
 
+class PortfolioManager:
+    """Clase para gestionar y analizar un portafolio de inversión."""
+    
+    def __init__(self, activos, token, fecha_desde=None, fecha_hasta=None):
+        self.activos = activos
+        self.token = token
+        self.fecha_desde = fecha_desde
+        self.fecha_hasta = fecha_hasta
+        self.data_loaded = False
+        self.returns = None
+        self.prices = None
+        self.volumes = None
+        self.notional = 100000  # Valor nominal por defecto
+        self.manager = None
+        self.garch_models = {}
+        self.monte_carlo_results = {}
+        self.volatility_forecasts = {}
+        self.vwma_results = {}  # Store VWMA analysis results
+        self.risk_metrics = {}  # Store portfolio risk metrics
+        self.portfolio_simulations = {}  # Store portfolio simulation results
+    
     def analyze_volume_weighted_ma(self, symbol, window=20):
         """
         Calculate and analyze Volume-Weighted Moving Average (VWMA) for a given symbol.
@@ -2191,18 +2279,27 @@ def mostrar_analisis_portafolio():
             st.error(f"Error en el análisis de riesgo del portafolio: {str(e)}")
             return None
     
-    def plot_portfolio_risk_analysis(self):
+    def plot_portfolio_risk_analysis(self, risk_metrics=None):
         """
-        Genera visualizaciones para el análisis de riesgo del portafolio.
-        """
-        if not self.risk_metrics:
-            st.warning("No hay métricas de riesgo disponibles. Ejecute primero el análisis de riesgo.")
-            return None
-            
-        metrics = self.risk_metrics
+        Visualiza el análisis de riesgo del portafolio.
         
+        Args:
+            risk_metrics: Diccionario con métricas de riesgo (opcional)
+        """
+        if risk_metrics is None:
+            risk_metrics = self.risk_metrics
+            
+        if risk_metrics is None:
+            st.warning("No hay métricas de riesgo disponibles para visualizar.")
+            return
+            
         # Crear pestañas para diferentes visualizaciones
-        tab1, tab2, tab3 = st.tabs(["📊 Resumen de Riesgo", "📈 Trayectorias Simuladas", "📉 Distribución de Retornos"])
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Resumen de Riesgo", 
+            "📈 Trayectorias Simuladas", 
+            "📉 Distribución de Retornos",
+            "🔍 Análisis Avanzado con Volumen"
+        ])
         
         with tab1:
             # Mostrar métricas clave
@@ -2211,22 +2308,22 @@ def mostrar_analisis_portafolio():
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("Retorno Esperado Anual", f"{metrics['expected_return']*100:.2f}%")
-                st.metric("Volatilidad Histórica Anual", f"{metrics['historical_volatility']*100:.2f}%")
+                st.metric("Retorno Esperado Anual", f"{risk_metrics['expected_return']*100:.2f}%")
+                st.metric("Volatilidad Histórica Anual", f"{risk_metrics['historical_volatility']*100:.2f}%")
                 
             with col2:
-                st.metric(f"VaR {int((1-metrics['confidence_level'])*100)}% (Simulado)", 
-                         f"{metrics['simulated_var']*100:.2f}%")
-                st.metric(f"CVaR {int((1-metrics['confidence_level'])*100)}% (Simulado)", 
-                         f"{metrics['simulated_cvar']*100:.2f}%")
+                st.metric(f"VaR {int((1-risk_metrics['confidence_level'])*100)}% (Simulado)", 
+                         f"{risk_metrics['simulated_var']*100:.2f}%")
+                st.metric(f"CVaR {int((1-risk_metrics['confidence_level'])*100)}% (Simulado)", 
+                         f"{risk_metrics['simulated_cvar']*100:.2f}%")
                 
             with col3:
-                st.metric("Prob. Retorno Positivo", f"{metrics['probabilities']['positive_return']:.1f}%")
-                st.metric("Prob. Retorno > 5%", f"{metrics['probabilities']['above_threshold']:.1f}%")
+                st.metric("Prob. Retorno Positivo", f"{risk_metrics['probabilities']['positive_return']:.1f}%")
+                st.metric("Prob. Retorno > 5%", f"{risk_metrics['probabilities']['above_threshold']:.1f}%")
             
             # Mostrar percentiles
             st.subheader("Distribución de Retornos Simulados")
-            percentiles = metrics['percentiles']
+            percentiles = risk_metrics['percentiles']
             
             # Crear tabla de percentiles
             percentiles_df = pd.DataFrame({
@@ -2238,21 +2335,21 @@ def mostrar_analisis_portafolio():
             # Mostrar interpretación de riesgo
             st.subheader("Interpretación de Riesgo")
             
-            if metrics['expected_return'] > 0:
+            if risk_metrics['expected_return'] > 0:
                 st.success("🔵 El retorno esperado es positivo, lo que indica un potencial de crecimiento del portafolio.")
             else:
                 st.warning("⚠️ El retorno esperado es negativo, lo que sugiere una posible pérdida en el período analizado.")
                 
-            if metrics['probabilities']['negative_return'] > 30:  # Umbral arbitrario
-                st.warning(f"⚠️ Hay una probabilidad del {metrics['probabilities']['negative_return']:.1f}% de obtener retornos negativos.")
-            
+            if risk_metrics['probabilities']['negative_return'] > 30:  # Umbral arbitrario
+                st.warning(f"⚠️ Hay una probabilidad del {risk_metrics['probabilities']['negative_return']:.1f}% de obtener retornos negativos.")
+                
         with tab2:
             # Mostrar trayectorias simuladas
-            st.subheader(f"Simulación de {metrics['n_simulations']} Trayectorias de Precio")
+            st.subheader(f"Simulación de {risk_metrics['n_simulations']} Trayectorias de Precio")
             
             # Seleccionar un subconjunto de trayectorias para visualización
-            n_paths = min(100, metrics['n_simulations'])  # Máximo 100 trayectorias para visualización
-            sample_paths = metrics['price_paths'][:, :n_paths]
+            n_paths = min(100, risk_metrics['n_simulations'])  # Máximo 100 trayectorias para visualización
+            sample_paths = risk_metrics['price_paths'][:, :n_paths]
             
             fig = go.Figure()
             
@@ -2260,7 +2357,7 @@ def mostrar_analisis_portafolio():
             for i in range(n_paths):
                 fig.add_trace(
                     go.Scatter(
-                        x=list(range(metrics['time_horizon'] + 1)),
+                        x=list(range(risk_metrics['time_horizon'] + 1)),
                         y=sample_paths[:, i],
                         mode='lines',
                         line=dict(width=1, color='rgba(30, 144, 255, 0.1)'),
@@ -2273,12 +2370,12 @@ def mostrar_analisis_portafolio():
             colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#4ECDC4', '#FF6B6B']
             
             for p, color in zip(percentiles, colors):
-                lower = np.percentile(metrics['price_paths'], 50 - p/2, axis=1)
-                upper = np.percentile(metrics['price_paths'], 50 + p/2, axis=1)
+                lower = np.percentile(risk_metrics['price_paths'], 50 - p/2, axis=1)
+                upper = np.percentile(risk_metrics['price_paths'], 50 + p/2, axis=1)
                 
                 fig.add_trace(
                     go.Scatter(
-                        x=list(range(metrics['time_horizon'] + 1)) + list(range(metrics['time_horizon'], -1, -1)),
+                        x=list(range(risk_metrics['time_horizon'] + 1)) + list(range(risk_metrics['time_horizon'], -1, -1)),
                         y=np.concatenate([lower, upper[::-1]]),
                         fill='toself',
                         fillcolor=color,
@@ -2289,10 +2386,10 @@ def mostrar_analisis_portafolio():
                 )
             
             # Añadir mediana
-            median = np.median(metrics['price_paths'], axis=1)
+            median = np.median(risk_metrics['price_paths'], axis=1)
             fig.add_trace(
                 go.Scatter(
-                    x=list(range(metrics['time_horizon'] + 1)),
+                    x=list(range(risk_metrics['time_horizon'] + 1)),
                     y=median,
                     mode='lines',
                     line=dict(width=2, color='#FF6B6B'),
@@ -2301,7 +2398,7 @@ def mostrar_analisis_portafolio():
             )
             
             fig.update_layout(
-                title=f"Simulación de Precios a {metrics['time_horizon']} Días",
+                title=f"Simulación de Precios a {risk_metrics['time_horizon']} Días",
                 xaxis_title='Días',
                 yaxis_title='Precio Normalizado',
                 template='plotly_dark',
@@ -2312,57 +2409,100 @@ def mostrar_analisis_portafolio():
             st.plotly_chart(fig, use_container_width=True)
             
         with tab3:
-            # Mostrar distribución de retornos
-            st.subheader("Distribución de Retornos Simulados")
+            self._plot_return_distribution(risk_metrics)
+                
+        with tab4:
+            st.header("🔍 Análisis Avanzado con Volumen")
+            st.info("""
+            Este análisis utiliza un modelo GARCH mejorado que incorpora el volumen de negociación 
+            para pronosticar con mayor precisión el riesgo y retorno del portafolio.
+            """)
             
-            fig = go.Figure()
-            
-            # Histograma de retornos
-            fig.add_trace(
-                go.Histogram(
-                    x=metrics['simulated_returns'],
-                    nbinsx=50,
-                    marker_color='#4ECDC4',
-                    opacity=0.7,
-                    name='Distribución de Retornos',
-                    histnorm='probability'
-                )
+            if st.button("🚀 Ejecutar Análisis con Volumen", type="primary"):
+                with st.spinner("Realizando simulación GARCH-Monte Carlo con volumen..."):
+                    forecast = forecast_portfolio_risk_with_volume(
+                        portfolio_manager=self,
+                        confidence_level=0.95,
+                        n_simulations=1000,
+                        days_forward=252  # 1 año
+                    )
+                    
+                    if forecast is not None:
+                        plot_forecast_results(forecast)
+                        
+    def _plot_return_distribution(self, risk_metrics):
+        st.subheader("Distribución de Retornos Simulados")
+        
+        fig = go.Figure()
+        
+        # Histograma de retornos
+        fig.add_trace(
+            go.Histogram(
+                x=risk_metrics['simulated_returns'],
+                nbinsx=50,
+                marker_color='#4ECDC4',
+                opacity=0.7,
+                name='Distribución de Retornos',
+                histnorm='probability'
             )
-            
-            # Líneas para VaR y CVaR
-            var_line = metrics['simulated_var']
-            cvar_line = metrics['simulated_cvar']
-            
-            fig.add_vline(x=var_line, line_dash="dash", line_color="red", 
-                         annotation_text=f"VaR {int((1-metrics['confidence_level'])*100)}%: {var_line*100:.2f}%")
-            
-            fig.add_vline(x=cvar_line, line_dash="dash", line_color="darkred",
-                         annotation_text=f"CVaR {int((1-metrics['confidence_level'])*100)}%: {cvar_line*100:.2f}%")
-            
-            fig.update_layout(
-                title='Distribución de Retornos Simulados',
-                xaxis_title='Retorno',
-                yaxis_title='Densidad de Probabilidad',
-                template='plotly_dark',
-                showlegend=False,
-                height=500
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Mostrar estadísticas de la distribución
-            skewness = stats.skew(metrics['simulated_returns'])
-            kurt = stats.kurtosis(metrics['simulated_returns'])
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Asimetría (Skewness)", f"{skewness:.2f}")
-            with col2:
-                st.metric("Curtosis", f"{kurt:.2f}")
-            with col3:
-                # Test de normalidad Jarque-Bera
-                jb_stat, p_value = stats.jarque_bera(metrics['simulated_returns'])
-                st.metric("Normalidad (p-valor)", f"{p_value:.4f}")
+        )
+        
+        # Añadir líneas para VaR y CVaR
+        var = -risk_metrics['simulated_var']
+        cvar = -risk_metrics['simulated_cvar']
+        
+        # Línea para el VaR
+        fig.add_vline(
+            x=var,
+            line_dash="dash",
+            line_color="red",
+            annotation_text=f"VaR {int((1-risk_metrics['confidence_level'])*100)}%: {var*100:.2f}%",
+            annotation_position="top right"
+        )
+        
+        # Línea para el CVaR
+        fig.add_vline(
+            x=cvar,
+            line_dash="dash",
+            line_color="orange",
+            annotation_text=f"CVaR: {cvar*100:.2f}%",
+            annotation_position="top right"
+        )
+        
+        # Línea para la media
+        mean_return = risk_metrics['expected_return']
+        fig.add_vline(
+            x=mean_return,
+            line_dash="dash",
+            line_color="green",
+            annotation_text=f"Media: {mean_return*100:.2f}%",
+            annotation_position="top right"
+        )
+        
+        fig.update_layout(
+            title=f"Distribución de Retornos a {risk_metrics['time_horizon']} Días",
+            xaxis_title='Retorno',
+            yaxis_title='Densidad de Probabilidad',
+            showlegend=False,
+            template='plotly_dark'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Mostrar estadísticas adicionales de la distribución
+        skewness = stats.skew(risk_metrics['simulated_returns'])
+        kurt = stats.kurtosis(risk_metrics['simulated_returns'])
+        
+        st.subheader("Estadísticas de la Distribución")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Asimetría (Skewness)", f"{skewness:.2f}")
+        with col2:
+            st.metric("Curtosis", f"{kurt:.2f}")
+        with col3:
+            # Test de normalidad Jarque-Bera
+            jb_stat, p_value = stats.jarque_bera(risk_metrics['simulated_returns'])
+            st.metric("Normalidad (p-valor)", f"{p_value:.4f}")
     
     def plot_volatility_analysis(self, symbol):
         """
