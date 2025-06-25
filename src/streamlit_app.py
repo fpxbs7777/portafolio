@@ -2683,20 +2683,39 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 break
         return seleccionados, total_invertido
     
-    # --- Filtro por tipo de activo ---
-    tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
-    tipo_seleccionado = st.selectbox(
-        "Filtrar por tipo de activo:",
-        options=['Todos'] + tipos_disponibles,
-        format_func=lambda x: "Todos" if x == 'Todos' else x
-    )
-    if tipo_seleccionado != 'Todos':
-        activos_para_optimizacion = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
-
     # Configuración de selección de universo y optimización
     col_sel, col1, col2, col3 = st.columns(4)
 
     with col_sel:
+        metodo_seleccion = st.selectbox(
+            "Método de Selección de Activos:",
+            options=['actual', 'aleatoria'],
+            format_func=lambda x: {
+                'actual': 'Portafolio actual',
+                'aleatoria': 'Selección aleatoria'
+            }[x]
+        )
+
+    # Mostrar input de capital y filtro de tipo de activo solo si corresponde
+    if metodo_seleccion == 'aleatoria':
+        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+        tipo_seleccionado = st.selectbox(
+            "Filtrar por tipo de activo:",
+            options=['Todos'] + tipos_disponibles,
+            format_func=lambda x: "Todos" if x == 'Todos' else x
+        )
+        activos_filtrados = activos_para_optimizacion
+        if tipo_seleccionado != 'Todos':
+            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+        capital_inicial = st.number_input(
+            "Capital Inicial para Optimización (ARS):",
+            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
+            help="El monto máximo a invertir en la selección aleatoria de activos"
+        )
+    else:
+        activos_filtrados = activos_para_optimizacion
+        capital_inicial = None
+
         metodo_seleccion = st.selectbox(
             "Método de Selección de Activos:",
             options=['actual', 'aleatoria'],
@@ -2716,28 +2735,30 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     else:
         capital_inicial = None
 
-    with col1:
-        estrategia = st.selectbox(
-            "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
-            format_func=lambda x: {
-                'markowitz': 'Optimización de Markowitz',
-                'equi-weight': 'Pesos Iguales',
-                'min-variance-l1': 'Mínima Varianza L1',
-                'min-variance-l2': 'Mínima Varianza L2',
-                'long-only': 'Solo Posiciones Largas'
-            }[x]
-        )
-    
-    with col2:
+    # --- Métodos avanzados de optimización ---
+    metodos_optimizacion = {
+        'Maximizar Sharpe (Markowitz)': 'max_sharpe',
+        'Mínima Varianza L1': 'min-variance-l1',
+        'Mínima Varianza L2': 'min-variance-l2',
+        'Pesos Iguales': 'equi-weight',
+        'Solo Posiciones Largas': 'long-only',
+        'Markowitz con Retorno Objetivo': 'markowitz-target'
+    }
+    metodo_ui = st.selectbox(
+        "Método de Optimización de Portafolio:",
+        options=list(metodos_optimizacion.keys())
+    )
+    metodo = metodos_optimizacion[metodo_ui]
+
+    # Pedir retorno objetivo solo si corresponde
+    target_return = None
+    if metodo == 'markowitz-target':
         target_return = st.number_input(
-            "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para estrategia Markowitz"
+            "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
+            min_value=0.01, max_value=1.0, value=0.10, step=0.01
         )
-    
-    with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+
+    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
     
     # Input de capital inicial
     capital_inicial = st.number_input(
@@ -2762,7 +2783,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         st.warning("Debe ingresar el capital inicial para la selección aleatoria.")
                         return
                     seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
-                        activos_para_optimizacion, token_acceso, capital_inicial
+                        activos_filtrados, token_acceso, capital_inicial
                     )
                     if not seleccionados:
                         st.warning("No se pudieron seleccionar activos aleatorios dentro del capital disponible.")
@@ -2774,7 +2795,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         st.markdown("#### Activos seleccionados aleatoriamente:")
                         st.dataframe(df_sel[['simbolo', 'mercado', 'precio', 'Peso (%)']], use_container_width=True)
                         # Solo optimizar sobre los activos seleccionados aleatoriamente (usando símbolo y mercado)
-                        universo_para_opt = [a for a in activos_para_optimizacion if any(
+                        universo_para_opt = [a for a in activos_filtrados if any(
                             s['simbolo'] == a['simbolo'] and s['mercado'] == a['mercado'] for s in seleccionados
                         )]
                         if not universo_para_opt:
@@ -2789,8 +2810,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     return
                 manager_inst = PortfolioManager(universo_para_opt, token_acceso, fecha_desde, fecha_hasta, capital=capital_inicial)
                 if manager_inst.load_data():
-                    use_target = target_return if estrategia == 'markowitz' else None
-                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+                    # Elegir método y target_return según selección
+                    if metodo == 'markowitz-target':
+                        portfolio_result = manager_inst.compute_portfolio(strategy='markowitz', target_return=target_return)
+                    else:
+                        portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
                     if portfolio_result:
                         st.success("✅ Optimización completada")
                         total_invertido = (portfolio_result.weights * capital_inicial).sum()
@@ -2807,7 +2831,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
                             metricas = portfolio_result.get_metrics_dict()
-                            
                             col_a, col_b = st.columns(2)
                             with col_a:
                                 st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
@@ -2820,29 +2843,30 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
                                 normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
                                 st.metric("Normalidad", normalidad)
-                        
-                        # Gráfico de distribución de retornos
-                        if portfolio_result.returns is not None:
-                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
-                            fig = portfolio_result.plot_histogram_streamlit()
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Gráfico de pesos
-                        if portfolio_result.weights is not None:
-                            st.markdown("#### 🥧 Distribución de Pesos")
-                            fig_pie = go.Figure(data=[go.Pie(
-                                labels=portfolio_result.dataframe_allocation['rics'],
-                                values=portfolio_result.weights,
-                                textinfo='label+percent',
-                                hole=0.4,
-                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                            )])
-                            fig_pie.update_layout(
-                                title="Distribución Optimizada de Activos",
-                                template='plotly_white'
-                            )
-                            st.plotly_chart(fig_pie, use_container_width=True)
-                        
+                        # Histograma avanzado con Plotly
+                        st.markdown("#### 📊 Histograma de Retornos del Portafolio")
+                        fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # Mostrar frontera eficiente si el usuario lo solicita
+                        if show_frontier:
+                            st.markdown("#### 📈 Frontera Eficiente (Efficient Frontier)")
+                            try:
+                                frontier, valid_returns, volatilities = manager_inst.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+                                fig_frontier = go.Figure()
+                                fig_frontier.add_trace(go.Scatter(
+                                    x=volatilities, y=valid_returns, mode='lines+markers', name='Frontera Eficiente',
+                                    line=dict(color='royalblue', width=2)
+                                ))
+                                fig_frontier.update_layout(
+                                    title="Frontera Eficiente",
+                                    xaxis_title="Volatilidad Anual",
+                                    yaxis_title="Retorno Anual",
+                                    template="plotly_dark"
+                                )
+                                st.plotly_chart(fig_frontier, use_container_width=True)
+                            except Exception as e:
+                                st.warning(f"No se pudo calcular la frontera eficiente: {e}")
                     else:
                         st.error("❌ Error en la optimización")
                 else:
