@@ -1266,16 +1266,19 @@ class manager:
                     if port_vol == 0:
                         return np.inf
                     return -(port_ret - self.risk_free_rate) / port_vol
-                
                 result = op.minimize(
-                    neg_sharpe_ratio, 
+                    neg_sharpe_ratio,
                     x0=np.ones(n_assets)/n_assets,
                     method='SLSQP',
                     bounds=bounds,
                     constraints=constraints
                 )
                 return self._create_output(result.x)
-        
+
+        # Si constraints no está definido, lanzar error
+        if 'constraints' not in locals():
+            raise ValueError(f"Tipo de portafolio no soportado o constraints no definidos para: {portfolio_type}")
+
         # Optimización general de varianza mínima
         result = op.minimize(
             lambda x: portfolio_variance(x, self.cov_matrix),
@@ -1284,28 +1287,7 @@ class manager:
             bounds=bounds,
             constraints=constraints
         )
-        
         return self._create_output(result.x)
-
-    def _create_output(self, weights):
-        """Crea un objeto output con los pesos optimizados"""
-        port_ret = np.sum(self.mean_returns * weights)
-        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-        
-        # Calcular retornos del portafolio
-        portfolio_returns = self.returns.dot(weights)
-        
-        # Crear objeto output
-        port_output = output(portfolio_returns, self.notional)
-        port_output.weights = weights
-        port_output.dataframe_allocation = pd.DataFrame({
-            'rics': self.rics,
-            'weights': weights,
-            'volatilities': np.sqrt(np.diag(self.cov_matrix)),
-            'returns': self.mean_returns
-        })
-        
-        return port_output
 
 class output:
     def __init__(self, returns, notional):
@@ -3567,7 +3549,8 @@ def main():
                     "Seleccione un cliente:",
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    key="sidebar_cliente_selector"
                 )
                 
                 st.session_state.cliente_seleccionado = next(
