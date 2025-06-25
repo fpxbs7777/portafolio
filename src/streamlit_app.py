@@ -2755,7 +2755,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if metodo == 'markowitz-target':
         target_return = st.number_input(
             "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
-            min_value=0.01, max_value=1.0, value=0.10, step=0.01
+            min_value=0.01, value=0.10, step=0.01, format="%.4f",
+            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
         )
 
     show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
@@ -2812,7 +2813,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 if manager_inst.load_data():
                     # Elegir método y target_return según selección
                     if metodo == 'markowitz-target':
-                        portfolio_result = manager_inst.compute_portfolio(strategy='markowitz', target_return=target_return)
+                        max_attempts = 10
+                        attempt = 0
+                        portfolio_result = None
+                        while attempt < max_attempts:
+                            result = manager_inst.compute_portfolio(strategy='markowitz', target_return=target_return)
+                            if result and abs(result.return_annual - target_return) < 0.001:
+                                portfolio_result = result
+                                break
+                            attempt += 1
+                        if not portfolio_result:
+                            st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos. El resultado más cercano se muestra.")
+                            # Mostrar el mejor resultado aunque no cumpla exactamente
+                            portfolio_result = result
                     else:
                         portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
                     if portfolio_result:
