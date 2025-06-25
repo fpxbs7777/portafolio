@@ -14,7 +14,7 @@ import streamlit.components.v1 as components
 
 warnings.filterwarnings('ignore')
 
-# Configuración de la página con aspecto profesional
+# Configuración de la página con tema oscuro profesional
 st.set_page_config(
     page_title="IOL Portfolio Analyzer",
     page_icon="📊",
@@ -22,99 +22,163 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados
+# Estilos CSS personalizados para tema oscuro
 st.markdown("""
 <style>
-    /* Estilos generales */
+    /* Estilos generales dark theme */
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #0f172a;
+        color: #e2e8f0;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     
     /* Mejora de tarjetas y métricas */
     .stMetric {
-        background-color: white;
+        background-color: #1e293b;
         border-radius: 10px;
         padding: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        border-left: 4px solid #0d6efd;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        border-left: 4px solid #4CAF50;
+        color: #e2e8f0 !important;
+    }
+    
+    .stMetric > div > div {
+        color: #94a3b8 !important;
     }
     
     /* Mejora de pestañas */
     .stTabs [data-baseweb="tab-list"] {
         gap: 5px;
+        background-color: #0f172a;
     }
     
     .stTabs [data-baseweb="tab"] {
         height: 45px;
         padding: 0 20px;
-        background-color: #e9ecef;
+        background-color: #1e293b;
         border-radius: 8px !important;
         font-weight: 500;
+        color: #e2e8f0;
         transition: all 0.3s ease;
     }
     
     .stTabs [aria-selected="true"] {
-        background-color: #0d6efd !important;
+        background-color: #4CAF50 !important;
         color: white !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     
     .stTabs [data-baseweb="tab"]:hover {
-        background-color: #dde5ed !important;
+        background-color: #334155 !important;
     }
     
     /* Mejora de inputs */
-    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox {
-        background-color: white;
+    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox, .stTextArea {
+        background-color: #1e293b;
         border-radius: 8px;
+        color: #e2e8f0;
+        border: 1px solid #334155;
+    }
+    
+    /* Estilos para las etiquetas de los inputs */
+    .stTextInput > label, .stNumberInput > label, 
+    .stDateInput > label, .stSelectbox > label,
+    .stTextArea > label {
+        color: #94a3b8 !important;
     }
     
     /* Botones */
-    .stButton>button {
+    .stButton > button {
         border-radius: 8px;
         font-weight: 500;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
         transition: all 0.2s;
     }
     
-    .stButton>button:hover {
+    .stButton > button:hover {
+        background-color: #45a049;
         transform: translateY(-2px);
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
     }
     
     /* Barra lateral */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2c3e50, #1a1a2e);
+        background: linear-gradient(180deg, #0f172a, #0c1424);
         color: white;
     }
     
-    [data-testid="stSidebar"] .stRadio label {
-        color: white !important;
-    }
-    
-    [data-testid="stSidebar"] .stSelectbox label {
-        color: white !important;
-    }
-    
-    [data-testid="stSidebar"] .stTextInput label {
-        color: white !important;
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stTextInput label,
+    [data-testid="stSidebar"] .stNumberInput label {
+        color: #94a3b8 !important;
     }
     
     /* Títulos */
     h1, h2, h3, h4, h5, h6 {
-        color: #2c3e50;
+        color: #4CAF50;
         font-weight: 600;
     }
     
     /* Tablas */
     .dataframe {
+        background-color: #1e293b !important;
+        color: #e2e8f0 !important;
         border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
+    
+    .dataframe th {
+        background-color: #334155 !important;
+        color: #e2e8f0 !important;
+    }
+    
+    .dataframe tr:nth-child(even) {
+        background-color: #1a2233 !important;
+    }
+    
+    .dataframe tr:hover {
+        background-color: #2c3a58 !important;
     }
     
     /* Progress bar */
     .stProgress > div > div > div {
-        background-color: #0d6efd;
+        background-color: #4CAF50;
+    }
+    
+    /* Scrollbar personalizada */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #0f172a;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #4CAF50;
+        border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #45a049;
+    }
+    
+    /* Efectos hover para tarjetas */
+    div[data-testid="stExpander"] {
+        background-color: #1e293b;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        transition: all 0.3s ease;
+    }
+    
+    div[data-testid="stExpander"]:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        transform: translateY(-2px);
     }
 </style>
 """, unsafe_allow_html=True)
