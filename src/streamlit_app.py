@@ -11,8 +11,169 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+from typing import Dict, List, Optional, Tuple
+import json
 
 warnings.filterwarnings('ignore')
+
+class MarketPredictor:
+    def __init__(self, token_portador: str, chart_widget: any):
+        self.token_portador = token_portador
+        self.chart_widget = chart_widget
+        
+    def export_data(self, symbol: str, timeframe: str = '1D') -> pd.DataFrame:
+        """Exporta datos históricos desde TradingView"""
+        try:
+            # Configurar parámetros de exportación
+            params = {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'from': int(datetime.now().timestamp()) - 31536000,  # Último año
+                'to': int(datetime.now().timestamp())
+            }
+            
+            # Exportar datos usando la API de TradingView
+            data = self.chart_widget.exportData(params)
+            
+            # Convertir a DataFrame
+            df = pd.DataFrame(data)
+            df['time'] = pd.to_datetime(df['time'], unit='s')
+            df.set_index('time', inplace=True)
+            return df
+        except Exception as e:
+            st.error(f"Error al exportar datos: {str(e)}")
+            return pd.DataFrame()
+    
+    def calculate_expected_return(self, data: pd.DataFrame, method: str = 'wma', 
+                                window: int = 252, alpha: float = 0.94) -> float:
+        """Calcula el retorno esperado usando WMA o EMA"""
+        if data.empty:
+            return 0.0
+            
+        if method == 'wma':
+            # Calcular WMA
+            weights = np.arange(1, window + 1)
+            weights = weights / weights.sum()
+            returns = data['close'].pct_change()
+            wma = np.sum(returns * weights[-len(returns):])
+            return wma * 252  # Anualizar
+        else:  # EMA
+            returns = data['close'].pct_change()
+            ema = returns.ewm(alpha=alpha).mean().iloc[-1]
+            return ema * 252  # Anualizar
+    
+    def calculate_volatility(self, data: pd.DataFrame) -> float:
+        """Calcula la volatilidad anualizada"""
+        if data.empty:
+            return 0.0
+            
+        returns = data['close'].pct_change()
+        return returns.std() * np.sqrt(252)
+    
+    def calculate_expected_volume(self, data: pd.DataFrame) -> float:
+        """Calcula el volumen promedio esperado"""
+        if data.empty:
+            return 0.0
+            
+        return data['volume'].mean()
+    
+    def monte_carlo_simulation(self, data: pd.DataFrame, n_simulations: int = 1000, 
+                             days: int = 252) -> Dict[str, float]:
+        """Realiza simulaciones de Monte Carlo para predecir precios"""
+        if data.empty:
+            return {'mean': 0.0, 'std': 0.0, 'var_95': 0.0}
+            
+        returns = data['close'].pct_change().dropna()
+        last_price = data['close'].iloc[-1]
+        
+        # Parámetros de la simulación
+        mu = returns.mean()
+        sigma = returns.std()
+        
+        # Simular caminos de precios
+        price_paths = np.zeros((days, n_simulations))
+        price_paths[0] = last_price
+        
+        for t in range(1, days):
+            price_paths[t] = price_paths[t-1] * (1 + np.random.normal(mu, sigma, n_simulations))
+        
+        # Calcular métricas
+        final_prices = price_paths[-1]
+        return {
+            'mean': np.mean(final_prices),
+            'std': np.std(final_prices),
+            'var_95': np.percentile(final_prices, 5)
+        }
+    
+    def get_predictions(self, symbol: str, method: str = 'wma', 
+                       window: int = 252, alpha: float = 0.94, 
+                       n_simulations: int = 1000) -> Dict[str, float]:
+        """
+        Obtiene todas las predicciones para un símbolo
+        """
+        try:
+            # Obtener datos históricos
+            data = self.export_data(symbol)
+            
+            # Calcular métricas
+            expected_return = self.calculate_expected_return(data, method, window, alpha)
+            volatility = self.calculate_volatility(data)
+            volume = self.calculate_expected_volume(data)
+            mc_results = self.monte_carlo_simulation(data, n_simulations)
+            
+            return {
+                'expected_return': expected_return,
+                'volatility': volatility,
+                'volume': volume,
+                'mc_mean': mc_results['mean'],
+                'mc_std': mc_results['std'],
+                'mc_var_95': mc_results['var_95']
+            }
+        except Exception as e:
+            st.error(f"Error al obtener predicciones: {str(e)}")
+            return {
+                'expected_return': 0.0,
+                'volatility': 0.0,
+                'volume': 0.0,
+                'mc_mean': 0.0,
+                'mc_std': 0.0,
+                'mc_var_95': 0.0
+            }
+
+def calcular_retorno_esperado_mejorado(token_portador, activo, ventana_muestral=252, alpha=0.94):
+    """
+    Calcula el retorno esperado ajustado usando EMA con volatilidad
+    """
+    try:
+        # Obtener datos históricos
+        datos = obtener_serie_historica_iol(token_portador, 'BCBA', activo, 
+                                          str(st.session_state.fecha_desde), 
+                                          str(st.session_state.fecha_hasta))
+        
+        if datos is None or datos.empty:
+            return {'retorno_esperado': 0.0, 'volatilidad': 0.0}
+            
+        # Calcular retornos logarítmicos
+        retornos = np.log(datos['precio'] / datos['precio'].shift(1))
+        retornos = retornos.dropna()
+        
+        # Calcular EMA
+        retorno_ema = retornos.ewm(alpha=alpha).mean().iloc[-1]
+        retorno_anual = retorno_ema * 252
+        
+        # Calcular volatilidad anualizada
+        volatilidad = retornos.std() * np.sqrt(252)
+        
+        # Ajustar retorno esperado por volatilidad
+        retorno_ajustado = retorno_anual - 0.5 * volatilidad**2
+        
+        return {
+            'retorno_esperado': retorno_ajustado,
+            'volatilidad': volatilidad
+        }
+    except Exception as e:
+        st.error(f"Error al calcular retorno esperado: {str(e)}")
+        return {'retorno_esperado': 0.0, 'volatilidad': 0.0}
 
 # Configuración de la página con tema oscuro profesional
 st.set_page_config(
@@ -2262,121 +2423,80 @@ def mostrar_cotizaciones_mercado(token_acceso):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
             
             if tasas_caucion is not None and not tasas_caucion.empty:
-                df_tasas = pd.DataFrame(tasas_caucion)
-                columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
-                columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
-                
-                if columnas_disponibles:
-                    st.dataframe(df_tasas[columnas_disponibles].head(10))
-                else:
-                    st.dataframe(df_tasas.head(10))
-            else:
-                st.error("❌ No se pudieron obtener las tasas de caución")
-
-def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
-    st.markdown("### 🔄 Optimización de Portafolio")
-    
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
     if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
+        st.error("No se pudo obtener el portafolio")
         return
     
-    activos_raw = portafolio.get('activos', [])
-    if not activos_raw:
-        st.warning("El portafolio está vacío")
-        return
-    
-    # Extraer símbolos, mercados y tipos de activo
-    activos_para_optimizacion = []
-    for activo in activos_raw:
+    # Obtener datos históricos
+    datos_historicos = {}
+    for activo in portafolio.get('activos', []):
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo')
         mercado = titulo.get('mercado')
-        tipo = titulo.get('tipo')
-        if simbolo:
-            activos_para_optimizacion.append({'simbolo': simbolo,
-                                              'mercado': mercado,
-                                              'tipo': tipo})
+        
+        if simbolo and mercado:
+            datos = obtener_serie_historica_iol(token_acceso, mercado, simbolo, 
+                                               str(st.session_state.fecha_desde), 
+                                               str(st.session_state.fecha_hasta))
+            if datos is not None and not datos.empty:
+                datos_historicos[simbolo] = datos
     
-    if not activos_para_optimizacion:
-        st.warning("No se encontraron activos con información de mercado válida para optimizar.")
+    if not datos_historicos:
+        st.warning("No hay datos históricos disponibles para optimizar")
         return
     
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
+    # Crear DataFrame con todos los precios
+    df_precios = pd.DataFrame()
+    for simbolo, datos in datos_historicos.items():
+        df_precios[simbolo] = datos['precio']
     
-    st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
+    # Crear MarketPredictor
+    market_predictor = MarketPredictor(token_portador, st.session_state.chart_widget)
     
-    # Configuración de optimización extendida
-    col1, col2, col3 = st.columns(3)
+    # Diccionarios para almacenar métricas
+    retornos_esperados = {}
+    volatilidades = {}
+    mc_metrics = {}
+    retornos_log = pd.DataFrame()
     
-    with col1:
-        estrategia = st.selectbox(
-            "Estrategia de Optimización:",
-            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
-            format_func=lambda x: {
-                'markowitz': 'Optimización de Markowitz',
-                'equi-weight': 'Pesos Iguales',
-                'min-variance-l1': 'Mínima Varianza L1',
-                'min-variance-l2': 'Mínima Varianza L2',
-                'long-only': 'Solo Posiciones Largas'
-            }[x]
-        )
+    # Configuración de parámetros
+    window = 252  # Ventana de 252 días (un año)
+    alpha = 0.94  # Parámetro EMA
+    n_simulations = 1000  # Número de simulaciones Monte Carlo
     
-    with col2:
-        target_return = st.number_input(
-            "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para estrategia Markowitz"
-        )
+    # Calcular métricas para cada activo
+    for simbolo in df_precios.columns:
+        try:
+            # Obtener predicciones usando MarketPredictor
+            predictions = market_predictor.get_predictions(
+                symbol=simbolo,
+                method='wma',
+                window=window,
+                alpha=alpha,
+                n_simulations=n_simulations
+            )
+            
+            # Almacenar métricas
+            retornos_esperados[simbolo] = predictions['expected_return']
+            volatilidades[simbolo] = predictions['volatility']
+            mc_metrics[simbolo] = {
+                'mean': predictions['mc_mean'],
+                'std': predictions['mc_std'],
+                'var_95': predictions['mc_var_95']
+            }
+            
+            # Calcular retornos logarítmicos
+            retornos_log[simbolo] = np.log(df_precios[simbolo] / df_precios[simbolo].shift(1))
+            
+        except Exception as e:
+            st.error(f"Error al procesar {simbolo}: {str(e)}")
+            continue
     
-    with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    # Eliminar columnas con NaN (activos sin datos suficientes)
+    retornos_log = retornos_log.dropna(axis=1)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
-    with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-    
-    if ejecutar_optimizacion:
-        with st.spinner("Ejecutando optimización..."):
-            try:
-                # Crear manager de portafolio con la lista de activos (símbolo y mercado)
-                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
-                
-                # Cargar datos
-                if manager_inst.load_data():
-                    # Computar optimización
-                    use_target = target_return if estrategia == 'markowitz' else None
-                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
-                    
-                    if portfolio_result:
-                        st.success("✅ Optimización completada")
-                        
-                        # Mostrar resultados extendidos
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            if portfolio_result.dataframe_allocation is not None:
-                                weights_df = portfolio_result.dataframe_allocation.copy()
-                                weights_df['Peso (%)'] = weights_df['weights'] * 100
-                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                        
-                        with col2:
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            metricas = portfolio_result.get_metrics_dict()
-                            
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                                st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+    # Recalcular la matriz de covarianza con los retornos logarítmicos
+    cov_matrix = retornos_log.cov()
                             with col_b:
                                 st.metric("Skewness", f"{metricas['Skewness']:.4f}")
                                 st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
