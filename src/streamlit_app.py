@@ -6,6 +6,42 @@ from plotly.subplots import make_subplots
 from arch import arch_model
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+import scipy.stats as stats
+
+def graficar_histograma_portafolio(returns, portfolio_name="Portafolio del Cliente"):
+    """
+    Grafica el histograma de los retornos del portafolio y muestra estadísticas relevantes usando Streamlit.
+    """
+    import streamlit as st
+    import numpy as np
+    returns = np.array(returns)
+    mean_daily = np.mean(returns)
+    volatility_daily = np.std(returns)
+    sharpe_ratio = mean_daily / volatility_daily if volatility_daily != 0 else np.nan
+    var_95 = np.percentile(returns, 5)
+    skewness = stats.skew(returns)
+    kurtosis = stats.kurtosis(returns)
+    jb_stat, p_value = stats.jarque_bera(returns)
+    is_normal = p_value > 0.05
+    decimals = 4
+    str_title = f'{portfolio_name} Portfolio Returns\n' + \
+                'mean_daily=' + str(np.round(mean_daily, decimals)) + ' | ' + \
+                'volatility_daily=' + str(np.round(volatility_daily, decimals)) + '\n' + \
+                'sharpe_ratio=' + str(np.round(sharpe_ratio, decimals)) + ' | ' + \
+                'var_95=' + str(np.round(var_95, decimals)) + '\n' + \
+                'skewness=' + str(np.round(skewness, decimals)) + ' | ' + \
+                'kurtosis=' + str(np.round(kurtosis, decimals)) + '\n' + \
+                'JB stat=' + str(np.round(jb_stat, decimals)) + ' | ' + \
+                'p-value=' + str(np.round(p_value, decimals)) + '\n' + \
+                'is_normal=' + str(is_normal)
+    fig, ax = plt.subplots()
+    ax.hist(returns, bins=40, color='#4CAF50', alpha=0.8, edgecolor='black')
+    ax.set_title(str_title, fontsize=10)
+    ax.set_xlabel('Retorno')
+    ax.set_ylabel('Frecuencia')
+    st.pyplot(fig)
+    st.caption(str_title)
+
 import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta, date
