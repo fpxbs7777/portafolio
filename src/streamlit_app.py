@@ -2771,9 +2771,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         st.success(f"✅ Selección aleatoria completada. Total invertido: {total_invertido:.2f} ARS")
                         df_sel = pd.DataFrame(seleccionados)
                         df_sel['Peso (%)'] = (df_sel['precio'] / total_invertido) * 100
+                        st.markdown("#### Activos seleccionados aleatoriamente:")
                         st.dataframe(df_sel[['simbolo', 'mercado', 'precio', 'Peso (%)']], use_container_width=True)
-                        # Solo optimizar sobre los activos seleccionados
-                        universo_para_opt = [a for a in activos_para_optimizacion if a['simbolo'] in [s['simbolo'] for s in seleccionados]]
+                        # Solo optimizar sobre los activos seleccionados aleatoriamente (usando símbolo y mercado)
+                        universo_para_opt = [a for a in activos_para_optimizacion if any(
+                            s['simbolo'] == a['simbolo'] and s['mercado'] == a['mercado'] for s in seleccionados
+                        )]
+                        if not universo_para_opt:
+                            st.warning("No hay activos seleccionados aleatoriamente para optimizar.")
+                            return
                 else:
                     universo_para_opt = activos_para_optimizacion
 
