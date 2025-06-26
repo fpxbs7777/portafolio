@@ -2960,11 +2960,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 
 
 
+    # Solo mostramos el botón de frontera eficiente si está habilitado
     col1, col2, col3 = st.columns(3)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+        if show_frontier:  # Solo mostrar este botón si show_frontier es True
+            ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+        else:
+            st.empty()  # Espacio vacío para mantener el layout
     with col3:
         comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.")
 
@@ -2988,24 +2992,54 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 # --- COMPARACIÓN ACTUAL VS ALEATORIA ---
                 if 'comparar_opt' in locals() and comparar_opt:
                     # 1. Portafolio actual
-                    universo_actual = activos_para_optimizacion
+                    if metodo_seleccion == 'aleatoria':
+                        universo_actual = activos_filtrados  # Usar los activos ya filtrados
+                    else:
+                        universo_actual = activos_para_optimizacion
+                    
                     capital_actual = capital_inicial if capital_inicial else 100000.0
+                    
+                    # Mostrar información sobre los activos seleccionados
+                    st.info(f"🔍 Analizando {len(universo_actual)} activos con un capital de ${capital_actual:,.2f}")
+                    
+                    # 2. Portafolio aleatorio (selección completamente aleatoria)
+                    st.info("🔀 Generando portafolio aleatorio para comparación")
+                    
+                    # Obtener todos los activos disponibles para la selección aleatoria
+                    todos_activos = []
+                    if 'activos_disponibles' in st.session_state:
+                        todos_activos = st.session_state.activos_disponibles
+                    else:
+                        # Si no hay activos en la sesión, usar los del portafolio actual
+                        todos_activos = activos_para_optimizacion
+                    
+                    # Seleccionar activos aleatorios del universo completo
+                    if todos_activos:
+                        seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
+                            todos_activos, token_acceso, capital_actual
+                        )
+                    else:
+                        st.warning("No hay activos disponibles para la selección aleatoria.")
+                        return
+                        
+                    if not seleccionados or len(seleccionados) < 2:
+                        st.warning("No se pudieron seleccionar suficientes activos aleatorios con el capital disponible.")
+                        return
+                        
+                    universo_aleatorio = [{
+                        'simbolo': s['simbolo'],
+                        'mercado': s['mercado'],
+                        'tipo': s.get('tipo', 'Desconocido')
+                    } for s in seleccionados]
+                    
+                    st.success(f"✅ Portafolio aleatorio generado con {len(universo_aleatorio)} activos")
+                    
+                    # Optimizar portafolio actual
                     manager_actual = PortfolioManager(universo_actual, token_acceso, fecha_desde, fecha_hasta, capital=capital_actual)
                     portfolio_result_actual = None
                     if manager_actual.load_data():
                         portfolio_result_actual = manager_actual.compute_portfolio(strategy=metodo, target_return=target_return) if metodo == 'markowitz-target' else manager_actual.compute_portfolio(strategy=metodo)
-                    # 2. Portafolio aleatorio (misma cantidad de activos)
-                    st.info("🔀 Selección aleatoria de activos para benchmarking")
-                    cantidad_activos = len(universo_actual)
-                    seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
-                        universo_actual, token_acceso, capital_actual
-                    )
-                    if not seleccionados or len(seleccionados) < 2:
-                        st.warning("No se pudieron seleccionar activos aleatorios dentro del capital disponible para comparar.")
-                        return
-                    universo_aleatorio = [a for a in universo_actual if any(
-                        s['simbolo'] == a['simbolo'] and s['mercado'] == a['mercado'] for s in seleccionados
-                    )]
+
                     manager_aleatorio = PortfolioManager(universo_aleatorio, token_acceso, fecha_desde, fecha_hasta, capital=capital_actual)
                     portfolio_result_aleatorio = None
                     if manager_aleatorio.load_data():
