@@ -1593,6 +1593,8 @@ class PortfolioManager:
         self.garch_models = {}
         self.monte_carlo_results = {}
         self.volatility_forecasts = {}
+        self.vwap_data = None  # Almacenará los datos de VWAP
+        self.portfolio_vwap = None  # Almacenará el VWAP del portafolio completo
     
     def analyze_volatility(self, symbol, returns, volumes=None, n_simulations=1000, n_days=30):
         """
@@ -2093,15 +2095,200 @@ class PortfolioManager:
         try:
             portfolios, returns, volatilities = compute_efficient_frontier(
                 self.prices.columns.tolist(), 
-                self.notional, 
-                target_return, 
+                self.notional,
+                target_return,
                 include_min_variance,
-                self.prices.to_dict('series')
+                self.prices
             )
             return portfolios, returns, volatilities
+            
         except Exception as e:
             st.error(f"Error al calcular la frontera eficiente: {str(e)}")
+            st.exception(e)
             return None, None, None
+            
+    def calcular_vwap_portafolio(self):
+        """
+        Calcula el VWAP (Volume Weighted Average Price) para cada activo en el portafolio
+        y el VWAP global ponderado por el valor de mercado de cada posición.
+        
+        Returns:
+            dict: Diccionario con los datos de VWAP por activo y el VWAP del portafolio
+        """
+        if not self.data_loaded or self.prices is None or self.volumes is None:
+            st.warning("Cargando datos de precios y volúmenes...")
+            self.load_data()
+            
+        if self.prices is None or self.volumes is None:
+            st.error("No se pudieron cargar los datos necesarios para el cálculo del VWAP")
+            return None
+            
+        try:
+            # Calcular VWAP para cada activo
+            vwap_data = {}
+            
+            for symbol in self.prices.columns:
+                if symbol in self.volumes.columns:
+                    # Calcular VWAP diario para cada activo
+                    prices = self.prices[symbol]
+                    volumes = self.volumes[symbol]
+                    
+                    # Calcular VWAP diario (suma de (precio * volumen) / suma de volúmenes)
+                    vwap_diario = (prices * volumes).groupby(pd.Grouper(freq='D')).sum() / \
+                                 volumes.groupby(pd.Grouper(freq='D')).sum()
+                    
+                    vwap_data[symbol] = vwap_diario
+            
+            # Calcular VWAP ponderado del portafolio
+            if vwap_data:
+                # Crear DataFrame con los VWAPs
+                vwap_df = pd.DataFrame(vwap_data)
+                
+                # Obtener la ponderación de cada activo en el portafolio
+                if hasattr(self, 'manager') and hasattr(self.manager, 'dataframe_allocation'):
+                    # Usar los pesos de la optimización si están disponibles
+                    weights = dict(zip(
+                        self.manager.dataframe_allocation['rics'],
+                        self.manager.dataframe_allocation['weights']
+                    ))
+                else:
+                    # Usar pesos iguales si no hay optimización
+                    n_assets = len(vwap_df.columns)
+                    weights = {symbol: 1/n_assets for symbol in vwap_df.columns}
+                
+                # Calcular VWAP ponderado
+                portfolio_vwap = pd.Series(0, index=vwap_df.index)
+                total_weight = 0
+                
+                for symbol, weight in weights.items():
+                    if symbol in vwap_df.columns:
+                        portfolio_vwap += vwap_df[symbol] * weight
+                        total_weight += weight
+                
+                if total_weight > 0:
+                    portfolio_vwap /= total_weight
+                
+                self.portfolio_vwap = portfolio_vwap
+            
+            self.vwap_data = vwap_data
+            return {
+                'vwap_por_activo': vwap_data,
+                'vwap_portafolio': self.portfolio_vwap
+            }
+            
+        except Exception as e:
+            st.error(f"Error al calcular el VWAP: {str(e)}")
+            st.exception(e)
+            return None
+    
+    def optimizar_portafolio_vwap(self, target_return=None, max_volatility=None, min_weight=0.0, max_weight=1.0):
+        """
+        Optimiza el portafolio utilizando el VWAP como referencia para los precios.
+        
+        Args:
+            target_return (float, optional): Retorno objetivo anualizado. Si no se especifica,
+                                          se maximiza el ratio de Sharpe.
+            max_volatility (float, optional): Volatilidad máxima permitida.
+            min_weight (float): Peso mínimo por activo (default: 0.0).
+            max_weight (float): Peso máximo por activo (default: 1.0).
+            
+        Returns:
+            dict: Diccionario con los pesos óptimos y métricas del portafolio
+        """
+        # Calcular VWAP si no está calculado
+        if self.vwap_data is None:
+            vwap_result = self.calcular_vwap_portafolio()
+            if vwap_result is None:
+                return None
+        
+        try:
+            # Obtener retornos diarios basados en VWAP
+            returns = []
+            valid_symbols = []
+            
+            for symbol, vwap_series in self.vwap_data.items():
+                if len(vwap_series) > 1:  # Necesitamos al menos 2 puntos para calcular retornos
+                    returns.append(vwap_series.pct_change().dropna())
+                    valid_symbols.append(symbol)
+            
+            if not returns:
+                st.error("No hay suficientes datos de VWAP para optimizar el portafolio")
+                return None
+            
+            # Crear DataFrame de retornos
+            returns_df = pd.concat(returns, axis=1)
+            returns_df.columns = valid_symbols
+            
+            # Calcular matriz de covarianza y retornos esperados
+            cov_matrix = returns_df.cov() * 252  # Anualizar
+            expected_returns = returns_df.mean() * 252  # Retornos anualizados
+            
+            # Función objetivo: Minimizar volatilidad o maximizar Sharpe
+            def objective(weights):
+                if target_return is not None:
+                    # Si hay retorno objetivo, minimizar volatilidad
+                    return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                else:
+                    # Si no hay retorno objetivo, maximizar Sharpe (minimizar -Sharpe)
+                    port_return = np.sum(expected_returns * weights)
+                    port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                    return -port_return / port_vol if port_vol > 0 else 0
+            
+            # Restricciones
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}  # Suma de pesos = 1
+            ]
+            
+            if target_return is not None:
+                constraints.append(
+                    {'type': 'eq', 'fun': lambda x: np.sum(x * expected_returns) - target_return}
+                )
+            
+            if max_volatility is not None:
+                constraints.append(
+                    {'type': 'ineq', 'fun': lambda x: max_volatility - np.sqrt(np.dot(x.T, np.dot(cov_matrix, x)))}
+                )
+            
+            # Límites de los pesos
+            bounds = tuple((min_weight, max_weight) for _ in range(len(valid_symbols)))
+                
+            # Punto inicial: pesos iguales
+            init_weights = np.array([1/len(valid_symbols)] * len(valid_symbols))
+                
+            # Optimizar
+            result = minimize(
+                objective,
+                init_weights,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                options={'maxiter': 1000}
+            )
+                
+            if not result.success:
+                st.warning(f"La optimización no convergió: {result.message}")
+                return None
+                
+            # Calcular métricas del portafolio óptimo
+            optimal_weights = result.x
+            port_return = np.sum(expected_returns * optimal_weights)
+            port_vol = np.sqrt(np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights)))
+            sharpe = port_return / port_vol if port_vol > 0 else 0
+                
+            return {
+                'symbols': valid_symbols,
+                'weights': optimal_weights,
+                'expected_return': port_return,
+                'volatility': port_vol,
+                'sharpe_ratio': sharpe,
+                'cov_matrix': cov_matrix,
+                'expected_returns': expected_returns
+            }
+                
+        except Exception as e:
+            st.error(f"Error al optimizar el portafolio con VWAP: {str(e)}")
+            st.exception(e)
+            return None
 
 # --- Historical Data Methods ---
 def _deprecated_serie_historica_iol(*args, **kwargs):
