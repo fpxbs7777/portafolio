@@ -3815,5 +3815,130 @@ def mostrar_bonos_mep():
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
+def mostrar_inicio():
+    """
+    Muestra la página de inicio de la aplicación con información general.
+    """
+    st.title("📊 Plataforma de Análisis Financiero")
+    
+    st.markdown("""
+    ### Bienvenido a la plataforma de análisis financiero
+    
+    Esta aplicación le permite realizar análisis avanzados de instrumentos financieros,
+    optimizar su portafolio de inversiones y realizar un seguimiento de sus posiciones.
+    """)
+    
+    # Mostrar características principales en columnas
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("### 📈 Mercado")
+        st.markdown("""
+        - Cotizaciones en tiempo real
+        - Gráficos interactivos
+        - Datos históricos
+        """)
+    
+    with col2:
+        st.markdown("### 💼 Portafolio")
+        st.markdown("""
+        - Seguimiento de inversiones
+        - Análisis de rendimiento
+        - Alertas personalizadas
+        """)
+    
+    with col3:
+        st.markdown("### 📊 Herramientas")
+        st.markdown("""
+        - Optimización de cartera
+        - Análisis técnico
+        - Proyecciones
+        """)
+    
+    # Sección de inicio rápido
+    st.markdown("---")
+    st.markdown("### 🚀 Comience ahora")
+    
+    # Botones de acción rápida
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📊 Ver Bonos MEP", use_container_width=True):
+            st.session_state.page = "bonos_mep"
+    
+    with col2:
+        if st.button("📈 Análisis Técnico", use_container_width=True):
+            st.session_state.page = "analisis_tecnico"
+    
+    with col3:
+        if st.button("💼 Estado de Cuenta", use_container_width=True):
+            st.session_state.page = "estado_cuenta"
+
+def main():
+    """
+    Función principal de la aplicación Streamlit.
+    Configura la navegación y las páginas de la aplicación.
+    """
+    st.set_page_config(
+        page_title="Análisis Financiero",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Inicializar variables de sesión si no existen
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'refresh_token' not in st.session_state:
+        st.session_state.refresh_token = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=30)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+    
+    # Barra lateral para navegación
+    with st.sidebar:
+        st.title("🔍 Navegación")
+        opcion = st.radio(
+            "Seleccione una opción:",
+            ["🏠 Inicio", "📊 Bonos MEP", "📈 Análisis Técnico", "📊 Optimización de Portafolio", 
+             "💼 Estado de Cuenta", "📝 Movimientos", "⚙️ Configuración"]
+        )
+    
+    # Mostrar contenido según la opción seleccionada
+    if opcion == "🏠 Inicio":
+        mostrar_inicio()
+    elif opcion == "📊 Bonos MEP":
+        mostrar_bonos_mep()
+    elif opcion == "📈 Análisis Técnico":
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            mostrar_analisis_tecnico(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente'))
+        else:
+            st.warning("Por favor, inicie sesión y seleccione un cliente primero.")
+    elif opcion == "📊 Optimización de Portafolio":
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            mostrar_optimizacion_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente'))
+        else:
+            st.warning("Por favor, inicie sesión y seleccione un cliente primero.")
+    elif opcion == "💼 Estado de Cuenta":
+        if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            estado_cuenta = obtener_estado_cuenta(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente'))
+            if estado_cuenta:
+                mostrar_estado_cuenta(estado_cuenta)
+        else:
+            st.warning("Por favor, inicie sesión y seleccione un cliente primero.")
+    elif opcion == "📝 Movimientos":
+        if st.session_state.token_acceso:
+            mostrar_movimientos_asesor()
+        else:
+            st.warning("Por favor, inicie sesión primero.")
+    elif opcion == "⚙️ Configuración":
+        st.title("⚙️ Configuración")
+        st.write("Configuración de la aplicación...")
+
 if __name__ == "__main__":
     main()
