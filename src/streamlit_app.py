@@ -5091,6 +5091,7 @@ def main():
                         st.rerun()
             
             st.sidebar.header("📋 Menú")
+            # Menú principal
             opciones_menu = [
                 "📊 Resumen del Portafolio",
                 "📈 Cotizaciones de Mercado",
@@ -5100,10 +5101,15 @@ def main():
                 "📝 Test de Perfil de Inversor"
             ]
             
-            # Solo mostrar opciones de asesor si hay token de acceso
+            # Opciones adicionales para asesores
             if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
                 opciones_menu.append("👤 Movimientos del Asesor")
-                opciones_menu.append("📉 Vender Especie D")
+            
+            # Submenú para operaciones de Dólar MEP
+            if st.session_state.token_acceso and st.session_state.cliente_seleccionado and "📈 Cotizaciones de Mercado" in opciones_menu:
+                # Insertar después de Cotizaciones de Mercado
+                idx = opciones_menu.index("📈 Cotizaciones de Mercado")
+                opciones_menu.insert(idx + 1, "   📉 Vender Especie D")
             
             opcion_seleccionada = st.sidebar.radio("Navegación", opciones_menu)
             
@@ -5128,6 +5134,15 @@ def main():
                     mostrar_cotizaciones_mercado(st.session_state.token_acceso)
                 else:
                     st.warning("No se pudo autenticar con IOL")
+                    
+            elif opcion_seleccionada.strip() == "📉 Vender Especie D":
+                # Mostrar la interfaz de Vender Especie D
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', 
+                                 st.session_state.cliente_seleccionado.get('id'))
+                    mostrar_venta_especie_d(st.session_state.token_acceso, cliente_id)
+                else:
+                    st.warning("Por favor, seleccione un cliente primero")
                 
             elif opcion_seleccionada == "🔍 Optimización de Portafolio":
                 st.title("Optimización de Portafolio")
