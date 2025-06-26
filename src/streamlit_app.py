@@ -22,8 +22,31 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import SHDA  # Para integración con PyHomeBroker
+import json
+import os
+import re
+import time
+from typing import Dict, List, Optional, Tuple, Union, Any
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import requests
+import streamlit as st
+from scipy import stats, optimize
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+from scipy.stats import norm, gaussian_kde
+import yfinance as yf
+import pyfolio as pf
+from pyfolio import timeseries
+from pyfolio.plotting import plot_rolling_returns, plot_annual_returns, plot_monthly_returns_heatmap
 
 warnings.filterwarnings('ignore')
+
+# Configuración global para Plotly
+import plotly.io as pio
+pio.templates.default = "plotly_dark"
 
 # Configuración de la página con tema oscuro profesional
 st.set_page_config(
@@ -3656,8 +3679,65 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
+def simular_ejecucion(precio_objetivo, precio_actual, volatilidad, dias=1, n_simulaciones=1000):
+    """
+    Simula la ejecución de órdenes usando el modelo de Monte Carlo.
+    
+    Args:
+        precio_objetivo (float): Precio objetivo de ejecución
+        precio_actual (float): Precio actual del activo
+        volatilidad (float): Volatilidad anualizada del activo
+        dias (int): Horizonte de tiempo en días
+        n_simulaciones (int): Número de simulaciones a ejecutar
+        
+    Returns:
+        dict: Resultados de la simulación
+    """
+    try:
+        # Convertir volatilidad diaria
+        volatilidad_diaria = volatilidad / np.sqrt(252)
+        
+        # Generar precios simulados
+        precios_simulados = []
+        for _ in range(n_simulaciones):
+            # Modelo de movimiento browniano geométrico
+            retorno_diario = np.random.normal(0, volatilidad_diaria, dias)
+            precios = precio_actual * np.exp(np.cumsum(retorno_diario))
+            precios_simulados.append(pd.Series(precios, index=range(dias)))
+        
+        # Calcular métricas
+        df_simulaciones = pd.concat(precios_simulados, axis=1)
+        
+        # Calcular probabilidad de ejecución
+        ejecutado = df_simulaciones.le(precio_objetivo).any()
+        prob_ejecucion = ejecutado.mean() * 100
+        
+        # Calcular tiempo medio de ejecución
+        if ejecutado.any():
+            tiempos_ejecucion = df_simulaciones.apply(lambda x: x[x <= precio_objetivo].index.min() if (x <= precio_objetivo).any() else dias)
+            tiempo_medio = tiempos_ejecucion.mean()
+        else:
+            tiempo_medio = dias
+        
+        return {
+            'probabilidad_ejecucion': prob_ejecucion,
+            'tiempo_medio_ejecucion': tiempo_medio,
+            'precio_medio_final': df_simulaciones.iloc[-1].mean(),
+            'precio_min_final': df_simulaciones.iloc[-1].min(),
+            'precio_max_final': df_simulaciones.iloc[-1].max(),
+            'simulaciones': df_simulaciones
+        }
+        
+    except Exception as e:
+        st.error(f"Error en la simulación de ejecución: {str(e)}")
+        return None
+
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
-    st.markdown("### 🔄 Optimización de Portafolio")
+    st.title("🔄 Optimización de Portafolio")
+    
+    # Asegurarse de que plotly.graph_objects esté disponible globalmente
+    global go
     
     with st.spinner("Obteniendo portafolio..."):
         portafolio = obtener_portafolio(token_acceso, id_cliente)
@@ -4031,28 +4111,39 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         except Exception as e:
                             st.warning(f"Advertencia al calcular el total invertido: {str(e)}")
                             total_invertido = capital_inicial
-                            
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            if portfolio_result.dataframe_allocation is not None:
-                                try:
-                                    weights_df = portfolio_result.dataframe_allocation.copy()
-                                    # Asegurarse de que la columna de pesos exista y sea numérica
-                                    if 'weights' in weights_df.columns:
-                                        weights_df['Peso (%)'] = pd.to_numeric(weights_df['weights'], errors='coerce') * 100
-                                        weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                        # Usar 'Activo' o 'rics' según lo que exista
-                                        col_activo = 'Activo' if 'Activo' in weights_df.columns else 'rics'
-                                        if col_activo in weights_df.columns:
-                                            st.dataframe(weights_df[[col_activo, 'Peso (%)']].rename(columns={col_activo: 'Activo'}), 
-                                                       use_container_width=True)
-                                        else:
-                                            st.dataframe(weights_df[['Peso (%)']], use_container_width=True)
-                                    else:
-                                        st.warning("No se encontró la columna 'weights' en los resultados")
-                                except Exception as e:
-                                    st.error(f"Error al mostrar los pesos: {str(e)}")
+                                                # Mostrar resultados de la optimización
+                        st.success("✅ Optimización completada")
+                        
+                        # Mostrar pesos optimizados
+                        st.subheader("📊 Pesos Optimizados")
+                        try:
+                            if hasattr(portfolio_result, 'dataframe_allocation') and portfolio_result.dataframe_allocation is not None:
+                                # Asegurarse de que la columna 'weights' existe
+                                weights_df = portfolio_result.dataframe_allocation.copy()
+                                if 'weights' not in weights_df.columns and 'Peso' in weights_df.columns:
+                                    weights_df['weights'] = weights_df['Peso']
+                                
+                                if 'weights' in weights_df.columns:
+                                    # Mostrar tabla de pesos
+                                    weights_df['Peso (%)'] = (weights_df['weights'] * 100).round(2)
+                                    st.dataframe(weights_df[['Activo', 'Peso (%)']].set_index('Activo').style.format({'Peso (%)': '{:.2f}%'.format}))
+                                    
+                                    # Mostrar gráfico de torta si hay datos
+                                    if not weights_df.empty and len(weights_df) > 0:
+                                        fig = px.pie(
+                                            weights_df, 
+                                            values='weights', 
+                                            names='Activo',
+                                            title='Distribución del Portafolio',
+                                            hole=0.3
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                else:
+                                    st.warning("No se encontró la columna 'weights' en los resultados")
+                            else:
+                                st.warning("No se encontró información de asignación en los resultados")
+                        except Exception as e:
+                            st.error(f"Error al mostrar los pesos: {str(e)}")
                         
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
@@ -4062,7 +4153,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                     metricas = portfolio_result.get_metrics_dict()
                                     
                                     # Mostrar métricas con manejo de errores
-                                    def safe_metric(name, value, format_str="{:.4f}"):
+                                    def safe_metric(name, value, format_str="{:.2f}"):
                                         try:
                                             if isinstance(value, (int, float)):
                                                 st.metric(name, format_str.format(value))
@@ -4071,22 +4162,49 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                         except Exception as e:
                                             st.error(f"Error mostrando {name}")
                                     
-                                    safe_metric("Ratio de Sharpe", metricas.get('sharpe_ratio', 'N/A'))
-                                    safe_metric("VaR 95%", metricas.get('var_95', 'N/A'))
-                                    safe_metric("Retorno Anual", metricas.get('return_annual', 'N/A'))
-                                    safe_metric("Volatilidad Anual", metricas.get('volatility_annual', 'N/A'))
-                                    safe_metric("Skewness", metricas.get('skewness', 'N/A'))
-                                    safe_metric("Kurtosis", metricas.get('kurtosis', 'N/A'))
+                                    # Mostrar métricas en columnas
+                                    col_m1, col_m2 = st.columns(2)
+                                    
+                                    with col_m1:
+                                        safe_metric("Ratio de Sharpe", metricas.get('sharpe_ratio', 'N/A'))
+                                        safe_metric("VaR 95%", f"{metricas.get('var_95', 'N/A'):.2%}" if isinstance(metricas.get('var_95'), (int, float)) else 'N/A')
+                                        safe_metric("Retorno Anual", f"{metricas.get('return_annual', 'N/A'):.2%}" if isinstance(metricas.get('return_annual'), (int, float)) else 'N/A')
+                                    
+                                    with col_m2:
+                                        safe_metric("Volatilidad Anual", f"{metricas.get('volatility_annual', 'N/A'):.2%}" if isinstance(metricas.get('volatility_annual'), (int, float)) else 'N/A')
+                                        safe_metric("Skewness", metricas.get('skewness', 'N/A'))
+                                        safe_metric("Kurtosis", metricas.get('kurtosis', 'N/A'))
+                                    
+                                    # Mostrar normalidad
                                     normalidad = "✅ Normal" if metricas.get('is_normal', False) else "❌ No Normal"
                                     st.metric("Normalidad", normalidad)
                                 else:
                                     st.warning("No se encontraron métricas del portafolio")
                             except Exception as e:
                                 st.error(f"Error al mostrar las métricas: {str(e)}")
-                        # Histograma avanzado con Plotly
-                        st.markdown("#### 📊 Histograma de Retornos del Portafolio")
-                        fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
-                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Mostrar histograma de retornos si está disponible
+                        if hasattr(portfolio_result, 'returns') and portfolio_result.returns is not None:
+                            st.subheader("📊 Distribución de Retornos")
+                            try:
+                                fig = px.histogram(
+                                    x=portfolio_result.returns * 100,  # Convertir a porcentaje
+                                    nbins=50,
+                                    title='Distribución de Retornos Diarios',
+                                    labels={'x': 'Retorno Diario (%)', 'y': 'Frecuencia'}
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Error al generar el histograma: {str(e)}")
+                        
+                        # Mostrar histograma avanzado si está disponible
+                        if hasattr(portfolio_result, 'plot_histogram_streamlit'):
+                            st.subheader("📊 Histograma Avanzado de Retornos")
+                            try:
+                                fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
+                                st.plotly_chart(fig, use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Error al generar el histograma avanzado: {str(e)}")
 
                         # Mostrar frontera eficiente si el usuario lo solicita
                         if show_frontier:
