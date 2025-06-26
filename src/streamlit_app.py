@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 from plotly.subplots import make_subplots
 from arch import arch_model
-from scipy.stats import norm
+from scipy.stats import norm, skew, kurtosis, jarque_bera
 import matplotlib.pyplot as plt
 import yfinance as yf
 import numpy as np
@@ -14,6 +14,43 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+import importlib
+from typing import Dict, List, Tuple, Optional, Union, Any
+import json
+import io
+import base64
+import time
+
+# Configuración de advertencias
+warnings.filterwarnings('ignore')
+
+# Configuración de pandas
+pd.set_option('display.float_format', lambda x: '%.4f' % x)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 1000)
+
+# Configuración de matplotlib
+plt.style.use('seaborn')
+plt.rcParams['figure.figsize'] = (12, 6)
+plt.rcParams['font.size'] = 12
+
+# Configuración de numpy
+np.set_printoptions(precision=4, suppress=True)
+
+# Constantes
+ANNUAL_TRADING_DAYS = 252
+RISK_FREE_RATE = 0.40  # Tasa libre de riesgo para Argentina (anual)
+
+# Importar módulos de análisis de portafolio
+try:
+    import market_data
+    importlib.reload(market_data)
+    import capm
+    importlib.reload(capm)
+    import portfolio
+    importlib.reload(portfolio)
+except ImportError:
+    st.warning("No se encontraron los módulos de análisis de portafolio. Algunas funciones pueden no estar disponibles.")
 
 warnings.filterwarnings('ignore')
 
@@ -1179,6 +1216,66 @@ def get_historical_data_for_optimization(token_portador, activos, fecha_desde, f
                 st.warning(f"No se pudieron obtener datos para {simbolo} en el mercado {mercado}")
                 
     return datos_historicos if datos_historicos else None
+
+# --- Funciones para análisis de portafolio ---
+
+def load_data(rics, argentina_tickers):
+    """
+    Descarga datos intradía para una lista de símbolos.
+
+    Args:
+        rics (list): Lista de símbolos a descargar.
+        argentina_tickers (set): Conjunto de tickers argentinos.
+
+    Returns:
+        dict: Diccionario con los datos descargados.
+    """
+    data = {}
+    for ric in rics:
+        symbol = ric + ".BA" if ric in argentina_tickers else ric
+        try:
+            df = yf.download(symbol, period="1d", interval="1m")
+            if not df.empty:
+                data[ric] = df
+            else:
+                st.warning(f'No se encontraron datos para {ric} (buscando {symbol})')
+        except Exception as e:
+            st.error(f'Error al descargar datos para {ric} (buscando {symbol}): {e}')
+    return data
+
+def plot_efficient_frontier_streamlit(dict_portfolios):
+    """
+    Grafica la frontera eficiente en Streamlit.
+
+    Args:
+        dict_portfolios (dict): Diccionario que contiene los portafolios calculados.
+    """
+    risks, returns, labels = [], [], []
+    for key, portfolio in dict_portfolios.items():
+        risks.append(portfolio.volatility_daily)
+        returns.append(portfolio.mean_daily)
+        labels.append(key)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=risks,
+        y=returns,
+        mode='markers+text',
+        name='Portafolios',
+        text=labels,
+        textposition="top center"
+    ))
+    
+    fig.update_layout(
+        title='Frontera Eficiente',
+        xaxis_title='Riesgo (Volatilidad Diaria)',
+        yaxis_title='Retorno Esperado Diario',
+        template='plotly_dark',
+        height=600,
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 # --- Enhanced Portfolio Management Classes ---
 class manager:
@@ -3073,9 +3170,13 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         fe_actual = None
                         fe_aleatorio = None
                         if manager_actual and manager_actual.load_data():
-                            fe_actual, ret_actual, vol_actual = manager_actual.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+                            fe_actual, ret_actual, vol_actual = manager_actual.compute_efficient_frontier(
+                                target_return=target_return or 0.08
+                            )
                         if manager_aleatorio and manager_aleatorio.load_data():
-                            fe_aleatorio, ret_aleatorio, vol_aleatorio = manager_aleatorio.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+                            fe_aleatorio, ret_aleatorio, vol_aleatorio = manager_aleatorio.compute_efficient_frontier(
+                                target_return=target_return or 0.08
+                            )
                         fig_fe = go.Figure()
                         if fe_actual is not None:
                             fig_fe.add_trace(go.Scatter(
@@ -3659,9 +3760,100 @@ def mostrar_analisis_portafolio():
                             st.exception(e)
 
 def main():
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    st.title("IOL Portfolio Analyzer")
+    st.markdown("---")
     
+    # Añadir pestañas para diferentes funcionalidades
+    tab1, tab2 = st.tabs(["Análisis IOL", "Optimización de Portafolio"])
+    
+    with tab1:
+        # Contenido original de la aplicación
+        st.header("Análisis de Cartera IOL")
+        # ... resto del código original ...
+        
+    with tab2:
+        st.header("Optimización de Portafolio")
+        
+        # Configuración de parámetros
+        col1, col2 = st.columns(2)
+        with col1:
+            notional = st.number_input("Capital a Invertir (USD)", min_value=1000.0, value=10000.0, step=1000.0)
+            num_assets = st.slider("Número de Activos", min_value=2, max_value=10, value=4)
+        
+        # Lista de activos disponibles
+        available_assets = ["INTC", "ETHA", "GOOGL", "ARKK", "AAPL", "MSFT", "AMZN", "TSLA", "META", "NFLX"]
+        argentina_tickers = {"ETHA", "GGAL", "YPF", "PAMP"}  # Ejemplo de tickers argentinos
+        
+        # Selección de activos
+        selected_assets = st.multiselect(
+            "Seleccione los activos", 
+            options=available_assets,
+            default=["INTC", "ETHA", "GOOGL", "ARKK"]
+        )
+        
+        if len(selected_assets) < 2:
+            st.warning("Seleccione al menos 2 activos para continuar")
+        else:
+            if st.button("Optimizar Portafolio"):
+                with st.spinner("Descargando datos y optimizando portafolio..."):
+                    try:
+                        # Descargar datos
+                        data = load_data(selected_assets, argentina_tickers)
+                        
+                        if not data:
+                            st.error("No se pudieron descargar datos para los activos seleccionados")
+                        else:
+                            # Limitar al número de activos seleccionados
+                            selected_assets = list(data.keys())[:num_assets]
+                            
+                            # Calcular la frontera eficiente
+                            target_return = None
+                            include_min_variance = True
+                            dict_portfolios = compute_efficient_frontier(
+                                selected_assets, notional, target_return, include_min_variance, data
+                            )
+                            
+                            # Mostrar resultados
+                            st.subheader("Resultados de la Optimización")
+                            st.write(f"Activos seleccionados: {', '.join(selected_assets)}")
+                            
+                            # Mostrar frontera eficiente
+                            plot_efficient_frontier_streamlit(dict_portfolios)
+                            
+                            # Mostrar pesos óptimos
+                            optimal_portfolio = dict_portfolios.get('markowitz-target')
+                            if optimal_portfolio:
+                                st.subheader("Asignación Óptima")
+                                
+                                # Crear DataFrame con los pesos
+                                df_alloc = optimal_portfolio.dataframe_allocation
+                                df_filtered = df_alloc[df_alloc['weights'] > 0.001].sort_values('weights', ascending=False)
+                                
+                                # Mostrar tabla
+                                st.dataframe(
+                                    df_filtered[['rics', 'weights', 'allocation']]\
+                                        .rename(columns={
+                                            'rics': 'Activo',
+                                            'weights': 'Peso',
+                                            'allocation': 'Asignación (USD)'
+                                        }), 
+                                    use_container_width=True
+                                )
+                                
+                                # Mostrar métricas
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Retorno Anual Esperado", f"{optimal_portfolio.return_annual:.2%}")
+                                with col2:
+                                    st.metric("Volatilidad Anual", f"{optimal_portfolio.volatility_annual:.2%}")
+                                with col3:
+                                    st.metric("Ratio de Sharpe", f"{optimal_portfolio.sharpe_ratio:.2f}")
+                                
+                    except Exception as e:
+                        st.error(f"Error al optimizar el portafolio: {str(e)}")
+                        import traceback
+                        st.text(traceback.format_exc())
+
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
         st.session_state.token_acceso = None
