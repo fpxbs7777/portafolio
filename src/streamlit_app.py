@@ -14,6 +14,7 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+from typing import Dict, List, Optional, Tuple
 
 warnings.filterwarnings('ignore')
 
@@ -675,6 +676,7 @@ def obtener_tasas_caucion(token_portador):
 def mostrar_tasas_caucion(token_portador):
     """
     Muestra las tasas de caución en una tabla y gráfico de curva de tasas optimizado
+    con soporte para múltiples tipos de activos
     """
     st.subheader("📊 Curva de Tasas de Caución")
     
@@ -688,11 +690,29 @@ def mostrar_tasas_caucion(token_portador):
             return
             
         # Verificar columnas requeridas
-        required_columns = ['símbolo', 'plazo', 'tasa', 'plazo_dias', 'tasa_anual']
+        required_columns = ['símbolo', 'plazo', 'tasa', 'plazo_dias', 'tasa_anual', 'tipo_activo']
         missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
         if missing_columns:
             st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
             st.dataframe(df_cauciones.head())  # Mostrar datos disponibles para depuración
+            return
+            
+        # Obtener lista única de tipos de activos
+        tipos_activos = sorted(df_cauciones['tipo_activo'].unique().tolist())
+        
+        # Selector múltiple de tipos de activos
+        tipos_seleccionados = st.multiselect(
+            'Seleccione tipos de activos a visualizar',
+            options=tipos_activos,
+            default=tipos_activos,  # Por defecto seleccionar todos
+            key='tipo_activo_selector'
+        )
+        
+        # Filtrar datos por tipos de activos seleccionados
+        if tipos_seleccionados:
+            df_filtrado = df_cauciones[df_cauciones['tipo_activo'].isin(tipos_seleccionados)].copy()
+        else:
+            st.warning("Seleccione al menos un tipo de activo para visualizar")
             return
         
         # Crear pestañas para diferentes vistas
@@ -702,81 +722,110 @@ def mostrar_tasas_caucion(token_portador):
             # Crear gráfico de curva de tasas
             fig = go.Figure()
             
-            # Añadir línea de tendencia
-            z = np.polyfit(df_cauciones['plazo_dias'], df_cauciones['tasa_anual'], 1)
-            p = np.poly1d(z)
+            # Definir colores para cada tipo de activo
+            colors = px.colors.qualitative.Plotly
             
-            # Línea de tendencia
-            fig.add_trace(go.Scatter(
-                x=df_cauciones['plazo_dias'],
-                y=p(df_cauciones['plazo_dias']),
-                mode='lines',
-                name='Tendencia',
-                line=dict(color='#ff7f0e', width=2, dash='dash'),
-                showlegend=True
-            ))
-            
-            # Puntos de datos
-            fig.add_trace(go.Scatter(
-                x=df_cauciones['plazo_dias'],
-                y=df_cauciones['tasa_anual'],
-                mode='markers+text',
-                name='Tasas',
-                text=df_cauciones['plazo'].astype(str) + '<br>' + df_cauciones['tasa_anual'].round(2).astype(str) + '%',
-                textposition='top center',
-                marker=dict(
-                    size=12,
-                    color=df_cauciones['tasa_anual'],
-                    colorscale='Viridis',
-                    showscale=True,
-                    colorbar=dict(title='Tasa %')
-                ),
-                hovertemplate='<b>Plazo:</b> %{x} días<br>' +
-                              '<b>Tasa Anual:</b> %{y:.2f}%<br>' +
-                              '<b>Descripción:</b> ' + df_cauciones['descripción'].astype(str) +
-                              '<extra></extra>',
-                showlegend=False
-            ))
+            # Agrupar por tipo de activo y agregar una traza para cada tipo
+            for i, (tipo_activo, group) in enumerate(df_filtrado.groupby('tipo_activo')):
+                color_idx = i % len(colors)
+                
+                # Ordenar por plazo para una línea más suave
+                group = group.sort_values('plazo_dias')
+                
+                # Añadir línea para este tipo de activo
+                fig.add_trace(go.Scatter(
+                    x=group['plazo_dias'],
+                    y=group['tasa_anual'],
+                    mode='lines+markers',
+                    name=tipo_activo,
+                    line=dict(color=colors[color_idx], width=2),
+                    marker=dict(size=10, color=colors[color_idx]),
+                    text=group['plazo'].astype(str) + ' días',
+                    hovertemplate=
+                        '<b>Tipo:</b> ' + tipo_activo + '<br>' +
+                        '<b>Plazo:</b> %{x} días<br>' +
+                        '<b>Tasa Anual:</b> %{y:.2f}%<br>' +
+                        '<b>Descripción:</b> ' + group['descripción'].astype(str) +
+                        '<extra></extra>',
+                    showlegend=True
+                ))
+                
+                # Añadir línea de tendencia para este tipo de activo
+                if len(group) > 1:  # Necesitamos al menos 2 puntos para una línea de tendencia
+                    z = np.polyfit(group['plazo_dias'], group['tasa_anual'], 1)
+                    p = np.poly1d(z)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=group['plazo_dias'],
+                        y=p(group['plazo_dias']),
+                        mode='lines',
+                        name=f'Tendencia {tipo_activo}',
+                        line=dict(color=colors[color_idx], width=1, dash='dash'),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
             
             # Configuración del layout
             fig.update_layout(
-                title='Curva de Tasas de Caución por Plazo',
+                title='Curva de Tasas de Caución por Plazo y Tipo de Activo',
                 xaxis_title='Plazo (días)',
                 yaxis_title='Tasa Anual Efectiva (%)',
                 template='plotly_dark',
                 height=600,
                 hovermode='closest',
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
                 xaxis=dict(
                     tickmode='linear',
                     tick0=0,
                     dtick=1,
                     showgrid=True,
                     gridwidth=1,
-                    gridcolor='rgba(128,128,128,0.2)'
+                    gridcolor='rgba(128,128,128,0.2)',
+                    showspikes=True,
+                    spikethickness=1,
+                    spikedash='dot',
+                    spikecolor='#999999',
+                    spikemode='across',
                 ),
                 yaxis=dict(
                     tickformat=".2f%",
-                    gridcolor='rgba(128,128,128,0.2)'
+                    gridcolor='rgba(128,128,128,0.2)',
+                    showspikes=True,
+                    spikethickness=1,
+                    spikedash='dot',
+                    spikecolor='#999999',
                 ),
                 margin=dict(l=50, r=50, t=80, b=50),
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
+                font=dict(color='white'),
+                hoverlabel=dict(
+                    bgcolor='rgba(0,0,0,0.8)',
+                    font_size=12,
+                    font_family="Arial"
+                )
             )
             
             # Mostrar el gráfico
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
             
-            # Mostrar métricas clave
+            # Mostrar métricas clave por tipo de activo
             st.subheader("📊 Resumen de Tasas")
             
-            # Calcular métricas
-            tasa_min = df_cauciones['tasa_anual'].min()
-            tasa_max = df_cauciones['tasa_anual'].max()
-            tasa_prom = df_cauciones['tasa_anual'].mean()
-            plazo_prom = df_cauciones['plazo_dias'].mean()
+            # Calcular métricas generales
+            tasa_min = df_filtrado['tasa_anual'].min()
+            tasa_max = df_filtrado['tasa_anual'].max()
+            tasa_prom = df_filtrado['tasa_anual'].mean()
+            plazo_prom = df_filtrado['plazo_dias'].mean()
             
-            # Mostrar métricas en columnas
+            # Mostrar métricas generales
+            st.markdown("**Métricas Generales (todos los tipos seleccionados):**")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Tasa Mínima", f"{tasa_min:.2f}%", delta=None)
@@ -787,6 +836,37 @@ def mostrar_tasas_caucion(token_portador):
             with col4:
                 st.metric("Plazo Promedio", f"{plazo_prom:.1f} días", delta=None)
             
+            # Mostrar métricas por tipo de activo
+            st.markdown("**Métricas por Tipo de Activo:**")
+            
+            # Crear un DataFrame con las métricas por tipo de activo
+            metrics_by_type = []
+            for tipo_activo, group in df_filtrado.groupby('tipo_activo'):
+                metrics_by_type.append({
+                    'Tipo de Activo': tipo_activo,
+                    'Cantidad': len(group),
+                    'Tasa Mínima': f"{group['tasa_anual'].min():.2f}%",
+                    'Tasa Máxima': f"{group['tasa_anual'].max():.2f}%",
+                    'Tasa Promedio': f"{group['tasa_anual'].mean():.2f}%",
+                    'Plazo Promedio': f"{group['plazo_dias'].mean():.1f} días"
+                })
+            
+            if metrics_by_type:
+                df_metrics = pd.DataFrame(metrics_by_type)
+                st.dataframe(
+                    df_metrics,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        'Tipo de Activo': st.column_config.TextColumn("Tipo de Activo"),
+                        'Cantidad': st.column_config.NumberColumn("Cantidad"),
+                        'Tasa Mínima': st.column_config.TextColumn("Tasa Mínima"),
+                        'Tasa Máxima': st.column_config.TextColumn("Tasa Máxima"),
+                        'Tasa Promedio': st.column_config.TextColumn("Tasa Promedio"),
+                        'Plazo Promedio': st.column_config.TextColumn("Plazo Promedio")
+                    }
+                )
+            
             # Mostrar tendencia
             st.markdown("""
             **Análisis de Tendencia:**
@@ -796,12 +876,13 @@ def mostrar_tasas_caucion(token_portador):
             """)
             
         with tab2:
-            # Mostrar tabla con los datos completos
+            # Mostrar tabla con los datos filtrados
             st.dataframe(
-                df_cauciones[['símbolo', 'descripción', 'plazo', 'plazo_dias', 'tasa_anual']]
-                .sort_values('plazo_dias')
+                df_filtrado[['tipo_activo', 'símbolo', 'descripción', 'plazo', 'plazo_dias', 'tasa_anual']]
+                .sort_values(['tipo_activo', 'plazo_dias'])
                 .assign(tasa_anual=lambda x: x['tasa_anual'].round(2).astype(str) + '%')
                 .rename(columns={
+                    'tipo_activo': 'Tipo de Activo',
                     'símbolo': 'Símbolo',
                     'descripción': 'Descripción',
                     'plazo': 'Plazo',
@@ -809,17 +890,26 @@ def mostrar_tasas_caucion(token_portador):
                     'tasa_anual': 'Tasa Anual'
                 }),
                 use_container_width=True,
-                height=min(600, 50 + len(df_cauciones) * 35),
-                hide_index=True
+                height=min(600, 50 + len(df_filtrado) * 35),
+                hide_index=True,
+                column_config={
+                    'Tipo de Activo': st.column_config.TextColumn("Tipo de Activo"),
+                    'Símbolo': st.column_config.TextColumn("Símbolo"),
+                    'Descripción': st.column_config.TextColumn("Descripción"),
+                    'Plazo': st.column_config.TextColumn("Plazo"),
+                    'Días': st.column_config.NumberColumn("Días"),
+                    'Tasa Anual': st.column_config.TextColumn("Tasa Anual")
+                }
             )
             
             # Botón para descargar datos
-            csv = df_cauciones.to_csv(index=False, encoding='utf-8-sig')
+            csv = df_filtrado.to_csv(index=False, encoding='utf-8-sig')
             st.download_button(
                 label="📥 Descargar datos en CSV",
                 data=csv,
                 file_name=f'tasas_caucion_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
-                mime='text/csv'
+                mime='text/csv',
+                help="Descargar los datos mostrados en formato CSV"
             )
             
     except Exception as e:
@@ -2356,6 +2446,336 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         'riesgo_anual': volatilidad_portafolio  # Usamos la volatilidad como proxy de riesgo
     }
 
+# --- Funciones de Perfil de Inversor ---
+
+def obtener_preguntas_test_inversor(token_portador: str) -> Optional[dict]:
+    """
+    Obtiene las preguntas y opciones para el test de perfil de inversor.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        
+    Returns:
+        dict: Diccionario con las preguntas y opciones del test, o None en caso de error
+    """
+    url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener preguntas del test de perfil: {str(e)}")
+        return None
+
+def mostrar_formulario_perfil(preguntas: dict) -> dict:
+    """
+    Muestra el formulario de perfil de inversor y devuelve las respuestas.
+    
+    Args:
+        preguntas (dict): Diccionario con las preguntas y opciones del test
+        
+    Returns:
+        dict: Respuestas del usuario al formulario
+    """
+    respuestas = {}
+    
+    st.subheader("📝 Test de Perfil de Inversor")
+    
+    # Instrumentos en los que ha invertido anteriormente
+    if 'instrumentosInvertidosAnteriormente' in preguntas:
+        pregunta = preguntas['instrumentosInvertidosAnteriormente']
+        opciones = {i['nombre']: i['id'] for i in pregunta['instrumentos']}
+        seleccionados = st.multiselect(
+            label=pregunta['pregunta'],
+            options=opciones.keys(),
+            default=[]
+        )
+        respuestas['instrumentosInvertidosAnteriormente'] = [opciones[s] for s in seleccionados]
+    
+    # Niveles de conocimiento de instrumentos
+    if 'nivelesConocimientoInstrumentos' in preguntas:
+        pregunta = preguntas['nivelesConocimientoInstrumentos']
+        st.subheader(pregunta['pregunta'])
+        conocimientos = {}
+        for nivel in pregunta['niveles']:
+            opciones = {op['nombre']: op['id'] for op in nivel['opciones']}
+            seleccion = st.radio(
+                label=nivel['nombre'],
+                options=opciones.keys(),
+                key=f"conocimiento_{nivel['id']}",
+                horizontal=True
+            )
+            conocimientos[nivel['id']] = opciones[seleccion]
+        respuestas['nivelesConocimientoInstrumentos'] = list(conocimientos.values())
+    
+    # Plazo de inversión
+    if 'plazosInversion' in preguntas:
+        pregunta = preguntas['plazosInversion']
+        opciones = {i['nombre']: i['id'] for i in pregunta['plazos']}
+        seleccion = st.radio(
+            label=pregunta['pregunta'],
+            options=opciones.keys(),
+            key="plazo_inversion"
+        )
+        respuestas['idPlazoElegido'] = opciones[seleccion]
+    
+    # Edad
+    if 'edadesPosibles' in preguntas:
+        pregunta = preguntas['edadesPosibles']
+        opciones = {i['nombre']: i['id'] for i in pregunta['edades']}
+        seleccion = st.radio(
+            label=pregunta['pregunta'],
+            options=opciones.keys(),
+            key="edad"
+        )
+        respuestas['idEdadElegida'] = opciones[seleccion]
+    
+    # Objetivo de inversión
+    if 'objetivosInversion' in preguntas:
+        pregunta = preguntas['objetivosInversion']
+        opciones = {i['nombre']: i['id'] for i in pregunta['objetivos']}
+        seleccion = st.radio(
+            label=pregunta['pregunta'],
+            options=opciones.keys(),
+            key="objetivo"
+        )
+        respuestas['idObjetivoInversionElegida'] = opciones[seleccion]
+    
+    # Pólizas de seguro
+    if 'polizasSeguro' in preguntas:
+        pregunta = preguntas['polizasSeguro']
+        opciones = {i['nombre']: i['id'] for i in pregunta['polizas']}
+        seleccion = st.radio(
+            label=pregunta['pregunta'],
+            options=opciones.keys(),
+            key="poliza"
+        )
+        respuestas['idPolizaElegida'] = opciones[seleccion]
+    
+    # Capacidad de ahorro
+    if 'capacidadesAhorro' in preguntas:
+        pregunta = preguntas['capacidadesAhorro']
+        opciones = {i['nombre']: i['id'] for i in pregunta['capacidadesAhorro']}
+        seleccion = st.radio(
+            label=pregunta['pregunta'],
+            options=opciones.keys(),
+            key="ahorro"
+        )
+        respuestas['idCapacidadAhorroElegida'] = opciones[seleccion]
+    
+    # Porcentaje de patrimonio dedicado a inversión
+    if 'porcentajesPatrimonioDedicado' in preguntas:
+        pregunta = preguntas['porcentajesPatrimonioDedicado']
+        opciones = {i['nombre']: i['id'] for i in pregunta['porcentajesPatrimonioDedicado']}
+        seleccion = st.radio(
+            label=pregunta['pregunta'],
+            options=opciones.keys(),
+            key="patrimonio"
+        )
+        respuestas['idPorcentajePatrimonioDedicado'] = opciones[seleccion]
+    
+    return respuestas
+
+def obtener_perfil_sugerido(token_portador: str, respuestas: dict, id_cliente_asesorado: str = None) -> Optional[dict]:
+    """
+    Obtiene el perfil de inversión sugerido basado en las respuestas del usuario.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        respuestas (dict): Respuestas del formulario de perfil
+        id_cliente_asesorado (str, optional): ID del cliente asesorado si es aplicable
+        
+    Returns:
+        dict: Perfil de inversión sugerido, o None en caso de error
+    """
+    # Construir la URL según si hay un ID de cliente asesorado o no
+    if id_cliente_asesorado:
+        url = f"https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente_asesorado}"
+    else:
+        url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    
+    # Preparar los headers
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    # Preparar el cuerpo de la solicitud
+    payload = {
+        "enviarEmailCliente": False,
+        **respuestas
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener el perfil sugerido: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Respuesta del servidor: {e.response.text}")
+        return None
+
+def seleccionar_activos_aleatorios(perfil: dict, activos_disponibles: Dict[str, list]) -> List[dict]:
+    """
+    Selecciona activos aleatorios para cada tipo de activo según el perfil.
+    
+    Args:
+        perfil (dict): Perfil de inversión con la composición sugerida
+        activos_disponibles (Dict[str, list]): Diccionario con listas de activos por tipo
+        
+    Returns:
+        List[dict]: Lista de activos seleccionados con sus pesos
+    """
+    cartera = []
+    
+    if 'perfilSugerido' not in perfil or 'perfilComposiciones' not in perfil['perfilSugerido']:
+        st.warning("No se encontró información de composición en el perfil")
+        return []
+    
+    for composicion in perfil['perfilSugerido']['perfilComposiciones']:
+        tipo_activo = composicion['nombre'].lower()
+        porcentaje = composicion['porcentaje'] / 100.0  # Convertir a fracción
+        
+        # Buscar activos disponibles para este tipo
+        activos_tipo = []
+        for key in activos_disponibles:
+            if tipo_activo in key.lower():
+                activos_tipo.extend(activos_disponibles[key])
+        
+        # Si hay activos disponibles, seleccionar uno al azar
+        if activos_tipo:
+            activo_seleccionado = random.choice(activos_tipo)
+            cartera.append({
+                'tipo_activo': tipo_activo,
+                'activo': activo_seleccionado,
+                'porcentaje': porcentaje
+            })
+    
+    return cartera
+
+def mostrar_cartera_recomendada(cartera: List[dict], capital_total: float):
+    """
+    Muestra la cartera recomendada en un formato amigable.
+    
+    Args:
+        cartera (List[dict]): Lista de activos con sus pesos
+        capital_total (float): Capital total a invertir
+    """
+    if not cartera:
+        st.warning("No se pudo generar una cartera con los parámetros proporcionados.")
+        return
+    
+    st.subheader("📊 Cartera Recomendada")
+    
+    # Crear DataFrame para mostrar la cartera
+    df_cartera = pd.DataFrame([{
+        'Tipo de Activo': item['tipo_activo'].title(),
+        'Activo': item['activo'],
+        'Porcentaje': f"{item['porcentaje']*100:.1f}%",
+        'Monto': f"${item['porcentaje'] * capital_total:,.2f}"
+    } for item in cartera])
+    
+    # Mostrar tabla con la cartera
+    st.dataframe(
+        df_cartera,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'Tipo de Activo': st.column_config.TextColumn("Tipo de Activo"),
+            'Activo': st.column_config.TextColumn("Activo"),
+            'Porcentaje': st.column_config.TextColumn("Asignación"),
+            'Monto': st.column_config.TextColumn("Monto")
+        }
+    )
+    
+    # Mostrar gráfico de torta
+    fig = px.pie(
+        df_cartera, 
+        values='Porcentaje', 
+        names='Tipo de Activo',
+        title='Distribución de la Cartera por Tipo de Activo',
+        labels={'Porcentaje': 'Porcentaje', 'Tipo de Activo': 'Tipo de Activo'}
+    )
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    st.plotly_chart(fig, use_container_width=True)
+
+def mostrar_test_perfil_inversor(token_portador: str, id_cliente: str = None):
+    """
+    Muestra el test de perfil de inversor y la cartera recomendada.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str, optional): ID del cliente si es aplicable
+    """
+    st.header("📝 Test de Perfil de Inversor")
+    
+    # Obtener preguntas del test
+    if 'preguntas_test' not in st.session_state:
+        with st.spinner("Cargando preguntas del test..."):
+            preguntas = obtener_preguntas_test_inversor(token_portador)
+            if preguntas:
+                st.session_state.preguntas_test = preguntas
+                st.session_state.test_completado = False
+            else:
+                st.error("No se pudieron cargar las preguntas del test. Intente nuevamente.")
+                return
+    
+    # Mostrar formulario si no se ha completado el test
+    if not st.session_state.get('test_completado', False):
+        respuestas = mostrar_formulario_perfil(st.session_state.preguntas_test)
+        
+        if st.button("Obtener Perfil de Inversión"):
+            with st.spinner("Analizando sus respuestas..."):
+                perfil = obtener_perfil_sugerido(token_portador, respuestas, id_cliente)
+                
+                if perfil and 'perfilSugerido' in perfil:
+                    st.session_state.perfil_inversor = perfil
+                    st.session_state.test_completado = True
+                    
+                    # Mostrar resumen del perfil
+                    st.success(f"Perfil de Inversión: {perfil['perfilSugerido']['nombre']}")
+                    st.write(perfil['perfilSugerido']['detalle'])
+                    
+                    # Mostrar composición del perfil
+                    st.subheader("Composición del Perfil")
+                    for comp in perfil['perfilSugerido']['perfilComposiciones']:
+                        st.write(f"- {comp['nombre']}: {comp['porcentaje']}%")
+    
+    # Si el test está completo, permitir generar cartera
+    if st.session_state.get('test_completado', False) and 'perfil_inversor' in st.session_state:
+        st.subheader("Generar Cartera de Inversión")
+        
+        # Ejemplo de activos disponibles (en un caso real, estos vendrían de la API)
+        activos_ejemplo = {
+            'acciones': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META'],
+            'bonos': ['AL30', 'GD30', 'AL35', 'GD35', 'AL41'],
+            'fondos': ['FCI1', 'FCI2', 'FCI3', 'FCI4', 'FCI5'],
+            'cauciones': ['CAU1', 'CAU2', 'CAU3', 'CAU4', 'CAU5'],
+            'plazofijo': ['PF1', 'PF2', 'PF3', 'PF4', 'PF5']
+        }
+        
+        capital = st.number_input(
+            "Capital total a invertir:", 
+            min_value=1000.0, 
+            value=100000.0, 
+            step=1000.0,
+            format="%.2f"
+        )
+        
+        if st.button("Generar Cartera Aleatoria"):
+            cartera = seleccionar_activos_aleatorios(
+                st.session_state.perfil_inversor, 
+                activos_ejemplo
+            )
+            mostrar_cartera_recomendada(cartera, capital)
+
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
@@ -2870,8 +3290,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
     with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
-    with col4:
         comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.")
 
     def obtener_cotizaciones_cauciones(bearer_token):
@@ -3638,29 +4056,54 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            st.sidebar.title("Menú Principal")
-            opcion = st.sidebar.radio(
-                "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
-                index=0,
-            )
-
+            st.sidebar.header("📋 Menú")
+            opciones_menu = [
+                "📊 Resumen del Portafolio",
+                "📈 Cotizaciones de Mercado",
+                "🔍 Optimización de Portafolio",
+                "📉 Análisis Técnico",
+                "📊 Análisis de Portafolio",
+                "📝 Test de Perfil de Inversor"
+            ]
+            
+            # Solo mostrar opciones de asesor si hay token de acceso
+            if token_portador and id_cliente:
+                opciones_menu.append("👤 Movimientos del Asesor")
+            
+            opcion_seleccionada = st.sidebar.radio("Navegación", opciones_menu)
+            
             # Mostrar la página seleccionada
-            if opcion == "🏠 Inicio":
+            if opcion_seleccionada == "🏠 Inicio":
                 st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "📊 Análisis de Portafolio":
-                if st.session_state.cliente_seleccionado:
-                    mostrar_analisis_portafolio()
+            elif opcion_seleccionada == "📊 Resumen del Portafolio":
+                st.title("Resumen del Portafolio")
+                portafolio = obtener_portafolio(token_portador, id_cliente)
+                if portafolio:
+                    mostrar_resumen_portafolio(portafolio, token_portador)
                 else:
-                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
-                else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
+                    st.warning("No se pudo obtener el portafolio")
+                
+            elif opcion_seleccionada == "📈 Cotizaciones de Mercado":
+                st.title("Cotizaciones de Mercado")
+                mostrar_cotizaciones_mercado(token_portador)
+                
+            elif opcion_seleccionada == "🔍 Optimización de Portafolio":
+                st.title("Optimización de Portafolio")
+                mostrar_optimizacion_portafolio(token_portador, id_cliente)
+                
+            elif opcion_seleccionada == "📉 Análisis Técnico":
+                st.title("Análisis Técnico")
+                mostrar_analisis_tecnico(token_portador, id_cliente)
+                
+            elif opcion_seleccionada == "📊 Análisis de Portafolio":
+                mostrar_analisis_portafolio()
+                
+            elif opcion_seleccionada == "👤 Movimientos del Asesor":
                 mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
+                
+            elif opcion_seleccionada == "📝 Test de Perfil de Inversor":
+                st.title("Test de Perfil de Inversor")
+                mostrar_test_perfil_inversor(token_portador, id_cliente)
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
