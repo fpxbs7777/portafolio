@@ -425,7 +425,10 @@ def obtener_tokens(usuario, contraseña):
         respuesta = requests.post(url_login, data=datos, timeout=15)
         respuesta.raise_for_status()
         respuesta_json = respuesta.json()
-        return respuesta_json['access_token'], respuesta_json['refresh_token']
+        return {
+            'access_token': respuesta_json['access_token'],
+            'refresh_token': respuesta_json['refresh_token']
+        }
     except requests.exceptions.HTTPError as http_err:
         st.error(f'Error HTTP al obtener tokens: {http_err}')
         if respuesta.status_code == 400:
@@ -3878,8 +3881,8 @@ def mostrar_inicio():
                 try:
                     tokens = obtener_tokens(usuario, contraseña)
                     if tokens:
-                        st.session_state.token_acceso = tokens['access_token']
-                        st.session_state.refresh_token = tokens['refresh_token']
+                        st.session_state.token_acceso = tokens.get('access_token')
+                        st.session_state.refresh_token = tokens.get('refresh_token')
                         st.success("✅ Sesión iniciada correctamente")
                         # Actualizar lista de clientes
                         clientes = obtener_lista_clientes(st.session_state.token_acceso)
