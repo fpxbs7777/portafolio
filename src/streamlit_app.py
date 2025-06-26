@@ -2423,19 +2423,20 @@ def compute_portfolio(self, strategy, target_return=0.08):
                 'Peso': weights,
                 'Retorno Esperado': self.returns.mean() * weights,
                 'Volatilidad': np.sqrt(np.diag(self.cov_matrix)) * weights if self.cov_matrix is not None else [0] * n_assets
-                'volatilities': self.returns.std().values,
-                'returns': self.returns.mean().values
             })
-            return portfolio_output
             
-        else:
-            st.error(f"Estrategia no soportada: {strategy}")
-            return None
+            port_output.dataframe_allocation = allocation_df
+            return port_output
             
     except Exception as e:
         st.error(f"Error al calcular la cartera: {str(e)}")
-        st.exception(e)
         return None
+
+def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
+    """Computa la frontera eficiente"""
+    if not self.data_loaded or not hasattr(self, 'prices') or self.prices is None:
+        st.error("No hay datos de precios disponibles")
+        return None, None, None
     
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
