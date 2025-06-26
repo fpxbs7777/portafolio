@@ -1,43 +1,55 @@
-import streamlit as st
-import requests
-import plotly.graph_objects as go
-import pandas as pd
-import numpy as np
-from plotly.subplots import make_subplots
-from datetime import date, timedelta
-import SHDA  # Para integración con PyHomeBroker
-from arch import arch_model
-from scipy.stats import norm
-import matplotlib.pyplot as plt
-import yfinance as yf
-import numpy as np
-from datetime import datetime, timedelta, date
-import scipy.optimize as op
-from scipy import stats
-import random
-import warnings
-import streamlit.components.v1 as components
-from typing import Dict, List, Optional, Tuple
-import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import SHDA  # Para integración con PyHomeBroker
-import json
+# Standard library imports
 import os
 import re
 import time
+import json
+import random
+import warnings
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple, Union, Any
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import requests
+
+# Third-party imports (lazy load heavy libraries)
 import streamlit as st
-from scipy import stats, optimize
-import matplotlib.pyplot as plt
-from scipy.optimize import minimize
-from scipy.stats import norm, gaussian_kde
-import yfinance as yf
+import pandas as pd
+import numpy as np
+
+# Configure warnings and logging
+warnings.filterwarnings('ignore')
+
+# Lazy imports for heavy libraries
+lazy_imports = {}
+
+def lazy_import(module_name, from_imports=None):
+    """Lazy import helper function"""
+    if module_name not in lazy_imports:
+        if from_imports:
+            module = __import__(module_name, fromlist=from_imports)
+            lazy_imports[module_name] = module
+        else:
+            module = __import__(module_name)
+            lazy_imports[module_name] = module
+    return lazy_imports[module_name]
+
+# Function to get lazy imports
+def get_import(module_name, from_imports=None):
+    """Get a lazy imported module"""
+    return lambda: lazy_import(module_name, from_imports)
+
+# Define lazy imports
+plotly_go = get_import('plotly.graph_objects')
+plt = get_import('matplotlib.pyplot')
+px = get_import('plotly.express')
+make_subplots = get_import('plotly.subplots', ['make_subplots'])
+arch_model = get_import('arch', ['arch_model'])
+scipy_stats = get_import('scipy.stats')
+scipy_optimize = get_import('scipy.optimize')
+minimize = get_import('scipy.optimize', ['minimize'])
+gaussian_kde = get_import('scipy.stats', ['gaussian_kde'])
+yf = get_import('yfinance')
+components = get_import('streamlit.components.v1')
+
+# Caching configuration
+CACHE_TTL = 3600  # 1 hour cache
 try:
     # Try to import from pyfolio-reloaded first
     from pyfolio_reloaded import timeseries
@@ -61,8 +73,14 @@ except ImportError:
 warnings.filterwarnings('ignore')
 
 # Configuración global para Plotly
-import plotly.io as pio
-pio.templates.default = "plotly_dark"
+@st.cache_resource
+def setup_plotly():
+    import plotly.io as pio
+    pio.templates.default = "plotly_dark"
+    return pio
+
+# Initialize plotly with caching
+pio = setup_plotly()
 
 # Configuración de la página con tema oscuro profesional
 st.set_page_config(
@@ -505,6 +523,7 @@ def obtener_lista_clientes(token_portador):
         st.error(f'Error de conexión al obtener clientes: {str(e)}')
         return []
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_estado_cuenta(token_portador, id_cliente=None):
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
@@ -524,6 +543,7 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
@@ -537,6 +557,7 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
     url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
@@ -562,7 +583,7 @@ def obtener_precio_actual(token_portador, mercado, simbolo):
     except Exception:
         return None
 
-
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
     url_cotizacion_mep = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
     encabezados = obtener_encabezado_autorizacion(token_portador)
@@ -588,6 +609,7 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
         st.error(f'Error al obtener cotización MEP: {str(e)}')
         return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
@@ -638,6 +660,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         st.error(f"Error de conexión: {str(e)}")
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_tasas_caucion(token_portador):
     """
     Obtiene todas las tasas de caución para todos los plazos desde la API de IOL.
@@ -716,7 +739,6 @@ def obtener_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def mostrar_tasas_caucion(token_portador):
@@ -988,6 +1010,7 @@ def mostrar_tasas_caucion(token_portador):
     except Exception:
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """Devuelve la URL correcta para la serie histórica del símbolo indicado.
 
@@ -1026,6 +1049,7 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
     # Ruta genérica (acciones BCBA, NYSE, NASDAQ, etc.)
     return f"{base_url}/{mercado_norm}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
 
+@st.cache_data(ttl=300, show_spinner=False)
 def parse_datetime_flexible(date_str: str):
     """
     Parses a datetime string that may or may not include microseconds or timezone info.
@@ -1051,6 +1075,7 @@ def parse_datetime_flexible(date_str: str):
         st.warning(f"Error parsing date '{date_str}': {str(e)}")
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def procesar_respuesta_historico(data, tipo_activo):
     """
     Procesa la respuesta de la API según el tipo de activo
@@ -1100,6 +1125,7 @@ def procesar_respuesta_historico(data, tipo_activo):
         st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_fondos_comunes(token_portador):
     """
     Obtiene la lista de fondos comunes de inversión disponibles
@@ -1117,6 +1143,7 @@ def obtener_fondos_comunes(token_portador):
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
     Obtiene la serie histórica de un fondo común de inversión
@@ -1146,6 +1173,7 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
     Obtiene la serie histórica de precios para un activo específico desde la API de InvertirOnline.
@@ -1287,6 +1315,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         return None
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
     Obtiene la serie histórica de un Fondo Común de Inversión.
@@ -1372,6 +1401,7 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         st.error(f"Error inesperado al procesar el FCI {simbolo}: {str(e)}")
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
     """
     Obtiene datos históricos para optimización usando el mercado específico de cada activo.
@@ -3059,16 +3089,15 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
         
         # Agregar cada gráfico de torta
         for i, (labels, values) in enumerate(zip(labels_list, values_list), start=1):
-            fig_pie.add_trace(
-                go.Pie(
-                    labels=labels,
-                    values=values,
-                    name=f"Gráfico {i}",
-                    textinfo='label+value',
-                    textposition='outside',
-                    marker=dict(colors=colors),
-                    textfont=dict(color='#f8f9fa')  # Texto blanco para mejor contraste
-                ),
+            fig_pie.add_trace(go.Pie(
+                labels=labels,
+                values=values,
+                name=f"Gráfico {i}",
+                textinfo='label+value',
+                textposition='outside',
+                marker=dict(colors=colors),
+                textfont=dict(color='#f8f9fa')  # Texto blanco para mejor contraste
+            ),
                 row=1, col=i
             )
         
@@ -3109,54 +3138,44 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
         )
         
         # Gráfico de valor total
-        fig_line.add_trace(
-            go.Scatter(
-                x=df["Fecha"],
-                y=df["Valor Total"],
-                mode='lines+markers',
-                name="Valor Total",
-                line=dict(color='#1f77b4', width=2),
-                marker=dict(size=6, color='#1f77b4')
-            ),
+        fig_line.add_trace(go.Scatter(
+            x=df["Fecha"],
+            y=df["Valor Total"],
+            mode='lines+markers',
+            name="Valor Total",
+            line=dict(color='#1f77b4', width=2),
+            marker=dict(size=6, color='#1f77b4')
+        ),
             row=1, col=1
         )
         
         # Gráfico de evolución porcentual
-        fig_line.add_trace(
-            go.Scatter(
-                x=df["Fecha"],
-                y=df["EvoluciÃ³n %"],  # Note: Using raw string to avoid encoding issues
-                mode='lines+markers',
-                name="EvoluciÃ³n %",
-                line=dict(color='#ff7f0e', width=2),
-                marker=dict(size=6, color='#ff7f0e')
-            ),
+        fig_line.add_trace(go.Scatter(
+            x=df["Fecha"],
+            y=df["Evolución %"],
+            mode='lines+markers',
+            name="Evolución %",
+            line=dict(color='#ff7f0e', width=2),
+            marker=dict(size=6, color='#ff7f0e')
+        ),
             row=2, col=1
         )
         
         fig_line.update_layout(
-            title=f"EvoluciÃ³n del Portafolio ({fecha_inicio} a {fecha_fin})",
+            title=f"Evolución del Portafolio ({fecha_inicio} a {fecha_fin})",
             title_x=0.5,
             height=700,
-            showlegend=False,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0.2)',
-            font=dict(color='#f8f9fa'),
-            margin=dict(l=50, r=50, t=80, b=50),
-            xaxis=dict(showgrid=True, gridwidth=1, gridcolor='#2d3748'),
-            yaxis=dict(showgrid=True, gridwidth=1, gridcolor='#2d3748'),
-            xaxis2=dict(showgrid=True, gridwidth=1, gridcolor='#2d3748'),
-            yaxis2=dict(showgrid=True, gridwidth=1, gridcolor='#2d3748')
+            showlegend=False
         )
         
-        fig_line.update_xaxes(title_text="Fecha", row=2, col=1)
         fig_line.update_yaxes(title_text="Valor (ARS)", row=1, col=1)
-        fig_line.update_yaxes(title_text="VariaciÃ³n %", row=2, col=1)
+        fig_line.update_yaxes(title_text="Variación %", row=2, col=1)
+        fig_line.update_xaxes(title_text="Fecha", row=2, col=1)
         
         st.plotly_chart(fig_line, use_container_width=True)
         
     except Exception as e:
-        st.error(f"Error al generar grÃ¡fico de evoluciÃ³n: {str(e)}")
+        st.error(f"Error al generar gráfico de evolución: {str(e)}")
         import traceback
         st.text(traceback.format_exc())
     
@@ -3258,15 +3277,14 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
         
         # Agregar cada gráfico de torta
         for i, (labels, values) in enumerate(zip(labels_list, values_list), start=1):
-            fig_pie.add_trace(
-                go.Pie(
-                    labels=labels,
-                    values=values,
-                    name=f"Gráfico {i}",
-                    textinfo='label+value',
-                    textposition='outside',
-                    marker=dict(colors=colors)
-                ),
+            fig_pie.add_trace(go.Pie(
+                labels=labels,
+                values=values,
+                name=f"Gráfico {i}",
+                textinfo='label+value',
+                textposition='outside',
+                marker=dict(colors=colors)
+            ),
                 row=1, col=i
             )
         
@@ -3300,26 +3318,24 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
         )
         
         # Gráfico de valor total
-        fig_line.add_trace(
-            go.Scatter(
-                x=df["Fecha"],
-                y=df["Valor Total"],
-                mode='lines+markers',
-                name="Valor Total",
-                line=dict(color='#1f77b4', width=2)
-            ),
+        fig_line.add_trace(go.Scatter(
+            x=df["Fecha"],
+            y=df["Valor Total"],
+            mode='lines+markers',
+            name="Valor Total",
+            line=dict(color='#1f77b4', width=2)
+        ),
             row=1, col=1
         )
         
         # Gráfico de evolución porcentual
-        fig_line.add_trace(
-            go.Scatter(
-                x=df["Fecha"],
-                y=df["Evolución %"],
-                mode='lines+markers',
-                name="Evolución %",
-                line=dict(color='#ff7f0e', width=2)
-            ),
+        fig_line.add_trace(go.Scatter(
+            x=df["Fecha"],
+            y=df["Evolución %"],
+            mode='lines+markers',
+            name="Evolución %",
+            line=dict(color='#ff7f0e', width=2)
+        ),
             row=2, col=1
         )
         
@@ -4961,7 +4977,41 @@ def mostrar_analisis_portafolio():
                             st.error(f"Error en el análisis de volatilidad: {str(e)}")
                             st.exception(e)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_initial_data():
+    """Load initial data with caching"""
+    return {
+        'fecha_desde': date.today() - timedelta(days=365),
+        'fecha_hasta': date.today()
+    }
+
 def main():
+    # Initialize session state with cached data
+    initial_data = load_initial_data()
+    
+    # Initialize session state
+    session_defaults = {
+        'token_acceso': None,
+        'refresh_token': None,
+        'clientes': [],
+        'cliente_seleccionado': None,
+        'fecha_desde': initial_data['fecha_desde'],
+        'fecha_hasta': initial_data['fecha_hasta'],
+        '_last_updated': time.time()
+    }
+    
+    for key, value in session_defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+    
+    # Set page config and title
+    st.set_page_config(
+        page_title="IOL Portfolio Analyzer",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
     
