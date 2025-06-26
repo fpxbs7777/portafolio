@@ -3822,7 +3822,7 @@ def mostrar_bonos_mep():
 
 def mostrar_inicio():
     """
-    Muestra la página de inicio de la aplicación con información general.
+    Muestra la página de inicio de la aplicación con información general y formulario de inicio de sesión.
     """
     st.title("📊 Plataforma de Análisis Financiero")
     
@@ -3860,24 +3860,80 @@ def mostrar_inicio():
         - Proyecciones
         """)
     
+    # Formulario de inicio de sesión
+    st.markdown("---")
+    st.markdown("### 🔐 Inicio de Sesión")
+    
+    with st.form("login_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            usuario = st.text_input("Usuario", key="login_usuario")
+        
+        with col2:
+            contraseña = st.text_input("Contraseña", type="password", key="login_contraseña")
+        
+        if st.form_submit_button("Iniciar Sesión"):
+            with st.spinner("Iniciando sesión..."):
+                try:
+                    tokens = obtener_tokens(usuario, contraseña)
+                    if tokens:
+                        st.session_state.token_acceso = tokens['access_token']
+                        st.session_state.refresh_token = tokens['refresh_token']
+                        st.success("✅ Sesión iniciada correctamente")
+                        # Actualizar lista de clientes
+                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        if clientes:
+                            st.session_state.clientes = clientes
+                            st.success("✅ Lista de clientes actualizada")
+                        st.rerun()
+                    else:
+                        st.error("❌ Error al iniciar sesión. Verifique sus credenciales.")
+                except Exception as e:
+                    st.error(f"❌ Error al iniciar sesión: {str(e)}")
+    
     # Sección de inicio rápido
     st.markdown("---")
     st.markdown("### 🚀 Comience ahora")
     
-    # Botones de acción rápida
+    # Botones de acción rápida con navegación
     col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button("📊 Ver Bonos MEP", use_container_width=True):
             st.session_state.page = "bonos_mep"
+            st.rerun()
     
     with col2:
         if st.button("📈 Análisis Técnico", use_container_width=True):
             st.session_state.page = "analisis_tecnico"
+            st.rerun()
     
     with col3:
         if st.button("💼 Estado de Cuenta", use_container_width=True):
             st.session_state.page = "estado_cuenta"
+            st.rerun()
+    
+    # Botones adicionales en la parte inferior
+    st.markdown("---")
+    st.markdown("### 🔍 Más opciones")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📊 Análisis de Portafolio", use_container_width=True):
+            st.session_state.page = "analisis_portafolio"
+            st.rerun()
+    
+    with col2:
+        if st.button("💰 Tasas de Caución", use_container_width=True):
+            st.session_state.page = "tasas_caucion"
+            st.rerun()
+    
+    with col3:
+        if st.button("👨‍💼 Panel del Asesor", use_container_width=True):
+            st.session_state.page = "panel_asesor"
+            st.rerun()
 
 def main():
     """
