@@ -1720,133 +1720,154 @@ class PortfolioManager:
         
         return fig
         
+    @st.cache_data(ttl=3600)  # Cache results for 1 hour
     def load_data(self):
-        # Convertir lista de activos a formato adecuado
-        symbols = []
-        markets = []
-        tipos = []
+        """Carga los datos de manera eficiente con caché y procesamiento en paralelo"""
+        import concurrent.futures
+        from functools import lru_cache
         
-        # Función auxiliar para detectar mercado
+        progress = st.progress(0)
+        progress_status = st.empty()
+        progress_status.info("Iniciando carga de datos...")
+        
+        # Función auxiliar para detectar mercado (optimizada con caché)
+        @lru_cache(maxsize=128)
         def detectar_mercado(tipo_raw: str, mercado_raw: str) -> str:
             """
             Determina el mercado basado en la información proporcionada.
-            
-            Args:
-                tipo_raw: Tipo de activo (ej: 'Acciones', 'Bonos', 'Cedears')
-                mercado_raw: Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
-                
-            Returns:
-                str: Mercado normalizado para la API
+            Optimizada con caché para evitar reprocesamiento.
             """
-            # Mapeo de mercados comunes
             mercado = str(mercado_raw).upper()
             
-            # Si el mercado está vacío, intentar deducirlo del tipo
-            if not mercado or mercado == 'NONE':
-                tipo = str(tipo_raw).lower()
-                if 'cedear' in tipo:
-                    return 'BCBA'  # Asumir que los CEDEARs son de BCBA
-                elif 'bono' in tipo or 'letra' in tipo or 'obligacion' in tipo:
-                    return 'BCBA'  # Asumir bonos en BCBA
-                elif 'accion' in tipo:
-                    return 'BCBA'  # Asumir acciones en BCBA por defecto
-                else:
-                    return 'BCBA'  # Valor por defecto
-                    
-            # Normalizar mercados conocidos
-            mercado_map = {
-                'BCBA': 'BCBA',
-                'BYMA': 'BCBA',
-                'ROFEX': 'ROFEX',
-                'NYSE': 'NYSE',
-                'NASDAQ': 'NASDAQ',
-                'AMEX': 'AMEX',
-                'BME': 'BME',
-                'BVC': 'BVC',
-                'BVL': 'BVL',
-                'B3': 'B3',
-                'BVMF': 'BVMF',
-                'EURONEXT': 'EURONEXT',
-                'LSE': 'LSE',
-                'FWB': 'FWB',
-                'SWX': 'SWX',
-                'TSX': 'TSX',
-                'TSXV': 'TSXV',
-                'ASX': 'ASX',
-                'NSE': 'NSE',
-                'BSE': 'BSE',
-                'TSE': 'TSE',
-                'HKEX': 'HKEX',
-                'SSE': 'SSE',
-                'SZSE': 'SZSE',
-                'KRX': 'KRX',
-                'TASE': 'TASE',
-                'MOEX': 'MOEX',
-                'JSE': 'JSE'
+            # Mapeo rápido de mercados comunes (usando un diccionario estático)
+            MERCADO_MAP = {
+                'BCBA': 'BCBA', 'BYMA': 'BCBA', 'ROFEX': 'ROFEX',
+                'NYSE': 'NYSE', 'NASDAQ': 'NASDAQ', 'AMEX': 'AMEX',
+                'BME': 'BME', 'BVC': 'BVC', 'BVL': 'BVL', 'B3': 'B3',
+                'BVMF': 'BVMF', 'EURONEXT': 'EURONEXT', 'LSE': 'LSE',
+                'FWB': 'FWB', 'SWX': 'SWX', 'TSX': 'TSX', 'TSXV': 'TSXV',
+                'ASX': 'ASX', 'NSE': 'NSE', 'BSE': 'BSE', 'TSE': 'TSE',
+                'HKEX': 'HKEX', 'SSE': 'SSE', 'SZSE': 'SZSE', 'KRX': 'KRX',
+                'TASE': 'TASE', 'MOEX': 'MOEX', 'JSE': 'JSE'
             }
             
-            return mercado_map.get(mercado, 'BCBA')  # Default a BCBA si no se reconoce
-            
-        # Procesar cada activo
-        for activo in self.activos:
+            if mercado in MERCADO_MAP:
+                return MERCADO_MAP[mercado]
+                
+            # Si no está en el mapa, deducir del tipo de activo
+            tipo = str(tipo_raw).lower()
+            if any(x in tipo for x in ['cedear', 'bono', 'letra', 'obligacion', 'accion']):
+                return 'BCBA'
+            return 'BCBA'  # Valor por defecto
+        
+        # Procesamiento en paralelo de activos
+        def process_activo(activo):
             if 'simbolo' not in activo:
-                continue
+                return None
                 
             simbolo = activo['simbolo']
             tipo = activo.get('tipo', '')
             mercado = activo.get('mercado', '')
-            
-            # Determinar mercado
             mercado_normalizado = detectar_mercado(tipo, mercado)
             
-            # Agregar a las listas
-            symbols.append(simbolo)
-            markets.append(mercado_normalizado)
-            tipos.append(tipo)
+            return {
+                'simbolo': simbolo,
+                'tipo': tipo,
+                'mercado': mercado_normalizado
+            }
         
-        # Obtener datos históricos
+        # Procesar activos en paralelo
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = list(executor.map(process_activo, self.activos))
+        
+        # Filtrar resultados nulos y extraer listas
+        processed_activos = [r for r in results if r is not None]
+        symbols = [a['simbolo'] for a in processed_activos]
+        markets = [a['mercado'] for a in processed_activos]
+        tipos = [a['tipo'] for a in processed_activos]
+        
+        progress.progress(30)
+        progress_status.info(f"Procesados {len(symbols)} activos")
+        
+        # Obtener datos históricos con caché y procesamiento por lotes
         try:
-            historical_data = get_historical_data_for_optimization(
-                self.token,
-                [{'simbolo': s, 'mercado': m} for s, m in zip(symbols, markets)],
-                self.fecha_desde,
-                self.fecha_hasta
-            )
+            progress_status.info("Obteniendo datos históricos...")
+            progress.progress(50)
             
-            if not historical_data:
+            # Función para obtener datos en lotes
+            def get_batch_data(batch):
+                return get_historical_data_for_optimization(
+                    self.token,
+                    [{'simbolo': s, 'mercado': m} for s, m in batch],
+                    self.fecha_desde,
+                    self.fecha_hasta
+                )
+            
+            # Procesar en lotes para evitar timeouts
+            batch_size = 10  # Ajustar según sea necesario
+            all_historical_data = {}
+            
+            for i in range(0, len(symbols), batch_size):
+                batch = list(zip(symbols[i:i+batch_size], markets[i:i+batch_size]))
+                batch_data = get_batch_data(batch)
+                all_historical_data.update(batch_data)
+                progress.progress(50 + int(30 * (i + len(batch)) / len(symbols)))
+            
+            if not all_historical_data:
                 st.error("No se pudieron cargar los datos históricos")
                 return False
+            
+            progress_status.info("Procesando datos...")
+            progress.progress(80)
                 
-            # Procesar datos en un DataFrame
-            prices = pd.DataFrame()
-            volumes = pd.DataFrame()
+            # Procesamiento eficiente de datos
+            valid_data = {k: v for k, v in all_historical_data.items() 
+                         if v is not None and not v.empty and 'precio' in v.columns}
             
-            for symbol, data in historical_data.items():
-                if data is not None and not data.empty:
-                    prices[symbol] = data['precio']
-                    if 'volumen' in data.columns:
-                        volumes[symbol] = data['volumen']
+            if not valid_data:
+                st.error("No hay datos válidos para procesar")
+                return False
+                
+            # Crear DataFrames de manera eficiente
+            prices = pd.DataFrame(
+                {k: v['precio'] for k, v in valid_data.items()}
+            )
             
-            # Calcular retornos
+            # Calcular retornos de manera vectorizada
             returns = prices.pct_change().dropna()
             
             # Guardar datos
             self.prices = prices
             self.returns = returns
-            if not volumes.empty:
-                self.volumes = volumes
-                
+            
+            # Solo cargar volúmenes si están disponibles
+            if 'volumen' in next(iter(valid_data.values())).columns:
+                self.volumes = pd.DataFrame(
+                    {k: v['volumen'] for k, v in valid_data.items() 
+                     if 'volumen' in v.columns}
+                )
+            
             self.data_loaded = True
+            progress.progress(95)
+            progress_status.info("Datos cargados exitosamente")
             return True
             
         except Exception as e:
+            progress_status.error("Error al cargar datos")
             st.error(f"Error al cargar datos: {str(e)}")
-            st.exception(e)
+            import traceback
+            st.error(traceback.format_exc())
             return False
+        finally:
+            progress.progress(100)
+            time.sleep(0.5)  # Dar tiempo para que se muestre el progreso final
+            progress.empty()
+            progress_status.empty()
 
+    @st.cache_data(ttl=3600)  # Cache results for 1 hour
     def compute_portfolio(self, strategy='max_sharpe', target_return=None):
         """
-        Calcula la cartera óptima según la estrategia especificada.
+        Calcula la cartera óptima según la estrategia especificada de manera eficiente.
         
         Args:
             strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight', 'markowitz-target')
@@ -1859,18 +1880,32 @@ class PortfolioManager:
             st.error("No hay datos de retornos disponibles")
             return None
             
+        progress = st.progress(0)
+        progress_status = st.empty()
+        
         try:
+            progress_status.info("Inicializando optimización...")
+            progress.progress(10)
+            
             # Inicializar el manager si no existe
             if not hasattr(self, 'manager') or not self.manager:
+                progress_status.info("Configurando gestor de cartera...")
+                progress.progress(20)
+                
                 self.manager = manager(
                     rics=self.returns.columns.tolist(),
                     notional=self.notional,
                     data=self.prices.to_dict('series')
                 )
                 
-                # Cargar datos y calcular covarianzas
+                # Cargar datos y calcular covarianzas en un solo paso
                 self.manager.returns = self.returns
+                progress_status.info("Calculando matriz de covarianza...")
+                progress.progress(40)
                 self.manager.compute_covariance()
+            
+            progress_status.info("Optimizando cartera...")
+            progress.progress(60)
             
             # Calcular cartera según estrategia
             if strategy in ['max_sharpe', 'min_vol', 'markowitz-target']:
