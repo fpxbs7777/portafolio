@@ -1064,35 +1064,26 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
 def parse_datetime_flexible(date_str: str):
     """
     Parses a datetime string that may or may not include microseconds or timezone info.
-    Handles multiple datetime formats flexibly.
+    Handles both formats: with and without milliseconds.
     """
     if not isinstance(date_str, str):
         return None
-    
     try:
-        # Try parsing with different formats
-        formats_to_try = [
-            '%Y-%m-%dT%H:%M:%S.%f%z',  # With microseconds and timezone
-            '%Y-%m-%dT%H:%M:%S%z',     # Without microseconds, with timezone
-            '%Y-%m-%dT%H:%M:%S.%f',    # With microseconds, without timezone
-            '%Y-%m-%dT%H:%M:%S',       # Without microseconds and timezone
-            '%Y-%m-%d %H:%M:%S.%f',    # Space separator with microseconds
-            '%Y-%m-%d %H:%M:%S',       # Space separator without microseconds
-            '%Y-%m-%d'                 # Date only
-        ]
-        
-        for fmt in formats_to_try:
-            try:
-                return pd.to_datetime(date_str, format=fmt, utc=True)
-            except (ValueError, TypeError):
-                continue
-                
-        # If none of the formats worked, try pandas' built-in parser
+        # First try parsing with the exact format that matches the error
+        try:
+            # Handle format without milliseconds: "2024-12-10T17:11:04"
+            if len(date_str) == 19 and 'T' in date_str and date_str.count(':') == 2:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S', utc=True)
+            # Handle format with milliseconds: "2024-12-10T17:11:04.123"
+            elif '.' in date_str and 'T' in date_str:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
+        except (ValueError, TypeError):
+            pass
+            
+        # Fall back to pandas' built-in parser if specific formats don't match
         return pd.to_datetime(date_str, errors='coerce', utc=True)
-        
     except Exception as e:
         st.warning(f"Error parsing date '{date_str}': {str(e)}")
-        return None
         return None
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1210,10 +1201,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
     try:
-        if not token_portador:
-            st.error("Error de autenticación: No se proporcionó un token de acceso")
-            return None
-            
         print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
         
         # Endpoint para FCIs (manejo especial)
@@ -1225,44 +1212,22 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
         print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
         
-        # Configurar encabezados con el token de autenticación
-        headers = obtener_encabezado_autorizacion(token_portador)
+        headers = {
+            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
+            'Accept': 'application/json'
+        }
         
-        # Agregar encabezados adicionales necesarios
-        headers.update({
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        })
+        # Realizar la solicitud
+        response = requests.get(url, headers={
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }, timeout=30)
         
-        # Realizar la solicitud con manejo de reintentos
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(url, headers=headers, timeout=30)
-                
-                # Verificar si la autenticación falló
-                if response.status_code == 401:
-                    st.error("Error de autenticación: Token inválido o expirado. Por favor, vuelva a iniciar sesión.")
-                    return None
-                    
-                # Verificar si el recurso no se encuentra
-                if response.status_code == 404:
-                    st.warning(f"No se encontraron datos para {simbolo} en {mercado}")
-                    return None
-                    
-                # Verificar otros errores HTTP
-                response.raise_for_status()
-                break  # Si llegamos aquí, la solicitud fue exitosa
-                
-            except requests.exceptions.RequestException as e:
-                if attempt == max_retries - 1:  # Último intento
-                    st.error(f"Error al conectar con la API de IOL: {str(e)}")
-                    return None
-                time.sleep(1)  # Esperar antes de reintentar
-                continue
-        
-        # Procesar la respuesta exitosa
+        # Verificar el estado de la respuesta
         print(f"Estado de la respuesta: {response.status_code}")
+        response.raise_for_status()
+        
+        # Procesar la respuesta
         data = response.json()
         print(f"Tipo de datos recibidos: {type(data)}")
         
@@ -2429,55 +2394,6 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
     except Exception as e:
         st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
         return None
-
-def obtener_activos_desde_paneles(token_portador, max_activos=50):
-    """
-    Obtiene activos de diferentes paneles del mercado.
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        max_activos (int): Número máximo de activos a devolver
-        
-    Returns:
-        list: Lista de diccionarios con información de los activos
-    """
-    paneles = [
-        # Argentina
-        ('Acciones', 'Panel%20General', 'Argentina'),
-        ('Bonos', 'Panel%20General', 'Argentina'),
-        ('Cedears', 'Panel%20General', 'Argentina'),
-        ('FCI', 'Panel%20General', 'Argentina'),
-        # Estados Unidos
-        ('Acciones', 'Panel%20General', 'Estados_Unidos'),
-        ('Acciones', 'Panel%20NYSE', 'Estados_Unidos'),
-        ('Acciones', 'Panel%20NASDAQ', 'Estados_Unidos')
-    ]
-    
-    activos = []
-    for instrumento, panel, pais in paneles:
-        try:
-            cotizaciones = obtener_panel_cotizaciones(token_portador, instrumento, panel, pais)
-            if cotizaciones and 'titulos' in cotizaciones:
-                for titulo in cotizaciones['titulos']:
-                    if len(activos) >= max_activos:
-                        break
-                    if 'simbolo' in titulo and 'mercado' in titulo:
-                        # Detectar mercado correcto para acciones de EEUU
-                        if instrumento == 'Acciones' and pais == 'Estados_Unidos':
-                            mercado = titulo['mercado'] if 'mercado' in titulo else 'NYSE'
-                        else:
-                            mercado = titulo['mercado']
-                        
-                        activos.append({
-                            'simbolo': titulo['simbolo'],
-                            'mercado': mercado,
-                            'tipo': instrumento,
-                            'panel': panel
-                        })
-        except Exception as e:
-            st.warning(f"Error al obtener panel {panel} de {instrumento}: {str(e)}")
-    
-    return activos
 
 # --- Portfolio Metrics Function ---
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
@@ -3789,332 +3705,17 @@ def mostrar_estado_cuenta(estado_cuenta):
         df_cuentas = pd.DataFrame(datos_cuentas)
         st.dataframe(df_cuentas, use_container_width=True, height=300)
 
-def obtener_serie_historica(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
-    """
-    Obtiene la serie histórica de cotizaciones para un símbolo en un mercado específico.
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        mercado (str): Mercado (ej: 'BCBA', 'NYSE')
-        simbolo (str): Símbolo del activo
-        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
-        ajustada (str): 'Ajustada' o 'SinAjustar'
-        
-    Returns:
-        dict: Datos de la serie histórica o None en caso de error
-    """
-    try:
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        headers = {"Authorization": f"Bearer {token_portador}"}
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"Error al obtener serie histórica: {str(e)}")
-        return None
-
-def obtener_paneles_disponibles(token_portador, instrumento, pais):
-    """
-    Obtiene la lista de paneles disponibles para un instrumento y país específicos.
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        instrumento (str): Tipo de instrumento (ej: 'Acciones', 'Bonos')
-        pais (str): País (ej: 'Argentina', 'Estados_Unidos')
-        
-    Returns:
-        list: Lista de paneles disponibles o None en caso de error
-    """
-    try:
-        if not token_portador:
-            return None
-            
-        base_url = "https://api.invertironline.com/api/v2"
-        url = f"{base_url}/Cotizaciones/{instrumento}/Paneles/{pais}"
-        
-        headers = {
-            "Authorization": f"Bearer {token_portador}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.get(url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            return response.json()
-        return None
-    except Exception:
-        return None
-
-def obtener_panel_cotizaciones(token_portador, instrumento, panel, pais):
-    """
-    Obtiene las cotizaciones para un panel específico.
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        instrumento (str): Tipo de instrumento (ej: 'Acciones', 'Bonos')
-        panel (str): Panel específico (ej: 'Panel%20General', 'Burcap')
-        pais (str): País (ej: 'Argentina', 'Estados_Unidos')
-        
-    Returns:
-        dict: Datos del panel de cotizaciones o None en caso de error
-    """
-    try:
-        # Validar que el token no esté vacío
-        if not token_portador:
-            st.error("❌ Error: No se proporcionó un token de autenticación")
-            return None
-            
-        # Construir la URL de la API
-        base_url = "https://api.invertironline.com/api/v2"
-        url = f"{base_url}/Cotizaciones/{instrumento}/{panel}/{pais}"
-        
-        # Configurar los headers con el token
-        headers = {
-            "Authorization": f"Bearer {token_portador}",
-            "Content-Type": "application/json"
-        }
-        
-        # Realizar la petición con timeout
-        response = requests.get(url, headers=headers, timeout=30)
-        
-        # Verificar el estado de la respuesta
-        if response.status_code == 401:
-            st.error("❌ Error 401: No autorizado. Por favor, verifique su token de acceso y vuelva a iniciar sesión.")
-            return None
-        elif response.status_code == 404:
-            st.warning(f"⚠️ No se encontró el recurso solicitado: {url}")
-            st.warning("Por favor, verifique los parámetros del panel.")
-            return None
-            
-        # Lanzar excepción para otros códigos de error
-        response.raise_for_status()
-        
-        # Devolver los datos en formato JSON
-        return response.json()
-        
-    except requests.exceptions.RequestException as e:
-        error_msg = str(e)
-        if "401" in error_msg:
-            st.error("🔑 Error de autenticación: El token ha expirado o no es válido. Por favor, inicie sesión nuevamente.")
-        elif "timed out" in error_msg.lower():
-            st.error("⏱️ Tiempo de espera agotado. Por favor, intente nuevamente más tarde.")
-        else:
-            st.error(f"❌ Error al conectarse al servidor: {error_msg}")
-        return None
-    except Exception as e:
-        st.error(f"❌ Error inesperado: {str(e)}")
-        return None
-
-def obtener_cotizacion_detallada(token_portador, mercado, simbolo):
-    """
-    Obtiene la cotización detallada de un instrumento.
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        mercado (str): Mercado (ej: 'BCBA', 'NYSE')
-        simbolo (str): Símbolo del activo
-        
-    Returns:
-        dict: Datos detallados de la cotización o None en caso de error
-    """
-    try:
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle"
-        headers = {"Authorization": f"Bearer {token_portador}"}
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"Error al obtener cotización detallada: {str(e)}")
-        return None
-
-def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
+def mostrar_cotizaciones_mercado(token_acceso):
     st.markdown("### 💱 Cotizaciones y Mercado")
     
-    # Crear pestañas para las diferentes secciones
-    tab_panel, tab_historica, tab_mep, tab_venta_bonos = st.tabs([
-        "📊 Panel Cotizaciones", 
-        "📈 Serie Histórica", 
-        "💰 Cotización MEP", 
-        "💵 Vender Bonos"
-    ])
-    
-    # Pestaña de Panel de Cotizaciones
-    with tab_panel:
-        st.subheader("📊 Panel de Cotizaciones")
-        
-        # Usar columnas para organizar los selectores
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            # Selector de tipo de instrumento
-            instrumentos_disponibles = ["Acciones", "Bonos", "Opciones", "Monedas", "Cauciones", "CHPD", "Futuros", "ADRs"]
-            instrumento = st.selectbox(
-                "Instrumento",
-                instrumentos_disponibles,
-                index=0,
-                key="panel_instrumento"
-            )
-        
-        with col2:
-            # Selector de país
-            paises_disponibles = ["Argentina", "Estados_Unidos"]
-            pais = st.selectbox(
-                "País",
-                paises_disponibles,
-                index=0,
-                key="panel_pais"
-            )
-        
-        # Obtener paneles disponibles dinámicamente
-        paneles_disponibles = []
-        panel_seleccionado = ""
-        
-        if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-            with st.spinner("Cargando paneles disponibles..."):
-                paneles_disponibles = obtener_paneles_disponibles(
-                    st.session_state.token_acceso,
-                    instrumento,
-                    pais
-                )
-        
-        with col3:
-            if paneles_disponibles:
-                # Mapear nombres de paneles a formato legible
-                paneles_legibles = [p.replace('_', ' ').title() for p in paneles_disponibles]
-                panel_seleccionado = st.selectbox(
-                    "Panel",
-                    options=paneles_disponibles,
-                    format_func=lambda x: x.replace('_', ' ').title(),
-                    index=0,
-                    key="panel_seleccionado"
-                )
-            else:
-                st.warning("No se encontraron paneles disponibles")
-                panel_seleccionado = ""
-        
-        # Botón para consultar
-        if st.button("🔍 Consultar Panel", disabled=not panel_seleccionado):
-            if panel_seleccionado:
-                with st.spinner("Obteniendo datos del panel..."):
-                    datos_panel = obtener_panel_cotizaciones(
-                        token_acceso, 
-                        instrumento, 
-                        panel_seleccionado, 
-                        pais
-                    )
-                    
-                    if datos_panel and 'titulos' in datos_panel and datos_panel['titulos']:
-                        # Convertir a DataFrame para mejor visualización
-                        df_panel = pd.DataFrame(datos_panel['titulos'])
-                        
-                        # Mostrar las primeras 20 filas con scroll
-                        st.dataframe(
-                            df_panel.head(20),
-                            use_container_width=True,
-                            height=500
-                        )
-                        
-                        # Opción para descargar datos
-                        csv = df_panel.to_csv(index=False, encoding='utf-8-sig')
-                        st.download_button(
-                            "📥 Descargar Datos",
-                            data=csv,
-                            file_name=f"panel_{instrumento}_{pais}.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.warning("No se encontraron datos para el panel seleccionado.")
-    
-    # Pestaña de Serie Histórica
-    with tab_historica:
-        st.subheader("📈 Consultar Serie Histórica")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            mercado = st.selectbox(
-                "Mercado",
-                ["BCBA", "NYSE", "NASDAQ", "AMEX", "BCS", "ROFX"],
-                index=0
-            )
-        with col2:
-            simbolo = st.text_input("Símbolo", value="GGAL")
-        with col3:
-            fecha_desde = st.date_input("Fecha Desde", value=date.today() - timedelta(days=30))
-        with col4:
-            fecha_hasta = st.date_input("Fecha Hasta", value=date.today())
-        
-        ajustada = st.radio("Ajuste", ["SinAjustar", "Ajustada"], horizontal=True)
-        
-        if st.button("📊 Obtener Serie Histórica"):
-            with st.spinner("Obteniendo datos históricos..."):
-                datos = obtener_serie_historica(
-                    token_acceso,
-                    mercado,
-                    simbolo,
-                    fecha_desde.strftime("%Y-%m-%d"),
-                    fecha_hasta.strftime("%Y-%m-%d"),
-                    ajustada
-                )
-                
-                if datos:
-                    # Mostrar datos en un gráfico
-                    if isinstance(datos, list) and len(datos) > 0:
-                        df_historico = pd.DataFrame(datos)
-                        
-                        # Verificar si la columna 'fecha' existe, si no, usar el primer campo de fecha disponible
-                        fecha_col = next((col for col in df_historico.columns if 'fecha' in col.lower()), None)
-                        
-                        if fecha_col:
-                            # Ordenar por fecha
-                            df_historico[fecha_col] = pd.to_datetime(df_historico[fecha_col])
-                            df_historico = df_historico.sort_values(fecha_col)
-                            
-                            # Mostrar gráfico de precios
-                            fig = px.line(
-                                df_historico, 
-                                x=fecha_col, 
-                                y='ultimoPrecio',
-                                title=f"Evolución de precios - {simbolo}",
-                                labels={'ultimoPrecio': 'Precio', fecha_col: 'Fecha'}
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Mostrar tabla con datos
-                            st.dataframe(
-                                df_historico,
-                                use_container_width=True,
-                                height=400
-                            )
-                            
-                            # Opción para descargar datos
-                            csv = df_historico.to_csv(index=False, encoding='utf-8-sig')
-                            st.download_button(
-                                "📥 Descargar Datos Históricos",
-                                data=csv,
-                                file_name=f"historico_{simbolo}_{fecha_desde}_{fecha_hasta}.csv",
-                                mime="text/csv"
-                            )
-                        else:
-                            st.warning("No se encontró una columna de fecha en los datos.")
-                    else:
-                        st.warning("No se encontraron datos históricos para el símbolo y rango de fechas seleccionados.")
-    
-    # Pestaña de Cotización MEP
-    with tab_mep:
-        with st.expander("Consultar Cotización MEP", expanded=True):
-            form = st.form("mep_form")
-            with form:
-                col1, col2, col3 = st.columns(3)
-                simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
-                id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
-                id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
-                
-                submitted = st.form_submit_button("🔍 Consultar MEP")
+    with st.expander("💰 Cotización MEP", expanded=True):
+        with st.form("mep_form"):
+            col1, col2, col3 = st.columns(3)
+            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
+            id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
+            id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
             
-            if submitted and simbolo_mep:
+            if st.form_submit_button("🔍 Consultar MEP"):
                 if simbolo_mep:
                     with st.spinner("Consultando cotización MEP..."):
                         cotizacion_mep = obtener_cotizacion_mep(
@@ -4125,250 +3726,9 @@ def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
                         st.success("✅ Cotización MEP obtenida")
                         precio_mep = cotizacion_mep.get('precio', 'N/A')
                         st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
-                        
-                        # Obtener datos históricos del MEP (últimos 30 días por defecto)
-                        fecha_hasta = datetime.now().strftime("%Y-%m-%d")
-                        fecha_desde = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-                        
-                        with st.spinner("Obteniendo datos históricos del MEP..."):
-                            # Obtener datos del bono en pesos (ej: AL30)
-                            try:
-                                df_pesos = obtener_serie_historica_iol(
-                                    token_acceso, 
-                                    'BCBA',  # Usar 'BCBA' para bonos argentinos
-                                    simbolo_mep, 
-                                    fecha_desde, 
-                                    fecha_hasta
-                                )
-                                if df_pesos is None or df_pesos.empty:
-                                    st.warning(f"No se encontraron datos históricos para {simbolo_mep} en el rango de fechas especificado.")
-                                    return
-                            except Exception as e:
-                                st.error(f"Error al obtener datos históricos para {simbolo_mep}: {str(e)}")
-                                return
-                            
-                            # Obtener datos del bono en dólares (ej: AL30D)
-                            try:
-                                df_dolares = obtener_serie_historica_iol(
-                                    token_acceso, 
-                                    'BCBA',  # Usar 'BCBA' para bonos argentinos en dólares
-                                    f"{simbolo_mep}D", 
-                                    fecha_desde, 
-                                    fecha_hasta
-                                )
-                                if df_dolares is None or df_dolares.empty:
-                                    st.warning(f"No se encontraron datos históricos para {simbolo_mep}D en el rango de fechas especificado.")
-                                    return
-                            except Exception as e:
-                                st.error(f"Error al obtener datos históricos para {simbolo_mep}D: {str(e)}")
-                                return
-                            
-                            if df_pesos is not None and df_dolares is not None and not df_pesos.empty and not df_dolares.empty:
-                                # Unir los DataFrames por fecha para calcular el MEP
-                                df_mep = pd.merge(
-                                    df_pesos.rename(columns={'precio': 'precio_pesos'}),
-                                    df_dolares.rename(columns={'precio': 'precio_dolares'}),
-                                    on='fecha',
-                                    how='inner'
-                                )
-                                
-                                # Calcular la cotización MEP (precio en pesos / precio en dólares)
-                                df_mep['mep'] = df_mep['precio_pesos'] / df_mep['precio_dolares']
-                                
-                                # Ordenar por fecha
-                                df_mep = df_mep.sort_values('fecha')
-                                
-                                # Crear gráfico de la serie histórica del MEP
-                                fig = go.Figure()
-                                
-                                # Agregar línea del MEP
-                                fig.add_trace(go.Scatter(
-                                    x=df_mep['fecha'],
-                                    y=df_mep['mep'],
-                                    mode='lines',
-                                    name='Tipo de Cambio MEP',
-                                    line=dict(color='#4CAF50', width=2),
-                                    hovertemplate='%{y:.2f} ARS/USD<extra></extra>'
-                                ))
-                                
-                                # Personalizar el diseño del gráfico
-                                fig.update_layout(
-                                    title=f'Serie Histórica del Dólar MEP ({simbolo_mep}/{simbolo_mep}D)',
-                                    xaxis_title='Fecha',
-                                    yaxis_title='Tipo de Cambio (ARS/USD)',
-                                    template='plotly_dark',
-                                    hovermode='x unified',
-                                    showlegend=True,
-                                    height=500,
-                                    margin=dict(l=50, r=50, t=80, b=50),
-                                    xaxis=dict(
-                                        showgrid=True,
-                                        gridcolor='rgba(255, 255, 255, 0.1)',
-                                        showline=True,
-                                        linecolor='rgba(255, 255, 255, 0.3)'
-                                    ),
-                                    yaxis=dict(
-                                        showgrid=True,
-                                        gridcolor='rgba(255, 255, 255, 0.1)',
-                                        showline=True,
-                                        linecolor='rgba(255, 255, 255, 0.3)'
-                                    )
-                                )
-                                
-                                # Mostrar el gráfico
-                                st.plotly_chart(fig, use_container_width=True)
-                                
-                                # Mostrar tabla con los últimos 5 valores
-                                st.subheader("Últimos Valores")
-                                df_ultimos = df_mep[['fecha', 'mep']].tail(5).copy()
-                                df_ultimos['fecha'] = df_ultimos['fecha'].dt.strftime('%Y-%m-%d')
-                                df_ultimos['mep'] = df_ultimos['mep'].round(2)
-                                df_ultimos = df_ultimos.rename(columns={
-                                    'fecha': 'Fecha',
-                                    'mep': 'Tipo de Cambio MEP (ARS/USD)'
-                                })
-                                st.dataframe(
-                                    df_ultimos,
-                                    hide_index=True,
-                                    column_config={
-                                        'Fecha': st.column_config.TextColumn('Fecha'),
-                                        'Tipo de Cambio MEP (ARS/USD)': st.column_config.NumberColumn(
-                                            'Tipo de Cambio MEP (ARS/USD)',
-                                            format='%.2f'
-                                        )
-                                    }
-                                )
-                            else:
-                                st.warning("No se pudieron obtener los datos históricos completos para calcular el MEP.")
-                                
-    
-        # Pestaña para vender bonos
-        with tab_venta_bonos:
-            # Mostrar el formulario de venta de especie D solo si hay un token de acceso
-            if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-                st.warning("🔒 Por favor, inicie sesión para acceder a la venta de bonos.")
-                return
-                
-            # Verificar si hay un cliente seleccionado
-            if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
-                st.warning("👤 Por favor, seleccione un cliente desde el menú lateral primero.")
-                return
-                
-            cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente')
-            if not cliente_id:
-                st.error("❌ No se pudo obtener el ID del cliente. Por favor, seleccione un cliente válido.")
-                return
-                
-            # Obtener el portafolio del cliente para mostrar los bonos disponibles
-            with st.spinner("🔍 Cargando portafolio del cliente..."):
-                try:
-                        
-                    portafolio = obtener_portafolio(st.session_state.token_acceso, cliente_id)
-                    
-                    # Filtrar bonos en pesos (que no terminan con 'D')
-                    bonos_pesos = []
-                    if portafolio and 'activos' in portafolio:
-                        bonos_pesos = [
-                            activo for activo in portafolio['activos'] 
-                            if (isinstance(activo, dict) and 
-                                activo.get('tipo') == 'Bonos' and 
-                                not str(activo.get('simbolo', '')).endswith('D') and 
-                                activo.get('cantidad_disponible', 0) > 0)
-                        ]
-                    
-                    if not bonos_pesos:
-                        st.warning("No se encontraron bonos en pesos disponibles para vender en su portafolio.")
                     else:
-                        # Mostrar tabla de bonos disponibles
-                        st.subheader("📊 Bonos en Pesos Disponibles")
-                        df_bonos = pd.DataFrame([{
-                            'Símbolo': bono.get('simbolo', ''),
-                            'Descripción': bono.get('descripcion', 'Sin descripción'),
-                            'Cantidad': bono.get('cantidad_disponible', 0),
-                            'Precio': bono.get('ultimo_precio', 0),
-                            'Moneda': bono.get('moneda', 'ARS')
-                        } for bono in bonos_pesos])
-                        
-                        st.dataframe(df_bonos, use_container_width=True)
-                        
-                        # Formulario para vender bonos
-                        with st.form("venta_bono_form"):
-                            st.subheader("📝 Vender Bono")
-                            
-                            # Seleccionar bono
-                            bono_opciones = [f"{bono['simbolo']} - {bono.get('descripcion', 'Sin descripción')}" for bono in bonos_pesos]
-                            bono_seleccionado = st.selectbox(
-                                "Seleccione el bono a vender",
-                                options=bono_opciones,
-                                index=0
-                            )
-                            
-                            # Obtener el símbolo del bono seleccionado
-                            bono_info = bonos_pesos[bono_opciones.index(bono_seleccionado)]
-                            simbolo = bono_info.get('simbolo', '')
-                            cantidad_max = int(bono_info.get('cantidad_disponible', 0))
-                            
-                            # Campos del formulario
-                            col1, col2 = st.columns(2)
-                            cantidad = col1.number_input(
-                                "Cantidad", 
-                                min_value=1, 
-                                max_value=cantidad_max if cantidad_max > 0 else 1, 
-                                value=1,
-                                step=1,
-                                help=f"Máximo disponible: {cantidad_max}"
-                            )
-                            
-                            precio_actual = bono_info.get('ultimo_precio', 0)
-                            precio = col2.number_input(
-                                "Precio", 
-                                min_value=0.0, 
-                                value=float(precio_actual) if precio_actual else 0.0,
-                                step=0.01,
-                                format="%.2f"
-                            )
-                            
-                            # Fecha de validez (hoy + 1 día por defecto)
-                            validez = st.date_input(
-                                "Válido hasta",
-                                value=date.today() + timedelta(days=1),
-                                min_value=date.today()
-                            )
-                            
-                            # Botón de envío
-                            submitted = st.form_submit_button("📤 Enviar Orden de Venta", use_container_width=True)
-                            
-                            if submitted:
-                                if not all([simbolo, cantidad, precio]):
-                                    st.error("Por favor complete todos los campos obligatorios.")
-                                else:
-                                    with st.spinner("Procesando orden de venta..."):
-                                        try:
-                                            # Llamar a la función vender_especie_d
-                                            resultado = vender_especie_d(
-                                                token_portador=st.session_state.token_acceso,
-                                                id_cliente=cliente_id,
-                                                simbolo=simbolo,
-                                                cantidad=int(cantidad),
-                                                precio=float(precio),
-                                                mercado="bCBA",  # Mercado por defecto
-                                                validez=validez.strftime("%Y-%m-%d")
-                                            )
-                                            
-                                            if resultado:
-                                                st.success("✅ Orden de venta enviada correctamente")
-                                                st.balloons()
-                                                st.json(resultado)
-                                            else:
-                                                st.error("No se pudo procesar la orden de venta.")
-                                        except Exception as e:
-                                            st.error(f"Error al procesar la orden: {str(e)}")
-                except Exception as e:
-                    st.error(f"Error al cargar el portafolio: {str(e)}")
+                        st.error("❌ No se pudo obtener la cotización MEP")
     
-
-    
-    # Sección de Tasas de Caución (fuera de las pestañas)
     with st.expander("🏦 Tasas de Caución", expanded=True):
         if st.button("🔄 Actualizar Tasas"):
             with st.spinner("Consultando tasas de caución..."):
@@ -4526,28 +3886,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col_sel:
         metodo_seleccion = st.selectbox(
             "Método de Selección de Activos:",
-            options=['actual', 'aleatoria', 'paneles_mercado'],
+            options=['actual', 'aleatoria'],
             format_func=lambda x: {
                 'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria',
-                'paneles_mercado': 'Paneles de mercado'
+                'aleatoria': 'Selección aleatoria'
             }[x]
         )
 
-    # Mostrar input de capital y filtro de tipo de activo según corresponda
-    if metodo_seleccion == 'paneles_mercado':
-        with st.spinner("Obteniendo activos de los paneles de mercado..."):
-            activos_filtrados = obtener_activos_desde_paneles(token_acceso)
-        if not activos_filtrados:
-            st.error("No se pudieron obtener activos de los paneles de mercado")
-            return
-        st.success(f"Se obtuvieron {len(activos_filtrados)} activos de los paneles de mercado")
-        capital = st.number_input(
-            "Capital Inicial para Optimización (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección de activos del mercado"
-        )
-    elif metodo_seleccion == 'aleatoria':
+    # Mostrar input de capital y filtro de tipo de activo solo si corresponde
+    if metodo_seleccion == 'aleatoria':
         # Filtro de tipo de activo solo en aleatoria
         tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
         tipo_seleccionado = st.selectbox(
@@ -5407,68 +4754,67 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         return None
 
 
-def vender_especie_d(token_portador, id_cliente, simbolo, cantidad, precio, mercado, validez, cuenta_comitente=None):
-    """
-    Realiza una operación de venta de especie D a través de la API de IOL.
+def mostrar_venta_especie_d():
+    st.title("📉 Venta de Especie D")
+    # ... (rest of the code remains the same)
     
-    Args:
-        token_portador (str): Token de autenticación
-        id_cliente (str): ID del cliente
-        simbolo (str): Símbolo del activo a vender
-        cantidad (int): Cantidad a vender
-        precio (float): Precio de venta
-        mercado (str): Mercado donde se opera (ej: 'bCBA')
-        validez (str): Fecha de validez de la orden (formato 'YYYY-MM-DD')
-        cuenta_comitente (str, optional): Número de cuenta comitente
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.error("No se encontró token de acceso. Por favor, inicie sesión.")
+        return
         
-    Returns:
-        dict: Respuesta de la API o None en caso de error
-    """
-    url_venta = 'https://api.invertironline.com/api/v2/operar/Vender'
-    encabezados = obtener_encabezado_autorizacion(token_portador)
+    if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
+        st.warning("Por favor, seleccione un cliente primero.")
+        return
     
-    # Asegurarse de que el símbolo no termine en 'D' (ya que estamos vendiendo la especie en pesos)
-    if simbolo.upper().endswith('D'):
-        st.error("Error: No se puede vender una especie que ya está en dólares.")
-        return None
-    
-    # Configurar los datos de la orden
-    datos_orden = {
-        'mercado': mercado.upper(),
-        'simbolo': simbolo.upper(),
-        'cantidad': int(cantidad),
-        'precio': float(precio),
-        'validez': validez,
-        'tipo': 'precioLimite',  # Tipo de orden: precioLimite, mercado, etc.
-        'plazo': 't2',  # T+2 días para bonos
-        'cliente': id_cliente
-    }
-    
-    # Agregar cuenta comitente si se especificó
-    if cuenta_comitente:
-        datos_orden['cuentaComitente'] = cuenta_comitente
-    
-    try:
-        # Realizar la solicitud POST
-        respuesta = requests.post(url_venta, headers=encabezados, json=datos_orden)
-        respuesta.raise_for_status()  # Lanza una excepción para códigos de error HTTP
+    with st.form("venta_especie_d_form"):
+        st.subheader("Datos de la Operación")
         
-        # Si la respuesta es exitosa, devolver los datos
-        return respuesta.json()
+        # Obtener datos del cliente
+        cliente = st.session_state.cliente_seleccionado
+        cliente_id = cliente.get('numeroCliente', cliente.get('id'))
         
-    except requests.exceptions.HTTPError as http_err:
-        st.error(f"❌ Error al enviar la orden de venta: {http_err}")
-        if hasattr(http_err, 'response') and http_err.response is not None:
-            try:
-                error_details = http_err.response.json()
-                st.json(error_details)
-            except:
-                st.error(f"Detalles del error: {http_err.response.text[:500]}")
-        return None
+        # Campos del formulario
+        simbolo = st.text_input("Símbolo", placeholder="Ej: GGAL")
+        cantidad = st.number_input("Cantidad", min_value=1, step=1, value=1)
+        precio = st.number_input("Precio", min_value=0.0, step=0.01, format="%.2f")
         
-    except Exception as e:
-        st.error(f"❌ Error inesperado al enviar la orden de venta: {str(e)}")
-        return None
+        # Selector de mercado
+        mercado = st.selectbox(
+            "Mercado",
+            ["bCBA", "bCBA24hs", "bCBAp", "bBYMA", "bROFX"]
+        )
+        
+        # Fecha de validez (hoy + 1 día por defecto)
+        validez = st.date_input(
+            "Válido hasta",
+            value=date.today() + timedelta(days=1),
+            min_value=date.today()
+        )
+        
+        # Cuenta comitente (opcional)
+        cuenta_comitente = st.text_input("Cuenta Comitente (opcional)", "")
+        
+        # Botón de envío
+        if st.form_submit_button("📤 Enviar Orden de Venta", use_container_width=True):
+            if not all([simbolo, cantidad, precio, mercado, validez]):
+                st.error("Por favor complete todos los campos obligatorios.")
+                return
+                
+            with st.spinner("Procesando orden de venta..."):
+                resultado = vender_especie_d(
+                    token_portador=st.session_state.token_acceso,
+                    id_cliente=cliente_id,
+                    simbolo=simbolo.upper(),
+                    cantidad=int(cantidad),
+                    precio=float(precio),
+                    mercado=mercado,
+                    validez=validez.strftime("%Y-%m-%d"),
+                    cuenta_comitente=cuenta_comitente if cuenta_comitente else None
+                )
+                
+                if resultado:
+                    st.success("✅ Orden de venta enviada correctamente")
+                    st.json(resultado)
 
 
 def mostrar_movimientos_asesor():
@@ -5882,7 +5228,11 @@ def main():
                 opciones_menu.append("👤 Movimientos del Asesor")
             
             # Submenú para operaciones de Dólar MEP
-            # Removida la opción de Vender Especie D según solicitud del usuario
+            if st.session_state.token_acceso and st.session_state.cliente_seleccionado and "📈 Cotizaciones de Mercado" in opciones_menu:
+                # Insertar después de Cotizaciones de Mercado
+                idx = opciones_menu.index("📈 Cotizaciones de Mercado")
+                if "   📉 Vender Especie D" not in opciones_menu:
+                    opciones_menu.insert(idx + 1, "   📉 Vender Especie D")
             
             opcion_seleccionada = st.sidebar.radio("Navegación", opciones_menu)
             
@@ -5908,8 +5258,15 @@ def main():
                 else:
                     st.warning("No se pudo autenticar con IOL")
                     
-            # Eliminada la opción de Vender Especie D del menú
-            
+            elif opcion_seleccionada.strip() == "📉 Vender Especie D":
+                # Mostrar la interfaz de Vender Especie D
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', 
+                                 st.session_state.cliente_seleccionado.get('id'))
+                    mostrar_venta_especie_d(st.session_state.token_acceso, cliente_id)
+                else:
+                    st.warning("Por favor, seleccione un cliente primero")
+                
             elif opcion_seleccionada == "🔍 Optimización de Portafolio":
                 st.title("Optimización de Portafolio")
                 if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
@@ -5935,8 +5292,12 @@ def main():
                 else:
                     st.warning("No se pudo autenticar con IOL")
                     
-            # Eliminada la opción duplicada de Vender Especie D
-            
+            elif opcion_seleccionada == "📉 Vender Especie D":
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    mostrar_venta_especie_d()
+                else:
+                    st.warning("Por favor, seleccione un cliente primero")
+                
             elif opcion_seleccionada == "📝 Test de Perfil de Inversor":
                 st.title("Test de Perfil de Inversor")
                 if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
