@@ -3766,7 +3766,7 @@ def simular_ejecucion(precio_objetivo, precio_actual, volatilidad, dias=1, n_sim
 
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
-    st.title("🔄 Optimización de Portafolio")
+    st.title("Optimización de Portafolio")
     
     # Asegurarse de que plotly.graph_objects esté disponible globalmente
     global go
@@ -3892,8 +3892,24 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
         )
 
-    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    # Checkbox moved to the top of the section for better organization
 
+    # --- Frontera Eficiente ---
+    if 'show_frontier' not in st.session_state:
+        st.session_state.show_frontier = True
+        
+    # Toggle function for the frontier
+    def toggle_frontier():
+        st.session_state.show_frontier = not st.session_state.show_frontier
+    
+    # Single checkbox for frontier display
+    show_frontier = st.checkbox(
+        "Mostrar Frontera Eficiente", 
+        value=st.session_state.show_frontier,
+        key="frontier_checkbox",
+        on_change=toggle_frontier
+    )
+    
     # --- Scheduling y tipo de orden ---
     scheduling_methods = {
         'TWAP (Time-Weighted)': 'twap',
@@ -4989,20 +5005,21 @@ def main():
     # Initialize session state with cached data
     initial_data = load_initial_data()
     
-    # Initialize session state
-    session_defaults = {
-        'token_acceso': None,
-        'refresh_token': None,
-        'clientes': [],
-        'cliente_seleccionado': None,
-        'fecha_desde': initial_data['fecha_desde'],
-        'fecha_hasta': initial_data['fecha_hasta'],
-        '_last_updated': time.time()
-    }
-    
-    for key, value in session_defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    # Initialize session state with persistent storage
+    if 'initialized' not in st.session_state:
+        st.session_state.update({
+            'token_acceso': None,
+            'refresh_token': None,
+            'clientes': [],
+            'cliente_seleccionado': None,
+            'fecha_desde': initial_data['fecha_desde'],
+            'fecha_hasta': initial_data['fecha_hasta'],
+            '_last_updated': time.time(),
+            'initialized': True,
+            'show_frontier': True,
+            'show_efficient_frontier': False,
+            'user_authenticated': False
+        })
     
     # Set page config and title
     st.set_page_config(
@@ -5045,8 +5062,12 @@ def main():
                             token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
                             
                             if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
+                                st.session_state.update({
+                                    'token_acceso': token_acceso,
+                                    'refresh_token': refresh_token,
+                                    'user_authenticated': True,
+                                    'last_activity': time.time()
+                                })
                                 st.success("✅ Conexión exitosa!")
                                 st.rerun()
                             else:
@@ -5159,7 +5180,8 @@ def main():
             if st.session_state.token_acceso and st.session_state.cliente_seleccionado and "📈 Cotizaciones de Mercado" in opciones_menu:
                 # Insertar después de Cotizaciones de Mercado
                 idx = opciones_menu.index("📈 Cotizaciones de Mercado")
-                opciones_menu.insert(idx + 1, "   📉 Vender Especie D")
+                if "   📉 Vender Especie D" not in opciones_menu:
+                    opciones_menu.insert(idx + 1, "   📉 Vender Especie D")
             
             opcion_seleccionada = st.sidebar.radio("Navegación", opciones_menu)
             
