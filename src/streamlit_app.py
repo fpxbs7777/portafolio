@@ -2059,13 +2059,27 @@ class PortfolioManager:
                 
             # Calcular cartera según estrategia
             if strategy in ['max_sharpe', 'min_vol']:
-                portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type=strategy,
-                    target_return=target_return
-                )
-                
-                if portfolio_output is None:
-                    st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
+                try:
+                    # Asegurarse de que el manager tenga los retornos y covarianzas
+                    if not hasattr(self.manager, 'mean_returns') or self.manager.mean_returns is None:
+                        self.manager.mean_returns = self.returns.mean()
+                    if not hasattr(self.manager, 'cov_matrix') or self.manager.cov_matrix is None:
+                        self.manager.cov_matrix = self.returns.cov()
+                    
+                    # Mapear estrategias a los tipos de portafolio soportados por el manager
+                    portfolio_type = 'markowitz' if strategy == 'max_sharpe' else 'min-variance-l1'
+                    
+                    # Calcular la cartera óptima
+                    portfolio_output = self.manager.compute_portfolio(
+                        portfolio_type=portfolio_type,
+                        target_return=target_return
+                    )
+                    
+                    if portfolio_output is None:
+                        raise ValueError(f"No se pudo calcular la cartera óptima con la estrategia '{strategy}'")
+                        
+                except Exception as e:
+                    st.warning(f"Error al calcular la cartera {strategy}: {str(e)}. Usando estrategia equi-weight.")
                     n_assets = len(self.returns.columns)
                     weights = np.array([1/n_assets] * n_assets)
                     portfolio_returns = (self.returns * weights).sum(axis=1)
@@ -4067,7 +4081,7 @@ def main():
             ]
             
             # Solo mostrar opciones de asesor si hay token de acceso
-            if token_portador and id_cliente:
+            if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
                 opciones_menu.append("👤 Movimientos del Asesor")
             
             opcion_seleccionada = st.sidebar.radio("Navegación", opciones_menu)
@@ -4077,33 +4091,55 @@ def main():
                 st.info("👆 Seleccione una opción del menú para comenzar")
             elif opcion_seleccionada == "📊 Resumen del Portafolio":
                 st.title("Resumen del Portafolio")
-                portafolio = obtener_portafolio(token_portador, id_cliente)
-                if portafolio:
-                    mostrar_resumen_portafolio(portafolio, token_portador)
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
+                    portafolio = obtener_portafolio(st.session_state.token_acceso, cliente_id)
+                    if portafolio:
+                        mostrar_resumen_portafolio(portafolio, st.session_state.token_acceso)
+                    else:
+                        st.warning("No se pudo obtener el portafolio")
                 else:
-                    st.warning("No se pudo obtener el portafolio")
+                    st.warning("Por favor, seleccione un cliente primero")
                 
             elif opcion_seleccionada == "📈 Cotizaciones de Mercado":
                 st.title("Cotizaciones de Mercado")
-                mostrar_cotizaciones_mercado(token_portador)
+                if st.session_state.token_acceso:
+                    mostrar_cotizaciones_mercado(st.session_state.token_acceso)
+                else:
+                    st.warning("No se pudo autenticar con IOL")
                 
             elif opcion_seleccionada == "🔍 Optimización de Portafolio":
                 st.title("Optimización de Portafolio")
-                mostrar_optimizacion_portafolio(token_portador, id_cliente)
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
+                    mostrar_optimizacion_portafolio(st.session_state.token_acceso, cliente_id)
+                else:
+                    st.warning("Por favor, seleccione un cliente primero")
                 
             elif opcion_seleccionada == "📉 Análisis Técnico":
                 st.title("Análisis Técnico")
-                mostrar_analisis_tecnico(token_portador, id_cliente)
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
+                    mostrar_analisis_tecnico(st.session_state.token_acceso, cliente_id)
+                else:
+                    st.warning("Por favor, seleccione un cliente primero")
                 
             elif opcion_seleccionada == "📊 Análisis de Portafolio":
                 mostrar_analisis_portafolio()
                 
             elif opcion_seleccionada == "👤 Movimientos del Asesor":
-                mostrar_movimientos_asesor()
+                if st.session_state.token_acceso:
+                    mostrar_movimientos_asesor()
+                else:
+                    st.warning("No se pudo autenticar con IOL")
                 
             elif opcion_seleccionada == "📝 Test de Perfil de Inversor":
                 st.title("Test de Perfil de Inversor")
-                mostrar_test_perfil_inversor(token_portador, id_cliente)
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
+                    mostrar_test_perfil_inversor(st.session_state.token_acceso, cliente_id)
+                else:
+                    st.warning("Por favor, seleccione un cliente primero")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
