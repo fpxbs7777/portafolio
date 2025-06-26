@@ -3151,26 +3151,26 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 if manager_inst.load_data():
                     # Optimizar usando los datos en cache
                     with st.spinner("Optimizando portafolio..."):
-                    # Elegir método y target_return según selección
-                    if metodo == 'markowitz-target':
-                        # Optimización con retorno objetivo
-                        max_attempts = 3  # Reducir el número de intentos
-                        attempt = 0
-                        while attempt < max_attempts:
-                            result = manager_inst.compute_portfolio(
-                                strategy='markowitz', 
-                                target_return=target_return
-                            )
-                            if result and abs(result.return_annual - target_return) < 0.001:
+                        # Elegir método y target_return según selección
+                        if metodo == 'markowitz-target':
+                            # Optimización con retorno objetivo
+                            max_attempts = 3  # Reducir el número de intentos
+                            attempt = 0
+                            while attempt < max_attempts:
+                                result = manager_inst.compute_portfolio(
+                                    strategy='markowitz', 
+                                    target_return=target_return
+                                )
+                                if result and abs(result.return_annual - target_return) < 0.001:
+                                    portfolio_result = result
+                                    break
+                                attempt += 1
+                            if not portfolio_result:
+                                st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos")
                                 portfolio_result = result
-                                break
-                            attempt += 1
-                        if not portfolio_result:
-                            st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos")
-                            portfolio_result = result
-                    else:
-                        # Optimización normal
-                        portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
+                        else:
+                            # Optimización normal
+                            portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
                     if portfolio_result:
                         st.success("✅ Optimización completada")
                         
