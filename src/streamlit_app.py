@@ -3460,6 +3460,147 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         """
         components.html(tv_widget, height=680)
 
+def mostrar_cauciones(token_acceso):
+    """
+    Muestra las tasas de caución disponibles con sus plazos correspondientes.
+    """
+    try:
+        st.header("📊 Tasas de Caución")
+        
+        # Mostrar indicador de carga
+        with st.spinner("Cargando datos de cauciones..."):
+            # Hacer la petición a la API
+            headers = {
+                'Authorization': f'Bearer {token_acceso}'
+            }
+            url = 'https://api.invertironline.com/api/v2/cotizaciones-orleans-panel/cauciones/argentina/Operables'
+            params = {
+                'cotizacionInstrumentoModel.instrumento': 'cauciones',
+                'cotizacionInstrumentoModel.pais': 'argentina'
+            }
+            
+            response = requests.get(
+                url,
+                headers=headers,
+                params=params
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                cauciones = data.get('titulos', [])
+                
+                if not cauciones:
+                    st.warning("No se encontraron datos de cauciones disponibles.")
+                    return
+                
+                # Procesar los datos para mostrar
+                cauciones_data = []
+                for cau in cauciones:
+                    plazo = cau.get('plazo', '').lower()
+                    tasa = cau.get('ultimoPrecio', 0)
+                    
+                    # Solo incluir si tiene plazo y tasa válidos
+                    if plazo and tasa > 0:
+                        # Convertir tasa a porcentaje (asumiendo que viene en formato decimal)
+                        tasa_porcentaje = tasa * 100
+                        
+                        # Extraer días numéricos del plazo (ej: "1 día" -> 1)
+                        dias = None
+                        if 'día' in plazo or 'dia' in plazo:
+                            try:
+                                dias = int(''.join(filter(str.isdigit, plazo)) or 0)
+                            except (ValueError, AttributeError):
+                                dias = 0
+                        
+                        if dias is not None:
+                            cauciones_data.append({
+                                'Plazo (días)': dias,
+                                'Tasa Anual (%)': round(tasa_porcentaje, 2),
+                                'Descripción': cau.get('descripcion', '')
+                            })
+                
+                if not cauciones_data:
+                    st.warning("No se encontraron tasas de caución válidas.")
+                    return
+                
+                # Ordenar por plazo
+                cauciones_data.sort(key=lambda x: x['Plazo (días)'])
+                
+                # Mostrar resumen
+                col1, col2, col3, col4 = st.columns(4)
+                tasas = [c['Tasa Anual (%)'] for c in cauciones_data if c['Tasa Anual (%)'] > 0]
+                
+                if tasas:
+                    with col1:
+                        st.metric("Tasa Mínima", f"{min(tasas):.2f}%")
+                    with col2:
+                        st.metric("Tasa Máxima", f"{max(tasas):.2f}%")
+                    with col3:
+                        st.metric("Tasa Promedio", f"{sum(tasas)/len(tasas):.2f}%")
+                    with col4:
+                        plazos = [c['Plazo (días)'] for c in cauciones_data if c['Plazo (días)'] > 0]
+                        if plazos:
+                            st.metric("Plazo Promedio", f"{sum(plazos)/len(plazos):.1f} días")
+                        else:
+                            st.metric("Plazo Promedio", "N/A")
+                
+                # Mostrar tabla con todas las cauciones
+                st.subheader("Tasas por Plazo")
+                st.dataframe(
+                    cauciones_data,
+                    column_config={
+                        'Plazo (días)': st.column_config.NumberColumn(
+                            'Plazo (días)',
+                            format='%d',
+                            help='Plazo de la caución en días'
+                        ),
+                        'Tasa Anual (%)': st.column_config.NumberColumn(
+                            'Tasa Anual (%)',
+                            format='%.2f%%',
+                            help='Tasa de interés anualizada'
+                        ),
+                        'Descripción': 'Descripción'
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Opcional: Mostrar gráfico de tasas por plazo
+                if len(cauciones_data) > 1:
+                    import plotly.express as px
+                    
+                    fig = px.line(
+                        cauciones_data,
+                        x='Plazo (días)',
+                        y='Tasa Anual (%)',
+                        title='Estructura Temporal de Tasas de Caución',
+                        markers=True,
+                        text='Tasa Anual (%)'
+                    )
+                    
+                    fig.update_traces(
+                        texttemplate='%{y:.2f}%',
+                        textposition='top center',
+                        line=dict(width=2, color='#1f77b4'),
+                        marker=dict(size=8)
+                    )
+                    
+                    fig.update_layout(
+                        xaxis_title='Plazo (días)',
+                        yaxis_title='Tasa Anual (%)',
+                        hovermode='x unified',
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                
+            else:
+                st.error(f"Error al obtener datos de cauciones: {response.status_code} - {response.text}")
+                
+    except Exception as e:
+        st.error(f"Error al procesar las tasas de caución: {str(e)}")
+
+
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
     
@@ -3590,13 +3731,14 @@ def mostrar_analisis_portafolio():
             return
             
         # Crear tabs con iconos y descripciones
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
             "📊 Resumen General", 
             "💰 Estado de Cuenta", 
             "📈 Análisis Técnico",
             "💱 Cotizaciones en Tiempo Real",
             "🔄 Optimización de Cartera",
             "📉 Análisis de Riesgo",
+            "🏦 Tasas de Caución",
             "⚙️ Configuración Avanzada"
         ])
 
@@ -3789,8 +3931,12 @@ def mostrar_analisis_portafolio():
                         last_analysis = st.session_state.analysis_cache[simbolo_seleccionado]
                         st.caption(f"Último análisis: {last_analysis['fecha'].strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Pestaña de configuración avanzada
+        # Pestaña de tasas de caución
         with tab7:
+            mostrar_cauciones(token_acceso)
+        
+        # Pestaña de configuración avanzada
+        with tab8:
             st.subheader("⚙️ Configuración Avanzada")
             
             st.warning("⚠️ Esta sección contiene configuraciones avanzadas. Modifíquelas con precaución.")
