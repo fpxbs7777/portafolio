@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import plotly.graph_objects as go
 import pandas as pd
+from typing import TypedDict, Literal
 from plotly.subplots import make_subplots
 from arch import arch_model
 from scipy.stats import norm
@@ -3507,6 +3508,38 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **Jarque-Bera**: Test de normalidad de los retornos
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
+
+class VWAPIndicatorOverrides(TypedDict):
+    """
+    Configuración de anulaciones para el indicador VWAP (Volume Weighted Average Price).
+    
+    Atributos:
+        color (str): Color de la línea VWAP (por defecto: '#2196F3' - azul)
+        display (int): Configuración de visualización (por defecto: 15)
+        linestyle (int): Estilo de línea (0=sólida, 1=punteada, 2=rayas, 3=puntos) (por defecto: 0)
+        linewidth (int): Ancho de la línea en píxeles (por defecto: 1)
+        plottype (str): Tipo de gráfico ('line', 'step', 'cross', 'histogram', etc.) (por defecto: 'line')
+        trackprice (int): Si mostrar el precio actual en la línea (0=no, 1=sí) (por defecto: 0)
+        transparency (int): Nivel de transparencia (0-100) (por defecto: 0)
+    """
+    color: str
+    display: int
+    linestyle: int
+    linewidth: int
+    plottype: Literal['line', 'step', 'cross', 'histogram']
+    trackprice: int
+    transparency: int
+    
+    def __init__(self, **kwargs):
+        # Valores por defecto
+        self.color = kwargs.get('color', '#2196F3')
+        self.display = kwargs.get('display', 15)
+        self.linestyle = kwargs.get('linestyle', 0)
+        self.linewidth = kwargs.get('linewidth', 1)
+        self.plottype = kwargs.get('plottype', 'line')
+        self.trackprice = kwargs.get('trackprice', 0)
+        self.transparency = kwargs.get('transparency', 0)
+
 
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
