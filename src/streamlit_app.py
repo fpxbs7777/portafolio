@@ -3636,26 +3636,76 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
                     if portfolio_result:
                         st.success("✅ Optimización completada")
-                        total_invertido = (portfolio_result.weights * capital_inicial).sum()
-                        if total_invertido > capital_inicial + 1e-6:
-                            st.warning(f"La suma de pesos ({total_invertido:.2f}) supera el capital inicial ({capital_inicial:.2f})")
+                        
+                        # Calcular el total invertido de manera segura
+                        try:
+                            if hasattr(portfolio_result, 'weights'):
+                                if isinstance(portfolio_result.weights, dict):
+                                    # Si weights es un diccionario, sumar los valores
+                                    total_invertido = sum(portfolio_result.weights.values()) * capital_inicial
+                                else:
+                                    # Si es un array o similar
+                                    total_invertido = np.sum(portfolio_result.weights) * capital_inicial
+                            else:
+                                total_invertido = capital_inicial  # Valor por defecto
+                                
+                            if total_invertido > capital_inicial * 1.01:  # Tolerancia del 1%
+                                st.warning(f"La suma de pesos ({total_invertido:.2f}) supera el capital inicial ({capital_inicial:.2f})")
+                        except Exception as e:
+                            st.warning(f"Advertencia al calcular el total invertido: {str(e)}")
+                            total_invertido = capital_inicial
+                            
                         col1, col2 = st.columns(2)
                         with col1:
                             st.markdown("#### 📊 Pesos Optimizados")
                             if portfolio_result.dataframe_allocation is not None:
-                                weights_df = portfolio_result.dataframe_allocation.copy()
-                                weights_df['Peso (%)'] = weights_df['weights'] * 100
-                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                                try:
+                                    weights_df = portfolio_result.dataframe_allocation.copy()
+                                    # Asegurarse de que la columna de pesos exista y sea numérica
+                                    if 'weights' in weights_df.columns:
+                                        weights_df['Peso (%)'] = pd.to_numeric(weights_df['weights'], errors='coerce') * 100
+                                        weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                                        # Usar 'Activo' o 'rics' según lo que exista
+                                        col_activo = 'Activo' if 'Activo' in weights_df.columns else 'rics'
+                                        if col_activo in weights_df.columns:
+                                            st.dataframe(weights_df[[col_activo, 'Peso (%)']].rename(columns={col_activo: 'Activo'}), 
+                                                       use_container_width=True)
+                                        else:
+                                            st.dataframe(weights_df[['Peso (%)']], use_container_width=True)
+                                    else:
+                                        st.warning("No se encontró la columna 'weights' en los resultados")
+                                except Exception as e:
+                                    st.error(f"Error al mostrar los pesos: {str(e)}")
+                        
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                            st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                            st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                            st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                            normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                            st.metric("Normalidad", normalidad)
+                            try:
+                                # Obtener métricas del portafolio de manera segura
+                                if hasattr(portfolio_result, 'get_metrics_dict'):
+                                    metricas = portfolio_result.get_metrics_dict()
+                                    
+                                    # Mostrar métricas con manejo de errores
+                                    def safe_metric(name, value, format_str="{:.4f}"):
+                                        try:
+                                            if isinstance(value, (int, float)):
+                                                st.metric(name, format_str.format(value))
+                                            else:
+                                                st.metric(name, str(value))
+                                        except Exception as e:
+                                            st.error(f"Error mostrando {name}")
+                                    
+                                    safe_metric("Ratio de Sharpe", metricas.get('sharpe_ratio', 'N/A'))
+                                    safe_metric("VaR 95%", metricas.get('var_95', 'N/A'))
+                                    safe_metric("Retorno Anual", metricas.get('return_annual', 'N/A'))
+                                    safe_metric("Volatilidad Anual", metricas.get('volatility_annual', 'N/A'))
+                                    safe_metric("Skewness", metricas.get('skewness', 'N/A'))
+                                    safe_metric("Kurtosis", metricas.get('kurtosis', 'N/A'))
+                                    normalidad = "✅ Normal" if metricas.get('is_normal', False) else "❌ No Normal"
+                                    st.metric("Normalidad", normalidad)
+                                else:
+                                    st.warning("No se encontraron métricas del portafolio")
+                            except Exception as e:
+                                st.error(f"Error al mostrar las métricas: {str(e)}")
                         # Histograma avanzado con Plotly
                         st.markdown("#### 📊 Histograma de Retornos del Portafolio")
                         fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
