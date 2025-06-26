@@ -4147,7 +4147,7 @@ def mostrar_analisis_portafolio():
                                                 
                                                 # Explicación del VaR
                                                 st.info(f"""
-                                                💡 El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_95):.2%} 
+                                                INFO: El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_95):.2%} 
                                                 indica que hay un {100-conf_level}% de probabilidad de que la pérdida 
                                                 diaria no supere este valor en condiciones normales de mercado.
                                                 """)
