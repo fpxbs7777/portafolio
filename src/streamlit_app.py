@@ -3757,6 +3757,38 @@ def obtener_serie_historica(token_portador, mercado, simbolo, fecha_desde, fecha
         st.error(f"Error al obtener serie histórica: {str(e)}")
         return None
 
+def obtener_paneles_disponibles(token_portador, instrumento, pais):
+    """
+    Obtiene la lista de paneles disponibles para un instrumento y país específicos.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        instrumento (str): Tipo de instrumento (ej: 'Acciones', 'Bonos')
+        pais (str): País (ej: 'Argentina', 'Estados_Unidos')
+        
+    Returns:
+        list: Lista de paneles disponibles o None en caso de error
+    """
+    try:
+        if not token_portador:
+            return None
+            
+        base_url = "https://api.invertironline.com/api/v2"
+        url = f"{base_url}/Cotizaciones/{instrumento}/Paneles/{pais}"
+        
+        headers = {
+            "Authorization": f"Bearer {token_portador}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception:
+        return None
+
 def obtener_panel_cotizaciones(token_portador, instrumento, panel, pais):
     """
     Obtiene las cotizaciones para un panel específico.
@@ -3771,14 +3803,50 @@ def obtener_panel_cotizaciones(token_portador, instrumento, panel, pais):
         dict: Datos del panel de cotizaciones o None en caso de error
     """
     try:
-        url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
-        headers = {"Authorization": f"Bearer {token_portador}"}
+        # Validar que el token no esté vacío
+        if not token_portador:
+            st.error("❌ Error: No se proporcionó un token de autenticación")
+            return None
+            
+        # Construir la URL de la API
+        base_url = "https://api.invertironline.com/api/v2"
+        url = f"{base_url}/Cotizaciones/{instrumento}/{panel}/{pais}"
         
-        response = requests.get(url, headers=headers)
+        # Configurar los headers con el token
+        headers = {
+            "Authorization": f"Bearer {token_portador}",
+            "Content-Type": "application/json"
+        }
+        
+        # Realizar la petición con timeout
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        # Verificar el estado de la respuesta
+        if response.status_code == 401:
+            st.error("❌ Error 401: No autorizado. Por favor, verifique su token de acceso y vuelva a iniciar sesión.")
+            return None
+        elif response.status_code == 404:
+            st.warning(f"⚠️ No se encontró el recurso solicitado: {url}")
+            st.warning("Por favor, verifique los parámetros del panel.")
+            return None
+            
+        # Lanzar excepción para otros códigos de error
         response.raise_for_status()
+        
+        # Devolver los datos en formato JSON
         return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = str(e)
+        if "401" in error_msg:
+            st.error("🔑 Error de autenticación: El token ha expirado o no es válido. Por favor, inicie sesión nuevamente.")
+        elif "timed out" in error_msg.lower():
+            st.error("⏱️ Tiempo de espera agotado. Por favor, intente nuevamente más tarde.")
+        else:
+            st.error(f"❌ Error al conectarse al servidor: {error_msg}")
+        return None
     except Exception as e:
-        st.error(f"Error al obtener panel de cotizaciones: {str(e)}")
+        st.error(f"❌ Error inesperado: {str(e)}")
         return None
 
 def obtener_cotizacion_detallada(token_portador, mercado, simbolo):
@@ -3819,51 +3887,88 @@ def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
     with tab_panel:
         st.subheader("📊 Panel de Cotizaciones")
         
+        # Usar columnas para organizar los selectores
         col1, col2, col3 = st.columns(3)
+        
         with col1:
+            # Selector de tipo de instrumento
+            instrumentos_disponibles = ["Acciones", "Bonos", "Opciones", "Monedas", "Cauciones", "CHPD", "Futuros", "ADRs"]
             instrumento = st.selectbox(
                 "Instrumento",
-                ["Acciones", "Bonos", "Opciones", "Monedas", "Cauciones", "CHPD", "Futuros", "ADRs"],
-                index=0
-            )
-        with col2:
-            panel = st.selectbox(
-                "Panel",
-                ["Panel%20General", "Burcap", "Todas"],
-                index=0
-            )
-        with col3:
-            pais = st.selectbox(
-                "País",
-                ["Argentina", "Estados_Unidos"],
-                index=0
+                instrumentos_disponibles,
+                index=0,
+                key="panel_instrumento"
             )
         
-        if st.button("🔍 Consultar Panel"):
-            with st.spinner("Obteniendo datos del panel..."):
-                datos_panel = obtener_panel_cotizaciones(token_acceso, instrumento, panel, pais)
-                
-                if datos_panel and 'titulos' in datos_panel and datos_panel['titulos']:
-                    # Convertir a DataFrame para mejor visualización
-                    df_panel = pd.DataFrame(datos_panel['titulos'])
-                    
-                    # Mostrar las primeras 20 filas con scroll
-                    st.dataframe(
-                        df_panel.head(20),
-                        use_container_width=True,
-                        height=500
+        with col2:
+            # Selector de país
+            paises_disponibles = ["Argentina", "Estados_Unidos"]
+            pais = st.selectbox(
+                "País",
+                paises_disponibles,
+                index=0,
+                key="panel_pais"
+            )
+        
+        # Obtener paneles disponibles dinámicamente
+        paneles_disponibles = []
+        panel_seleccionado = ""
+        
+        if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+            with st.spinner("Cargando paneles disponibles..."):
+                paneles_disponibles = obtener_paneles_disponibles(
+                    st.session_state.token_acceso,
+                    instrumento,
+                    pais
+                )
+        
+        with col3:
+            if paneles_disponibles:
+                # Mapear nombres de paneles a formato legible
+                paneles_legibles = [p.replace('_', ' ').title() for p in paneles_disponibles]
+                panel_seleccionado = st.selectbox(
+                    "Panel",
+                    options=paneles_disponibles,
+                    format_func=lambda x: x.replace('_', ' ').title(),
+                    index=0,
+                    key="panel_seleccionado"
+                )
+            else:
+                st.warning("No se encontraron paneles disponibles")
+                panel_seleccionado = ""
+        
+        # Botón para consultar
+        if st.button("🔍 Consultar Panel", disabled=not panel_seleccionado):
+            if panel_seleccionado:
+                with st.spinner("Obteniendo datos del panel..."):
+                    datos_panel = obtener_panel_cotizaciones(
+                        token_acceso, 
+                        instrumento, 
+                        panel_seleccionado, 
+                        pais
                     )
                     
-                    # Opción para descargar datos
-                    csv = df_panel.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        "📥 Descargar Datos",
-                        data=csv,
-                        file_name=f"panel_{instrumento}_{pais}.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.warning("No se encontraron datos para el panel seleccionado.")
+                    if datos_panel and 'titulos' in datos_panel and datos_panel['titulos']:
+                        # Convertir a DataFrame para mejor visualización
+                        df_panel = pd.DataFrame(datos_panel['titulos'])
+                        
+                        # Mostrar las primeras 20 filas con scroll
+                        st.dataframe(
+                            df_panel.head(20),
+                            use_container_width=True,
+                            height=500
+                        )
+                        
+                        # Opción para descargar datos
+                        csv = df_panel.to_csv(index=False, encoding='utf-8-sig')
+                        st.download_button(
+                            "📥 Descargar Datos",
+                            data=csv,
+                            file_name=f"panel_{instrumento}_{pais}.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.warning("No se encontraron datos para el panel seleccionado.")
     
     # Pestaña de Serie Histórica
     with tab_historica:
@@ -5706,11 +5811,7 @@ def main():
                 opciones_menu.append("👤 Movimientos del Asesor")
             
             # Submenú para operaciones de Dólar MEP
-            if st.session_state.token_acceso and st.session_state.cliente_seleccionado and "📈 Cotizaciones de Mercado" in opciones_menu:
-                # Insertar después de Cotizaciones de Mercado
-                idx = opciones_menu.index("📈 Cotizaciones de Mercado")
-                if "   📉 Vender Especie D" not in opciones_menu:
-                    opciones_menu.insert(idx + 1, "   📉 Vender Especie D")
+            # Removida la opción de Vender Especie D según solicitud del usuario
             
             opcion_seleccionada = st.sidebar.radio("Navegación", opciones_menu)
             
@@ -5736,15 +5837,8 @@ def main():
                 else:
                     st.warning("No se pudo autenticar con IOL")
                     
-            elif opcion_seleccionada.strip() == "📉 Vender Especie D":
-                # Mostrar la interfaz de Vender Especie D
-                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
-                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', 
-                                 st.session_state.cliente_seleccionado.get('id'))
-                    mostrar_venta_especie_d(st.session_state.token_acceso, cliente_id)
-                else:
-                    st.warning("Por favor, seleccione un cliente primero")
-                
+            # Eliminada la opción de Vender Especie D del menú
+            
             elif opcion_seleccionada == "🔍 Optimización de Portafolio":
                 st.title("Optimización de Portafolio")
                 if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
@@ -5770,12 +5864,8 @@ def main():
                 else:
                     st.warning("No se pudo autenticar con IOL")
                     
-            elif opcion_seleccionada == "📉 Vender Especie D":
-                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
-                    mostrar_venta_especie_d()
-                else:
-                    st.warning("Por favor, seleccione un cliente primero")
-                
+            # Eliminada la opción duplicada de Vender Especie D
+            
             elif opcion_seleccionada == "📝 Test de Perfil de Inversor":
                 st.title("Test de Perfil de Inversor")
                 if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
