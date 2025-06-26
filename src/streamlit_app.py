@@ -2731,6 +2731,89 @@ def obtener_perfil_sugerido(token_portador: str, respuestas: dict, id_cliente_as
             st.error(f"Respuesta del servidor: {e.response.text}")
         return None
 
+def obtener_movimientos(token_acceso, fecha_desde=None, fecha_hasta=None):
+    """Obtiene los movimientos de la cuenta con manejo mejorado de errores."""
+    try:
+        if not token_acceso:
+            st.error("No se encontró el token de acceso. Por favor inicie sesión nuevamente.")
+            return None
+            
+        if fecha_desde is None:
+            fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if fecha_hasta is None:
+            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+            
+        url = f"{BASE_URL}/api/v2/Asesor/Movimientos"
+        headers = {
+            'Authorization': f'Bearer {token_acceso}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
+        # Formatear fechas correctamente para la API
+        fecha_desde_iso = f"{fecha_desde}T00:00:00.000Z"
+        fecha_hasta_iso = f"{fecha_hasta}T23:59:59.999Z"
+        
+        data = {
+            'clientes': [0],  # 0 para el cliente actual
+            'from': fecha_desde_iso,
+            'to': fecha_hasta_iso,
+            'dateType': 'FechaOperacion',  # o 'FechaContable' según necesites
+            'status': 'Todas',  # o 'Pendiente', 'Acreditado', etc.
+            'type': 'Todas',  # o 'Compra', 'Venta', 'Transferencia', etc.
+            'country': 'AR',  # Código de país
+            'currency': 'ARS',  # Moneda
+            'cuentaComitente': ''  # Dejar vacío para todas las cuentas
+        }
+        
+        st.info(f"Solicitando movimientos desde {fecha_desde} hasta {fecha_hasta}...")
+        
+        # Realizar la petición con manejo de timeout
+        response = requests.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=30  # 30 segundos de timeout
+        )
+        
+        # Verificar el estado de la respuesta
+        response.raise_for_status()
+        
+        # Verificar si la respuesta es un JSON válido
+        try:
+            movimientos = response.json()
+            if not movimientos:
+                st.warning("No se encontraron movimientos para el período seleccionado.")
+                return None
+            return movimientos
+            
+        except ValueError as json_err:
+            st.error(f"Error al procesar la respuesta del servidor: {str(json_err)}")
+            st.text(f"Respuesta recibida: {response.text[:500]}...")  # Mostrar primeros 500 caracteres
+            return None
+            
+    except requests.exceptions.HTTPError as http_err:
+        if http_err.response.status_code == 401:
+            st.error("Error de autenticación (401). Por favor verifica tu token de acceso y vuelve a iniciar sesión.")
+            # Limpiar la sesión para forzar un nuevo inicio de sesión
+            if 'token_acceso' in st.session_state:
+                del st.session_state['token_acceso']
+        else:
+            st.error(f"Error HTTP al obtener movimientos: {http_err}")
+            if hasattr(http_err, 'response') and http_err.response is not None:
+                st.error(f"Detalles del error: {http_err.response.text}")
+        return None
+        
+    except requests.exceptions.RequestException as req_err:
+        st.error(f"Error de conexión: {str(req_err)}")
+        return None
+        
+    except Exception as e:
+        st.error(f"Error inesperado al obtener movimientos: {str(e)}")
+        import traceback
+        st.text(traceback.format_exc())
+        return None
+
 def seleccionar_activos_aleatorios(perfil: dict, activos_disponibles: Dict[str, list]) -> List[dict]:
     """
     Selecciona activos aleatorios para cada tipo de activo según el perfil.
