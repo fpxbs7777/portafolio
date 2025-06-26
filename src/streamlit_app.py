@@ -1387,6 +1387,138 @@ class output:
         )
         
         return fig
+        
+    def get_pnl_scenarios(self, confidence_levels=[0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]):
+        """
+        Calcula escenarios de ganancias y pérdidas basados en probabilidades empíricas.
+        
+        Args:
+            confidence_levels (list): Niveles de confianza para los escenarios 
+                                   (por defecto: [1%, 5%, 10%, 25%, 50%, 75%, 90%, 95%, 99%])
+            
+        Returns:
+            pd.DataFrame: DataFrame con los escenarios de P&L
+        """
+        if self.returns is None or len(self.returns) == 0:
+            return None
+            
+        # Calcular percentiles de los retornos
+        percentiles = [p * 100 for p in confidence_levels]
+        returns_at_percentiles = np.percentile(self.returns, percentiles)
+        
+        # Calcular P&L en términos monetarios
+        pnl = returns_at_percentiles * self.notional
+        
+        # Crear DataFrame con los resultados
+        scenarios = pd.DataFrame({
+            'Nivel de Confianza': [f"{int(p*100)}%" for p in confidence_levels],
+            'Retorno Diario': returns_at_percentiles,
+            'P&L Diaria (ARS)': pnl,
+            'Retorno Anualizado': (1 + returns_at_percentiles) ** 252 - 1,
+            'P&L Anualizada (ARS)': ((1 + returns_at_percentiles) ** 252 - 1) * self.notional
+        })
+        
+        return scenarios
+        
+    def display_pnl_analysis(self):
+        """Muestra un análisis completo de ganancias y pérdidas en Streamlit"""
+        if self.returns is None or len(self.returns) == 0:
+            st.warning("No hay datos suficientes para realizar el análisis de P&L.")
+            return
+            
+        st.subheader("Análisis de Ganancias y Pérdidas (P&L)")
+        
+        # Calcular escenarios
+        scenarios = self.get_pnl_scenarios()
+        
+        if scenarios is not None:
+            # Mostrar tabla de escenarios
+            st.write("### Escenarios de P&L")
+            
+            # Formatear columnas para mejor visualización
+            display_df = scenarios.copy()
+            display_df['Retorno Diario'] = display_df['Retorno Diario'].apply(lambda x: f"{x:.4f}")
+            display_df['P&L Diaria (ARS)'] = display_df['P&L Diaria (ARS)'].apply(lambda x: f"${x:,.2f}")
+            display_df['Retorno Anualizado'] = display_df['Retorno Anualizado'].apply(lambda x: f"{x:.2%}")
+            display_df['P&L Anualizada (ARS)'] = display_df['P&L Anualizada (ARS)'].apply(lambda x: f"${x:,.2f}")
+            
+            # Mostrar tabla con estilo
+            st.dataframe(
+                display_df,
+                column_config={
+                    'Nivel de Confianza': "Nivel de Confianza",
+                    'Retorno Diario': "Retorno Diario",
+                    'P&L Diaria (ARS)': "P&L Diaria (ARS)",
+                    'Retorno Anualizado': "Retorno Anualizado",
+                    'P&L Anualizada (ARS)': "P&L Anualizada (ARS)"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            # Gráfico de distribución de P&L
+            st.write("### Distribución de Ganancias y Pérdidas")
+            
+            # Crear figura con dos ejes y
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # Histograma de retornos
+            fig.add_trace(
+                go.Histogram(
+                    x=self.returns * self.notional,
+                    name="Distribución P&L",
+                    marker_color='#0d6efd',
+                    opacity=0.7,
+                    nbinsx=50
+                ),
+                secondary_y=False,
+            )
+            
+            # Líneas verticales para escenarios clave
+            for i, row in scenarios[scenarios['Nivel de Confianza'].isin(['5%', '50%', '95%'])].iterrows():
+                fig.add_vline(
+                    x=row['P&L Diaria (ARS)'],
+                    line_dash="dash",
+                    line_color="red" if row['P&L Diaria (ARS)'] < 0 else "green",
+                    annotation_text=f"{row['Nivel de Confianza']}: ${row['P&L Diaria (ARS)']:,.2f}",
+                    annotation_position="top right"
+                )
+            
+            # Línea vertical en P&L = 0
+            fig.add_vline(
+                x=0,
+                line_color="black",
+                line_width=1,
+                opacity=0.5
+            )
+            
+            # Actualizar diseño del gráfico
+            fig.update_layout(
+                title="Distribución de Ganancias y Pérdidas Diarias",
+                xaxis_title="Ganancia/Pérdida Diaria (ARS)",
+                yaxis_title="Frecuencia",
+                showlegend=False,
+                template='plotly_white',
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Análisis de riesgo
+            st.write("### Análisis de Riesgo")
+            
+            # Calcular métricas de riesgo
+            var_95 = scenarios[scenarios['Nivel de Confianza'] == '5%']['P&L Diaria (ARS)'].values[0]
+            cvar_95 = scenarios[scenarios['Nivel de Confianza'] <= '5%']['P&L Diaria (ARS)'].mean()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Valor en Riesgo (VaR) 95% Diario", f"${var_95:,.2f}")
+            with col2:
+                st.metric("Pérdida Esperada (CVaR) 95% Diario", f"${cvar_95:,.2f}" if cvar_95 < 0 else f"${cvar_95:,.2f}")
+            with col3:
+                prob_loss = (self.returns < 0).mean() * 100
+                st.metric("Probabilidad de Pérdida Diaria", f"{prob_loss:.1f}%")
 
 def portfolio_variance(x, mtx_var_covar):
     """Calcula la varianza del portafolio"""
