@@ -4553,6 +4553,85 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Grafica la serie histórica del MEP dollar usando Plotly.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo_base (str): Símbolo del bono base (ej: 'AL30')
+        simbolo_mep (str): Símbolo del bono MEP (ej: 'AL30D')
+        fecha_desde (str): Fecha de inicio (formato YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (formato YYYY-MM-DD)
+        ajustada (str): Tipo de ajuste ('Ajustada' o 'SinAjustar')
+    """
+    try:
+        # Obtener series históricas
+        serie_base = obtener_serie_historica_iol(token_portador, 'BCBA', simbolo_base, fecha_desde, fecha_hasta, ajustada)
+        serie_mep = obtener_serie_historica_iol(token_portador, 'BCBA', simbolo_mep, fecha_desde, fecha_hasta, ajustada)
+        
+        if serie_base is None or serie_mep is None:
+            st.error("No se pudo obtener las series históricas")
+            return None
+            
+        # Calcular el MEP dollar
+        df_base = serie_base.set_index('fecha')
+        df_mep = serie_mep.set_index('fecha')
+        
+        # Alinear las series por fecha
+        df_base = df_base.reindex(df_mep.index)
+        df_mep = df_mep.reindex(df_base.index)
+        
+        # Calcular el MEP dollar
+        df_mep['mep_dollar'] = df_mep['precio'] / df_base['precio']
+        
+        # Crear gráfico con Plotly
+        fig = go.Figure()
+        
+        # Agregar trazas
+        fig.add_trace(go.Scatter(
+            x=df_mep.index,
+            y=df_mep['mep_dollar'],
+            name=f'MEP Dollar ({simbolo_base}/{simbolo_mep})',
+            mode='lines',
+            line=dict(color='blue')
+        ))
+        
+        # Agregar precios individuales
+        fig.add_trace(go.Scatter(
+            x=df_base.index,
+            y=df_base['precio'],
+            name=f'{simbolo_base} (ARS)',
+            mode='lines',
+            line=dict(color='green', dash='dot')
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df_mep.index,
+            y=df_mep['precio'],
+            name=f'{simbolo_mep} (USD)',
+            mode='lines',
+            line=dict(color='red', dash='dot')
+        ))
+        
+        # Configurar diseño
+        fig.update_layout(
+            title=f'Serie Histórica MEP Dollar - {simbolo_base}/{simbolo_mep}',
+            xaxis_title='Fecha',
+            yaxis_title='Precio',
+            legend_title='Series',
+            template='plotly_dark',
+            height=600,
+            hovermode='x unified'
+        )
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error al graficar la serie histórica: {str(e)}")
+        return None
+
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
