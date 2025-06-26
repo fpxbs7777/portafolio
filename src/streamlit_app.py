@@ -2720,6 +2720,8 @@ def mostrar_cotizaciones_mercado(token_acceso):
             
             if tasas_caucion is not None and not tasas_caucion.empty:
                 df_tasas = pd.DataFrame(tasas_caucion)
+                
+                # Mostrar tabla con las tasas
                 columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
                 columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
                 
@@ -2727,6 +2729,79 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     st.dataframe(df_tasas[columnas_disponibles].head(10))
                 else:
                     st.dataframe(df_tasas.head(10))
+                
+                # Crear gráfico de curva de tasas si hay suficientes puntos
+                if len(df_tasas) > 1:
+                    # Asegurarse de que las columnas necesarias existen
+                    if 'plazo_dias' in df_tasas.columns and 'tasa' in df_tasas.columns:
+                        fig = go.Figure()
+                        
+                        # Agregar traza principal
+                        fig.add_trace(go.Scatter(
+                            x=df_tasas['plazo_dias'],
+                            y=df_tasas['tasa'],
+                            mode='lines+markers',
+                            name='Tasa',
+                            line=dict(color='#1f77b4', width=2),
+                            marker=dict(size=8, color='#1f77b4')
+                        ))
+                        
+                        # Agregar líneas de bid y offer si están disponibles
+                        if 'bid' in df_tasas.columns:
+                            fig.add_trace(go.Scatter(
+                                x=df_tasas['plazo_dias'],
+                                y=df_tasas['bid'],
+                                mode='lines',
+                                name='Bid',
+                                line=dict(color='#2ca02c', dash='dash')
+                            ))
+                        
+                        if 'offer' in df_tasas.columns:
+                            fig.add_trace(go.Scatter(
+                                x=df_tasas['plazo_dias'],
+                                y=df_tasas['offer'],
+                                mode='lines',
+                                name='Offer',
+                                line=dict(color='#d62728', dash='dash')
+                            ))
+                        
+                        # Configurar layout del gráfico
+                        fig.update_layout(
+                            title='Curva de Tasas de Caución',
+                            xaxis_title='Plazo (días)',
+                            yaxis_title='Tasa Anual (%)',
+                            template='plotly_dark',
+                            height=500,
+                            showlegend=True,
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            ),
+                            annotations=[
+                                dict(
+                                    x=1,
+                                    y=1.1,
+                                    xref='paper',
+                                    yref='paper',
+                                    text=f"Tasa Mín: {df_tasas['tasa'].min():.2f}% | "
+                                         f"Tasa Máx: {df_tasas['tasa'].max():.2f}%",
+                                    showarrow=False,
+                                    font=dict(size=12),
+                                    xanchor='right'
+                                )
+                            ]
+                        )
+                        
+                        # Añadir hover data
+                        fig.update_traces(
+                            hovertemplate='<b>Plazo: %{x} días</b><br>'
+                                         '<b>Tasa: %{y:.2f}%</b>'
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
@@ -2905,14 +2980,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     except ImportError:
         st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
     with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
-    with col4:
         comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.")
 
     def obtener_cotizaciones_cauciones(bearer_token):
