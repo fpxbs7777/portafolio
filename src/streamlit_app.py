@@ -2815,7 +2815,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     if not seleccionados or len(seleccionados) < 2:
                         st.warning("No se pudieron seleccionar activos aleatorios dentro del capital disponible para comparar.")
                         return
-                    universo_aleatorio = [a for a in universo_actual if any(
+                    universo_aleatorio = [a for a in activos_para_optimizacion if any(
                         s['simbolo'] == a['simbolo'] and s['mercado'] == a['mercado'] for s in seleccionados
                     )]
                     manager_aleatorio = PortfolioManager(universo_aleatorio, token_acceso, fecha_desde, fecha_hasta, capital=capital_actual)
@@ -3436,6 +3436,75 @@ def mostrar_analisis_portafolio():
                             st.error(f"Error en el análisis de volatilidad: {str(e)}")
                             st.exception(e)
 
+def calcular_vwap(high, low, close, volume, window=20, method='sma'):
+    """
+    Calcula el VWAP (Volume Weighted Average Price) con diferentes métodos de suavizado
+    
+    Args:
+        high: Serie de precios máximos
+        low: Serie de precios mínimos
+        close: Serie de precios de cierre
+        volume: Serie de volúmenes
+        window: Ventana de días para el cálculo
+        method: Método de suavizado ('sma', 'ema', 'wma')
+        
+    Returns:
+        Serie con los valores de VWAP
+    """
+    typical_price = (high + low + close) / 3
+    typical_price_vol = typical_price * volume
+    
+    if method == 'sma':
+        # Simple Moving Average
+        vwap = typical_price_vol.rolling(window=window).sum() / volume.rolling(window=window).sum()
+    elif method == 'ema':
+        # Exponential Moving Average
+        vwap = typical_price_vol.ewm(span=window, adjust=False).mean() / volume.ewm(span=window, adjust=False).mean()
+    else:  # wma
+        # Weighted Moving Average
+        weights = np.arange(1, window + 1)
+        wma = typical_price_vol.rolling(window=window).apply(
+            lambda x: np.sum(weights * x) / weights.sum(), raw=True
+        )
+        vwap = wma / volume.rolling(window=window).apply(
+            lambda x: np.sum(weights * x) / weights.sum(), raw=True
+        )
+    
+    return vwap
+
+
+def aplicar_estilo_vwap(fig, line_color='#2196F3', line_width=1, line_style=0, opacity=1.0):
+    """
+    Aplica el estilo VWAP al gráfico
+    
+    Args:
+        fig: Figura de Plotly
+        line_color: Color de la línea (formato hexadecimal)
+        line_width: Ancho de la línea
+        line_style: Estilo de la línea (0=sólida, 1=punteada, 2=rayas, 3=punto-raya)
+        opacity: Opacidad de la línea (0-1)
+    """
+    # Mapeo de estilos de línea
+    dash_map = {
+        0: None,  # sólida
+        1: 'dot',  # punteada
+        2: 'dash',  # rayas
+        3: 'dashdot'  # punto-raya
+    }
+    
+    # Aplicar estilo a todas las trazas VWAP
+    for trace in fig.data:
+        if 'VWAP' in trace.name:
+            trace.update(
+                line=dict(
+                    color=line_color,
+                    width=line_width,
+                    dash=dash_map.get(line_style, None)
+                ),
+                opacity=opacity
+            )
+    return fig
+
 def mostrar_bonos_mep():
     """Muestra un gráfico con los precios históricos de los bonos MEP"""
     st.header("📈 Bonos MEP - Análisis Histórico")
@@ -3456,12 +3525,77 @@ def mostrar_bonos_mep():
         'GD35D': 'GD35D.BA'
     }
     
-    # Widget para seleccionar el período de tiempo
-    periodo = st.selectbox(
-        "Seleccione el período de tiempo:",
-        ["Último mes", "Últimos 3 meses", "Últimos 6 meses", "Último año", "Máximo histórico"],
-        index=3
-    )
+    # Widgets de configuración
+    col1, col2 = st.columns(2)
+    with col1:
+        periodo = st.selectbox(
+            "Período de tiempo:",
+            ["Último mes", "Últimos 3 meses", "Últimos 6 meses", "Último año", "Máximo histórico"],
+            index=3
+        )
+    
+    # Configuración avanzada del VWAP
+    with st.expander("⚙️ Configuración Avanzada VWAP", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            mostrar_vwap = st.checkbox(
+                "Mostrar VWAP", 
+                value=True, 
+                help="Muestra el indicador VWAP (Precio Promedio Ponderado por Volumen)"
+            )
+            vwap_window = st.slider(
+                "Período VWAP (días)", 
+                min_value=5, 
+                max_value=200, 
+                value=20, 
+                step=1,
+                disabled=not mostrar_vwap,
+                help="Ventana de tiempo para el cálculo del VWAP"
+            )
+            vwap_method = st.selectbox(
+                "Método de cálculo",
+                options=['sma', 'ema', 'wma'],
+                format_func=lambda x: {
+                    'sma': 'Media Móvil Simple',
+                    'ema': 'Media Móvil Exponencial',
+                    'wma': 'Media Móvil Ponderada'
+                }[x],
+                disabled=not mostrar_vwap
+            )
+        
+        with col2:
+            vwap_color = st.color_picker(
+                "Color de la línea", 
+                value='#2196F3',
+                disabled=not mostrar_vwap
+            )
+            vwap_width = st.slider(
+                "Ancho de línea", 
+                min_value=1, 
+                max_value=5, 
+                value=1, 
+                step=1,
+                disabled=not mostrar_vwap
+            )
+            vwap_style = st.selectbox(
+                "Estilo de línea",
+                options=[0, 1, 2, 3],
+                format_func=lambda x: {
+                    0: 'Sólida',
+                    1: 'Punteada',
+                    2: 'Rayas',
+                    3: 'Punto-raya'
+                }[x],
+                disabled=not mostrar_vwap
+            )
+            vwap_opacity = st.slider(
+                "Opacidad",
+                min_value=0.1,
+                max_value=1.0,
+                value=1.0,
+                step=0.1,
+                disabled=not mostrar_vwap
+            )
     
     # Mapear la selección a días
     periodos_dias = {
@@ -3480,80 +3614,112 @@ def mostrar_bonos_mep():
     with st.spinner(f'Obteniendo datos históricos de bonos MEP ({periodo.lower()})...'):
         # Obtener datos históricos para cada bono
         datos = {}
+        vwap_data = {}
         
-        if st.session_state.token_acceso is None:
-            with st.form("login_form"):
-                st.subheader("Ingreso a IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-                
-                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
+        for nombre, ticker in bonos_mep.items():
+            try:
+                df = yf.download(ticker, start=fecha_ini, end=fecha_fin, progress=False)
+                if not df.empty:
+                    datos[nombre] = df['Close']
+                    
+                    # Calcular VWAP si está habilitado
+                    if mostrar_vwap and 'High' in df and 'Low' in df and 'Close' in df and 'Volume' in df:
+                        vwap = calcular_vwap(
+                            df['High'], 
+                            df['Low'], 
+                            df['Close'], 
+                            df['Volume'], 
+                            window=vwap_window,
+                            method=vwap_method
+                        )
+                        vwap_data[nombre] = vwap
+            except Exception as e:
+                st.error(f"Error al obtener datos históricos de {nombre}: {str(e)}")
+        
+        # Crear gráfico principal
+        fig_precios = go.Figure()
+        
+        # Agregar líneas de precios
+        for bono in datos:
+            # Precio de cierre
+            fig_precios.add_trace(go.Scatter(
+                x=datos[bono].index,
+                y=datos[bono],
+                name=bono,
+                mode='lines',
+                line=dict(width=2),
+                showlegend=True
+            ))
+            
+            # Agregar VWAP si está habilitado y hay datos
+            if mostrar_vwap and bono in vwap_data and not vwap_data[bono].isna().all():
+                fig_precios.add_trace(go.Scatter(
+                    x=vwap_data[bono].index,
+                    y=vwap_data[bono],
+                    name=f'{bono} VWAP ({vwap_window}d)',
+                    mode='lines',
+                    line=dict(width=vwap_width, dash={
+                        0: None,  # sólida
+                        1: 'dot',  # punteada
+                        2: 'dash',  # rayas
+                        3: 'dashdot'  # punto-raya
+                    }.get(vwap_style, None)),
+                    opacity=vwap_opacity,
+                    showlegend=True
+                ))
+        
+        # Aplicar estilo VWAP
+        fig_precios = aplicar_estilo_vwap(
+            fig_precios,
+            line_color=vwap_color,
+            line_width=vwap_width,
+            line_style=vwap_style,
+            opacity=vwap_opacity
+        )
+        
+        # Configuración del layout
+        fig_precios.update_layout(
+            title=f'Precios Históricos de Bonos MEP - {periodo}',
+            xaxis_title='Fecha',
+            yaxis_title='Precio (USD)',
+            legend_title='Leyenda',
+            hovermode='x',
+            height=600,
+            template='plotly_dark',
+            margin=dict(l=50, r=50, t=80, b=50),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        # Mostrar el gráfico
+        st.plotly_chart(fig_precios, use_container_width=True)
+        
+        # Mostrar tabla resumen
+        st.subheader("Resumen de Precios")
+        resumen = []
+        for bono, precios in datos.items():
+            if not precios.empty:
+                resumen.append({
+                    'Bono': bono,
+                    'Último Precio': f"${precios.iloc[-1]:.2f}",
+                    'Mínimo 30d': f"${precios.min():.2f}",
+                    'Máximo 30d': f"${precios.max():.2f}",
+                    'Volatilidad (30d)': f"{precios.pct_change().std() * 100:.2f}%"
+                })
+        
+        if resumen:
+            st.dataframe(
+                pd.DataFrame(resumen),
+                use_container_width=True,
+                hide_index=True
+            )
         else:
-            st.success("✅ Conectado a IOL")
-            st.divider()
-            
-            st.subheader("Configuración de Fechas")
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_desde = st.date_input(
-                    "Desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
-                )
-            with col2:
-                fecha_hasta = st.date_input(
-                    "Hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
-            
-            st.session_state.fecha_desde = fecha_desde
-            st.session_state.fecha_hasta = fecha_hasta
-            
-            # Obtener lista de clientes
-            if not st.session_state.clientes and st.session_state.token_acceso:
-                with st.spinner("Cargando clientes..."):
-                    try:
-                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        if clientes:
-                            st.session_state.clientes = clientes
-                        else:
-                            st.warning("No se encontraron clientes")
-                    except Exception as e:
-                        st.error(f"Error al cargar clientes: {str(e)}")
-            
-            clientes = st.session_state.clientes
-            
-            if clientes:
-                st.subheader("Selección de Cliente")
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed",
-                    key="sidebar_cliente_selector"
-                )
-                
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
+            st.warning("No hay datos para mostrar en el resumen")
                 
                 if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
                     with st.spinner("Actualizando..."):
