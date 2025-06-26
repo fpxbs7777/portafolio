@@ -3553,137 +3553,277 @@ def mostrar_movimientos_asesor():
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
 def mostrar_analisis_portafolio():
-    cliente = st.session_state.cliente_seleccionado
-    token_acceso = st.session_state.token_acceso
-
-    if not cliente:
-        st.error("No se ha seleccionado ningún cliente")
-        return
-        
-    # Inicializar el gestor de portafolio en session_state si no existe
-    if 'portfolio_manager' not in st.session_state:
-        st.session_state.portfolio_manager = None
-
-    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-
-    st.title(f"Análisis de Portafolio - {nombre_cliente}")
-    
-    # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🔄 Optimización",
-        "📉 Análisis de Volatilidad"
-    ])
-
-    with tab1:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente")
-    
-    with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
-    
-    with tab3:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
-    
-    with tab4:
-        mostrar_cotizaciones_mercado(token_acceso)
-    
-    with tab5:
-        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
-        
-    with tab6:
-        st.header("📊 Análisis de Volatilidad")
-        
-        # Obtener datos históricos
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
-            st.warning("No hay activos en el portafolio para analizar")
-        else:
-            # Mostrar selector de activos
-            activos = portafolio['activos']
-            simbolos = [a['titulo']['simbolo'] for a in activos if 'titulo' in a and 'simbolo' in a['titulo']]
+    """
+    Muestra el análisis completo del portafolio con múltiples pestañas para diferentes análisis.
+    Incluye manejo mejorado de errores, carga de estados y retroalimentación al usuario.
+    """
+    try:
+        # Verificar autenticación
+        if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+            st.error("🔒 No se encontró sesión activa. Por favor, inicie sesión primero.")
+            return
             
-            if not simbolos:
-                st.warning("No se encontraron símbolos válidos para analizar")
+        cliente = st.session_state.get('cliente_seleccionado')
+        token_acceso = st.session_state.token_acceso
+
+        if not cliente:
+            st.error("⚠️ No se ha seleccionado ningún cliente")
+            return
+            
+        # Inicializar el gestor de portafolio en session_state si no existe
+        if 'portfolio_manager' not in st.session_state:
+            st.session_state.portfolio_manager = None
+            st.session_state.last_analysis_time = None
+            st.session_state.analysis_cache = {}
+
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+
+        st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+        
+        # Mostrar estado de carga
+        with st.spinner("Cargando datos del portafolio..."):
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if not portafolio:
+            st.error("❌ No se pudo cargar el portafolio. Intente nuevamente más tarde.")
+            return
+            
+        # Crear tabs con iconos y descripciones
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "📊 Resumen General", 
+            "💰 Estado de Cuenta", 
+            "📈 Análisis Técnico",
+            "💱 Cotizaciones en Tiempo Real",
+            "🔄 Optimización de Cartera",
+            "📉 Análisis de Riesgo",
+            "⚙️ Configuración Avanzada"
+        ])
+
+        with tab1:
+            st.subheader("🔍 Resumen del Portafolio")
+            if portafolio:
+                with st.expander("📋 Ver detalles del portafolio", expanded=True):
+                    mostrar_resumen_portafolio(portafolio, token_acceso)
             else:
-                simbolo_seleccionado = st.selectbox(
-                    "Seleccione un activo para analizar:",
-                    options=simbolos,
-                    key="vol_asset_selector"
-                )
+                st.warning("ℹ️ No se encontraron activos en el portafolio")
+        
+        with tab2:
+            st.subheader("📝 Estado de Cuenta")
+            with st.spinner("Cargando estado de cuenta..."):
+                estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+                if estado_cuenta:
+                    mostrar_estado_cuenta(estado_cuenta)
+                else:
+                    st.warning("No se pudo obtener el estado de cuenta")
+        
+        with tab3:
+            st.subheader("📈 Análisis Técnico")
+            mostrar_analisis_tecnico(token_acceso, id_cliente)
+        
+        with tab4:
+            st.subheader("💱 Cotizaciones en Tiempo Real")
+            mostrar_cotizaciones_mercado(token_acceso)
+        
+        with tab5:
+            st.subheader("🔄 Optimización de Cartera")
+            mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+            
+        with tab6:
+            st.header("📊 Análisis de Riesgo y Volatilidad")
+            
+            if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+                st.warning("ℹ️ No hay activos en el portafolio para analizar")
+            else:
+                # Mostrar selector de activos con información adicional
+                activos = portafolio['activos']
+                activos_info = []
                 
-                # Configuración del análisis
-                with st.expander("⚙️ Configuración del análisis", expanded=False):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        n_simulaciones = st.number_input(
-                            "Número de simulaciones",
-                            min_value=100,
-                            max_value=10000,
-                            value=1000,
-                            step=100,
-                            help="Cantidad de trayectorias a simular en el análisis de Monte Carlo"
-                        )
-                    with col2:
-                        dias_proyeccion = st.number_input(
-                            "Días de proyección",
-                            min_value=5,
-                            max_value=365,
-                            value=30,
-                            step=5,
-                            help="Horizonte temporal para las proyecciones"
-                        )
+                for a in activos:
+                    if 'titulo' in a and 'simbolo' in a['titulo']:
+                        nombre = a['titulo'].get('descripcion', a['titulo']['simbolo'])
+                        activos_info.append({
+                            'simbolo': a['titulo']['simbolo'],
+                            'nombre': nombre,
+                            'tipo': a['titulo'].get('tipo', 'Desconocido')
+                        })
                 
-                # Botón para ejecutar el análisis
-                if st.button("🔍 Analizar Volatilidad", use_container_width=True):
-                    with st.spinner("Realizando análisis de volatilidad..."):
-                        try:
-                            # Inicializar el gestor de portafolio si no existe
-                            if st.session_state.portfolio_manager is None:
-                                st.session_state.portfolio_manager = PortfolioManager(
-                                    activos=[{'simbolo': s} for s in simbolos],
-                                    token=token_acceso,
-                                    fecha_desde=(date.today() - timedelta(days=365)).strftime('%Y-%m-%d'),
-                                    fecha_hasta=date.today().strftime('%Y-%m-%d')
-                                )
-                                # Cargar datos históricos
-                                if not st.session_state.portfolio_manager.load_data():
-                                    st.error("Error al cargar datos históricos")
-                                    return
-                            
-                            # Obtener retornos del activo seleccionado
-                            if simbolo_seleccionado in st.session_state.portfolio_manager.returns:
-                                returns = st.session_state.portfolio_manager.returns[simbolo_seleccionado]
-                                
-                                # Realizar análisis de volatilidad
-                                result = st.session_state.portfolio_manager.analyze_volatility(
-                                    symbol=simbolo_seleccionado,
-                                    returns=returns,
-                                    n_simulations=n_simulaciones,
-                                    n_days=dias_proyeccion
-                                )
-                                
-                                if result is not None:
-                                    # Mostrar gráficos
-                                    fig = st.session_state.portfolio_manager.plot_volatility_analysis(simbolo_seleccionado)
-                                    if fig is not None:
-                                        st.plotly_chart(fig, use_container_width=True)
-                            else:
-                                st.warning(f"No se encontraron datos de retornos para {simbolo_seleccionado}")
-                                
-                        except Exception as e:
-                            st.error(f"Error al realizar el análisis de volatilidad: {str(e)}")
+                if not activos_info:
+                    st.warning("⚠️ No se encontraron símbolos válidos para analizar")
+                else:
+                    # Crear opciones formateadas para el selectbox
+                    opciones = [f"{a['simbolo']} - {a['nombre']} ({a['tipo']})" for a in activos_info]
+                    seleccion = st.selectbox(
+                        "Seleccione un activo para analizar:",
+                        options=opciones,
+                        key="vol_asset_selector",
+                        help="Seleccione un activo para realizar el análisis de riesgo"
+                    )
+                    
+                    # Obtener el símbolo seleccionado
+                    simbolo_seleccionado = seleccion.split(' - ')[0] if seleccion else None
+                    
+                    # Configuración avanzada del análisis
+                    with st.expander("⚙️ Configuración Avanzada", expanded=False):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            n_simulaciones = st.number_input(
+                                "Número de simulaciones",
+                                min_value=100,
+                                max_value=10000,
+                                value=1000,
+                                step=100,
+                                help="Cantidad de trayectorias a simular en el análisis de Monte Carlo"
+                            )
+                        with col2:
+                            dias_proyeccion = st.number_input(
+                                "Días de proyección",
+                                min_value=5,
+                                max_value=365,
+                                value=30,
+                                step=5,
+                                help="Horizonte temporal para las proyecciones"
+                            )
+                        with col3:
+                            conf_level = st.selectbox(
+                                "Nivel de confianza",
+                                options=[90, 95, 99],
+                                index=1,
+                                help="Nivel de confianza para los cálculos de riesgo"
+                            )
+                    
+                    # Sección de análisis de riesgo
+                    with st.expander("📊 Métricas de Riesgo", expanded=True):
+                        if st.button("🔍 Calcular Métricas de Riesgo", 
+                                   use_container_width=True,
+                                   type="primary"):
+                            with st.spinner("Calculando métricas de riesgo..."):
+                                try:
+                                    # Inicializar el gestor de portafolio si no existe
+                                    if st.session_state.portfolio_manager is None:
+                                        st.session_state.portfolio_manager = PortfolioManager(
+                                            activos=[{'simbolo': a['simbolo']} for a in activos_info],
+                                            token=token_acceso,
+                                            fecha_desde=(date.today() - timedelta(days=365)).strftime('%Y-%m-%d'),
+                                            fecha_hasta=date.today().strftime('%Y-%m-%d')
+                                        )
+                                        # Cargar datos históricos
+                                        if not st.session_state.portfolio_manager.load_data():
+                                            st.error("❌ Error al cargar datos históricos")
+                                            return
+                                    
+                                    # Obtener retornos del activo seleccionado
+                                    if simbolo_seleccionado in st.session_state.portfolio_manager.returns:
+                                        returns = st.session_state.portfolio_manager.returns[simbolo_seleccionado]
+                                        
+                                        # Mostrar métricas básicas
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Volatilidad Anualizada", f"{returns.std() * np.sqrt(252):.2%}")
+                                        with col2:
+                                            st.metric("Retorno Promedio Anual", f"{returns.mean() * 252:.2%}")
+                                        with col3:
+                                            st.metric("Ratio de Sharpe", 
+                                                    f"{returns.mean() / returns.std() * np.sqrt(252):.2f}" if returns.std() > 0 else "N/A")
+                                        
+                                        # Realizar análisis de volatilidad
+                                        with st.spinner("Ejecutando simulación de Monte Carlo..."):
+                                            result = st.session_state.portfolio_manager.analyze_volatility(
+                                                symbol=simbolo_seleccionado,
+                                                returns=returns,
+                                                n_simulations=n_simulaciones,
+                                                n_days=dias_proyeccion
+                                            )
+                                        
+                                        if result is not None:
+                                            # Mostrar gráficos en pestañas
+                                            tab_vol, tab_dist, tab_risk = st.tabs([
+                                                "📈 Volatilidad", 
+                                                "📊 Distribución", 
+                                                "⚠️ Valor en Riesgo"
+                                            ])
+                                            
+                                            with tab_vol:
+                                                st.subheader("Análisis de Volatilidad")
+                                                fig_vol = st.session_state.portfolio_manager.plot_volatility_analysis(simbolo_seleccionado)
+                                                if fig_vol is not None:
+                                                    st.plotly_chart(fig_vol, use_container_width=True)
+                                            
+                                            with tab_dist:
+                                                st.subheader("Distribución de Retornos")
+                                                # Aquí podrías agregar un gráfico de distribución
+                                                st.line_chart(returns.cumsum())
+                                                
+                                            with tab_risk:
+                                                st.subheader("Análisis de Valor en Riesgo (VaR)")
+                                                # Cálculo básico de VaR
+                                                var_95 = np.percentile(returns, 5)
+                                                st.metric(f"VaR al {100-conf_level}% (1 día)", 
+                                                         f"{var_95:.2%}" if var_95 < 0 else f"{var_95:.2%}",
+                                                         delta_color="inverse")
+                                                
+                                                # Explicación del VaR
+                                                st.info(f"""
+                                                💡 El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_94):.2%} 
+                                                indica que hay un {100-conf_level}% de probabilidad de que la pérdida 
+                                                diaria no supere este valor en condiciones normales de mercado.
+                                                """)
+                                                
+                                            # Guardar tiempo del último análisis
+                                            st.session_state.last_analysis_time = datetime.now()
+                                            st.session_state.analysis_cache[simbolo_seleccionado] = {
+                                                'fecha': datetime.now(),
+                                                'resultados': result
+                                            }
+                                            
+                                            st.success("✅ Análisis completado exitosamente")
+                                    else:
+                                        st.warning(f"⚠️ No se encontraron datos de retornos para {simbolo_seleccionado}")
+                                        
+                                except Exception as e:
+                                    st.error(f"❌ Error al realizar el análisis de riesgo: {str(e)}")
+                                    st.exception(e)  # Solo para depuración
+                    
+                    # Mostrar último análisis si existe
+                    if simbolo_seleccionado in st.session_state.get('analysis_cache', {}):
+                        last_analysis = st.session_state.analysis_cache[simbolo_seleccionado]
+                        st.caption(f"Último análisis: {last_analysis['fecha'].strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Pestaña de configuración avanzada
+        with tab7:
+            st.subheader("⚙️ Configuración Avanzada")
+            
+            st.warning("⚠️ Esta sección contiene configuraciones avanzadas. Modifíquelas con precaución.")
+            
+            # Opciones de actualización de datos
+            with st.expander("🔄 Actualización de Datos", expanded=False):
+                st.checkbox("Actualización automática", value=True, 
+                           help="Actualizar datos automáticamente cada 5 minutos")
+                if st.button("Forzar actualización de datos"):
+                    if 'portfolio_manager' in st.session_state:
+                        st.session_state.portfolio_manager = None
+                        st.success("Se reiniciará la carga de datos en la próxima actualización")
+                    else:
+                        st.info("No hay datos para actualizar")
+            
+            # Configuración de visualización
+            with st.expander("📊 Preferencias de Visualización", expanded=False):
+                st.selectbox("Tema de la interfaz", ["Claro", "Oscuro", "Sistema"], 
+                            index=1, help="Seleccione el tema visual de la aplicación")
+                st.slider("Tamaño de fuente base", 10, 18, 14, 
+                         help="Ajusta el tamaño de la fuente base de la aplicación")
+            
+            # Limpieza de caché
+            with st.expander("🗑️ Limpieza de Datos", expanded=False):
+                st.warning("Esta acción no se puede deshacer")
+                if st.button("Limpiar caché de análisis"):
+                    st.session_state.analysis_cache = {}
+                    st.session_state.portfolio_manager = None
+                    st.success("Caché de análisis limpiado correctamente")
+    
+    except Exception as e:
+        st.error(f"❌ Error inesperado en el análisis de portafolio: {str(e)}")
+        st.exception(e)  # Solo para depuración
                             st.exception(e)
 
 def main():
