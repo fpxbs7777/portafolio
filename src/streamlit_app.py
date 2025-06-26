@@ -94,23 +94,6 @@ def setup_plotly():
 pio = setup_plotly()
 
 # Configuración de la página con tema oscuro profesional
-
-# --- Bloque Streamlit: Serie Histórica Dólar MEP ---
-st.header("Serie Histórica Dólar MEP")
-simbolo_base = st.selectbox("Bono en Pesos (base)", ["AL30", "GD30"], index=0)
-simbolo_mep = st.selectbox("Bono en Dólares (MEP)", ["AL30D", "GD30D"], index=0)
-fecha_desde = st.date_input("Desde", value=datetime(2021, 1, 1))
-fecha_hasta = st.date_input("Hasta", value=datetime.now())
-ajustada = st.selectbox("Ajuste", ["SinAjustar", "Ajustada"], index=0)
-
-# Token debe estar definido por el login o flujo superior
-token_portador = globals().get('token_portador', None) or globals().get('bearer_token', None)
-
-if token_portador and st.button("Mostrar Dólar MEP"):
-    graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fecha_desde.strftime("%Y-%m-%d"), fecha_hasta.strftime("%Y-%m-%d"), ajustada)
-elif not token_portador:
-    st.warning("No se detectó token de acceso. Por favor, inicia sesión primero.")
-
 st.set_page_config(
     page_title="IOL Portfolio Analyzer",
     page_icon="📊",
@@ -588,130 +571,28 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
 @st.cache_data(ttl=300, show_spinner=False)
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
-    return obtener_cotizacion_detallada(token_portador, mercado, simbolo).get('ultimoPrecio')
-
-@st.cache_data(ttl=300, show_spinner=False)
-def obtener_cotizacion_detallada(token_portador, mercado, simbolo):
-    """
-    Obtiene la cotización detallada de un título específico.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
-        simbolo (str): Símbolo del activo
-        
-    Returns:
-        dict: Diccionario con la información detallada de la cotización
-    """
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle"
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
     headers = obtener_encabezado_autorizacion(token_portador)
-    
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener cotización detallada: {str(e)}")
-        return {}
-
-@st.cache_data(ttl=300, show_spinner=False)
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
-    """
-    Obtiene la serie histórica de precios para un activo específico.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
-        simbolo (str): Símbolo del activo
-        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
-        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
-        ajustada (str): 'Ajustada' o 'SinAjustar' (default: 'SinAjustar')
-        
-    Returns:
-        pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
-    """
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-    headers = obtener_encabezado_autorizacion(token_portador)
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        
-        data = response.json()
-        if isinstance(data, list) and len(data) > 0:
-            df = pd.DataFrame(data)
-            if 'fecha' in df.columns and 'ultimoPrecio' in df.columns:
-                df['fecha'] = pd.to_datetime(df['fecha'])
-                df = df[['fecha', 'ultimoPrecio']].rename(columns={'ultimoPrecio': 'precio'})
-                return df.sort_values('fecha')
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, (int, float)):
+                return float(data)
+            elif isinstance(data, dict):
+                # La API suele devolver 'ultimoPrecio'
+                for k in [
+                    'ultimoPrecio', 'ultimo_precio', 'ultimoPrecioComprador', 'ultimoPrecioVendedor',
+                    'precio', 'precioActual', 'valor'
+                ]:
+                    if k in data and data[k] is not None:
+                        try:
+                            return float(data[k])
+                        except ValueError:
+                            continue
         return None
-    except Exception as e:
-        st.error(f"Error al obtener serie histórica: {str(e)}")
+    except Exception:
         return None
-
-@st.cache_data(ttl=300, show_spinner=False)
-def obtener_panel_cotizaciones(token_portador, instrumento, panel, pais):
-    """
-    Obtiene las cotizaciones dentro del grupo indicado.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        instrumento (str): Tipo de instrumento ('Acciones', 'Bonos', 'Opciones', 'Monedas', 'Cauciones', 'CHPD', 'Futuros', 'ADRs')
-        panel (str): Panel de cotizaciones ('Panel%20General', 'Burcap', 'Todas')
-        pais (str): País ('Argentina', 'Estados_Unidos')
-        
-    Returns:
-        list: Lista de diccionarios con las cotizaciones, o lista vacía en caso de error
-    """
-    url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
-    headers = obtener_encabezado_autorizacion(token_portador)
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        
-        data = response.json()
-        if isinstance(data, dict) and 'titulos' in data:
-            return data['titulos']
-        return []
-    except Exception as e:
-        st.error(f"Error al obtener panel de cotizaciones: {str(e)}")
-        return []
-
-@st.cache_data(ttl=300, show_spinner=False)
-def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
-    """
-    Obtiene la cotización MEP (Mercado Electrónico de Pagos) para un bono específico.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        simbolo (str): Símbolo del bono (ej: 'GD30')
-        id_plazo_compra (str): ID del plazo de compra
-        id_plazo_venta (str): ID del plazo de venta
-        
-    Returns:
-        dict: Diccionario con la información de la cotización MEP
-    """
-    url = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
-    headers = obtener_encabezado_autorizacion(token_portador)
-    
-    datos = {
-        "simbolo": simbolo,
-        "idPlazoOperatoriaCompra": id_plazo_compra,
-        "idPlazoOperatoriaVenta": id_plazo_venta
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=datos, timeout=10)
-        response.raise_for_status()
-        
-        resultado = response.json()
-        if isinstance(resultado, (int, float)):
-            return {'precio': resultado, 'simbolo': simbolo}
-        return resultado
-    except requests.exceptions.RequestException as e:
-        st.error(f'Error al obtener cotización MEP: {str(e)}')
-        return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
 @st.cache_data(ttl=300, show_spinner=False)
 def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
@@ -4570,176 +4451,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
-    """
-    Grafica la serie histórica del MEP dollar usando Plotly.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        simbolo_base (str): Símbolo del bono base (ej: 'AL30')
-        simbolo_mep (str): Símbolo del bono MEP (ej: 'AL30D')
-        fecha_desde (str): Fecha de inicio (formato YYYY-MM-DD)
-        fecha_hasta (str): Fecha de fin (formato YYYY-MM-DD)
-        ajustada (str): Tipo de ajuste ('Ajustada' o 'SinAjustar')
-    """
-    try:
-        # Obtener series históricas
-        serie_base = obtener_serie_historica_iol(token_portador, 'BCBA', simbolo_base, fecha_desde, fecha_hasta, ajustada)
-        serie_mep = obtener_serie_historica_iol(token_portador, 'BCBA', simbolo_mep, fecha_desde, fecha_hasta, ajustada)
-        
-        if serie_base is None or serie_mep is None:
-            st.error("No se pudo obtener las series históricas")
-            return None
-            
-        # Verificar que los DataFrames no estén vacíos
-        if serie_base.empty or serie_mep.empty:
-            st.error("Las series históricas están vacías")
-            return None
-            
-        # Asegurar que las fechas estén en el índice
-        df_base = serie_base.copy()
-        df_mep = serie_mep.copy()
-        
-        df_base['fecha'] = pd.to_datetime(df_base['fecha'])
-        df_mep['fecha'] = pd.to_datetime(df_mep['fecha'])
-        
-        df_base.set_index('fecha', inplace=True)
-        df_mep.set_index('fecha', inplace=True)
-        
-        # Alinear las series por fecha
-        common_dates = df_base.index.intersection(df_mep.index)
-        
-        if len(common_dates) == 0:
-            st.error("No hay fechas en común entre las series")
-            return None
-            
-        df_base = df_base.loc[common_dates]
-        df_mep = df_mep.loc[common_dates]
-        
-        # Calcular el MEP dollar
-        df_mep['mep_dollar'] = df_mep['precio'] / df_base['precio']
-        
-        # Crear gráfico con Plotly
-        fig = go.Figure()
-        
-        # Agregar trazas
-        fig.add_trace(go.Scatter(
-            x=df_mep.index,
-            y=df_mep['mep_dollar'],
-            name=f'MEP Dollar ({simbolo_base}/{simbolo_mep})',
-            mode='lines',
-            line=dict(color='blue', width=2)
-        ))
-        
-        # Agregar precios individuales
-        fig.add_trace(go.Scatter(
-            x=df_base.index,
-            y=df_base['precio'],
-            name=f'{simbolo_base} (ARS)',
-            mode='lines',
-            line=dict(color='green', dash='dot', width=1)
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df_mep.index,
-            y=df_mep['precio'],
-            name=f'{simbolo_mep} (USD)',
-            mode='lines',
-            line=dict(color='red', dash='dot', width=1)
-        ))
-        
-        # Configurar diseño
-        fig.update_layout(
-            title=f'Serie Histórica MEP Dollar - {simbolo_base}/{simbolo_mep}',
-            xaxis_title='Fecha',
-            yaxis_title='Precio',
-            legend_title='Series',
-            template='plotly_dark',
-            height=600,
-            hovermode='x unified',
-            showlegend=True,
-            margin=dict(l=50, r=50, t=50, b=50)
-        )
-        
-        # Ajustar el rango del eje y para mejor visualización
-        fig.update_yaxes(
-            type='log',
-            rangemode='tozero'
-        )
-        
-        return fig
-        
-    except Exception as e:
-        st.error(f"Error al graficar la serie histórica: {str(e)}")
-        return None
-
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
-    """
-    Muestra el análisis técnico con gráficos de MEP dollar.
-    """
-    st.markdown("### 📊 Análisis Técnico")
-    
-    # Configuración inicial
-    simbolos_base = ['AL30', 'GD30', 'GD29']
-    simbolos_mep = {'AL30': 'AL30D', 'GD30': 'GD30D', 'GD29': 'GD29D'}
-    
-    # Selección de bono
-    bono_seleccionado = st.selectbox(
-        'Selecciona un bono para analizar:',
-        options=simbolos_base
-    )
-    
-    if bono_seleccionado:
-        try:
-            # Obtener fechas
-            fecha_actual = pd.Timestamp.now()
-            fecha_desde = (fecha_actual - pd.DateOffset(years=1)).strftime('%Y-%m-%d')
-            fecha_hasta = fecha_actual.strftime('%Y-%m-%d')
-            
-            # Mostrar gráfico MEP
-            with st.spinner('Cargando gráfico MEP...'):
-                fig = graficar_serie_historica_mep(
-                    token_portador=token_acceso,
-                    simbolo_base=bono_seleccionado,
-                    simbolo_mep=simbolos_mep[bono_seleccionado],
-                    fecha_desde=fecha_desde,
-                    fecha_hasta=fecha_hasta,
-                    ajustada="SinAjustar"
-                )
-                
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.error("No se pudo generar el gráfico")
-                    
-        except Exception as e:
-            st.error(f"Error al mostrar el análisis técnico: {str(e)}")
-
-    st.markdown("### 📊 Análisis Técnico")
-    
-    """
-    **Estrategias de Optimización:**
-    - **Sharpe Ratio Máximo:**
-      - Maximiza la relación retorno/risk
-      - Considera volatilidad y correlaciones
-      - Genera portafolios equilibrados
-    
-    **Mínima Varianza:**
-    - Minimiza la varianza del portafolio
-    - No considera correlaciones históricas
-    
-    **Solo Posiciones Largas:**
-    - Optimización estándar sin restricciones adicionales
-    - Permite solo posiciones compradoras (sin ventas en corto)
-    - Suma de pesos = 100%
-    
-    **Métricas Estadísticas:"
-    - **Skewness**: Medida de asimetría de la distribución
-    - **Kurtosis**: Medida de la forma de la distribución (colas)
-    - **Jarque-Bera**: Test de normalidad de los retornos
-    - **VaR 95%**: Valor en riesgo al 95% de confianza
-    """
     st.markdown("### 📊 Análisis Técnico")
     
     with st.spinner("Obteniendo portafolio..."):
