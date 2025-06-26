@@ -3726,6 +3726,108 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         st.success("✅ Cotización MEP obtenida")
                         precio_mep = cotizacion_mep.get('precio', 'N/A')
                         st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
+                        
+                        # Obtener datos históricos del MEP
+                        fecha_hasta = datetime.now().strftime("%Y-%m-%d")
+                        fecha_desde = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+                        
+                        with st.spinner("Obteniendo datos históricos del MEP..."):
+                            # Obtener datos del bono en pesos (ej: AL30)
+                            df_pesos = obtener_serie_historica_iol(
+                                token_acceso, 
+                                'Bonos', 
+                                simbolo_mep, 
+                                fecha_desde, 
+                                fecha_hasta
+                            )
+                            
+                            # Obtener datos del bono en dólares (ej: AL30D)
+                            df_dolares = obtener_serie_historica_iol(
+                                token_acceso, 
+                                'Bonos', 
+                                f"{simbolo_mep}D", 
+                                fecha_desde, 
+                                fecha_hasta
+                            )
+                            
+                            if df_pesos is not None and df_dolares is not None and not df_pesos.empty and not df_dolares.empty:
+                                # Unir los DataFrames por fecha para calcular el MEP
+                                df_mep = pd.merge(
+                                    df_pesos.rename(columns={'precio': 'precio_pesos'}),
+                                    df_dolares.rename(columns={'precio': 'precio_dolares'}),
+                                    on='fecha',
+                                    how='inner'
+                                )
+                                
+                                # Calcular la cotización MEP (precio en pesos / precio en dólares)
+                                df_mep['mep'] = df_mep['precio_pesos'] / df_mep['precio_dolares']
+                                
+                                # Ordenar por fecha
+                                df_mep = df_mep.sort_values('fecha')
+                                
+                                # Crear gráfico de la serie histórica del MEP
+                                fig = go.Figure()
+                                
+                                # Agregar línea del MEP
+                                fig.add_trace(go.Scatter(
+                                    x=df_mep['fecha'],
+                                    y=df_mep['mep'],
+                                    mode='lines',
+                                    name='Tipo de Cambio MEP',
+                                    line=dict(color='#4CAF50', width=2),
+                                    hovertemplate='%{y:.2f} ARS/USD<extra></extra>'
+                                ))
+                                
+                                # Personalizar el diseño del gráfico
+                                fig.update_layout(
+                                    title=f'Serie Histórica del Dólar MEP ({simbolo_mep}/{simbolo_mep}D)',
+                                    xaxis_title='Fecha',
+                                    yaxis_title='Tipo de Cambio (ARS/USD)',
+                                    template='plotly_dark',
+                                    hovermode='x unified',
+                                    showlegend=True,
+                                    height=500,
+                                    margin=dict(l=50, r=50, t=80, b=50),
+                                    xaxis=dict(
+                                        showgrid=True,
+                                        gridcolor='rgba(255, 255, 255, 0.1)',
+                                        showline=True,
+                                        linecolor='rgba(255, 255, 255, 0.3)'
+                                    ),
+                                    yaxis=dict(
+                                        showgrid=True,
+                                        gridcolor='rgba(255, 255, 255, 0.1)',
+                                        showline=True,
+                                        linecolor='rgba(255, 255, 255, 0.3)'
+                                    )
+                                )
+                                
+                                # Mostrar el gráfico
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Mostrar tabla con los últimos 5 valores
+                                st.subheader("Últimos Valores")
+                                df_ultimos = df_mep[['fecha', 'mep']].tail(5).copy()
+                                df_ultimos['fecha'] = df_ultimos['fecha'].dt.strftime('%Y-%m-%d')
+                                df_ultimos['mep'] = df_ultimos['mep'].round(2)
+                                df_ultimos = df_ultimos.rename(columns={
+                                    'fecha': 'Fecha',
+                                    'mep': 'Tipo de Cambio MEP (ARS/USD)'
+                                })
+                                st.dataframe(
+                                    df_ultimos,
+                                    hide_index=True,
+                                    column_config={
+                                        'Fecha': st.column_config.TextColumn('Fecha'),
+                                        'Tipo de Cambio MEP (ARS/USD)': st.column_config.NumberColumn(
+                                            'Tipo de Cambio MEP (ARS/USD)',
+                                            format='%.2f'
+                                        )
+                                    }
+                                )
+                            else:
+                                st.warning("No se pudieron obtener los datos históricos completos para calcular el MEP.")
+                                
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
     
