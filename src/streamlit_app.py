@@ -3845,6 +3845,83 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
     
+        # Pestaña para vender bonos
+        with tab2:
+            if not id_cliente:
+                st.warning("🔒 Inicie sesión para ver su portafolio de bonos")
+            elif not bonos_pesos:
+                st.info("No tiene bonos en pesos en su portafolio para operar en MEP")
+            else:
+                st.markdown("### 📊 Bonos disponibles en su portafolio")
+                
+                # Mostrar tabla de bonos disponibles
+                bonos_data = []
+                for bono in bonos_pesos:
+                    bonos_data.append({
+                        'Símbolo': bono.get('simbolo', ''),
+                        'Descripción': bono.get('descripcion', ''),
+                        'Cantidad': bono.get('cantidad', 0),
+                        'Último Precio': bono.get('ultimoPrecio', 0),
+                        'Moneda': bono.get('moneda', '')
+                    })
+                
+                if bonos_data:
+                    df_bonos = pd.DataFrame(bonos_data)
+                    st.dataframe(
+                        df_bonos,
+                        use_container_width=True,
+                        column_config={
+                            'Símbolo': st.column_config.TextColumn('Símbolo'),
+                            'Descripción': st.column_config.TextColumn('Descripción'),
+                            'Cantidad': st.column_config.NumberColumn('Cantidad', format='%d'),
+                            'Último Precio': st.column_config.NumberColumn('Último Precio', format='%.2f'),
+                            'Moneda': st.column_config.TextColumn('Moneda')
+                        }
+                    )
+                    
+                    # Formulario para vender
+                    with st.form("vender_bono_form"):
+                        st.markdown("### 🛒 Vender Bono")
+                        
+                        # Seleccionar bono
+                        bono_seleccionado = st.selectbox(
+                            "Seleccione el bono a vender",
+                            options=[b['Símbolo'] for b in bonos_data]
+                        )
+                        
+                        # Obtener cantidad máxima disponible
+                        bono_info = next((b for b in bonos_data if b['Símbolo'] == bono_seleccionado), None)
+                        cantidad_max = int(bono_info['Cantidad']) if bono_info else 0
+                        
+                        # Campos del formulario
+                        cantidad = st.number_input(
+                            "Cantidad",
+                            min_value=1,
+                            max_value=cantidad_max,
+                            value=min(1, cantidad_max),
+                            help=f"Máximo disponible: {cantidad_max}"
+                        )
+                        
+                        precio = st.number_input(
+                            "Precio",
+                            min_value=0.0,
+                            value=float(bono_info['Último Precio']) if bono_info else 0.0,
+                            step=0.01,
+                            format="%.2f"
+                        )
+                        
+                        plazo_liquidacion = st.selectbox(
+                            "Plazo de liquidación",
+                            ["T+0", "T+1", "T+2"],
+                            index=1
+                        )
+                        
+                        if st.form_submit_button("📤 Vender Bono"):
+                            with st.spinner("Procesando orden de venta..."):
+                                # Aquí iría la lógica para enviar la orden de venta
+                                # Por ahora solo mostramos un mensaje de éxito
+                                st.success(f"✅ Orden de venta para {cantidad} títulos de {bono_seleccionado} a ${precio:.2f} cada uno")
+                
     with st.expander("🏦 Tasas de Caución", expanded=True):
         if st.button("🔄 Actualizar Tasas"):
             with st.spinner("Consultando tasas de caución..."):
