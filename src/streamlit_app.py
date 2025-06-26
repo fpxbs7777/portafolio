@@ -2965,20 +2965,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         help="El monto máximo a invertir en la selección y optimización de activos"
     )
 
-    # Widget TradingView (requiere streamlit-tradingview-widget instalado)
-    try:
-        from streamlit_tradingview_ta import TradingViewWidget
-        st.subheader("Gráfico interactivo TradingView")
-        TradingViewWidget(
-            symbol="NASDAQ:AAPL",  # Cambia por símbolo seleccionado
-            interval="D",
-            theme="dark",
-            studies=["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
-            height=600,
-            width="100%",
-        )
-    except ImportError:
-        st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
+
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -3141,30 +3128,53 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 if not universo_para_opt:
                     st.warning("No hay activos suficientes para optimizar.")
                     return
-                manager_inst = PortfolioManager(universo_para_opt, token_acceso, fecha_desde, fecha_hasta, capital=capital_inicial)
+
+                # Cachear los datos históricos si no están en cache
+                if 'historical_data' not in st.session_state:
+                    with st.spinner("Cargando datos históricos..."):
+                        st.session_state.historical_data = get_historical_data_for_optimization(
+                            token_acceso, 
+                            universo_para_opt, 
+                            fecha_desde, 
+                            fecha_hasta
+                        )
+                
+                # Inicializar el manager con los datos ya cargados
+                manager_inst = PortfolioManager(
+                    universo_para_opt, 
+                    token_acceso, 
+                    fecha_desde, 
+                    fecha_hasta, 
+                    capital=capital_inicial
+                )
+                
                 if manager_inst.load_data():
+                    # Optimizar usando los datos en cache
+                    with st.spinner("Optimizando portafolio..."):
                     # Elegir método y target_return según selección
                     if metodo == 'markowitz-target':
-                        max_attempts = 10
+                        # Optimización con retorno objetivo
+                        max_attempts = 3  # Reducir el número de intentos
                         attempt = 0
-                        portfolio_result = None
                         while attempt < max_attempts:
-                            result = manager_inst.compute_portfolio(strategy='markowitz', target_return=target_return)
+                            result = manager_inst.compute_portfolio(
+                                strategy='markowitz', 
+                                target_return=target_return
+                            )
                             if result and abs(result.return_annual - target_return) < 0.001:
                                 portfolio_result = result
                                 break
                             attempt += 1
                         if not portfolio_result:
-                            st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos. El resultado más cercano se muestra.")
-                            # Mostrar el mejor resultado aunque no cumpla exactamente
+                            st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos")
                             portfolio_result = result
                     else:
+                        # Optimización normal
                         portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
                     if portfolio_result:
                         st.success("✅ Optimización completada")
-                        total_invertido = (portfolio_result.weights * capital_inicial).sum()
-                        if total_invertido > capital_inicial + 1e-6:
-                            st.warning(f"La suma de pesos ({total_invertido:.2f}) supera el capital inicial ({capital_inicial:.2f})")
+                        
+                        # Mostrar resultados
                         col1, col2 = st.columns(2)
                         with col1:
                             st.markdown("#### 📊 Pesos Optimizados")
@@ -3176,26 +3186,27 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
                             metrics = portfolio_result.get_metrics_dict()
-                            st.metric("Ratio de Sharpe", f"{metrics['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metrics['VaR 95%']:.4f}")
-                            st.metric("Skewness", f"{metrics['Skewness']:.4f}")
-                            st.metric("Kurtosis", f"{metrics['Kurtosis']:.4f}")
-                            st.metric("JB Statistic", f"{metrics['JB Statistic']:.4f}")
-                            normalidad = "✅ Normal" if metrics['Is Normal'] else "❌ No Normal"
-                            st.metric("Normalidad", normalidad)
-                        # Histograma avanzado con Plotly
-                        st.markdown("#### 📊 Histograma de Retornos del Portafolio")
-                        fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
+                            for metric, value in metrics.items():
+                                st.metric(f"{metric}", f"{value:.4f}")
+                        
+                        # Mostrar histograma de retornos
+                        st.markdown("#### 📊 Histograma de Retornos")
+                        fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos")
                         st.plotly_chart(fig, use_container_width=True)
-
-                        # Mostrar frontera eficiente si el usuario lo solicita
+                        
+                        # Mostrar frontera eficiente si se solicita
                         if show_frontier:
-                            st.markdown("#### 📈 Frontera Eficiente (Efficient Frontier)")
+                            st.markdown("#### 📈 Frontera Eficiente")
                             try:
-                                frontier, valid_returns, volatilities = manager_inst.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+                                frontier, returns, volatilities = manager_inst.compute_efficient_frontier(
+                                    target_return=target_return or 0.08
+                                )
                                 fig_frontier = go.Figure()
                                 fig_frontier.add_trace(go.Scatter(
-                                    x=volatilities, y=valid_returns, mode='lines+markers', name='Frontera Eficiente',
+                                    x=volatilities, 
+                                    y=returns, 
+                                    mode='lines+markers', 
+                                    name='Frontera Eficiente',
                                     line=dict(color='royalblue', width=2)
                                 ))
                                 fig_frontier.update_layout(
@@ -3205,6 +3216,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                     template="plotly_dark"
                                 )
                                 st.plotly_chart(fig_frontier, use_container_width=True)
+                            except Exception as e:
+                                st.warning(f"No se pudo calcular la frontera eficiente: {str(e)}")
                             except Exception as e:
                                 st.warning(f"No se pudo calcular la frontera eficiente: {e}")
                         # Simulación de ejecución
