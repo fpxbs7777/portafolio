@@ -1493,79 +1493,96 @@ class manager:
         return self.cov_matrix, self.mean_returns
 
     def compute_portfolio(self, portfolio_type=None, target_return=None):
-        if self.cov_matrix is None:
-            self.compute_covariance()
+        try:
+            if self.cov_matrix is None:
+                self.compute_covariance()
+                
+            if self.cov_matrix is None or self.mean_returns is None:
+                raise ValueError("Matriz de covarianza o retornos medios no inicializados")
+                
+            n_assets = len(self.rics)
+            if n_assets == 0:
+                raise ValueError("No hay activos en el portafolio")
+                
+            bounds = tuple((0, 1) for _ in range(n_assets))
             
-        n_assets = len(self.rics)
-        bounds = tuple((0, 1) for _ in range(n_assets))
-        
-        if portfolio_type == 'min-variance-l1':
-            # Minimizar varianza con restricción L1
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
-            ]
-            
-        elif portfolio_type == 'min-variance-l2':
-            # Minimizar varianza con restricción L2
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
-            ]
-            
-        elif portfolio_type == 'equi-weight':
-            # Pesos iguales
-            weights = np.ones(n_assets) / n_assets
-            return self._create_output(weights)
-            
-        elif portfolio_type == 'long-only':
-            # Optimización long-only estándar
-            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-            
-        elif portfolio_type == 'markowitz':
-            if target_return is not None:
-                # Optimización con retorno objetivo
+            # Validate target return if provided
+            if target_return is not None and not isinstance(target_return, (int, float)):
+                raise ValueError("El retorno objetivo debe ser un número")
+                
+            if portfolio_type == 'min-variance-l1':
                 constraints = [
                     {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                    {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
                 ]
-            else:
-                # Maximizar Sharpe Ratio
+                
+            elif portfolio_type == 'min-variance-l2':
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
+                ]
+                
+            elif portfolio_type == 'equi-weight':
+                weights = np.ones(n_assets) / n_assets
+                return self._create_output(weights)
+                
+            elif portfolio_type == 'long-only':
                 constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-                def neg_sharpe_ratio(weights):
-                    if isinstance(weights, np.ndarray):
+                
+            elif portfolio_type == 'markowitz':
+                if target_return is not None:
+                    constraints = [
+                        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                        {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                    ]
+                else:
+                    constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                    
+                    def neg_sharpe_ratio(weights):
+                        if not isinstance(weights, np.ndarray):
+                            return np.inf
+                        
                         port_ret = np.sum(self.mean_returns * weights)
-                        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                        port_vol = np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
+                        
                         if port_vol == 0:
                             return np.inf
+                        
                         return -(port_ret - self.risk_free_rate) / port_vol
-                    return np.inf
-                result = op.minimize(
-                    neg_sharpe_ratio,
-                    x0=np.ones(n_assets)/n_assets,
-                    method='SLSQP',
-                    bounds=bounds,
-                    constraints=constraints
-                )
-                if result.success:
-                    return self._create_output(result.x)
-                else:
-                    raise ValueError(f"Optimización fallida: {result.message}")
-                    return None
-
-        # Si constraints no está definido, lanzar error
-        if 'constraints' not in locals():
-            raise ValueError(f"Tipo de portafolio no soportado o constraints no definidos para: {portfolio_type}")
-
-        # Optimización general de varianza mínima
-        result = op.minimize(
-            lambda x: portfolio_variance(x, self.cov_matrix),
-            x0=np.ones(n_assets)/n_assets,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-        return self._create_output(result.x)
+                    
+                    result = op.minimize(
+                        neg_sharpe_ratio,
+                        x0=np.ones(n_assets)/n_assets,
+                        method='SLSQP',
+                        bounds=bounds,
+                        constraints=constraints
+                    )
+                    
+                    if result.success:
+                        return self._create_output(result.x)
+                    else:
+                        raise ValueError(f"Optimización fallida: {result.message}")
+                        
+            else:
+                raise ValueError(f"Tipo de portafolio no soportado: {portfolio_type}")
+                
+            # General variance minimization optimization
+            result = op.minimize(
+                lambda x: portfolio_variance(x, self.cov_matrix),
+                x0=np.ones(n_assets)/n_assets,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+            
+            if not result.success:
+                raise ValueError(f"Optimización fallida: {result.message}")
+                
+            return self._create_output(result.x)
+            
+        except Exception as e:
+            st.error(f"Error durante la optimización: {str(e)}")
+            return None
         
     def _create_output(self, weights):
         """
@@ -1581,7 +1598,7 @@ class manager:
         portfolio_returns = self.returns.dot(weights)
         
         # Crear objeto de salida
-        port_output = output(portfolio_returns, self.notional)
+        port_output = Output(portfolio_returns, self.notional)
         port_output.weights = dict(zip(self.rics, weights))
         
         # Crear DataFrame con la asignación
@@ -1594,83 +1611,6 @@ class manager:
         
         return port_output
 
-class output:
-    def __init__(self, returns, notional):
-        self.returns = returns
-        self.notional = notional
-        if returns is not None and len(returns) > 0:
-            self.mean_daily = np.mean(returns)
-            self.volatility_daily = np.std(returns)
-            self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
-            self.var_95 = np.percentile(returns, 5)
-            self.skewness = stats.skew(returns)
-            self.kurtosis = stats.kurtosis(returns)
-            self.jb_stat, self.p_value = stats.jarque_bera(returns)
-            self.is_normal = self.p_value > 0.05
-            self.decimals = 4
-            self.str_title = 'Portfolio Returns'
-            self.volatility_annual = self.volatility_daily * np.sqrt(252)
-            self.return_annual = self.mean_daily * 252
-        else:
-            self.mean_daily = 0
-            self.volatility_daily = 0
-            self.sharpe_ratio = 0
-            self.var_95 = 0
-            self.skewness = 0
-            self.kurtosis = 0
-            self.jb_stat = 0
-            self.p_value = 0
-            self.is_normal = False
-            self.decimals = 4
-            self.str_title = 'Portfolio Returns'
-            self.volatility_annual = 0
-            self.return_annual = 0
-        
-        # Placeholders que serán actualizados por el manager
-        self.weights = None
-        self.dataframe_allocation = None
-
-    def get_metrics_dict(self):
-        """Retorna métricas del portafolio en formato diccionario"""
-        return {
-            'Mean Daily': self.mean_daily,
-            'Volatility Daily': self.volatility_daily,
-            'Sharpe Ratio': self.sharpe_ratio,
-            'VaR 95%': self.var_95,
-            'Skewness': self.skewness,
-            'Kurtosis': self.kurtosis,
-            'JB Statistic': self.jb_stat,
-            'P-Value': self.p_value,
-            'Is Normal': self.is_normal,
-            'Annual Return': self.return_annual,
-            'Annual Volatility': self.volatility_annual
-        }
-
-    def plot_histogram_streamlit(self, title="Distribución de Retornos"):
-        """Crea un histograma de retornos usando Plotly para Streamlit"""
-        if self.returns is None or len(self.returns) == 0:
-            # Crear gráfico vacío
-            fig = go.Figure()
-            fig.add_annotation(
-                text="No hay datos suficientes para mostrar",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False
-            )
-            fig.update_layout(title=title)
-            return fig
-        
-        try:
-            fig = go.Figure(data=[go.Histogram(
-                x=self.returns,
-                nbinsx=30,
-                name="Retornos del Portafolio"
-            )])
-            
-            # Agregar líneas de métricas importantes
-            fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
-                         annotation_text=f"Media: {self.mean_daily:.4f}")
-            fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
-                         annotation_text=f"VaR 95%: {self.var_95:.4f}")
             
             fig.update_layout(
                 title=f"{title}",
@@ -1812,33 +1752,20 @@ class PortfolioManager:
         self.returns = None
         self.prices = None
         self.volumes = None
-        self.notional = capital  # Valor nominal definido por el usuario
+        self.notional = capital
         self.manager = None
         self.garch_models = {}
         self.monte_carlo_results = {}
         self.volatility_forecasts = {}
-    
+
     def analyze_volatility(self, symbol, returns, volumes=None, n_simulations=1000, n_days=30):
-        """
-        Analiza la volatilidad usando GARCH y simulación de Monte Carlo
-        
-        Args:
-            symbol (str): Símbolo del activo
-            returns (pd.Series): Serie de retornos
-            volumes (pd.Series, optional): Serie de volúmenes
-            n_simulations (int): Número de simulaciones Monte Carlo (default: 1000)
-            n_days (int): Número de días a pronosticar (default: 30)
-            
-        Returns:
-            dict: Resultados del análisis de volatilidad
-        """
         try:
             # Asegurarse de que no haya valores NaN
             returns = returns.dropna()
             if len(returns) < 30:  # Mínimo de datos para un análisis significativo
                 st.warning(f"No hay suficientes datos para analizar la volatilidad de {symbol}")
                 return None
-                
+
             # 1. Ajustar modelo GARCH(1,1)
             garch_model = arch_model(
                 returns * 100,  # Multiplicar por 100 para mejorar la convergencia
@@ -1847,29 +1774,29 @@ class PortfolioManager:
                 q=1,
                 dist='normal'
             )
-            
+
             # Ajustar el modelo con supresión de salida
             with st.spinner(f"Ajustando modelo GARCH para {symbol}..."):
                 garch_fit = garch_model.fit(disp='off')
-                
+
             self.garch_models[symbol] = garch_fit
-            
+
             # 2. Pronóstico de volatilidad
             forecast = garch_fit.forecast(horizon=5)
             forecast_volatility = np.sqrt(forecast.variance.iloc[-1] / 100)  # Deshacer el escalado
-            
+
             # 3. Simulación de Monte Carlo
             last_price = returns.iloc[-1] if hasattr(returns, 'iloc') else 1.0
             last_vol = np.sqrt(garch_fit.conditional_volatility.iloc[-1] / 100)
-            
+
             # Inicializar matrices para almacenar resultados
             price_paths = np.zeros((n_simulations, n_days))
             returns_paths = np.zeros((n_simulations, n_days))
-            
+
             # Mostrar barra de progreso para simulaciones
             progress_bar = st.progress(0)
             progress_text = st.empty()
-            
+
             # Simular trayectorias de precios
             for i in range(n_simulations):
                 # Actualizar barra de progreso
@@ -1877,37 +1804,37 @@ class PortfolioManager:
                     progress = (i + 1) / n_simulations
                     progress_bar.progress(progress)
                     progress_text.text(f"Simulando trayectorias: {i+1}/{n_simulations}")
-                
+
                 # Generar retornos aleatorios con la volatilidad estimada
                 daily_returns = np.random.normal(
                     loc=returns.mean(),
                     scale=last_vol,
                     size=n_days
                 )
-                
+
                 # Asegurar que los retornos sean razonables
                 daily_returns = np.clip(daily_returns, -0.3, 0.3)
-                
+
                 # Calcular trayectoria de precios
                 price_path = last_price * (1 + daily_returns).cumprod()
-                
+
                 # Almacenar resultados
                 price_paths[i] = price_path
                 returns_paths[i] = daily_returns
-            
+
             # Limpiar barra de progreso
             progress_bar.empty()
             progress_text.empty()
-            
+
             # Calcular métricas de la simulación
             final_prices = price_paths[:, -1]
             expected_return = final_prices.mean() / last_price - 1
             expected_volatility = returns_paths.std(axis=1).mean()
-            
+
             # Calcular métricas de riesgo
             var_95 = np.percentile(returns_paths, 5)
             cvar_95 = returns_paths[returns_paths <= var_95].mean()
-            
+
             # Calcular drawdowns simulados
             max_drawdowns = []
             for path in price_paths:
@@ -1920,9 +1847,9 @@ class PortfolioManager:
                     if dd > max_dd:
                         max_dd = dd
                 max_drawdowns.append(max_dd)
-            
+
             avg_max_drawdown = np.mean(max_drawdowns)
-            
+
             # Almacenar resultados
             self.monte_carlo_results[symbol] = {
                 'price_paths': price_paths,
@@ -1936,7 +1863,7 @@ class PortfolioManager:
                 'forecast_dates': [pd.Timestamp.now() + pd.Timedelta(days=i+1) for i in range(n_days)],
                 'simulation_date': pd.Timestamp.now()
             }
-            
+
             # Mostrar resumen de métricas
             st.success(f"Análisis de volatilidad completado para {symbol}")
             col1, col2, col3, col4 = st.columns(4)
@@ -1948,13 +1875,13 @@ class PortfolioManager:
                 st.metric("VaR 95% (1 día)", f"{var_95*100:.2f}%")
             with col4:
                 st.metric("Drawdown Máx. Promedio", f"{avg_max_drawdown*100:.2f}%")
-            
+
             return {
                 'garch_model': garch_fit,
                 'forecast_volatility': forecast_volatility,
                 'monte_carlo': self.monte_carlo_results[symbol]
             }
-            
+
         except Exception as e:
             st.error(f"Error en el análisis de volatilidad para {symbol}: {str(e)}")
             import traceback
@@ -2103,93 +2030,228 @@ class PortfolioManager:
         fig.update_yaxes(title_text='Pérdida Máxima Esperada (%)', row=2, col=2)
         
         return fig
+            
+        mc_result = self.monte_carlo_results[symbol]
+        
+        # Crear figura con subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                'Trayectorias de Precio Simuladas',
+                'Distribución de Retornos Esperados',
+                'Volatilidad Pronosticada',
+                'Riesgo (VaR)'
+            ),
+            specs=[[{"secondary_y": True}, {}],
+                 [{"secondary_y": True}, {}]]
+        )
+        
+        # 1. Trayectorias de precios simuladas
+        for i in range(min(100, len(mc_result['price_paths']))):
+            fig.add_trace(
+                go.Scatter(
+                    x=mc_result['forecast_dates'],
+                    y=mc_result['price_paths'][i],
+                    line=dict(color='rgba(0, 100, 255, 0.1)'),
+                    showlegend=False
+                ),
+                row=1, col=1
+            )
+        
+        # Añadir media y percentiles
+        mean_prices = np.mean(mc_result['price_paths'], axis=0)
+        p5 = np.percentile(mc_result['price_paths'], 5, axis=0)
+        p95 = np.percentile(mc_result['price_paths'], 95, axis=0)
+        
+        fig.add_trace(
+            go.Scatter(
+                x=mc_result['forecast_dates'],
+                y=mean_prices,
+                line=dict(color='red', width=2),
+                name='Media'
+            ),
+            row=1, col=1, secondary_y=False
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=mc_result['forecast_dates'],
+                y=p5,
+                line=dict(color='green', width=1, dash='dash'),
+                name='Percentil 5%'
+            ),
+            row=1, col=1, secondary_y=False
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=mc_result['forecast_dates'],
+                y=p95,
+                line=dict(color='blue', width=1, dash='dash'),
+                name='Percentil 95%'
+            ),
+            row=1, col=1, secondary_y=False
+        )
+        
+        # 2. Histograma de retornos
+        final_returns = (mc_result['price_paths'][:, -1] / mc_result['last_price'] - 1) * 100
+        fig.add_trace(
+            go.Histogram(
+                x=final_returns,
+                nbinsx=50,
+                name='Distribución de Retornos',
+                marker_color='#1f77b4',
+                opacity=0.7
+            ),
+            row=1, col=2
+        )
+        
+        # Añadir línea para el VaR
+        var_95 = np.percentile(final_returns, 5)
+        fig.add_vline(
+            x=var_95,
+            line=dict(color='red', width=2, dash='dash'),
+            row=1, col=2,
+            annotation_text=f'VaR 95%: {var_95:.2f}%',
+            annotation_position='top right'
+        )
+        
+        # 3. Volatilidad pronosticada
+        if symbol in self.garch_models:
+            garch_fit = self.garch_models[symbol]
+            volatilities = np.sqrt(garch_fit.conditional_volatility / 100)  # Deshacer escalado
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=self.prices.index[-len(volatilities):],
+                    y=volatilities * 100,  # Convertir a porcentaje
+                    line=dict(color='purple', width=2),
+                    name='Volatilidad Condicional',
+                    yaxis='y2'
+                ),
+                row=2, col=1, secondary_y=False
+            )
+        
+        # 4. Riesgo (VaR)
+        var_levels = np.arange(1, 11) * 10  # 10% a 100%
+        var_values = [np.percentile(final_returns, level) for level in var_levels]
+        
+        fig.add_trace(
+            go.Bar(
+                x=var_levels,
+                y=var_values,
+                name='Value at Risk',
+                marker_color='#ff7f0e'
+            ),
+            row=2, col=2
+        )
+        
+        # Actualizar diseño
+        fig.update_layout(
+            title=f'Análisis de Volatilidad - {symbol}',
+            showlegend=True,
+            height=800,
+            template='plotly_dark'
+        )
+        
+        # Actualizar ejes
+        fig.update_xaxes(title_text='Fecha', row=1, col=1)
+        fig.update_yaxes(title_text='Precio', row=1, col=1)
+        fig.update_xaxes(title_text='Retorno (%)', row=1, col=2)
+        fig.update_yaxes(title_text='Frecuencia', row=1, col=2)
+        fig.update_xaxes(title_text='Fecha', row=2, col=1)
+        fig.update_yaxes(title_text='Volatilidad Anualizada (%)', row=2, col=1)
+        fig.update_xaxes(title_text='Nivel de Confianza (%)', row=2, col=2)
+        fig.update_yaxes(title_text='Pérdida Máxima Esperada (%)', row=2, col=2)
+        
+        return fig
         
     def load_data(self):
-        # Convertir lista de activos a formato adecuado
-        symbols = []
-        markets = []
-        tipos = []
-        
-        # Función auxiliar para detectar mercado
-        def detectar_mercado(tipo_raw: str, mercado_raw: str) -> str:
-            """
-            Determina el mercado basado en la información proporcionada.
-            
-            Args:
-                tipo_raw: Tipo de activo (ej: 'Acciones', 'Bonos', 'Cedears')
-                mercado_raw: Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
-                
-            Returns:
-                str: Mercado normalizado para la API
-            """
-            # Mapeo de mercados comunes
-            mercado = str(mercado_raw).upper()
-            
-            # Si el mercado está vacío, intentar deducirlo del tipo
-            if not mercado or mercado == 'NONE':
-                tipo = str(tipo_raw).lower()
-                if 'cedear' in tipo:
-                    return 'BCBA'  # Asumir que los CEDEARs son de BCBA
-                elif 'bono' in tipo or 'letra' in tipo or 'obligacion' in tipo:
-                    return 'BCBA'  # Asumir bonos en BCBA
-                elif 'accion' in tipo:
-                    return 'BCBA'  # Asumir acciones en BCBA por defecto
-                else:
-                    return 'BCBA'  # Valor por defecto
-                    
-            # Normalizar mercados conocidos
-            mercado_map = {
-                'BCBA': 'BCBA',
-                'BYMA': 'BCBA',
-                'ROFEX': 'ROFEX',
-                'NYSE': 'NYSE',
-                'NASDAQ': 'NASDAQ',
-                'AMEX': 'AMEX',
-                'BME': 'BME',
-                'BVC': 'BVC',
-                'BVL': 'BVL',
-                'B3': 'B3',
-                'BVMF': 'BVMF',
-                'EURONEXT': 'EURONEXT',
-                'LSE': 'LSE',
-                'FWB': 'FWB',
-                'SWX': 'SWX',
-                'TSX': 'TSX',
-                'TSXV': 'TSXV',
-                'ASX': 'ASX',
-                'NSE': 'NSE',
-                'BSE': 'BSE',
-                'TSE': 'TSE',
-                'HKEX': 'HKEX',
-                'SSE': 'SSE',
-                'SZSE': 'SZSE',
-                'KRX': 'KRX',
-                'TASE': 'TASE',
-                'MOEX': 'MOEX',
-                'JSE': 'JSE'
-            }
-            
-            return mercado_map.get(mercado, 'BCBA')  # Default a BCBA si no se reconoce
-            
-        # Procesar cada activo
-        for activo in self.activos:
-            if 'simbolo' not in activo:
-                continue
-                
-            simbolo = activo['simbolo']
-            tipo = activo.get('tipo', '')
-            mercado = activo.get('mercado', '')
-            
-            # Determinar mercado
-            mercado_normalizado = detectar_mercado(tipo, mercado)
-            
-            # Agregar a las listas
-            symbols.append(simbolo)
-            markets.append(mercado_normalizado)
-            tipos.append(tipo)
-        
-        # Obtener datos históricos
         try:
+            # Convertir lista de activos a formato adecuado
+            symbols = []
+            markets = []
+            tipos = []
+            
+            # Función auxiliar para detectar mercado
+            def detectar_mercado(tipo_raw: str, mercado_raw: str) -> str:
+                """
+                Determina el mercado basado en la información proporcionada.
+                
+                Args:
+                    tipo_raw (str): Tipo de activo (ej: 'Acciones', 'Bonos', 'Cedears')
+                    mercado_raw (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
+                    
+                Returns:
+                    str: Mercado normalizado para la API
+                """
+                # Mapeo de mercados comunes
+                mercado = str(mercado_raw).upper()
+                
+                # Si el mercado está vacío, intentar deducirlo del tipo
+                if not mercado or mercado == 'NONE':
+                    tipo = str(tipo_raw).lower()
+                    if 'cedear' in tipo:
+                        return 'BCBA'  # Asumir que los CEDEARs son de BCBA
+                    elif 'bono' in tipo or 'letra' in tipo or 'obligacion' in tipo:
+                        return 'BCBA'  # Asumir bonos en BCBA
+                    elif 'accion' in tipo:
+                        return 'BCBA'  # Asumir acciones en BCBA por defecto
+                    else:
+                        return 'BCBA'  # Valor por defecto
+                        
+                # Normalizar mercados conocidos
+                mercado_map = {
+                    'BCBA': 'BCBA',
+                    'BYMA': 'BCBA',
+                    'ROFEX': 'ROFEX',
+                    'NYSE': 'NYSE',
+                    'NASDAQ': 'NASDAQ',
+                    'AMEX': 'AMEX',
+                    'BME': 'BME',
+                    'BVC': 'BVC',
+                    'BVL': 'BVL',
+                    'B3': 'B3',
+                    'BVMF': 'BVMF',
+                    'EURONEXT': 'EURONEXT',
+                    'LSE': 'LSE',
+                    'FWB': 'FWB',
+                    'SWX': 'SWX',
+                    'TSX': 'TSX',
+                    'TSXV': 'TSXV',
+                    'ASX': 'ASX',
+                    'NSE': 'NSE',
+                    'BSE': 'BSE',
+                    'TSE': 'TSE',
+                    'HKEX': 'HKEX',
+                    'SSE': 'SSE',
+                    'SZSE': 'SZSE',
+                    'KRX': 'KRX',
+                    'TASE': 'TASE',
+                    'MOEX': 'MOEX',
+                    'JSE': 'JSE'
+                }
+                
+                return mercado_map.get(mercado, 'BCBA')  # Default a BCBA si no se reconoce
+            
+            # Procesar cada activo
+            for activo in self.activos:
+                if 'simbolo' not in activo:
+                    continue
+                    
+                simbolo = activo['simbolo']
+                tipo = activo.get('tipo', '')
+                mercado = activo.get('mercado', '')
+                
+                # Determinar mercado
+                mercado_normalizado = detectar_mercado(tipo, mercado)
+                
+                # Agregar a las listas
+                symbols.append(simbolo)
+                markets.append(mercado_normalizado)
+                tipos.append(tipo)
+            
+            # Obtener datos históricos
             historical_data = get_historical_data_for_optimization(
                 self.token,
                 [{'simbolo': s, 'mercado': m} for s, m in zip(symbols, markets)],
@@ -2198,28 +2260,19 @@ class PortfolioManager:
             )
             
             if not historical_data:
-                st.error("No se pudieron cargar los datos históricos")
-                return False
+                raise ValueError("No se pudieron obtener datos históricos")
                 
-            # Procesar datos en un DataFrame
-            prices = pd.DataFrame()
-            volumes = pd.DataFrame()
-            
-            for symbol, data in historical_data.items():
-                if data is not None and not data.empty:
-                    prices[symbol] = data['precio']
-                    if 'volumen' in data.columns:
-                        volumes[symbol] = data['volumen']
-            
+            # Procesar datos para cada activo
+            for simbolo in symbols:
+                if simbolo in historical_data:
+                    df = historical_data[simbolo]
+                    if not df.empty:
+                        self.prices[simbolo] = df['precio']
+                        self.volumes[simbolo] = df.get('volumen', 0)
+                        
             # Calcular retornos
-            returns = prices.pct_change().dropna()
+            self.returns = self.prices.pct_change().dropna()
             
-            # Guardar datos
-            self.prices = prices
-            self.returns = returns
-            if not volumes.empty:
-                self.volumes = volumes
-                
             self.data_loaded = True
             return True
             
@@ -2229,71 +2282,48 @@ class PortfolioManager:
             return False
 
     def compute_portfolio(self, strategy='max_sharpe', target_return=None):
-        """
-        Calcula la cartera óptima según la estrategia especificada.
-        
-        Args:
-            strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight')
-            target_return (float, optional): Retorno objetivo para estrategias que lo requieran
-            
-        Returns:
-            output: Objeto output con la cartera optimizada o None en caso de error
-        """
-        if not self.data_loaded or self.returns is None or self.returns.empty:
+        try:
+            if not self.data_loaded or self.returns is None or self.returns.empty:
+                st.error("No hay datos de retornos disponibles")
+                return None
             st.error("No hay datos de retornos disponibles")
             return None
             
-        try:
-            # Inicializar el manager si no existe
-            if not hasattr(self, 'manager') or not self.manager:
-                self.manager = manager(
-                    rics=self.returns.columns.tolist(),
-                    notional=self.notional,
-                    data=self.prices.to_dict('series')
+        # Inicializar el manager si no existe
+        if not hasattr(self, 'manager') or not self.manager:
+            self.manager = manager(
+                rics=self.returns.columns.tolist(),
+                notional=self.notional,
+                data=self.prices.to_dict('series')
+            )
+            
+            # Cargar datos y calcular covarianzas
+            self.manager.returns = self.returns
+            self.manager.compute_covariance()
+            
+        # Calcular cartera según estrategia
+        if strategy in ['max_sharpe', 'min_vol']:
+            try:
+                # Asegurarse de que el manager tenga los retornos y covarianzas
+                if not hasattr(self.manager, 'mean_returns') or self.manager.mean_returns is None:
+                    self.manager.mean_returns = self.returns.mean()
+                if not hasattr(self.manager, 'cov_matrix') or self.manager.cov_matrix is None:
+                    self.manager.cov_matrix = self.returns.cov()
+                
+                # Mapear estrategias a los tipos de portafolio soportados por el manager
+                portfolio_type = 'markowitz' if strategy == 'max_sharpe' else 'min-variance-l1'
+                
+                # Calcular la cartera óptima
+                portfolio_output = self.manager.compute_portfolio(
+                    portfolio_type=portfolio_type,
+                    target_return=target_return
                 )
                 
-                # Cargar datos y calcular covarianzas
-                self.manager.returns = self.returns
-                self.manager.compute_covariance()
-                
-            # Calcular cartera según estrategia
-            if strategy in ['max_sharpe', 'min_vol']:
-                try:
-                    # Asegurarse de que el manager tenga los retornos y covarianzas
-                    if not hasattr(self.manager, 'mean_returns') or self.manager.mean_returns is None:
-                        self.manager.mean_returns = self.returns.mean()
-                    if not hasattr(self.manager, 'cov_matrix') or self.manager.cov_matrix is None:
-                        self.manager.cov_matrix = self.returns.cov()
-                    
-                    # Mapear estrategias a los tipos de portafolio soportados por el manager
-                    portfolio_type = 'markowitz' if strategy == 'max_sharpe' else 'min-variance-l1'
-                    
-                    # Calcular la cartera óptima
-                    portfolio_output = self.manager.compute_portfolio(
-                        portfolio_type=portfolio_type,
-                        target_return=target_return
-                    )
-                    
-                    if portfolio_output is None:
-                        raise ValueError(f"No se pudo calcular la cartera óptima con la estrategia '{strategy}'")
+                if portfolio_output is None:
+                    raise ValueError(f"No se pudo calcular la cartera óptima con la estrategia '{strategy}'")
                         
-                except Exception as e:
-                    st.warning(f"Error al calcular la cartera {strategy}: {str(e)}. Usando estrategia equi-weight.")
-                    n_assets = len(self.returns.columns)
-                    weights = np.array([1/n_assets] * n_assets)
-                    portfolio_returns = (self.returns * weights).sum(axis=1)
-                    portfolio_output = output(portfolio_returns, self.notional)
-                    portfolio_output.weights = weights
-                    portfolio_output.dataframe_allocation = pd.DataFrame({
-                        'rics': list(self.returns.columns),
-                        'weights': weights,
-                        'volatilities': self.returns.std().values,
-                        'returns': self.returns.mean().values
-                    })
-                
-                return portfolio_output
-                
-            elif strategy == 'equi-weight':
+            except Exception as e:
+                st.warning(f"Error al calcular la cartera {strategy}: {str(e)}. Usando estrategia equi-weight.")
                 n_assets = len(self.returns.columns)
                 weights = np.array([1/n_assets] * n_assets)
                 portfolio_returns = (self.returns * weights).sum(axis=1)
@@ -2305,16 +2335,31 @@ class PortfolioManager:
                     'volatilities': self.returns.std().values,
                     'returns': self.returns.mean().values
                 })
+                
                 return portfolio_output
                 
-            else:
-                st.error(f"Estrategia no soportada: {strategy}")
-                return None
-                
-        except Exception as e:
-            st.error(f"Error al calcular la cartera: {str(e)}")
-            st.exception(e)
+        elif strategy == 'equi-weight':
+            n_assets = len(self.returns.columns)
+            weights = np.array([1/n_assets] * n_assets)
+            portfolio_returns = (self.returns * weights).sum(axis=1)
+            portfolio_output = output(portfolio_returns, self.notional)
+            portfolio_output.weights = weights
+            portfolio_output.dataframe_allocation = pd.DataFrame({
+                'rics': list(self.returns.columns),
+                'weights': weights,
+                'volatilities': self.returns.std().values,
+                'returns': self.returns.mean().values
+            })
+            return portfolio_output
+            
+        else:
+            st.error(f"Estrategia no soportada: {strategy}")
             return None
+            
+    except Exception as e:
+        st.error(f"Error al calcular la cartera: {str(e)}")
+        st.exception(e)
+        return None
     
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
@@ -3137,7 +3182,7 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
             )
         
         fig_pie.update_layout(
-            title_text=f"Distribución de Posiciones (Periodo: {fecha_inicio} a {fecha_fin})",
+            title=f"Distribución de Posiciones (Periodo: {fecha_inicio} a {fecha_fin})",
             title_x=0.5,
             showlegend=False,
             height=500,
@@ -3145,6 +3190,10 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color='#f8f9fa')
         )
+        
+        # Actualizar ejes
+        fig_pie.update_xaxes(title_text='Fecha', row=1, col=1)
+        fig_pie.update_yaxes(title_text='Precio', row=1, col=1)
         st.plotly_chart(fig_pie, use_container_width=True)
     
     # Gráfico de evolución
@@ -3165,11 +3214,7 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
         fig_line = make_subplots(
             rows=2, cols=1,
             shared_xaxes=True,
-            subplot_titles=(
-                f"Valor Total del Portafolio (ARS)", 
-                "Evolución Porcentual (%)"
-            ),
-            vertical_spacing=0.1
+            subplot_titles=("Valor Total del Portafolio", "Evolución Porcentual")
         )
         
         # Gráfico de valor total
@@ -3324,7 +3369,7 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
             )
         
         fig_pie.update_layout(
-            title_text=f"Distribución de Posiciones (Periodo: {fecha_inicio} a {fecha_fin})",
+            title=f"Distribución de Posiciones (Periodo: {fecha_inicio} a {fecha_fin})",
             title_x=0.5,
             showlegend=False,
             height=500
@@ -3389,6 +3434,8 @@ def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
         
     except Exception as e:
         st.error(f"Error al generar gráfico de evolución: {str(e)}")
+        import traceback
+        st.text(traceback.format_exc())
 
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
