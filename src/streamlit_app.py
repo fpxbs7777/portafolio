@@ -2296,9 +2296,48 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador):
+def mostrar_resumen_portafolio(portafolio):
+    """
+    Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas
+    """
     st.markdown("### 📈 Resumen del Portafolio")
     
+    # Initialize saldo_usd and saldo_ars with default values
+    saldo_usd = portafolio.get('saldo_usd', 0)
+    saldo_ars = portafolio.get('saldo_ars', 0)
+    
+    # Get portfolio assets
+    activos = portafolio.get('activos', [])
+    
+    # Calculate total portfolio value
+    valor_total = sum(activo.get('Valuación', 0) for activo in activos)
+    
+    # Add USD and ARS balances to total value
+    valor_total += saldo_usd + saldo_ars
+    
+    # Calculate portfolio metrics
+    metricas = calcular_metricas_portafolio(activos, valor_total)
+    
+    if not metricas:
+        st.error("Error calculando métricas del portafolio")
+        return
+    
+    # Display portfolio summary with USD and ARS balances
+    st.markdown("#### 🔍 Detalles del Portafolio")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Valor Total", f"${valor_total:,.2f}")
+        st.metric("Saldo USD", f"${saldo_usd:,.2f}")
+        st.metric("Saldo ARS", f"${saldo_ars:,.2f}")
+    
+    with col2:
+        st.metric("Media de Activo", f"${metricas['media_activo']:,.2f}")
+        st.metric("Mediana de Activo", f"${metricas['mediana_activo']:,.2f}")
+        st.metric("Desv. Estándar", f"${metricas['std_dev_activo']:,.2f}")
+    
+    # Rest of the function continues...
+
     activos = portafolio.get('activos', [])
     datos_activos = []
     valor_total = 0
