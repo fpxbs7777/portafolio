@@ -2958,13 +2958,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     )
     order_type = order_types[order_type_ui]
 
-    # Input de capital inicial
-    capital_inicial = st.number_input(
-        "Capital Inicial para Optimización (ARS):",
-        min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-        help="El monto máximo a invertir en la selección y optimización de activos"
-    )
-
 
 
     col1, col2, col3 = st.columns(3)
