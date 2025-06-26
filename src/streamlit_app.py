@@ -1849,7 +1849,7 @@ class PortfolioManager:
         Calcula la cartera óptima según la estrategia especificada.
         
         Args:
-            strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight')
+            strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight', 'markowitz-target')
             target_return (float, optional): Retorno objetivo para estrategias que lo requieran
             
         Returns:
@@ -1871,52 +1871,51 @@ class PortfolioManager:
                 # Cargar datos y calcular covarianzas
                 self.manager.returns = self.returns
                 self.manager.compute_covariance()
-                
+            
             # Calcular cartera según estrategia
-            if strategy in ['max_sharpe', 'min_vol']:
+            if strategy in ['max_sharpe', 'min_vol', 'markowitz-target']:
+                # Para markowitz-target, usamos max_sharpe con target_return
+                portfolio_type = 'max_sharpe' if strategy == 'markowitz-target' else strategy
+                
                 portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type=strategy,
-                    target_return=target_return
+                    portfolio_type=portfolio_type,
+                    target_return=target_return if strategy == 'markowitz-target' else None
                 )
                 
                 if portfolio_output is None:
                     st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
-                    n_assets = len(self.returns.columns)
-                    weights = np.array([1/n_assets] * n_assets)
-                    portfolio_returns = (self.returns * weights).sum(axis=1)
-                    portfolio_output = output(portfolio_returns, self.notional)
-                    portfolio_output.weights = weights
-                    portfolio_output.dataframe_allocation = pd.DataFrame({
-                        'rics': list(self.returns.columns),
-                        'weights': weights,
-                        'volatilities': self.returns.std().values,
-                        'returns': self.returns.mean().values
-                    })
+                    return self._create_equi_weight_portfolio()
                 
                 return portfolio_output
                 
             elif strategy == 'equi-weight':
-                n_assets = len(self.returns.columns)
-                weights = np.array([1/n_assets] * n_assets)
-                portfolio_returns = (self.returns * weights).sum(axis=1)
-                portfolio_output = output(portfolio_returns, self.notional)
-                portfolio_output.weights = weights
-                portfolio_output.dataframe_allocation = pd.DataFrame({
-                    'rics': list(self.returns.columns),
-                    'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
-                })
-                return portfolio_output
+                return self._create_equi_weight_portfolio()
                 
             else:
                 st.error(f"Estrategia no soportada: {strategy}")
+                st.info("Estrategias soportadas: 'max_sharpe', 'min_vol', 'equi-weight', 'markowitz-target'")
                 return None
                 
         except Exception as e:
             st.error(f"Error al calcular la cartera: {str(e)}")
             st.exception(e)
             return None
+            
+    def _create_equi_weight_portfolio(self):
+        """Crea una cartera con pesos iguales para todos los activos"""
+        n_assets = len(self.returns.columns)
+        weights = np.array([1/n_assets] * n_assets)
+        portfolio_returns = (self.returns * weights).sum(axis=1)
+        portfolio_output = output(portfolio_returns, self.notional)
+        portfolio_output.weights = weights
+        portfolio_output.dataframe_allocation = pd.DataFrame({
+            'rics': list(self.returns.columns),
+            'weights': weights,
+            'volatilities': self.returns.std().values,
+            'returns': self.returns.mean().values
+        })
+        return portfolio_output
+                
     
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
@@ -2377,12 +2376,24 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
+        # Calcular valor total incluyendo saldos
+        valor_total_con_saldos = valor_total + saldo_usd + saldo_ars
+        
         # Información General
         cols = st.columns(4)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        cols[3].metric("Valor Total", f"${valor_total_con_saldos:,.2f}")
+        
+        # Mostrar desglose de saldos
+        st.subheader("💰 Saldos Disponibles")
+        saldo_cols = st.columns(2)
+        saldo_cols[0].metric("Saldo en USD", f"${saldo_usd:,.2f}")
+        saldo_cols[1].metric("Saldo en ARS", f"${saldo_ars:,.2f}")
+        st.metric("Total en Activos", f"${valor_total:,.2f}")
+        st.metric("Valor Total del Portafolio (Activos + Efectivo)", f"${valor_total_con_saldos:,.2f}", 
+                delta=f"${(saldo_usd + saldo_ars):,.2f} en efectivo")
         
         if metricas:
             # Métricas de Riesgo
