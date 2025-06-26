@@ -37,10 +37,13 @@ def get_import(module_name, from_imports=None):
     return lambda: lazy_import(module_name, from_imports)
 
 # Define lazy imports
-plotly_go = get_import('plotly.graph_objects')
+# Import plotly modules directly for better performance
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+
+# Other lazy imports
 plt = get_import('matplotlib.pyplot')
-px = get_import('plotly.express')
-make_subplots = get_import('plotly.subplots', ['make_subplots'])
 arch_model = get_import('arch', ['arch_model'])
 scipy_stats = get_import('scipy.stats')
 scipy_optimize = get_import('scipy.optimize')
@@ -1589,18 +1592,33 @@ class output:
     def __init__(self, returns, notional):
         self.returns = returns
         self.notional = notional
-        self.mean_daily = np.mean(returns)
-        self.volatility_daily = np.std(returns)
-        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
-        self.var_95 = np.percentile(returns, 5)
-        self.skewness = stats.skew(returns)
-        self.kurtosis = stats.kurtosis(returns)
-        self.jb_stat, self.p_value = stats.jarque_bera(returns)
-        self.is_normal = self.p_value > 0.05
-        self.decimals = 4
-        self.str_title = 'Portfolio Returns'
-        self.volatility_annual = self.volatility_daily * np.sqrt(252)
-        self.return_annual = self.mean_daily * 252
+        if returns is not None and len(returns) > 0:
+            self.mean_daily = np.mean(returns)
+            self.volatility_daily = np.std(returns)
+            self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
+            self.var_95 = np.percentile(returns, 5)
+            self.skewness = stats.skew(returns)
+            self.kurtosis = stats.kurtosis(returns)
+            self.jb_stat, self.p_value = stats.jarque_bera(returns)
+            self.is_normal = self.p_value > 0.05
+            self.decimals = 4
+            self.str_title = 'Portfolio Returns'
+            self.volatility_annual = self.volatility_daily * np.sqrt(252)
+            self.return_annual = self.mean_daily * 252
+        else:
+            self.mean_daily = 0
+            self.volatility_daily = 0
+            self.sharpe_ratio = 0
+            self.var_95 = 0
+            self.skewness = 0
+            self.kurtosis = 0
+            self.jb_stat = 0
+            self.p_value = 0
+            self.is_normal = False
+            self.decimals = 4
+            self.str_title = 'Portfolio Returns'
+            self.volatility_annual = 0
+            self.return_annual = 0
         
         # Placeholders que serán actualizados por el manager
         self.weights = None
@@ -1625,6 +1643,7 @@ class output:
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
         if self.returns is None or len(self.returns) == 0:
+            # Crear gráfico vacío
             fig = go.Figure()
             fig.add_annotation(
                 text="No hay datos suficientes para mostrar",
@@ -1634,28 +1653,30 @@ class output:
             fig.update_layout(title=title)
             return fig
         
-        fig = go.Figure(data=[go.Histogram(
-            x=self.returns,
-            nbinsx=30,
-            name="Retornos del Portafolio",
-            marker_color='#0d6efd'
-        )])
-        
-        # Agregar líneas de métricas importantes
-        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
-                     annotation_text=f"Media: {self.mean_daily:.4f}")
-        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
-                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
-        
-        fig.update_layout(
-            title=f"{title}",
-            xaxis_title="Retorno",
-            yaxis_title="Frecuencia",
-            showlegend=False,
-            template='plotly_white'
-        )
-        
-        return fig
+        try:
+            fig = go.Figure(data=[go.Histogram(
+                x=self.returns,
+                nbinsx=30,
+                name="Retornos del Portafolio"
+            )])
+            
+            # Agregar líneas de métricas importantes
+            fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
+                         annotation_text=f"Media: {self.mean_daily:.4f}")
+            fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
+                         annotation_text=f"VaR 95%: {self.var_95:.4f}")
+            
+            fig.update_layout(
+                title=f"{title}",
+                xaxis_title="Retorno",
+                yaxis_title="Frecuencia",
+                showlegend=False
+            )
+            
+            return fig
+        except Exception as e:
+            st.error(f"Error al generar el histograma: {str(e)}")
+            return None
 
 def portfolio_variance(x, mtx_var_covar):
     """Calcula la varianza del portafolio"""
