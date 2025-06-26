@@ -4575,13 +4575,30 @@ def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fech
             st.error("No se pudo obtener las series históricas")
             return None
             
-        # Calcular el MEP dollar
-        df_base = serie_base.set_index('fecha')
-        df_mep = serie_mep.set_index('fecha')
+        # Verificar que los DataFrames no estén vacíos
+        if serie_base.empty or serie_mep.empty:
+            st.error("Las series históricas están vacías")
+            return None
+            
+        # Asegurar que las fechas estén en el índice
+        df_base = serie_base.copy()
+        df_mep = serie_mep.copy()
+        
+        df_base['fecha'] = pd.to_datetime(df_base['fecha'])
+        df_mep['fecha'] = pd.to_datetime(df_mep['fecha'])
+        
+        df_base.set_index('fecha', inplace=True)
+        df_mep.set_index('fecha', inplace=True)
         
         # Alinear las series por fecha
-        df_base = df_base.reindex(df_mep.index)
-        df_mep = df_mep.reindex(df_base.index)
+        common_dates = df_base.index.intersection(df_mep.index)
+        
+        if len(common_dates) == 0:
+            st.error("No hay fechas en común entre las series")
+            return None
+            
+        df_base = df_base.loc[common_dates]
+        df_mep = df_mep.loc[common_dates]
         
         # Calcular el MEP dollar
         df_mep['mep_dollar'] = df_mep['precio'] / df_base['precio']
@@ -4595,7 +4612,7 @@ def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fech
             y=df_mep['mep_dollar'],
             name=f'MEP Dollar ({simbolo_base}/{simbolo_mep})',
             mode='lines',
-            line=dict(color='blue')
+            line=dict(color='blue', width=2)
         ))
         
         # Agregar precios individuales
@@ -4604,7 +4621,7 @@ def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fech
             y=df_base['precio'],
             name=f'{simbolo_base} (ARS)',
             mode='lines',
-            line=dict(color='green', dash='dot')
+            line=dict(color='green', dash='dot', width=1)
         ))
         
         fig.add_trace(go.Scatter(
@@ -4612,7 +4629,7 @@ def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fech
             y=df_mep['precio'],
             name=f'{simbolo_mep} (USD)',
             mode='lines',
-            line=dict(color='red', dash='dot')
+            line=dict(color='red', dash='dot', width=1)
         ))
         
         # Configurar diseño
@@ -4623,7 +4640,15 @@ def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fech
             legend_title='Series',
             template='plotly_dark',
             height=600,
-            hovermode='x unified'
+            hovermode='x unified',
+            showlegend=True,
+            margin=dict(l=50, r=50, t=50, b=50)
+        )
+        
+        # Ajustar el rango del eje y para mejor visualización
+        fig.update_yaxes(
+            type='log',
+            rangemode='tozero'
         )
         
         return fig
