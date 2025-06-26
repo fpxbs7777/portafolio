@@ -2708,7 +2708,6 @@ def obtener_perfil_sugerido(token_portador: str, respuestas: dict, id_cliente_as
     else:
         url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
     
-    # Preparar los headers
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -2720,99 +2719,6 @@ def obtener_perfil_sugerido(token_portador: str, respuestas: dict, id_cliente_as
         "enviarEmailCliente": False,
         **respuestas
     }
-    
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener el perfil sugerido: {str(e)}")
-        if hasattr(e, 'response') and e.response is not None:
-            st.error(f"Respuesta del servidor: {e.response.text}")
-        return None
-
-def obtener_movimientos(token_acceso, fecha_desde=None, fecha_hasta=None):
-    """Obtiene los movimientos de la cuenta con manejo mejorado de errores."""
-    try:
-        if not token_acceso:
-            st.error("No se encontró el token de acceso. Por favor inicie sesión nuevamente.")
-            return None
-            
-        if fecha_desde is None:
-            fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-        if fecha_hasta is None:
-            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-            
-        url = f"{BASE_URL}/api/v2/Asesor/Movimientos"
-        headers = {
-            'Authorization': f'Bearer {token_acceso}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        
-        # Formatear fechas correctamente para la API
-        fecha_desde_iso = f"{fecha_desde}T00:00:00.000Z"
-        fecha_hasta_iso = f"{fecha_hasta}T23:59:59.999Z"
-        
-        data = {
-            'clientes': [0],  # 0 para el cliente actual
-            'from': fecha_desde_iso,
-            'to': fecha_hasta_iso,
-            'dateType': 'FechaOperacion',  # o 'FechaContable' según necesites
-            'status': 'Todas',  # o 'Pendiente', 'Acreditado', etc.
-            'type': 'Todas',  # o 'Compra', 'Venta', 'Transferencia', etc.
-            'country': 'AR',  # Código de país
-            'currency': 'ARS',  # Moneda
-            'cuentaComitente': ''  # Dejar vacío para todas las cuentas
-        }
-        
-        st.info(f"Solicitando movimientos desde {fecha_desde} hasta {fecha_hasta}...")
-        
-        # Realizar la petición con manejo de timeout
-        response = requests.post(
-            url,
-            headers=headers,
-            json=data,
-            timeout=30  # 30 segundos de timeout
-        )
-        
-        # Verificar el estado de la respuesta
-        response.raise_for_status()
-        
-        # Verificar si la respuesta es un JSON válido
-        try:
-            movimientos = response.json()
-            if not movimientos:
-                st.warning("No se encontraron movimientos para el período seleccionado.")
-                return None
-            return movimientos
-            
-        except ValueError as json_err:
-            st.error(f"Error al procesar la respuesta del servidor: {str(json_err)}")
-            st.text(f"Respuesta recibida: {response.text[:500]}...")  # Mostrar primeros 500 caracteres
-            return None
-            
-    except requests.exceptions.HTTPError as http_err:
-        if http_err.response.status_code == 401:
-            st.error("Error de autenticación (401). Por favor verifica tu token de acceso y vuelve a iniciar sesión.")
-            # Limpiar la sesión para forzar un nuevo inicio de sesión
-            if 'token_acceso' in st.session_state:
-                del st.session_state['token_acceso']
-        else:
-            st.error(f"Error HTTP al obtener movimientos: {http_err}")
-            if hasattr(http_err, 'response') and http_err.response is not None:
-                st.error(f"Detalles del error: {http_err.response.text}")
-        return None
-        
-    except requests.exceptions.RequestException as req_err:
-        st.error(f"Error de conexión: {str(req_err)}")
-        return None
-        
-    except Exception as e:
-        st.error(f"Error inesperado al obtener movimientos: {str(e)}")
-        import traceback
-        st.text(traceback.format_exc())
-        return None
 
 def seleccionar_activos_aleatorios(perfil: dict, activos_disponibles: Dict[str, list]) -> List[dict]:
     """
@@ -4412,6 +4318,288 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         """
         components.html(tv_widget, height=680)
 
+def vender_especie_d(token_portador, id_cliente, simbolo, cantidad, precio, mercado, validez, cuenta_comitente=None):
+    """
+    Realiza una operación de venta de especie D a través de la API de IOL.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        simbolo (str): Símbolo del activo a vender
+        cantidad (int): Cantidad a vender
+        precio (float): Precio de venta
+        mercado (str): Mercado donde se opera (ej: 'bCBA')
+        validez (str): Fecha de validez de la orden (formato 'YYYY-MM-DD')
+        cuenta_comitente (str, optional): Número de cuenta comitente
+        
+    Returns:
+        dict: Respuesta de la API o None en caso de error
+    """
+    url = f"https://api.invertironline.com/api/v2/asesores/operar/VenderEspecieD"
+    
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    data = {
+        "clientes": clientes,
+        "fechaDesde": fecha_desde,
+        "fechaHasta": fecha_hasta,
+        "tipoFecha": tipo_fecha,
+        "estado": estado,
+        "tipoOperacion": tipo_operacion,
+        "moneda": moneda
+    }
+    
+    # Eliminar campos None del payload
+    data = {k: v for k, v in data.items() if v is not None}
+    
+    st.info(f"Solicitando movimientos desde {fecha_desde} hasta {fecha_hasta}...")
+    
+    # Configurar timeout y realizar la petición
+    try:
+        response = requests.post(
+            url, 
+            headers=headers, 
+            json=data,
+            timeout=30  # 30 segundos de timeout
+        )
+        
+        # Verificar si la respuesta es exitosa
+        response.raise_for_status()
+        
+        # Intentar decodificar la respuesta JSON
+        try:
+            return response.json()
+        except ValueError as json_err:
+            st.error("❌ Error al decodificar la respuesta JSON")
+            st.error(f"Contenido de la respuesta: {response.text[:500]}")
+            return None
+            
+    except requests.exceptions.HTTPError as http_err:
+        if http_err.response.status_code == 401:
+            st.error("🔒 Error de autenticación. Por favor, inicie sesión nuevamente.")
+            # Limpiar la sesión para forzar un nuevo inicio de sesión
+            if 'token_acceso' in st.session_state:
+                del st.session_state['token_acceso']
+            if 'refresh_token' in st.session_state:
+                del st.session_state['refresh_token']
+        elif http_err.response.status_code == 500:
+            st.error("⚠️ Error interno del servidor al procesar la solicitud.")
+            st.info("Sugerencias:")
+            st.info("1. Verifique que las fechas sean válidas")
+            st.info("2. Intente con un rango de fechas más pequeño")
+            st.info("3. Si el problema persiste, intente más tarde")
+        else:
+            st.error(f"❌ Error HTTP {http_err.response.status_code}: {str(http_err)}")
+        
+        # Mostrar detalles adicionales del error si están disponibles
+        try:
+            error_details = http_err.response.json()
+            st.json(error_details)
+        except:
+            st.error(f"Detalles del error: {http_err.response.text[:500]}")
+            
+    except requests.exceptions.RequestException as req_err:
+        st.error(f"❌ Error de conexión: {str(req_err)}")
+        
+    except Exception as e:
+        st.error(f"❌ Error inesperado: {str(e)}")
+        
+    return None
+
+
+def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha='fechaOperacion', 
+                            estado=None, tipo_operacion=None, moneda='ARS'):
+    """
+    Obtiene los movimientos de los clientes del asesor con manejo mejorado de errores.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        clientes (list): Lista de IDs de clientes
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
+        tipo_fecha (str): Tipo de fecha a filtrar ('fechaOperacion' o 'fechaLiquidacion')
+        estado (str, optional): Estado de las operaciones a filtrar
+        tipo_operacion (str, optional): Tipo de operación a filtrar
+        moneda (str, optional): Moneda de las operaciones (por defecto 'ARS')
+        
+    Returns:
+        list or dict: Lista de movimientos o diccionario con error en caso de fallo
+    """
+    try:
+        if not token_portador:
+            st.error("🔑 No se encontró el token de acceso. Por favor inicie sesión nuevamente.")
+            return None
+            
+        # Validar fechas
+        try:
+            datetime.strptime(fecha_desde, '%Y-%m-%d')
+            datetime.strptime(fecha_hasta, '%Y-%m-%d')
+        except ValueError:
+            st.error("❌ Formato de fecha inválido. Use YYYY-MM-DD")
+            return None
+            
+        url = "https://api.invertironline.com/api/v2/asesores/movimientos"
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
+        # Formatear fechas en formato ISO 8601
+        fecha_desde_iso = f"{fecha_desde}T00:00:00.000Z"
+        fecha_hasta_iso = f"{fecha_hasta}T23:59:59.999Z"
+        
+        # Construir el payload según la documentación de la API
+        data = {
+            'clientes': clientes,
+            'from': fecha_desde_iso,
+            'to': fecha_hasta_iso,
+            'tipoFecha': tipo_fecha,
+            'pais': 'AR',
+            'moneda': moneda
+        }
+        
+        # Agregar filtros opcionales si se proporcionan
+        if estado:
+            data['estado'] = estado
+        if tipo_operacion:
+            data['tipoOperacion'] = tipo_operacion
+            
+        st.info(f"Solicitando movimientos desde {fecha_desde} hasta {fecha_hasta}...")
+        
+        # Realizar la petición con manejo de timeout
+        response = requests.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=30  # 30 segundos de timeout
+        )
+        
+        # Verificar el estado de la respuesta
+        response.raise_for_status()
+        
+        # Verificar si la respuesta es un JSON válido
+        try:
+            movimientos = response.json()
+            if not movimientos:
+                st.warning("No se encontraron movimientos para el período seleccionado.")
+                return []
+            return movimientos
+            
+        except ValueError as json_err:
+            st.error(f"Error al procesar la respuesta del servidor: {str(json_err)}")
+            st.text(f"Respuesta recibida: {response.text[:500]}...")  # Mostrar primeros 500 caracteres
+            return None
+            
+    except requests.exceptions.HTTPError as http_err:
+        if http_err.response.status_code == 401:
+            st.error("🔒 Error de autenticación (401). Por favor verifica tu token de acceso y vuelve a iniciar sesión.")
+            # Limpiar la sesión para forzar un nuevo inicio de sesión
+            if 'token_acceso' in st.session_state:
+                del st.session_state['token_acceso']
+            if 'refresh_token' in st.session_state:
+                del st.session_state['refresh_token']
+        elif http_err.response.status_code == 500:
+            st.error("⚠️ Error interno del servidor al procesar la solicitud.")
+            st.info("Sugerencias para solucionar el problema:")
+            st.info("1. Verifique que las fechas sean válidas")
+            st.info("2. Intente con un rango de fechas más pequeño")
+            st.info("3. Si el problema persiste, intente más tarde")
+            
+            # Mostrar detalles del error si están disponibles
+            try:
+                error_details = http_err.response.json()
+                st.json(error_details)
+            except:
+                st.error(f"Detalles del error: {http_err.response.text[:500]}")
+        else:
+            st.error(f"❌ Error HTTP {http_err.response.status_code}: {str(http_err)}")
+            try:
+                st.json(http_err.response.json())
+            except:
+                st.error(f"Detalles: {http_err.response.text[:500]}")
+        
+        return None
+        
+    except requests.exceptions.RequestException as req_err:
+        st.error(f"❌ Error de conexión: {str(req_err)}")
+        if hasattr(req_err, 'response') and req_err.response is not None:
+            st.error(f"Respuesta del servidor: {req_err.response.text[:500]}")
+        return None
+        
+    except Exception as e:
+        st.error(f"❌ Error inesperado al obtener movimientos: {str(e)}")
+        import traceback
+        st.text(traceback.format_exc())
+        return None
+
+
+def mostrar_venta_especie_d():
+    st.title("📉 Venta de Especie D")
+    # ... (rest of the code remains the same)
+    
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.error("No se encontró token de acceso. Por favor, inicie sesión.")
+        return
+        
+    if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
+        st.warning("Por favor, seleccione un cliente primero.")
+        return
+    
+    with st.form("venta_especie_d_form"):
+        st.subheader("Datos de la Operación")
+        
+        # Obtener datos del cliente
+        cliente = st.session_state.cliente_seleccionado
+        cliente_id = cliente.get('numeroCliente', cliente.get('id'))
+        
+        # Campos del formulario
+        simbolo = st.text_input("Símbolo", placeholder="Ej: GGAL")
+        cantidad = st.number_input("Cantidad", min_value=1, step=1, value=1)
+        precio = st.number_input("Precio", min_value=0.0, step=0.01, format="%.2f")
+        
+        # Selector de mercado
+        mercado = st.selectbox(
+            "Mercado",
+            ["bCBA", "bCBA24hs", "bCBAp", "bBYMA", "bROFX"]
+        )
+        
+        # Fecha de validez (hoy + 1 día por defecto)
+        validez = st.date_input(
+            "Válido hasta",
+            value=date.today() + timedelta(days=1),
+            min_value=date.today()
+        )
+        
+        # Cuenta comitente (opcional)
+        cuenta_comitente = st.text_input("Cuenta Comitente (opcional)", "")
+        
+        # Botón de envío
+        if st.form_submit_button("📤 Enviar Orden de Venta", use_container_width=True):
+            if not all([simbolo, cantidad, precio, mercado, validez]):
+                st.error("Por favor complete todos los campos obligatorios.")
+                return
+                
+            with st.spinner("Procesando orden de venta..."):
+                resultado = vender_especie_d(
+                    token_portador=st.session_state.token_acceso,
+                    id_cliente=cliente_id,
+                    simbolo=simbolo.upper(),
+                    cantidad=int(cantidad),
+                    precio=float(precio),
+                    mercado=mercado,
+                    validez=validez.strftime("%Y-%m-%d"),
+                    cuenta_comitente=cuenta_comitente if cuenta_comitente else None
+                )
+                
+                if resultado:
+                    st.success("✅ Orden de venta enviada correctamente")
+                    st.json(resultado)
+
+
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
     
@@ -4769,6 +4957,7 @@ def main():
             # Solo mostrar opciones de asesor si hay token de acceso
             if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
                 opciones_menu.append("👤 Movimientos del Asesor")
+                opciones_menu.append("📉 Vender Especie D")
             
             opcion_seleccionada = st.sidebar.radio("Navegación", opciones_menu)
             
@@ -4818,6 +5007,12 @@ def main():
                     mostrar_movimientos_asesor()
                 else:
                     st.warning("No se pudo autenticar con IOL")
+                    
+            elif opcion_seleccionada == "📉 Vender Especie D":
+                if st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+                    mostrar_venta_especie_d()
+                else:
+                    st.warning("Por favor, seleccione un cliente primero")
                 
             elif opcion_seleccionada == "📝 Test de Perfil de Inversor":
                 st.title("Test de Perfil de Inversor")
