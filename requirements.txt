@@ -17,4 +17,4 @@ fpdf
 arch
 statsmodels
 tradingview
-
+SHDA==0.0.4rc4
