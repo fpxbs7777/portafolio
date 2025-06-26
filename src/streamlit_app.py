@@ -3816,6 +3816,107 @@ def simular_ejecucion(precio_objetivo, precio_actual, volatilidad, dias=1, n_sim
         return None
 
 
+def mostrar_optimizacion_portafolio(token_portador, notional, data, rics):
+    """
+    Muestra la interfaz de optimización de portafolio con Streamlit.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        notional (float): Capital disponible
+        data (dict): Datos históricos de los activos
+        rics (list): Lista de símbolos de los activos
+    """
+    try:
+        # Parámetros de entrada
+        num_simulations = 1000
+        num_assets = 10
+        initial_capital_pesos = 50000.0
+
+        # Filtrar símbolos con datos disponibles
+        rics_with_data = [ric for ric in rics if ric in data]
+        if not rics_with_data:
+            st.error("No se descargó ningún dato. Revisa la lista de RICs o la conexión a Internet.")
+            return
+
+        # Seleccionar un subconjunto de activos
+        selected_rics = random.sample(rics_with_data, min(num_assets, len(rics_with_data)))
+
+        # Calcular la frontera eficiente
+        target_return = None
+        include_min_variance = True
+        dict_portfolios = portfolio.compute_efficient_frontier(selected_rics, notional, target_return, include_min_variance, data)
+
+        # Mostrar resultados
+        st.subheader("Activos seleccionados:")
+        st.write(selected_rics)
+
+        # Mostrar histograma de retornos
+        if 'markowitz-target' in dict_portfolios:
+            st.subheader("📊 Distribución de Retornos")
+            fig = dict_portfolios['markowitz-target'].plot_histogram_streamlit()
+            st.plotly_chart(fig)
+
+        # Mostrar pesos del portafolio
+        if 'markowitz-target' in dict_portfolios and hasattr(dict_portfolios['markowitz-target'], 'dataframe_allocation'):
+            st.subheader("📊 Pesos Optimizados")
+            df_alloc = dict_portfolios['markowitz-target'].dataframe_allocation
+            if df_alloc is not None:
+                df_display = df_alloc[df_alloc['weights'] > 0.01].copy()
+                df_display['weights'] = df_display['weights'].apply(lambda x: f"{x:.2%}")
+                st.dataframe(df_display)
+                st.write(f"Suma total: {df_alloc['weights'].sum():.2%}")
+
+        # Graficar la frontera eficiente
+        if dict_portfolios:
+            st.subheader("📈 Frontera Eficiente")
+            fig = plot_efficient_frontier_streamlit(dict_portfolios)
+            st.plotly_chart(fig)
+
+    except Exception as e:
+        st.error(f"Error en la optimización: {str(e)}")
+
+# Función para graficar la frontera eficiente usando Plotly
+def plot_efficient_frontier_streamlit(dict_portfolios):
+    """
+    Grafica la frontera eficiente usando Plotly.
+    
+    Args:
+        dict_portfolios (dict): Diccionario que contiene los portafolios calculados.
+    
+    Returns:
+        go.Figure: Figura de Plotly con la frontera eficiente
+    """
+    risks, returns, labels = [], [], []
+    for key, portfolio in dict_portfolios.items():
+        if hasattr(portfolio, 'volatility_daily') and hasattr(portfolio, 'mean_daily'):
+            risks.append(portfolio.volatility_daily)
+            returns.append(portfolio.mean_daily)
+            labels.append(key)
+
+    fig = go.Figure()
+    
+    # Agregar puntos de la frontera eficiente
+    fig.add_trace(go.Scatter(
+        x=risks,
+        y=returns,
+        mode='markers+text',
+        text=labels,
+        textposition='top center',
+        marker=dict(size=10),
+        name='Portafolios'
+    ))
+    
+    # Configurar layout
+    fig.update_layout(
+        title='Frontera Eficiente',
+        xaxis_title='Riesgo (Volatilidad)',
+        yaxis_title='Retorno Esperado',
+        template='plotly_white',
+        showlegend=True
+    )
+    
+    return fig
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.title("Optimización de Portafolio")
     
