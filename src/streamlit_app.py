@@ -1201,6 +1201,10 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
     try:
+        if not token_portador:
+            st.error("Error de autenticación: No se proporcionó un token de acceso")
+            return None
+            
         print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
         
         # Endpoint para FCIs (manejo especial)
@@ -1212,22 +1216,44 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
         print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
         
-        headers = {
-            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
-            'Accept': 'application/json'
-        }
+        # Configurar encabezados con el token de autenticación
+        headers = obtener_encabezado_autorizacion(token_portador)
         
-        # Realizar la solicitud
-        response = requests.get(url, headers={
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }, timeout=30)
+        # Agregar encabezados adicionales necesarios
+        headers.update({
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        })
         
-        # Verificar el estado de la respuesta
+        # Realizar la solicitud con manejo de reintentos
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, headers=headers, timeout=30)
+                
+                # Verificar si la autenticación falló
+                if response.status_code == 401:
+                    st.error("Error de autenticación: Token inválido o expirado. Por favor, vuelva a iniciar sesión.")
+                    return None
+                    
+                # Verificar si el recurso no se encuentra
+                if response.status_code == 404:
+                    st.warning(f"No se encontraron datos para {simbolo} en {mercado}")
+                    return None
+                    
+                # Verificar otros errores HTTP
+                response.raise_for_status()
+                break  # Si llegamos aquí, la solicitud fue exitosa
+                
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:  # Último intento
+                    st.error(f"Error al conectar con la API de IOL: {str(e)}")
+                    return None
+                time.sleep(1)  # Esperar antes de reintentar
+                continue
+        
+        # Procesar la respuesta exitosa
         print(f"Estado de la respuesta: {response.status_code}")
-        response.raise_for_status()
-        
-        # Procesar la respuesta
         data = response.json()
         print(f"Tipo de datos recibidos: {type(data)}")
         
@@ -3705,13 +3731,216 @@ def mostrar_estado_cuenta(estado_cuenta):
         df_cuentas = pd.DataFrame(datos_cuentas)
         st.dataframe(df_cuentas, use_container_width=True, height=300)
 
+def obtener_serie_historica(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene la serie histórica de cotizaciones para un símbolo en un mercado específico.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        mercado (str): Mercado (ej: 'BCBA', 'NYSE')
+        simbolo (str): Símbolo del activo
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
+        ajustada (str): 'Ajustada' o 'SinAjustar'
+        
+    Returns:
+        dict: Datos de la serie histórica o None en caso de error
+    """
+    try:
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        headers = {"Authorization": f"Bearer {token_portador}"}
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener serie histórica: {str(e)}")
+        return None
+
+def obtener_panel_cotizaciones(token_portador, instrumento, panel, pais):
+    """
+    Obtiene las cotizaciones para un panel específico.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        instrumento (str): Tipo de instrumento (ej: 'Acciones', 'Bonos')
+        panel (str): Panel específico (ej: 'Panel%20General', 'Burcap')
+        pais (str): País (ej: 'Argentina', 'Estados_Unidos')
+        
+    Returns:
+        dict: Datos del panel de cotizaciones o None en caso de error
+    """
+    try:
+        url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
+        headers = {"Authorization": f"Bearer {token_portador}"}
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener panel de cotizaciones: {str(e)}")
+        return None
+
+def obtener_cotizacion_detallada(token_portador, mercado, simbolo):
+    """
+    Obtiene la cotización detallada de un instrumento.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        mercado (str): Mercado (ej: 'BCBA', 'NYSE')
+        simbolo (str): Símbolo del activo
+        
+    Returns:
+        dict: Datos detallados de la cotización o None en caso de error
+    """
+    try:
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle"
+        headers = {"Authorization": f"Bearer {token_portador}"}
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener cotización detallada: {str(e)}")
+        return None
+
 def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
     st.markdown("### 💱 Cotizaciones y Mercado")
     
     # Crear pestañas para las diferentes secciones
-    tab1, tab2 = st.tabs(["💰 Cotización MEP", "💵 Vender Bonos"])
+    tab_panel, tab_historica, tab_mep, tab_venta_bonos = st.tabs([
+        "📊 Panel Cotizaciones", 
+        "📈 Serie Histórica", 
+        "💰 Cotización MEP", 
+        "💵 Vender Bonos"
+    ])
     
-    with tab1:
+    # Pestaña de Panel de Cotizaciones
+    with tab_panel:
+        st.subheader("📊 Panel de Cotizaciones")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            instrumento = st.selectbox(
+                "Instrumento",
+                ["Acciones", "Bonos", "Opciones", "Monedas", "Cauciones", "CHPD", "Futuros", "ADRs"],
+                index=0
+            )
+        with col2:
+            panel = st.selectbox(
+                "Panel",
+                ["Panel%20General", "Burcap", "Todas"],
+                index=0
+            )
+        with col3:
+            pais = st.selectbox(
+                "País",
+                ["Argentina", "Estados_Unidos"],
+                index=0
+            )
+        
+        if st.button("🔍 Consultar Panel"):
+            with st.spinner("Obteniendo datos del panel..."):
+                datos_panel = obtener_panel_cotizaciones(token_acceso, instrumento, panel, pais)
+                
+                if datos_panel and 'titulos' in datos_panel and datos_panel['titulos']:
+                    # Convertir a DataFrame para mejor visualización
+                    df_panel = pd.DataFrame(datos_panel['titulos'])
+                    
+                    # Mostrar las primeras 20 filas con scroll
+                    st.dataframe(
+                        df_panel.head(20),
+                        use_container_width=True,
+                        height=500
+                    )
+                    
+                    # Opción para descargar datos
+                    csv = df_panel.to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        "📥 Descargar Datos",
+                        data=csv,
+                        file_name=f"panel_{instrumento}_{pais}.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.warning("No se encontraron datos para el panel seleccionado.")
+    
+    # Pestaña de Serie Histórica
+    with tab_historica:
+        st.subheader("📈 Consultar Serie Histórica")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            mercado = st.selectbox(
+                "Mercado",
+                ["BCBA", "NYSE", "NASDAQ", "AMEX", "BCS", "ROFX"],
+                index=0
+            )
+        with col2:
+            simbolo = st.text_input("Símbolo", value="GGAL")
+        with col3:
+            fecha_desde = st.date_input("Fecha Desde", value=date.today() - timedelta(days=30))
+        with col4:
+            fecha_hasta = st.date_input("Fecha Hasta", value=date.today())
+        
+        ajustada = st.radio("Ajuste", ["SinAjustar", "Ajustada"], horizontal=True)
+        
+        if st.button("📊 Obtener Serie Histórica"):
+            with st.spinner("Obteniendo datos históricos..."):
+                datos = obtener_serie_historica(
+                    token_acceso,
+                    mercado,
+                    simbolo,
+                    fecha_desde.strftime("%Y-%m-%d"),
+                    fecha_hasta.strftime("%Y-%m-%d"),
+                    ajustada
+                )
+                
+                if datos:
+                    # Mostrar datos en un gráfico
+                    if isinstance(datos, list) and len(datos) > 0:
+                        df_historico = pd.DataFrame(datos)
+                        
+                        # Verificar si la columna 'fecha' existe, si no, usar el primer campo de fecha disponible
+                        fecha_col = next((col for col in df_historico.columns if 'fecha' in col.lower()), None)
+                        
+                        if fecha_col:
+                            # Ordenar por fecha
+                            df_historico[fecha_col] = pd.to_datetime(df_historico[fecha_col])
+                            df_historico = df_historico.sort_values(fecha_col)
+                            
+                            # Mostrar gráfico de precios
+                            fig = px.line(
+                                df_historico, 
+                                x=fecha_col, 
+                                y='ultimoPrecio',
+                                title=f"Evolución de precios - {simbolo}",
+                                labels={'ultimoPrecio': 'Precio', fecha_col: 'Fecha'}
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Mostrar tabla con datos
+                            st.dataframe(
+                                df_historico,
+                                use_container_width=True,
+                                height=400
+                            )
+                            
+                            # Opción para descargar datos
+                            csv = df_historico.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                "📥 Descargar Datos Históricos",
+                                data=csv,
+                                file_name=f"historico_{simbolo}_{fecha_desde}_{fecha_hasta}.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.warning("No se encontró una columna de fecha en los datos.")
+                    else:
+                        st.warning("No se encontraron datos históricos para el símbolo y rango de fechas seleccionados.")
+    
+    # Pestaña de Cotización MEP
+    with tab_mep:
         with st.expander("Consultar Cotización MEP", expanded=True):
             form = st.form("mep_form")
             with form:
@@ -3851,126 +4080,130 @@ def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
                                 
     
         # Pestaña para vender bonos
-        with tab2:
+        with tab_venta_bonos:
             # Mostrar el formulario de venta de especie D solo si hay un token de acceso
             if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-                st.warning("Por favor, inicie sesión para acceder a la venta de bonos.")
-            else:
-                # Obtener el portafolio del cliente para mostrar los bonos disponibles
-                with st.spinner("Cargando portafolio..."):
-                    try:
-                        # Verificar si hay un cliente seleccionado
-                        if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
-                            st.warning("Por favor, seleccione un cliente primero.")
-                            return
+                st.warning("🔒 Por favor, inicie sesión para acceder a la venta de bonos.")
+                return
+                
+            # Verificar si hay un cliente seleccionado
+            if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
+                st.warning("👤 Por favor, seleccione un cliente desde el menú lateral primero.")
+                return
+                
+            cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente')
+            if not cliente_id:
+                st.error("❌ No se pudo obtener el ID del cliente. Por favor, seleccione un cliente válido.")
+                return
+                
+            # Obtener el portafolio del cliente para mostrar los bonos disponibles
+            with st.spinner("🔍 Cargando portafolio del cliente..."):
+                try:
                         
-                        cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente')
-                        if not cliente_id:
-                            st.error("No se pudo obtener el ID del cliente.")
-                            return
+                    portafolio = obtener_portafolio(st.session_state.token_acceso, cliente_id)
+                    
+                    # Filtrar bonos en pesos (que no terminan con 'D')
+                    bonos_pesos = []
+                    if portafolio and 'activos' in portafolio:
+                        bonos_pesos = [
+                            activo for activo in portafolio['activos'] 
+                            if (isinstance(activo, dict) and 
+                                activo.get('tipo') == 'Bonos' and 
+                                not str(activo.get('simbolo', '')).endswith('D') and 
+                                activo.get('cantidad_disponible', 0) > 0)
+                        ]
+                    
+                    if not bonos_pesos:
+                        st.warning("No se encontraron bonos en pesos disponibles para vender en su portafolio.")
+                    else:
+                        # Mostrar tabla de bonos disponibles
+                        st.subheader("📊 Bonos en Pesos Disponibles")
+                        df_bonos = pd.DataFrame([{
+                            'Símbolo': bono.get('simbolo', ''),
+                            'Descripción': bono.get('descripcion', 'Sin descripción'),
+                            'Cantidad': bono.get('cantidad_disponible', 0),
+                            'Precio': bono.get('ultimo_precio', 0),
+                            'Moneda': bono.get('moneda', 'ARS')
+                        } for bono in bonos_pesos])
                         
-                        portafolio = obtener_portafolio(st.session_state.token_acceso, cliente_id)
+                        st.dataframe(df_bonos, use_container_width=True)
                         
-                        # Filtrar bonos en pesos (que no terminan con 'D')
-                        bonos_pesos = []
-                        if portafolio and 'activos' in portafolio:
-                            bonos_pesos = [
-                                activo for activo in portafolio['activos'] 
-                                if (isinstance(activo, dict) and 
-                                    activo.get('tipo') == 'Bonos' and 
-                                    not str(activo.get('simbolo', '')).endswith('D') and 
-                                    activo.get('cantidad_disponible', 0) > 0)
-                            ]
-                        
-                        if not bonos_pesos:
-                            st.warning("No se encontraron bonos en pesos disponibles para vender en su portafolio.")
-                        else:
-                            # Mostrar tabla de bonos disponibles
-                            st.subheader("📊 Bonos en Pesos Disponibles")
-                            df_bonos = pd.DataFrame([{
-                                'Símbolo': bono.get('simbolo', ''),
-                                'Descripción': bono.get('descripcion', 'Sin descripción'),
-                                'Cantidad': bono.get('cantidad_disponible', 0),
-                                'Precio': bono.get('ultimo_precio', 0),
-                                'Moneda': bono.get('moneda', 'ARS')
-                            } for bono in bonos_pesos])
+                        # Formulario para vender bonos
+                        with st.form("venta_bono_form"):
+                            st.subheader("📝 Vender Bono")
                             
-                            st.dataframe(df_bonos, use_container_width=True)
+                            # Seleccionar bono
+                            bono_opciones = [f"{bono['simbolo']} - {bono.get('descripcion', 'Sin descripción')}" for bono in bonos_pesos]
+                            bono_seleccionado = st.selectbox(
+                                "Seleccione el bono a vender",
+                                options=bono_opciones,
+                                index=0
+                            )
                             
-                            # Formulario para vender bonos
-                            with st.form("venta_bono_form"):
-                                st.subheader("📝 Vender Bono")
-                                
-                                # Seleccionar bono
-                                bono_opciones = [f"{bono['simbolo']} - {bono.get('descripcion', 'Sin descripción')}" for bono in bonos_pesos]
-                                bono_seleccionado = st.selectbox(
-                                    "Seleccione el bono a vender",
-                                    options=bono_opciones,
-                                    index=0
-                                )
-                                
-                                # Obtener el símbolo del bono seleccionado
-                                bono_info = bonos_pesos[bono_opciones.index(bono_seleccionado)]
-                                simbolo = bono_info.get('simbolo', '')
-                                cantidad_max = int(bono_info.get('cantidad_disponible', 0))
-                                
-                                # Campos del formulario
-                                col1, col2 = st.columns(2)
-                                cantidad = col1.number_input(
-                                    "Cantidad", 
-                                    min_value=1, 
-                                    max_value=cantidad_max if cantidad_max > 0 else 1, 
-                                    value=1,
-                                    step=1,
-                                    help=f"Máximo disponible: {cantidad_max}"
-                                )
-                                
-                                precio_actual = bono_info.get('ultimo_precio', 0)
-                                precio = col2.number_input(
-                                    "Precio", 
-                                    min_value=0.0, 
-                                    value=float(precio_actual) if precio_actual else 0.0,
-                                    step=0.01,
-                                    format="%.2f"
-                                )
-                                
-                                # Fecha de validez (hoy + 1 día por defecto)
-                                validez = st.date_input(
-                                    "Válido hasta",
-                                    value=date.today() + timedelta(days=1),
-                                    min_value=date.today()
-                                )
-                                
-                                # Botón de envío
-                                submitted = st.form_submit_button("📤 Enviar Orden de Venta", use_container_width=True)
-                                
-                                if submitted:
-                                    if not all([simbolo, cantidad, precio]):
-                                        st.error("Por favor complete todos los campos obligatorios.")
-                                    else:
-                                        with st.spinner("Procesando orden de venta..."):
-                                            try:
-                                                # Llamar a la función vender_especie_d
-                                                resultado = vender_especie_d(
-                                                    token_portador=st.session_state.token_acceso,
-                                                    id_cliente=cliente_id,
-                                                    simbolo=simbolo,
-                                                    cantidad=int(cantidad),
-                                                    precio=float(precio),
-                                                    mercado="bCBA",  # Mercado por defecto
-                                                    validez=validez.strftime("%Y-%m-%d")
-                                                )
-                                                
-                                                if resultado:
-                                                    st.success("✅ Orden de venta enviada correctamente")
-                                                    st.balloons()
-                                                    st.json(resultado)
-                                                else:
-                                                    st.error("No se pudo procesar la orden de venta.")
-                                            except Exception as e:
-                                                st.error(f"Error al procesar la orden: {str(e)}")
-                    except Exception as e:
-                        st.error(f"Error al cargar el portafolio: {str(e)}")
+                            # Obtener el símbolo del bono seleccionado
+                            bono_info = bonos_pesos[bono_opciones.index(bono_seleccionado)]
+                            simbolo = bono_info.get('simbolo', '')
+                            cantidad_max = int(bono_info.get('cantidad_disponible', 0))
+                            
+                            # Campos del formulario
+                            col1, col2 = st.columns(2)
+                            cantidad = col1.number_input(
+                                "Cantidad", 
+                                min_value=1, 
+                                max_value=cantidad_max if cantidad_max > 0 else 1, 
+                                value=1,
+                                step=1,
+                                help=f"Máximo disponible: {cantidad_max}"
+                            )
+                            
+                            precio_actual = bono_info.get('ultimo_precio', 0)
+                            precio = col2.number_input(
+                                "Precio", 
+                                min_value=0.0, 
+                                value=float(precio_actual) if precio_actual else 0.0,
+                                step=0.01,
+                                format="%.2f"
+                            )
+                            
+                            # Fecha de validez (hoy + 1 día por defecto)
+                            validez = st.date_input(
+                                "Válido hasta",
+                                value=date.today() + timedelta(days=1),
+                                min_value=date.today()
+                            )
+                            
+                            # Botón de envío
+                            submitted = st.form_submit_button("📤 Enviar Orden de Venta", use_container_width=True)
+                            
+                            if submitted:
+                                if not all([simbolo, cantidad, precio]):
+                                    st.error("Por favor complete todos los campos obligatorios.")
+                                else:
+                                    with st.spinner("Procesando orden de venta..."):
+                                        try:
+                                            # Llamar a la función vender_especie_d
+                                            resultado = vender_especie_d(
+                                                token_portador=st.session_state.token_acceso,
+                                                id_cliente=cliente_id,
+                                                simbolo=simbolo,
+                                                cantidad=int(cantidad),
+                                                precio=float(precio),
+                                                mercado="bCBA",  # Mercado por defecto
+                                                validez=validez.strftime("%Y-%m-%d")
+                                            )
+                                            
+                                            if resultado:
+                                                st.success("✅ Orden de venta enviada correctamente")
+                                                st.balloons()
+                                                st.json(resultado)
+                                            else:
+                                                st.error("No se pudo procesar la orden de venta.")
+                                        except Exception as e:
+                                            st.error(f"Error al procesar la orden: {str(e)}")
+                except Exception as e:
+                    st.error(f"Error al cargar el portafolio: {str(e)}")
+    
+
     
     # Sección de Tasas de Caución (fuera de las pestañas)
     with st.expander("🏦 Tasas de Caución", expanded=True):
