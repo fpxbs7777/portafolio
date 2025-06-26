@@ -94,6 +94,23 @@ def setup_plotly():
 pio = setup_plotly()
 
 # Configuración de la página con tema oscuro profesional
+
+# --- Bloque Streamlit: Serie Histórica Dólar MEP ---
+st.header("Serie Histórica Dólar MEP")
+simbolo_base = st.selectbox("Bono en Pesos (base)", ["AL30", "GD30"], index=0)
+simbolo_mep = st.selectbox("Bono en Dólares (MEP)", ["AL30D", "GD30D"], index=0)
+fecha_desde = st.date_input("Desde", value=datetime(2021, 1, 1))
+fecha_hasta = st.date_input("Hasta", value=datetime.now())
+ajustada = st.selectbox("Ajuste", ["SinAjustar", "Ajustada"], index=0)
+
+# Token debe estar definido por el login o flujo superior
+token_portador = globals().get('token_portador', None) or globals().get('bearer_token', None)
+
+if token_portador and st.button("Mostrar Dólar MEP"):
+    graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fecha_desde.strftime("%Y-%m-%d"), fecha_hasta.strftime("%Y-%m-%d"), ajustada)
+elif not token_portador:
+    st.warning("No se detectó token de acceso. Por favor, inicia sesión primero.")
+
 st.set_page_config(
     page_title="IOL Portfolio Analyzer",
     page_icon="📊",
