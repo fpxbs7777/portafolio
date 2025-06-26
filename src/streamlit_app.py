@@ -3705,15 +3705,19 @@ def mostrar_estado_cuenta(estado_cuenta):
         df_cuentas = pd.DataFrame(datos_cuentas)
         st.dataframe(df_cuentas, use_container_width=True, height=300)
 
-def mostrar_cotizaciones_mercado(token_acceso):
+def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
     st.markdown("### 💱 Cotizaciones y Mercado")
     
-    with st.expander("💰 Cotización MEP", expanded=True):
-        with st.form("mep_form"):
-            col1, col2, col3 = st.columns(3)
-            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
-            id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
-            id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
+    # Crear pestañas para las diferentes secciones
+    tab1, tab2 = st.tabs(["💰 Cotización MEP", "💵 Vender Bonos"])
+    
+    with tab1:
+        with st.expander("Consultar Cotización MEP", expanded=True):
+            with st.form("mep_form"):
+                col1, col2, col3 = st.columns(3)
+                simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
+                id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
+                id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
             
             if st.form_submit_button("🔍 Consultar MEP"):
                 if simbolo_mep:
@@ -3922,6 +3926,8 @@ def mostrar_cotizaciones_mercado(token_acceso):
                                 # Por ahora solo mostramos un mensaje de éxito
                                 st.success(f"✅ Orden de venta para {cantidad} títulos de {bono_seleccionado} a ${precio:.2f} cada uno")
                 
+    
+    # Sección de Tasas de Caución (fuera de las pestañas)
     with st.expander("🏦 Tasas de Caución", expanded=True):
         if st.button("🔄 Actualizar Tasas"):
             with st.spinner("Consultando tasas de caución..."):
@@ -4995,8 +5001,8 @@ def mostrar_venta_especie_d():
                 
             with st.spinner("Procesando orden de venta..."):
                 resultado = vender_especie_d(
-                    token_portador=st.session_state.token_acceso,
-                    id_cliente=cliente_id,
+                    token_portador=token_acceso,
+                    id_cliente=id_cliente,
                     simbolo=simbolo.upper(),
                     cantidad=int(cantidad),
                     precio=float(precio),
