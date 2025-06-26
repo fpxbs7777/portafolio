@@ -3970,7 +3970,6 @@ def mostrar_analisis_portafolio():
     except Exception as e:
         st.error(f"❌ Error inesperado en el análisis de portafolio: {str(e)}")
         st.exception(e)  # Solo para depuración
-                            st.exception(e)
 
 def main():
     # Inicializar session state
