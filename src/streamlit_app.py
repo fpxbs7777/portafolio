@@ -2430,6 +2430,55 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
         return None
 
+def obtener_activos_desde_paneles(token_portador, max_activos=50):
+    """
+    Obtiene activos de diferentes paneles del mercado.
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        max_activos (int): Número máximo de activos a devolver
+        
+    Returns:
+        list: Lista de diccionarios con información de los activos
+    """
+    paneles = [
+        # Argentina
+        ('Acciones', 'Panel%20General', 'Argentina'),
+        ('Bonos', 'Panel%20General', 'Argentina'),
+        ('Cedears', 'Panel%20General', 'Argentina'),
+        ('FCI', 'Panel%20General', 'Argentina'),
+        # Estados Unidos
+        ('Acciones', 'Panel%20General', 'Estados_Unidos'),
+        ('Acciones', 'Panel%20NYSE', 'Estados_Unidos'),
+        ('Acciones', 'Panel%20NASDAQ', 'Estados_Unidos')
+    ]
+    
+    activos = []
+    for instrumento, panel, pais in paneles:
+        try:
+            cotizaciones = obtener_panel_cotizaciones(token_portador, instrumento, panel, pais)
+            if cotizaciones and 'titulos' in cotizaciones:
+                for titulo in cotizaciones['titulos']:
+                    if len(activos) >= max_activos:
+                        break
+                    if 'simbolo' in titulo and 'mercado' in titulo:
+                        # Detectar mercado correcto para acciones de EEUU
+                        if instrumento == 'Acciones' and pais == 'Estados_Unidos':
+                            mercado = titulo['mercado'] if 'mercado' in titulo else 'NYSE'
+                        else:
+                            mercado = titulo['mercado']
+                        
+                        activos.append({
+                            'simbolo': titulo['simbolo'],
+                            'mercado': mercado,
+                            'tipo': instrumento,
+                            'panel': panel
+                        })
+        except Exception as e:
+            st.warning(f"Error al obtener panel {panel} de {instrumento}: {str(e)}")
+    
+    return activos
+
 # --- Portfolio Metrics Function ---
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
@@ -4477,15 +4526,28 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col_sel:
         metodo_seleccion = st.selectbox(
             "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
+            options=['actual', 'aleatoria', 'paneles_mercado'],
             format_func=lambda x: {
                 'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
+                'aleatoria': 'Selección aleatoria',
+                'paneles_mercado': 'Paneles de mercado'
             }[x]
         )
 
-    # Mostrar input de capital y filtro de tipo de activo solo si corresponde
-    if metodo_seleccion == 'aleatoria':
+    # Mostrar input de capital y filtro de tipo de activo según corresponda
+    if metodo_seleccion == 'paneles_mercado':
+        with st.spinner("Obteniendo activos de los paneles de mercado..."):
+            activos_filtrados = obtener_activos_desde_paneles(token_acceso)
+        if not activos_filtrados:
+            st.error("No se pudieron obtener activos de los paneles de mercado")
+            return
+        st.success(f"Se obtuvieron {len(activos_filtrados)} activos de los paneles de mercado")
+        capital = st.number_input(
+            "Capital Inicial para Optimización (ARS):",
+            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
+            help="El monto máximo a invertir en la selección de activos del mercado"
+        )
+    elif metodo_seleccion == 'aleatoria':
         # Filtro de tipo de activo solo en aleatoria
         tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
         tipo_seleccionado = st.selectbox(
