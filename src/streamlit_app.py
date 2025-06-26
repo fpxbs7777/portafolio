@@ -3727,28 +3727,42 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         precio_mep = cotizacion_mep.get('precio', 'N/A')
                         st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
                         
-                        # Obtener datos históricos del MEP
+                        # Obtener datos históricos del MEP (últimos 30 días por defecto)
                         fecha_hasta = datetime.now().strftime("%Y-%m-%d")
-                        fecha_desde = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+                        fecha_desde = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
                         
                         with st.spinner("Obteniendo datos históricos del MEP..."):
                             # Obtener datos del bono en pesos (ej: AL30)
-                            df_pesos = obtener_serie_historica_iol(
-                                token_acceso, 
-                                'Bonos', 
-                                simbolo_mep, 
-                                fecha_desde, 
-                                fecha_hasta
-                            )
+                            try:
+                                df_pesos = obtener_serie_historica_iol(
+                                    token_acceso, 
+                                    'Bonos', 
+                                    simbolo_mep, 
+                                    fecha_desde, 
+                                    fecha_hasta
+                                )
+                                if df_pesos is None or df_pesos.empty:
+                                    st.warning(f"No se encontraron datos históricos para {simbolo_mep} en el rango de fechas especificado.")
+                                    return
+                            except Exception as e:
+                                st.error(f"Error al obtener datos históricos para {simbolo_mep}: {str(e)}")
+                                return
                             
                             # Obtener datos del bono en dólares (ej: AL30D)
-                            df_dolares = obtener_serie_historica_iol(
-                                token_acceso, 
-                                'Bonos', 
-                                f"{simbolo_mep}D", 
-                                fecha_desde, 
-                                fecha_hasta
-                            )
+                            try:
+                                df_dolares = obtener_serie_historica_iol(
+                                    token_acceso, 
+                                    'Bonos', 
+                                    f"{simbolo_mep}D", 
+                                    fecha_desde, 
+                                    fecha_hasta
+                                )
+                                if df_dolares is None or df_dolares.empty:
+                                    st.warning(f"No se encontraron datos históricos para {simbolo_mep}D en el rango de fechas especificado.")
+                                    return
+                            except Exception as e:
+                                st.error(f"Error al obtener datos históricos para {simbolo_mep}D: {str(e)}")
+                                return
                             
                             if df_pesos is not None and df_dolares is not None and not df_pesos.empty and not df_dolares.empty:
                                 # Unir los DataFrames por fecha para calcular el MEP
