@@ -1528,53 +1528,77 @@ def portfolio_variance(x, mtx_var_covar):
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
-    # special portfolios    
-    label1 = 'min-variance-l1'
-    label2 = 'min-variance-l2'
-    label3 = 'equi-weight'
-    label4 = 'long-only'
-    label5 = 'markowitz-none'
-    label6 = 'markowitz-target'
-    
-    # compute covariance matrix
-    port_mgr = manager(rics, notional, data)
-    port_mgr.compute_covariance()
-    
-    # compute vectors of returns and volatilities for Markowitz portfolios
-    min_returns = np.min(port_mgr.mean_returns)
-    max_returns = np.max(port_mgr.mean_returns)
-    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
-    volatilities = []
-    valid_returns = []
-    
-    for ret in returns:
+    try:
+        # Verificar datos de entrada
+        if not rics or not isinstance(rics, list) or len(rics) == 0:
+            raise ValueError("La lista de RICs no puede estar vacía")
+            
+        if not isinstance(notional, (int, float)) or notional <= 0:
+            raise ValueError("El notional debe ser un número positivo")
+            
+        if data is None or data.empty:
+            raise ValueError("No hay datos disponibles para el análisis")
+            
+        # special portfolios    
+        label1 = 'min-variance-l1'
+        label2 = 'min-variance-l2'
+        label3 = 'equi-weight'
+        label4 = 'long-only'
+        label5 = 'markowitz-none'
+        label6 = 'markowitz-target'
+        
+        # compute covariance matrix
+        port_mgr = manager(rics, notional, data)
+        
+        if port_mgr is None:
+            raise ValueError("No se pudo inicializar el gestor de portafolio")
+            
+        port_mgr.compute_covariance()
+        
+        if port_mgr.mean_returns is None or port_mgr.cov_matrix is None:
+            raise ValueError("No se pudieron calcular las matrices de retorno y covarianza")
+            
+        # compute vectors of returns and volatilities for Markowitz portfolios
+        min_returns = np.min(port_mgr.mean_returns)
+        max_returns = np.max(port_mgr.mean_returns)
+        returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
+        volatilities = []
+        valid_returns = []
+        
+        for ret in returns:
+            try:
+                port = port_mgr.compute_portfolio('markowitz', ret)
+                if port is not None and hasattr(port, 'volatility_annual'):
+                    volatilities.append(port.volatility_annual)
+                    valid_returns.append(ret)
+            except Exception as e:
+                continue
+        
+        # compute special portfolios
+        portfolios = {}
         try:
-            port = port_mgr.compute_portfolio('markowitz', ret)
-            volatilities.append(port.volatility_annual)
-            valid_returns.append(ret)
-        except:
-            continue
-    
-    # compute special portfolios
-    portfolios = {}
-    try:
-        portfolios[label1] = port_mgr.compute_portfolio(label1)
-    except:
-        portfolios[label1] = None
+            portfolios[label1] = port_mgr.compute_portfolio(label1)
+        except Exception as e:
+            portfolios[label1] = None
+            
+        try:
+            portfolios[label2] = port_mgr.compute_portfolio(label2)
+        except Exception as e:
+            portfolios[label2] = None
+            
+        portfolios[label3] = port_mgr.compute_portfolio(label3)
+        portfolios[label4] = port_mgr.compute_portfolio(label4)
+        portfolios[label5] = port_mgr.compute_portfolio('markowitz')
         
-    try:
-        portfolios[label2] = port_mgr.compute_portfolio(label2)
-    except:
-        portfolios[label2] = None
+        try:
+            portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
+        except Exception as e:
+            portfolios[label6] = None
+            
+        return portfolios, valid_returns, volatilities
         
-    portfolios[label3] = port_mgr.compute_portfolio(label3)
-    portfolios[label4] = port_mgr.compute_portfolio(label4)
-    portfolios[label5] = port_mgr.compute_portfolio('markowitz')
-    
-    try:
-        portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
-    except:
-        portfolios[label6] = None
+    except Exception as e:
+        raise ValueError(f"Error al calcular la frontera eficiente: {str(e)}")
     
     return portfolios, valid_returns, volatilities
 
@@ -2012,141 +2036,6 @@ class PortfolioManager:
         
         Args:
             strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight')
-            target_return (float, optional): Retorno objetivo para estrategias que lo requieran
-            
-        Returns:
-            output: Objeto output con la cartera optimizada o None en caso de error
-        """
-        if not self.data_loaded or self.returns is None or self.returns.empty:
-            st.error("No hay datos de retornos disponibles")
-            return None
-            
-        try:
-            # Inicializar el manager si no existe
-            if not hasattr(self, 'manager') or not self.manager:
-                self.manager = manager(
-                    rics=self.returns.columns.tolist(),
-                    notional=self.notional,
-                    data=self.prices.to_dict('series')
-                )
-                
-                # Cargar datos y calcular covarianzas
-                self.manager.returns = self.returns
-                self.manager.compute_covariance()
-                
-            # Calcular cartera según estrategia
-            if strategy == 'min_vol':
-                portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type='min_variance',
-                    target_return=target_return
-                )
-            elif strategy == 'max_sharpe':
-                # Para max_sharpe, usamos markowitz sin retorno objetivo para maximizar el ratio de Sharpe
-                portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type='markowitz',
-                    target_return=None
-                )
-                
-                if portfolio_output is None:
-                    st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
-                    n_assets = len(self.returns.columns)
-                    weights = np.array([1/n_assets] * n_assets)
-                    portfolio_returns = (self.returns * weights).sum(axis=1)
-                    portfolio_output = output(portfolio_returns, self.notional)
-                    portfolio_output.weights = weights
-                    portfolio_output.dataframe_allocation = pd.DataFrame({
-                        'rics': list(self.returns.columns),
-                        'weights': weights,
-                        'volatilities': self.returns.std().values,
-                        'returns': self.returns.mean().values
-                    })
-                
-                return portfolio_output
-                
-            elif strategy == 'equi-weight':
-                n_assets = len(self.returns.columns)
-                weights = np.array([1/n_assets] * n_assets)
-                portfolio_returns = (self.returns * weights).sum(axis=1)
-                portfolio_output = output(portfolio_returns, self.notional)
-                portfolio_output.weights = weights
-                portfolio_output.dataframe_allocation = pd.DataFrame({
-                    'rics': list(self.returns.columns),
-                    'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
-                })
-                return portfolio_output
-                
-            else:
-                st.error(f"Estrategia no soportada: {strategy}")
-                return None
-                
-        except Exception as e:
-            st.error(f"Error al calcular la cartera: {str(e)}")
-            st.exception(e)
-            return None
-    
-    def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
-        """Computa la frontera eficiente"""
-        if not self.data_loaded or not hasattr(self, 'prices') or self.prices is None:
-            st.error("No hay datos de precios disponibles")
-            return None, None, None
-        
-        try:
-            portfolios, returns, volatilities = compute_efficient_frontier(
-                self.prices.columns.tolist(), 
-                self.notional,
-                target_return,
-                include_min_variance,
-                self.prices
-            )
-            return portfolios, returns, volatilities
-            
-        except Exception as e:
-            st.error(f"Error al calcular la frontera eficiente: {str(e)}")
-            st.exception(e)
-            return None, None, None
-            
-    def calcular_vwap_portafolio(self):
-        """
-        Calcula el VWAP (Volume Weighted Average Price) para cada activo en el portafolio
-        y el VWAP global ponderado por el valor de mercado de cada posición.
-        
-        Returns:
-            dict: Diccionario con los datos de VWAP por activo y el VWAP del portafolio
-        """
-        if not self.data_loaded or self.prices is None or self.volumes is None:
-            st.warning("Cargando datos de precios y volúmenes...")
-            self.load_data()
-            
-        if self.prices is None or self.volumes is None:
-            st.error("No se pudieron cargar los datos necesarios para el cálculo del VWAP")
-            return None
-            
-        try:
-            # Calcular VWAP para cada activo
-            vwap_data = {}
-            
-            for symbol in self.prices.columns:
-                if symbol in self.volumes.columns:
-                    # Calcular VWAP diario para cada activo
-                    prices = self.prices[symbol]
-                    volumes = self.volumes[symbol]
-                    
-                    # Calcular VWAP diario (suma de (precio * volumen) / suma de volúmenes)
-                    vwap_diario = (prices * volumes).groupby(pd.Grouper(freq='D')).sum() / \
-                                 volumes.groupby(pd.Grouper(freq='D')).sum()
-                    
-                    vwap_data[symbol] = vwap_diario
-            
-            # Calcular VWAP ponderado del portafolio
-            if vwap_data:
-                # Crear DataFrame con los VWAPs
-                vwap_df = pd.DataFrame(vwap_data)
-                
-                # Obtener la ponderación de cada activo en el portafolio
-                if hasattr(self, 'manager') and hasattr(self.manager, 'dataframe_allocation'):
-                    # Usar los pesos de la optimización si están disponibles
                     weights = dict(zip(
                         self.manager.dataframe_allocation['rics'],
                         self.manager.dataframe_allocation['weights']
@@ -4258,7 +4147,7 @@ def mostrar_analisis_portafolio():
                                                 
                                                 # Explicación del VaR
                                                 st.info(f"""
-                                                💡 El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_94):.2%} 
+                                                💡 El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_95):.2%} 
                                                 indica que hay un {100-conf_level}% de probabilidad de que la pérdida 
                                                 diaria no supere este valor en condiciones normales de mercado.
                                                 """)
