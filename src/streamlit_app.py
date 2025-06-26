@@ -5,6 +5,7 @@ import time
 import json
 import random
 import warnings
+import requests  # Keep this import at the top level
 from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple, Union, Any
 
@@ -47,6 +48,9 @@ minimize = get_import('scipy.optimize', ['minimize'])
 gaussian_kde = get_import('scipy.stats', ['gaussian_kde'])
 yf = get_import('yfinance')
 components = get_import('streamlit.components.v1')
+
+# Ensure requests is available in the global scope
+requests = requests
 
 # Caching configuration
 CACHE_TTL = 3600  # 1 hour cache
