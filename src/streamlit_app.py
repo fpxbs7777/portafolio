@@ -5025,7 +5025,7 @@ def main():
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
             
-            # Obtener lista de clientes
+            # Cargar lista de clientes si no está en el estado de la sesión
     if not st.session_state.clientes and st.session_state.token_acceso:
         with st.spinner("Cargando clientes..."):
             try:
@@ -5035,9 +5035,6 @@ def main():
                 else:
                     error_msg = clientes.get('error', 'No se pudo obtener la lista de clientes') if isinstance(clientes, dict) else 'No se encontraron clientes'
                     st.warning(f"{error_msg}. Por favor, verifique su conexión y permisos.")
-                    # Mostrar botón para recargar
-                    if st.button("Reintentar carga de clientes"):
-                        st.rerun()
             except Exception as e:
                 st.error(f"Error al cargar clientes: {str(e)}")
                 if "401" in str(e):
@@ -5045,39 +5042,54 @@ def main():
                     st.session_state.token_acceso = None
                     st.session_state.refresh_token = None
                     st.rerun()
-            
-            clientes = st.session_state.clientes
-            
-            if clientes:
-                st.subheader("Selección de Cliente")
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed",
-                    key="sidebar_cliente_selector"
-                )
-                
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
-                
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
-                    with st.spinner("Actualizando..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista actualizada")
-                        st.rerun()
-            else:
-                st.warning("No se encontraron clientes")
 
     # Contenido principal
     try:
         if st.session_state.token_acceso:
+            # Mostrar selector de cliente en la barra lateral
+            with st.sidebar:
+                st.header("👤 Cliente")
+                if st.session_state.clientes:
+                    cliente_ids = [c.get('numeroCliente', c.get('id')) for c in st.session_state.clientes]
+                    cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', f'Cliente {i}')) for i, c in enumerate(st.session_state.clientes, 1)]
+                    
+                    # Mostrar el selector de cliente con el nombre completo
+                    cliente_seleccionado = st.selectbox(
+                        "Seleccione un cliente:",
+                        options=cliente_ids,
+                        format_func=lambda x: cliente_nombres[cliente_ids.index(x)],
+                        key="cliente_selector"
+                    )
+                    
+                    # Actualizar el cliente seleccionado en el estado de la sesión
+                    st.session_state.cliente_seleccionado = next(
+                        (c for c in st.session_state.clientes 
+                         if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                        None
+                    )
+                    
+                    # Mostrar información del cliente seleccionado
+                    if st.session_state.cliente_seleccionado:
+                        cliente = st.session_state.cliente_seleccionado
+                        st.caption(f"💼 {cliente.get('tipoPersona', 'Cliente')}")
+                        if 'cuentas' in cliente:
+                            st.caption(f"📋 {len(cliente['cuentas'])} cuentas")
+                        
+                        # Botón para actualizar la lista de clientes
+                        if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+                            with st.spinner("Actualizando..."):
+                                nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                                if nuevos_clientes and 'error' not in nuevos_clientes:
+                                    st.session_state.clientes = nuevos_clientes
+                                    st.success("✅ Lista actualizada")
+                                    st.rerun()
+                                else:
+                                    st.error("Error al actualizar la lista de clientes")
+                else:
+                    st.warning("No se encontraron clientes")
+                    if st.button("🔄 Reintentar carga de clientes"):
+                        st.rerun()
+            
             st.sidebar.header("📋 Menú")
             opciones_menu = [
                 "📊 Resumen del Portafolio",
