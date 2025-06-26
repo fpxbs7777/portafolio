@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 from plotly.subplots import make_subplots
 from arch import arch_model
@@ -3435,27 +3436,50 @@ def mostrar_analisis_portafolio():
                             st.error(f"Error en el análisis de volatilidad: {str(e)}")
                             st.exception(e)
 
-def main():
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+def mostrar_bonos_mep():
+    """Muestra un gráfico con los precios históricos de los bonos MEP"""
+    st.header("📈 Bonos MEP - Análisis Histórico")
     
-    # Inicializar session state
-    if 'token_acceso' not in st.session_state:
-        st.session_state.token_acceso = None
-    if 'refresh_token' not in st.session_state:
-        st.session_state.refresh_token = None
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = []
-    if 'cliente_seleccionado' not in st.session_state:
-        st.session_state.cliente_seleccionado = None
-    if 'fecha_desde' not in st.session_state:
-        st.session_state.fecha_desde = date.today() - timedelta(days=365)
-    if 'fecha_hasta' not in st.session_state:
-        st.session_state.fecha_hasta = date.today()
+    with st.expander("ℹ️ Información", expanded=False):
+        st.markdown("""
+        Este gráfico muestra la evolución histórica de los principales bonos que cotizan en el mercado MEP (Mercado de Efectivo y Pago).
+        Los precios se obtienen en tiempo real a través de Yahoo Finance.
+        """)
     
-    # Barra lateral - Autenticación
-    with st.sidebar:
-        st.header("🔐 Autenticación IOL")
+    # Lista de bonos MEP con sus tickers en Yahoo Finance
+    bonos_mep = {
+        'AL30D': 'AL30D.BA',
+        'GD30D': 'GD30D.BA',
+        'AL29D': 'AL29D.BA',
+        'GD29D': 'GD29D.BA',
+        'AL35D': 'AL35D.BA',
+        'GD35D': 'GD35D.BA'
+    }
+    
+    # Widget para seleccionar el período de tiempo
+    periodo = st.selectbox(
+        "Seleccione el período de tiempo:",
+        ["Último mes", "Últimos 3 meses", "Últimos 6 meses", "Último año", "Máximo histórico"],
+        index=3
+    )
+    
+    # Mapear la selección a días
+    periodos_dias = {
+        "Último mes": 30,
+        "Últimos 3 meses": 90,
+        "Últimos 6 meses": 180,
+        "Último año": 365,
+        "Máximo histórico": 365*10  # 10 años para el máximo histórico
+    }
+    
+    dias = periodos_dias[periodo]
+    fecha_fin = datetime.now()
+    fecha_ini = fecha_fin - timedelta(days=dias)
+    
+    # Mostrar indicador de carga
+    with st.spinner(f'Obteniendo datos históricos de bonos MEP ({periodo.lower()})...'):
+        # Obtener datos históricos para cada bono
+        datos = {}
         
         if st.session_state.token_acceso is None:
             with st.form("login_form"):
@@ -3546,7 +3570,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "📈 Bonos MEP", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -3563,6 +3587,8 @@ def main():
                     mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para ver las tasas de caución")
+            elif opcion == "📈 Bonos MEP":
+                mostrar_bonos_mep()
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
