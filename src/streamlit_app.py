@@ -2736,17 +2736,17 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         if metricas:
             if metricas['concentracion'] > 0.5:
                 st.warning("""
-                **⚠️ Portafolio Altamente Concentrado**  
+                **ALERTA: Portafolio Altamente Concentrado**  
                 Considere diversificar sus inversiones para reducir el riesgo.
                 """)
             elif metricas['concentracion'] > 0.25:
                 st.info("""
-                **ℹ️ Concentración Moderada**  
+                **INFO: Concentración Moderada**  
                 Podría mejorar su diversificación para optimizar el riesgo.
                 """)
             else:
                 st.success("""
-                **✅ Buena Diversificación**  
+                **EXITO: Buena Diversificación**  
                 Su portafolio está bien diversificado.
                 """)
             
