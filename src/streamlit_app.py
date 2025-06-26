@@ -1473,6 +1473,33 @@ class manager:
             constraints=constraints
         )
         return self._create_output(result.x)
+        
+    def _create_output(self, weights):
+        """
+        Crea un objeto de salida para la cartera con los pesos dados.
+        
+        Args:
+            weights (np.array): Vector de pesos de la cartera
+            
+        Returns:
+            output: Objeto con la cartera optimizada
+        """
+        # Calcular retornos de la cartera
+        portfolio_returns = self.returns.dot(weights)
+        
+        # Crear objeto de salida
+        port_output = output(portfolio_returns, self.notional)
+        port_output.weights = dict(zip(self.rics, weights))
+        
+        # Crear DataFrame con la asignación
+        allocation = pd.DataFrame({
+            'Activo': self.rics,
+            'Peso': weights,
+            'Retorno Anual': self.mean_returns * 252 if self.mean_returns is not None else [0] * len(weights)
+        })
+        port_output.dataframe_allocation = allocation
+        
+        return port_output
 
 class output:
     def __init__(self, returns, notional):
@@ -2653,17 +2680,41 @@ def seleccionar_activos_aleatorios(perfil: dict, activos_disponibles: Dict[str, 
         st.warning("No se encontró información de composición en el perfil")
         return []
     
+    # Mapeo de tipos de activos a claves en activos_disponibles
+    tipo_a_clave = {
+        'acciones': ['acciones', 'equity', 'stocks'],
+        'bonos': ['bonos', 'bonds', 'obligaciones'],
+        'fondos': ['fondos', 'fci', 'fondos_comunes'],
+        'cauciones': ['cauciones', 'repos', 'repos'],
+        'plazo fijo': ['plazofijo', 'plazo_fijo', 'pf']
+    }
+    
     for composicion in perfil['perfilSugerido']['perfilComposiciones']:
         tipo_activo = composicion['nombre'].lower()
         porcentaje = composicion['porcentaje'] / 100.0  # Convertir a fracción
         
         # Buscar activos disponibles para este tipo
         activos_tipo = []
-        for key in activos_disponibles:
-            if tipo_activo in key.lower():
-                activos_tipo.extend(activos_disponibles[key])
         
-        # Si hay activos disponibles, seleccionar uno al azar
+        # Buscar por coincidencia exacta primero
+        if tipo_activo in activos_disponibles:
+            activos_tipo = activos_disponibles[tipo_activo]
+        else:
+            # Si no hay coincidencia exacta, buscar por palabras clave
+            for key, keywords in tipo_a_clave.items():
+                if any(kw in tipo_activo for kw in keywords):
+                    if key in activos_disponibles:
+                        activos_tipo = activos_disponibles[key]
+                        break
+        
+        # Si aún no encontramos activos, intentar coincidencias parciales
+        if not activos_tipo:
+            for key in activos_disponibles:
+                if any(kw in tipo_activo for kw in key.lower().split()):
+                    activos_tipo = activos_disponibles[key]
+                    break
+        
+        # Si encontramos activos, seleccionar uno al azar
         if activos_tipo:
             activo_seleccionado = random.choice(activos_tipo)
             cartera.append({
@@ -2766,13 +2817,33 @@ def mostrar_test_perfil_inversor(token_portador: str, id_cliente: str = None):
     if st.session_state.get('test_completado', False) and 'perfil_inversor' in st.session_state:
         st.subheader("Generar Cartera de Inversión")
         
-        # Ejemplo de activos disponibles (en un caso real, estos vendrían de la API)
+        # Activos de ejemplo organizados por tipo
         activos_ejemplo = {
-            'acciones': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META'],
-            'bonos': ['AL30', 'GD30', 'AL35', 'GD35', 'AL41'],
-            'fondos': ['FCI1', 'FCI2', 'FCI3', 'FCI4', 'FCI5'],
-            'cauciones': ['CAU1', 'CAU2', 'CAU3', 'CAU4', 'CAU5'],
-            'plazofijo': ['PF1', 'PF2', 'PF3', 'PF4', 'PF5']
+            # Acciones locales e internacionales
+            'acciones': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'GGAL', 'YPF', 'PAMP', 'BMA', 'TEO'],
+            'acciones_nyse': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'JPM', 'V', 'JNJ', 'WMT'],
+            'acciones_nasdaq': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'ADBE', 'INTC', 'CSCO'],
+            'acciones_bcba': ['GGAL', 'YPF', 'PAMP', 'BMA', 'TEO', 'TGS', 'COME', 'PGR', 'TGSU2', 'TXAR'],
+            
+            # Bonos y títulos públicos
+            'bonos': ['AL30', 'GD30', 'AL35', 'GD35', 'AL41', 'GD46', 'AL29', 'GD29', 'AL30D', 'GD30D'],
+            'títulos_públicos': ['AL30', 'GD30', 'AL35', 'GD35', 'AL41', 'GD46', 'AL29', 'GD29', 'TX26', 'TX28'],
+            
+            # Fondos comunes de inversión
+            'fondos': ['FCI1', 'FCI2', 'FCI3', 'FCI4', 'FCI5', 'FCI6', 'FCI7', 'FCI8', 'FCI9', 'FCI10'],
+            'fci_renta_variable': ['FCIRV1', 'FCIRV2', 'FCIRV3', 'FCIRV4', 'FCIRV5'],
+            'fci_renta_fija': ['FCIRF1', 'FCIRF2', 'FCIRF3', 'FCIRF4', 'FCIRF5'],
+            'fci_mixto': ['FCIM1', 'FCIM2', 'FCIM3', 'FCIM4', 'FCIM5'],
+            
+            # Instrumentos de corto plazo
+            'cauciones': ['CAU1', 'CAU2', 'CAU3', 'CAU4', 'CAU5', 'CAU7', 'CAU14', 'CAU28', 'CAU42', 'CAU56'],
+            'plazo_fijo': ['PF1', 'PF2', 'PF3', 'PF4', 'PF5', 'PF30', 'PF60', 'PF90', 'PF120', 'PF180'],
+            'plazofijo': ['PF1', 'PF2', 'PF3', 'PF4', 'PF5', 'PF30', 'PF60', 'PF90', 'PF120', 'PF180'],
+            
+            # Otros instrumentos
+            'cedears': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'BABA', 'MELI', 'VIST'],
+            'obligaciones_negociables': ['ON1', 'ON2', 'ON3', 'ON4', 'ON5', 'ON6', 'ON7', 'ON8', 'ON9', 'ON10'],
+            'futuros': ['RFX20MAR24', 'RFX20JUN24', 'RFX20SEP24', 'RFX20DIC24', 'DLR/MAE24']
         }
         
         capital = st.number_input(
@@ -2906,7 +2977,31 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General
+        # Inicializar métricas con valores por defecto
+        metricas = {
+            'retorno_esperado_anual': 0,
+            'std_dev_activo': 0,
+            'concentracion': 0,
+            'pl_esperado_min': 0,
+            'pl_esperado_max': 0,
+            'probabilidades': {
+                'perdida': 0,
+                'ganancia': 0,
+                'perdida_mayor_10': 0,
+                'ganancia_mayor_10': 0
+            },
+            'riesgo_anual': 0
+        }
+        
+        # Calcular métricas del portafolio si hay datos
+        if datos_activos and valor_total > 0:
+            try:
+                portafolio_dict = {row['Símbolo']: row for row in datos_activos}
+                metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
+            except Exception as e:
+                st.error(f"Error al calcular métricas del portafolio: {str(e)}")
+        
+        # Mostrar información general
         cols = st.columns(4)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
@@ -3519,7 +3614,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                     title="Frontera Eficiente",
                                     xaxis_title="Volatilidad Anual",
                                     yaxis_title="Retorno Anual",
-                                    template="plotly_dark"
+                                    template="plotly_white"
                                 )
                                 st.plotly_chart(fig_frontier, use_container_width=True)
                             except Exception as e:
@@ -4027,16 +4122,25 @@ def main():
             st.session_state.fecha_hasta = fecha_hasta
             
             # Obtener lista de clientes
-            if not st.session_state.clientes and st.session_state.token_acceso:
-                with st.spinner("Cargando clientes..."):
-                    try:
-                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        if clientes:
-                            st.session_state.clientes = clientes
-                        else:
-                            st.warning("No se encontraron clientes")
-                    except Exception as e:
-                        st.error(f"Error al cargar clientes: {str(e)}")
+    if not st.session_state.clientes and st.session_state.token_acceso:
+        with st.spinner("Cargando clientes..."):
+            try:
+                clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                if clientes and 'error' not in clientes:
+                    st.session_state.clientes = clientes
+                else:
+                    error_msg = clientes.get('error', 'No se pudo obtener la lista de clientes') if isinstance(clientes, dict) else 'No se encontraron clientes'
+                    st.warning(f"{error_msg}. Por favor, verifique su conexión y permisos.")
+                    # Mostrar botón para recargar
+                    if st.button("Reintentar carga de clientes"):
+                        st.rerun()
+            except Exception as e:
+                st.error(f"Error al cargar clientes: {str(e)}")
+                if "401" in str(e):
+                    st.warning("Sesión expirada. Por favor, vuelva a iniciar sesión.")
+                    st.session_state.token_acceso = None
+                    st.session_state.refresh_token = None
+                    st.rerun()
             
             clientes = st.session_state.clientes
             
