@@ -18,6 +18,59 @@ import streamlit.components.v1 as components
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
+"""
+---
+Trading de Alta Frecuencia (HFT) - Teoría y Modelos Clave
+
+1. ¿Qué es HFT?
+- Trading algorítmico que utiliza la velocidad como ventaja competitiva.
+- Estrategias: 
+    * Proveedores de liquidez: Usan órdenes limitadas para ganar el spread.
+    * Tomadores de liquidez: Consumen liquidez con arbitraje, estrategias direccionales, etc.
+    * Explotadores de microestructuras: Se aprovechan de fallas estructurales del mercado.
+
+2. Impacto de Mercado y Ejecución Óptima
+- El impacto de mercado es el cambio de precio causado por la actividad de trading, especialmente grandes órdenes.
+- El impacto suele ser cóncavo respecto al tamaño de la orden: crece más lento a medida que la orden es mayor.
+- Los modelos de ejecución óptima buscan balancear el impacto de mercado (operar rápido) y el riesgo de mercado (operar lento).
+
+3. Riesgo de Inventario y Provisión de Liquidez
+- Los proveedores de liquidez ganan el spread, pero enfrentan riesgo de inventario y selección adversa.
+- El control estocástico permite derivar reglas óptimas para cotizar y gestionar inventario.
+
+4. Conclusiones
+- HFT abarca varias estrategias; la velocidad es clave.
+- El impacto de mercado es central en la ejecución óptima.
+- La provisión de liquidez requiere balancear spread y riesgo de inventario.
+---
+"""
+
+def optimal_execution_example(N, v, sigma, V, kappa, gamma, lambd):
+    """
+    Ejemplo ilustrativo de un modelo de ejecución óptima de órdenes.
+    Args:
+        N (int): Número de pasos de ejecución
+        v (float): Total de acciones a ejecutar
+        sigma (float): Volatilidad por período
+        V (float): Volumen típico por período
+        kappa (float): Parámetro de impacto de mercado
+        gamma (float): Exponente de impacto (usualmente ~0.5)
+        lambd (float): Aversión al riesgo
+    Returns:
+        x (np.ndarray): Inventario restante óptimo en cada paso
+    """
+    tau = 1
+    x = np.zeros(N+1)
+    x[0] = v
+    for n in range(1, N+1):
+        x[n] = x[n-1] - v/N
+    return x
+
+# Puedes usar esta función para simular una curva de trading óptima:
+# N = 10; v = 10000; sigma = 0.01; V = 50000; kappa = 0.1; gamma = 0.5; lambd = 0.01
+# x = optimal_execution_example(N, v, sigma, V, kappa, gamma, lambd)
+# print("Inventario restante óptimo:", x)
+
 warnings.filterwarnings('ignore')
 
 # Configuración de la página con tema oscuro profesional
@@ -2066,10 +2119,6 @@ class PortfolioManager:
             }
             
         except Exception as e:
-            st.error(f"Error al calcular el VWAP: {str(e)}")
-            st.exception(e)
-            return None
-    
     def optimizar_portafolio_vwap(self, target_return=None, max_volatility=None, min_weight=0.0, max_weight=1.0):
         """
         Optimiza el portafolio utilizando el VWAP como referencia para los precios.
