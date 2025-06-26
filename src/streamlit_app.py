@@ -3736,7 +3736,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                             try:
                                 df_pesos = obtener_serie_historica_iol(
                                     token_acceso, 
-                                    'Bonos', 
+                                    'BCBA',  # Usar 'BCBA' para bonos argentinos
                                     simbolo_mep, 
                                     fecha_desde, 
                                     fecha_hasta
@@ -3752,7 +3752,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                             try:
                                 df_dolares = obtener_serie_historica_iol(
                                     token_acceso, 
-                                    'Bonos', 
+                                    'BCBA',  # Usar 'BCBA' para bonos argentinos en dólares
                                     f"{simbolo_mep}D", 
                                     fecha_desde, 
                                     fecha_hasta
