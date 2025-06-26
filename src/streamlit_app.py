@@ -2553,41 +2553,43 @@ def mostrar_estado_cuenta(estado_cuenta):
         df_cuentas = pd.DataFrame(datos_cuentas)
         st.dataframe(df_cuentas, use_container_width=True, height=300)
 
-def obtener_serie_historica_mep(token_acceso, fecha_desde, fecha_hasta):
+def obtener_serie_historica_mep(token_acceso, simbolo_local, simbolo_extranjero, fecha_desde, fecha_hasta):
     """
-    Obtiene la serie histórica del dolar MEP calculando AL30/AL30D
+    Obtiene la serie histórica del dolar MEP calculando el ratio entre dos bonos
     """
     try:
-        # Obtener series históricas de AL30 y AL30D
-        al30 = obtener_serie_historica_iol(
+        # Obtener series históricas de los bonos seleccionados
+        bono_local = obtener_serie_historica_iol(
             token_acceso, 
-            "Bonos", 
-            "AL30", 
+            "BCBA", 
+            simbolo_local, 
             fecha_desde, 
             fecha_hasta
         )
         
-        al30d = obtener_serie_historica_iol(
+        bono_extranjero = obtener_serie_historica_iol(
             token_acceso, 
-            "Bonos", 
-            "AL30D", 
+            "BCBA", 
+            simbolo_extranjero, 
             fecha_desde, 
             fecha_hasta
         )
         
-        if al30 is None or al30d is None:
+        if bono_local is None or bono_extranjero is None:
             return None
         
         # Unir las series en una sola tabla
         df = pd.merge(
-            al30, 
-            al30d, 
+            bono_local, 
+            bono_extranjero, 
             on='fecha',
-            suffixes=('_al30', '_al30d')
+            suffixes=(f'_{simbolo_local}', f'_{simbolo_extranjero}')
         )
         
-        # Calcular el precio MEP
-        df['precio_mep'] = df['precio_al30'] / df['precio_al30d']
+        # Calcular el precio MEP (ratio entre los dos bonos)
+        precio_local = df[f'precio_{simbolo_local}']
+        precio_extranjero = df[f'precio_{simbolo_extranjero}']
+        df['precio_mep'] = precio_local / precio_extranjero
         
         return df[['fecha', 'precio_mep']]
     except Exception as e:
@@ -2620,41 +2622,65 @@ def mostrar_cotizaciones_mercado(token_acceso):
     
     with st.expander("📈 Serie Histórica Dólar MEP", expanded=True):
         with st.form("historical_mep_form"):
-            col1, col2 = st.columns(2)
-            fecha_desde = col1.date_input("Fecha Desde", value=pd.to_datetime('2023-01-01'))
-            fecha_hasta = col2.date_input("Fecha Hasta", value=pd.to_datetime('today'))
+            col1, col2, col3 = st.columns(3)
+            simbolo_local = col1.text_input("Bono Local (ej: AL30)", value="AL30")
+            simbolo_extranjero = col2.text_input("Bono Extranjero (ej: AL30D)", value="AL30D")
+            fecha_desde = col3.date_input("Fecha Desde", value=pd.to_datetime('2023-01-01'))
+            fecha_hasta = col3.date_input("Fecha Hasta", value=pd.to_datetime('today'))
             
             if st.form_submit_button("🔍 Consultar Historial"):
-                with st.spinner("Consultando serie histórica MEP..."):
-                    serie_historica = obtener_serie_historica_mep(
-                        token_acceso, 
-                        fecha_desde.strftime('%Y-%m-%d'),
-                        fecha_hasta.strftime('%Y-%m-%d')
-                    )
-                    
-                    if serie_historica is not None and not serie_historica.empty:
-                        # Crear gráfico con Plotly
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=serie_historica['fecha'],
-                            y=serie_historica['precio_mep'],
-                            mode='lines',
-                            name='Dólar MEP'
-                        ))
-                        
-                        fig.update_layout(
-                            title='Serie Histórica Dólar MEP (AL30/AL30D)',
-                            xaxis_title='Fecha',
-                            yaxis_title='Precio',
-                            template='plotly_dark'
+                if not simbolo_local or not simbolo_extranjero:
+                    st.error("Por favor ingrese ambos símbolos")
+                else:
+                    with st.spinner(f"Consultando serie histórica MEP ({simbolo_local}/{simbolo_extranjero})..."):
+                        serie_historica = obtener_serie_historica_mep(
+                            token_acceso,
+                            simbolo_local,
+                            simbolo_extranjero,
+                            fecha_desde.strftime('%Y-%m-%d'),
+                            fecha_hasta.strftime('%Y-%m-%d')
                         )
                         
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Mostrar tabla con los datos
-                        st.dataframe(serie_historica, use_container_width=True)
-                    else:
-                        st.error("❌ No se pudo obtener la serie histórica")
+                        if serie_historica is not None and not serie_historica.empty:
+                            # Crear gráfico con Plotly
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=serie_historica['fecha'],
+                                y=serie_historica['precio_mep'],
+                                mode='lines',
+                                name=f'Dólar MEP ({simbolo_local}/{simbolo_extranjero})'
+                            ))
+                            
+                            # Calcular estadísticas
+                            ultimo_valor = serie_historica['precio_mep'].iloc[-1]
+                            max_valor = serie_historica['precio_mep'].max()
+                            min_valor = serie_historica['precio_mep'].min()
+                            media_valor = serie_historica['precio_mep'].mean()
+                            
+                            fig.update_layout(
+                                title=f'Serie Histórica Dólar MEP ({simbolo_local}/{simbolo_extranjero})',
+                                xaxis_title='Fecha',
+                                yaxis_title='Precio',
+                                template='plotly_dark',
+                                annotations=[
+                                    dict(
+                                        x=0.5,
+                                        y=1.1,
+                                        xref='paper',
+                                        yref='paper',
+                                        text=f'Último: ${ultimo_valor:.2f} | Máx: ${max_valor:.2f} | Mín: ${min_valor:.2f} | Prom: ${media_valor:.2f}',
+                                        showarrow=False,
+                                        font=dict(size=12)
+                                    )
+                                ]
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Mostrar tabla con los datos
+                            st.dataframe(serie_historica, use_container_width=True)
+                        else:
+                            st.error("❌ No se pudo obtener la serie histórica. Verifique los símbolos e intente nuevamente.")
     
     with st.expander("🏦 Tasas de Caución", expanded=True):
         if st.button("🔄 Actualizar Tasas"):
