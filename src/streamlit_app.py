@@ -2753,12 +2753,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
             if ratio_riesgo_retorno > 0.5:
                 st.success("""
-                **✅ Buen Balance Riesgo-Retorno**  
+                **EXITO: Buen Balance Riesgo-Retorno**  
                 La relación entre riesgo y retorno es favorable.
                 """)
             else:
                 st.warning("""
-                **⚠️ Revisar Balance Riesgo-Retorno**  
+                **ALERTA: Revisar Balance Riesgo-Retorno**  
                 El riesgo podría ser alto en relación al retorno esperado.
                 """)
     else:
