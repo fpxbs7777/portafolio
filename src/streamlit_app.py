@@ -1533,11 +1533,13 @@ class manager:
                 # Maximizar Sharpe Ratio
                 constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
                 def neg_sharpe_ratio(weights):
-                    port_ret = np.sum(self.mean_returns * weights)
-                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-                    if port_vol == 0:
-                        return np.inf
-                    return -(port_ret - self.risk_free_rate) / port_vol
+                    if isinstance(weights, np.ndarray):
+                        port_ret = np.sum(self.mean_returns * weights)
+                        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                        if port_vol == 0:
+                            return np.inf
+                        return -(port_ret - self.risk_free_rate) / port_vol
+                    return np.inf
                 result = op.minimize(
                     neg_sharpe_ratio,
                     x0=np.ones(n_assets)/n_assets,
@@ -1545,7 +1547,11 @@ class manager:
                     bounds=bounds,
                     constraints=constraints
                 )
-                return self._create_output(result.x)
+                if result.success:
+                    return self._create_output(result.x)
+                else:
+                    raise ValueError(f"Optimización fallida: {result.message}")
+                    return None
 
         # Si constraints no está definido, lanzar error
         if 'constraints' not in locals():
@@ -3755,17 +3761,33 @@ def simular_ejecucion(precio_objetivo, precio_actual, volatilidad, dias=1, n_sim
         dict: Resultados de la simulación
     """
     try:
+        # Validar entradas
+        if precio_objetivo is None or precio_actual is None or volatilidad is None:
+            raise ValueError("Todos los parámetros deben ser números válidos")
+            
+        if not isinstance(precio_objetivo, (int, float)) or not isinstance(precio_actual, (int, float)) or not isinstance(volatilidad, (int, float)):
+            raise ValueError("Los parámetros deben ser números")
+            
         # Convertir volatilidad diaria
-        volatilidad_diaria = volatilidad / np.sqrt(252)
+        volatilidad_diaria = float(volatilidad) / np.sqrt(252)
+        precio_actual = float(precio_actual)
         
         # Generar precios simulados
         precios_simulados = []
         for _ in range(n_simulaciones):
-            # Modelo de movimiento browniano geométrico
-            retorno_diario = np.random.normal(0, volatilidad_diaria, dias)
-            precios = precio_actual * np.exp(np.cumsum(retorno_diario))
-            precios_simulados.append(pd.Series(precios, index=range(dias)))
+            try:
+                # Modelo de movimiento browniano geométrico
+                retorno_diario = np.random.normal(0, volatilidad_diaria, dias)
+                precios = precio_actual * np.exp(np.cumsum(retorno_diario))
+                precios_simulados.append(pd.Series(precios, index=range(dias)))
+            except Exception as e:
+                st.error(f"Error en simulación: {str(e)}")
+                continue
         
+        # Si no se generaron simulaciones válidas
+        if not precios_simulados:
+            raise ValueError("No se pudieron generar simulaciones válidas")
+            
         # Calcular métricas
         df_simulaciones = pd.concat(precios_simulados, axis=1)
         
