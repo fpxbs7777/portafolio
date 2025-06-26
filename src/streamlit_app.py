@@ -571,28 +571,130 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
 @st.cache_data(ttl=300, show_spinner=False)
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+    return obtener_cotizacion_detallada(token_portador, mercado, simbolo).get('ultimoPrecio')
+
+@st.cache_data(ttl=300, show_spinner=False)
+def obtener_cotizacion_detallada(token_portador, mercado, simbolo):
+    """
+    Obtiene la cotización detallada de un título específico.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
+        simbolo (str): Símbolo del activo
+        
+    Returns:
+        dict: Diccionario con la información detallada de la cotización
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle"
     headers = obtener_encabezado_autorizacion(token_portador)
+    
     try:
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, (int, float)):
-                return float(data)
-            elif isinstance(data, dict):
-                # La API suele devolver 'ultimoPrecio'
-                for k in [
-                    'ultimoPrecio', 'ultimo_precio', 'ultimoPrecioComprador', 'ultimoPrecioVendedor',
-                    'precio', 'precioActual', 'valor'
-                ]:
-                    if k in data and data[k] is not None:
-                        try:
-                            return float(data[k])
-                        except ValueError:
-                            continue
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener cotización detallada: {str(e)}")
+        return {}
+
+@st.cache_data(ttl=300, show_spinner=False)
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene la serie histórica de precios para un activo específico.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
+        simbolo (str): Símbolo del activo
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
+        ajustada (str): 'Ajustada' o 'SinAjustar' (default: 'SinAjustar')
+        
+    Returns:
+        pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            if 'fecha' in df.columns and 'ultimoPrecio' in df.columns:
+                df['fecha'] = pd.to_datetime(df['fecha'])
+                df = df[['fecha', 'ultimoPrecio']].rename(columns={'ultimoPrecio': 'precio'})
+                return df.sort_values('fecha')
         return None
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al obtener serie histórica: {str(e)}")
         return None
+
+@st.cache_data(ttl=300, show_spinner=False)
+def obtener_panel_cotizaciones(token_portador, instrumento, panel, pais):
+    """
+    Obtiene las cotizaciones dentro del grupo indicado.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        instrumento (str): Tipo de instrumento ('Acciones', 'Bonos', 'Opciones', 'Monedas', 'Cauciones', 'CHPD', 'Futuros', 'ADRs')
+        panel (str): Panel de cotizaciones ('Panel%20General', 'Burcap', 'Todas')
+        pais (str): País ('Argentina', 'Estados_Unidos')
+        
+    Returns:
+        list: Lista de diccionarios con las cotizaciones, o lista vacía en caso de error
+    """
+    url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        if isinstance(data, dict) and 'titulos' in data:
+            return data['titulos']
+        return []
+    except Exception as e:
+        st.error(f"Error al obtener panel de cotizaciones: {str(e)}")
+        return []
+
+@st.cache_data(ttl=300, show_spinner=False)
+def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
+    """
+    Obtiene la cotización MEP (Mercado Electrónico de Pagos) para un bono específico.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo (str): Símbolo del bono (ej: 'GD30')
+        id_plazo_compra (str): ID del plazo de compra
+        id_plazo_venta (str): ID del plazo de venta
+        
+    Returns:
+        dict: Diccionario con la información de la cotización MEP
+    """
+    url = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    datos = {
+        "simbolo": simbolo,
+        "idPlazoOperatoriaCompra": id_plazo_compra,
+        "idPlazoOperatoriaVenta": id_plazo_venta
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos, timeout=10)
+        response.raise_for_status()
+        
+        resultado = response.json()
+        if isinstance(resultado, (int, float)):
+            return {'precio': resultado, 'simbolo': simbolo}
+        return resultado
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error al obtener cotización MEP: {str(e)}')
+        return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
 @st.cache_data(ttl=300, show_spinner=False)
 def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
