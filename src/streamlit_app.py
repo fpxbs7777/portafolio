@@ -2,7 +2,10 @@ import streamlit as st
 import requests
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 from plotly.subplots import make_subplots
+from datetime import date, timedelta
+import SHDA  # Para integración con PyHomeBroker
 from arch import arch_model
 from scipy.stats import norm
 import matplotlib.pyplot as plt
@@ -2923,6 +2926,188 @@ def mostrar_test_perfil_inversor(token_portador: str, id_cliente: str = None):
             mostrar_cartera_recomendada(cartera, capital)
 
 # --- Funciones de Visualización ---
+def mostrar_analisis_portafolio(portafolio, token_portador):
+    st.markdown("## 📊 Análisis de Portafolio")
+    
+    # Sección de análisis con PyHomeBroker
+    st.markdown("### 🔄 Análisis con PyHomeBroker")
+    with st.expander("Configuración de PyHomeBroker", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            host = st.number_input("Número de Broker (ej: 284 para Veta)", min_value=1, value=284, step=1, key="phb_broker")
+            dni = st.text_input("DNI", value="", key="phb_dni")
+            user = st.text_input("Usuario", value="", key="phb_user")
+        with col2:
+            password = st.text_input("Contraseña", type="password", value="", key="phb_password")
+            comitente = st.number_input("Número de comitente", min_value=1, value=0, step=1, key="phb_comitente")
+            
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_inicio = st.date_input("Fecha de inicio", value=date.today() - timedelta(days=30), key="phb_fecha_inicio")
+        with col2:
+            use_today = st.checkbox("Usar fecha actual como fin", value=True, key="phb_use_today")
+            if not use_today:
+                fecha_fin = st.date_input("Fecha de fin", value=date.today(), key="phb_fecha_fin")
+            else:
+                fecha_fin = date.today()
+    
+    if st.button("🔍 Analizar con PyHomeBroker", key="phb_analyze_btn"):
+        if not all([host, dni, user, password, comitente]):
+            st.error("Por favor complete todos los campos de conexión")
+            return
+            
+        with st.spinner("Conectando con PyHomeBroker..."):
+            try:
+                # Inicializar conexión
+                hb = SHDA.SHDA(host, dni, user, password)
+                
+                # Obtener fechas en el rango
+                fechas = pd.date_range(start=fecha_inicio, end=fecha_fin).strftime("%Y-%m-%d").tolist()
+                
+                # Obtener posiciones para cada fecha
+                posiciones = {}
+                for fecha in fechas:
+                    try:
+                        pos = hb.get_portfolio.by_date(comitente, fecha, "ARS")
+                        if pos is not None and not pos.empty:
+                            posiciones[fecha] = pos
+                    except Exception as e:
+                        st.warning(f"Error al obtener datos para {fecha}: {str(e)}")
+                
+                if not posiciones:
+                    st.error("No se pudieron obtener datos del portafolio. Verifique las credenciales y fechas.")
+                    return
+                
+                # Mostrar gráficos
+                mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin)
+                
+            except Exception as e:
+                st.error(f"Error al conectar con PyHomeBroker: {str(e)}")
+                import traceback
+                st.text(traceback.format_exc())
+
+def mostrar_graficos_pyhomebroker(posiciones, fecha_inicio, fecha_fin):
+    """Muestra los gráficos de análisis de PyHomeBroker"""
+    fechas = sorted(posiciones.keys())
+    
+    # Gráfico de torta para fechas representativas
+    if len(fechas) >= 3:
+        fechas_pie = [fechas[0], fechas[len(fechas)//2], fechas[-1]]
+    else:
+        fechas_pie = fechas
+    
+    # Función para crear etiquetas
+    def crear_labels(pos):
+        if 'description' in pos and 'position' in pos:
+            return [f"{desc} ({pos_val})" for desc, pos_val in zip(pos["description"], pos["position"])]
+        return []
+    
+    # Preparar datos para gráficos de torta
+    labels_list = []
+    values_list = []
+    for fecha in fechas_pie:
+        if fecha in posiciones:
+            labels = crear_labels(posiciones[fecha])
+            if labels:  # Solo agregar si hay datos
+                labels_list.append(labels)
+                values_list.append(posiciones[fecha]["position"].astype(float))
+    
+    # Mostrar gráficos de torta si hay datos
+    if labels_list and values_list:
+        st.markdown("### 📊 Distribución de Posiciones")
+        fig_pie = make_subplots(
+            rows=1, 
+            cols=len(labels_list),
+            specs=[[{'type':'domain'}]*len(labels_list)],
+            subplot_titles=[f"Posiciones ({fecha})" for fecha in fechas_pie[:len(labels_list)]]
+        )
+        
+        # Colores personalizados
+        colors = ['#636EFA', '#00CC96', '#FF6F61', '#F7B7A3', '#FF9900', '#AB63FA']
+        
+        # Agregar cada gráfico de torta
+        for i, (labels, values) in enumerate(zip(labels_list, values_list), start=1):
+            fig_pie.add_trace(
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    name=f"Gráfico {i}",
+                    textinfo='label+value',
+                    textposition='outside',
+                    marker=dict(colors=colors)
+                ),
+                row=1, col=i
+            )
+        
+        fig_pie.update_layout(
+            title_text=f"Distribución de Posiciones (Periodo: {fecha_inicio} a {fecha_fin})",
+            title_x=0.5,
+            showlegend=False,
+            height=500
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    # Gráfico de evolución
+    st.markdown("### 📈 Evolución del Portafolio")
+    try:
+        # Crear DataFrame con la evolución
+        data = {
+            "Fecha": fechas,
+            "Valor Total": [posiciones[fecha]["position"].astype(float).sum() for fecha in fechas]
+        }
+        df = pd.DataFrame(data)
+        
+        # Calcular evolución porcentual
+        df["Evolución %"] = df["Valor Total"].pct_change() * 100
+        df.loc[0, "Evolución %"] = 0
+        
+        # Crear gráfico de líneas
+        fig_line = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            subplot_titles=("Valor Total del Portafolio", "Evolución Porcentual")
+        )
+        
+        # Gráfico de valor total
+        fig_line.add_trace(
+            go.Scatter(
+                x=df["Fecha"],
+                y=df["Valor Total"],
+                mode='lines+markers',
+                name="Valor Total",
+                line=dict(color='#1f77b4', width=2)
+            ),
+            row=1, col=1
+        )
+        
+        # Gráfico de evolución porcentual
+        fig_line.add_trace(
+            go.Scatter(
+                x=df["Fecha"],
+                y=df["Evolución %"],
+                mode='lines+markers',
+                name="Evolución %",
+                line=dict(color='#ff7f0e', width=2)
+            ),
+            row=2, col=1
+        )
+        
+        fig_line.update_layout(
+            title=f"Evolución del Portafolio ({fecha_inicio} a {fecha_fin})",
+            title_x=0.5,
+            height=700,
+            showlegend=False
+        )
+        
+        fig_line.update_yaxes(title_text="Valor (ARS)", row=1, col=1)
+        fig_line.update_yaxes(title_text="Variación %", row=2, col=1)
+        fig_line.update_xaxes(title_text="Fecha", row=2, col=1)
+        
+        st.plotly_chart(fig_line, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error al generar gráfico de evolución: {str(e)}")
+
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
