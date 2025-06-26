@@ -2296,6 +2296,198 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
+
+def mostrar_optimizacion_avanzada(portafolio, token_portador):
+    """
+    Muestra una optimización avanzada del portafolio con frontera eficiente
+    """
+    st.markdown("## 🎯 Optimización Avanzada de Portafolio")
+    
+    # Get portfolio assets
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para optimizar")
+        return
+    
+    # Prepare data for optimization
+    simbolos = [activo['simbolo'] for activo in activos if activo.get('simbolo')]
+    if not simbolos:
+        st.warning("No se encontraron símbolos válidos para optimización")
+        return
+    
+    # Date range for historical data (last 3 years)
+    fecha_hasta = date.today()
+    fecha_desde = fecha_hasta - timedelta(days=3*365)
+    
+    # Get historical data
+    with st.spinner("Obteniendo datos históricos..."):
+        mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+            token_portador, 
+            [{'simbolo': s, 'mercado': 'BCBA'} for s in simbolos],
+            fecha_desde,
+            fecha_hasta
+        )
+    
+    if mean_returns is None or cov_matrix is None:
+        st.error("No se pudieron obtener suficientes datos históricos para la optimización")
+        return
+    
+    # Portfolio optimization settings
+    st.sidebar.markdown("### ⚙️ Configuración de Optimización")
+    num_portfolios = st.sidebar.slider("Número de carteras a simular", 100, 10000, 5000, 100)
+    risk_free_rate = st.sidebar.number_input("Tasa libre de riesgo anual (%)", 0.0, 20.0, 5.0) / 100
+    
+    # Run optimization
+    if st.button("🔍 Ejecutar Optimización"):
+        with st.spinner("Optimizando cartera..."):
+            # Generate random portfolios
+            results = np.zeros((3, num_portfolios))
+            weights_record = []
+            
+            for i in range(num_portfolios):
+                weights = np.random.random(len(simbolos))
+                weights /= np.sum(weights)
+                weights_record.append(weights)
+                
+                # Calculate portfolio metrics
+                portfolio_return = np.sum(mean_returns * weights) * 252
+                portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                
+                results[0, i] = portfolio_std
+                results[1, i] = portfolio_return
+                results[2, i] = (portfolio_return - risk_free_rate) / (portfolio_std + 1e-10)  # Sharpe ratio
+            
+            # Find optimal portfolios
+            max_sharpe_idx = np.argmax(results[2])
+            optimal_weights = weights_record[max_sharpe_idx]
+            
+            min_vol_idx = np.argmin(results[0])
+            min_vol_weights = weights_record[min_vol_idx]
+            
+            # Create efficient frontier
+            frontier_y = np.linspace(results[1, min_vol_idx], max(results[1]) * 1.1, 50)
+            frontier_x = []
+            
+            for possible_return in frontier_y:
+                weights = optimize_portfolio_with_target(mean_returns, cov_matrix, possible_return/252)
+                if weights is not None:
+                    frontier_x.append(np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(252))
+                else:
+                    frontier_x.append(np.nan)
+            
+            # Plot efficient frontier
+            fig = go.Figure()
+            
+            # Random portfolios
+            fig.add_trace(go.Scatter(
+                x=results[0, :], 
+                y=results[1, :],
+                mode='markers',
+                name='Carteras Aleatorias',
+                marker=dict(
+                    size=5,
+                    color=results[2, :],
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title='Ratio de Sharpe')
+                )
+            ))
+            
+            # Efficient frontier
+            fig.add_trace(go.Scatter(
+                x=frontier_x,
+                y=frontier_y,
+                mode='lines',
+                name='Frontera Eficiente',
+                line=dict(color='red', width=2, dash='dash')
+            ))
+            
+            # Optimal portfolios
+            fig.add_trace(go.Scatter(
+                x=[results[0, max_sharpe_idx]],
+                y=[results[1, max_sharpe_idx]],
+                mode='markers',
+                name='Máximo Ratio de Sharpe',
+                marker=dict(color='gold', size=15, symbol='star')
+            ))
+            
+            fig.add_trace(go.Scatter(
+                x=[results[0, min_vol_idx]],
+                y=[results[1, min_vol_idx]],
+                mode='markers',
+                name='Mínima Volatilidad',
+                marker=dict(color='green', size=15, symbol='star')
+            ))
+            
+            fig.update_layout(
+                title='Frontera Eficiente de Carteras',
+                xaxis_title='Volatilidad Anualizada',
+                yaxis_title='Retorno Anualizado',
+                showlegend=True,
+                template='plotly_white'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Show optimal portfolios
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 🏆 Cartera Óptima (Máximo Sharpe)")
+                st.metric("Retorno Esperado", f"{results[1, max_sharpe_idx]*100:.2f}%")
+                st.metric("Volatilidad", f"{results[0, max_sharpe_idx]*100:.2f}%")
+                st.metric("Ratio de Sharpe", f"{results[2, max_sharpe_idx]:.2f}")
+                
+                st.markdown("#### Asignación de Activos")
+                max_sharpe_allocation = pd.DataFrame({
+                    'Activo': simbolos,
+                    'Peso (%)': (optimal_weights * 100).round(2)
+                }).sort_values('Peso (%)', ascending=False)
+                st.dataframe(max_sharpe_allocation)
+            
+            with col2:
+                st.markdown("### 🛡️ Cartera de Mínima Varianza")
+                st.metric("Retorno Esperado", f"{results[1, min_vol_idx]*100:.2f}%")
+                st.metric("Volatilidad", f"{results[0, min_vol_idx]*100:.2f}%")
+                st.metric("Ratio de Sharpe", f"{(results[1, min_vol_idx] - risk_free_rate) / results[0, min_vol_idx]:.2f}")
+                
+                st.markdown("#### Asignación de Activos")
+                min_vol_allocation = pd.DataFrame({
+                    'Activo': simbolos,
+                    'Peso (%)': (min_vol_weights * 100).round(2)
+                }).sort_values('Peso (%)', ascending=False)
+                st.dataframe(min_vol_allocation)
+
+def optimize_portfolio_with_target(mean_returns, cov_matrix, target_return):
+    """
+    Optimiza un portafolio para alcanzar un retorno objetivo específico
+    """
+    n_assets = len(mean_returns)
+    
+    def portfolio_volatility(weights):
+        return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+    
+    constraints = [
+        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},  # Sum of weights = 1
+        {'type': 'eq', 'fun': lambda x: np.sum(x * mean_returns) - target_return}  # Target return
+    ]
+    
+    bounds = tuple((0, 1) for _ in range(n_assets))
+    initial_guess = [1/n_assets] * n_assets
+    
+    result = minimize(
+        portfolio_volatility,
+        initial_guess,
+        method='SLSQP',
+        bounds=bounds,
+        constraints=constraints
+    )
+    
+    if result.success:
+        return result.x
+    return None
+
+# --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio):
     """
     Muestra un resumen comprehensivo del portafolio con valuación corregida y métricas avanzadas
@@ -3629,28 +3821,64 @@ def main():
     try:
         if st.session_state.token_acceso:
             st.sidebar.title("Menú Principal")
-            opcion = st.sidebar.radio(
-                "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
-                index=0,
+            opcion = st.sidebar.selectbox(
+                "Seleccionar vista",
+                ["🏠 Inicio", "📊 Resumen", "📈 Análisis de Rendimiento", "📊 Análisis de Riesgo", "📊 Optimización de Portafolio", "📊 Optimización Avanzada", "📊 Análisis de Correlación", "📊 Análisis de Sectorial", "📊 Análisis de Mercado", "📊 Análisis de Activos"]
             )
-
+            
             # Mostrar la página seleccionada
             if opcion == "🏠 Inicio":
                 st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "📊 Análisis de Portafolio":
+            elif opcion == "📊 Resumen":
                 if st.session_state.cliente_seleccionado:
-                    mostrar_analisis_portafolio()
+                    # Obtener el portafolio usando el token y el ID del cliente
+                    portafolio = obtener_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado['id'])
+                    if portafolio:
+                        mostrar_resumen_portafolio(portafolio)
+                    else:
+                        st.error("No se pudo obtener el portafolio")
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
+            elif opcion == "📈 Análisis de Rendimiento":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_rendimiento()
                 else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
-                mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📊 Análisis de Riesgo":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_riesgo()
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📊 Optimización de Portafolio":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_optimizacion_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado['id'])
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📊 Optimización Avanzada":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_optimizacion_avanzada(st.session_state.token_acceso, st.session_state.cliente_seleccionado['id'])
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📊 Análisis de Correlación":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_correlacion()
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📊 Análisis de Sectorial":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_sectorial()
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📊 Análisis de Mercado":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_mercado()
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "📊 Análisis de Activos":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_activos()
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
