@@ -1192,6 +1192,31 @@ class manager:
         self.mean_returns = None
         self.risk_free_rate = 0.40  # Tasa libre de riesgo anual para Argentina
 
+    def _create_output(self, weights):
+        """
+        Crea un objeto output con los resultados de la optimización
+        
+        Args:
+            weights (np.array): Pesos optimizados para cada activo
+            
+        Returns:
+            output: Objeto con los resultados de la optimización
+        """
+        # Calcular retornos del portafolio
+        portfolio_returns = (self.returns * weights).sum(axis=1)
+        
+        # Crear objeto output
+        output_obj = output(portfolio_returns, self.notional)
+        output_obj.weights = weights
+        output_obj.dataframe_allocation = pd.DataFrame({
+            'rics': self.rics,
+            'weights': weights,
+            'volatilities': self.returns.std().values,
+            'returns': self.returns.mean().values
+        })
+        
+        return output_obj
+
     def load_intraday_timeseries(self, ticker):
         return self.data[ticker]
 
