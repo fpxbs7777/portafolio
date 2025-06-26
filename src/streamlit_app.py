@@ -3720,15 +3720,15 @@ def mostrar_bonos_mep():
             )
         else:
             st.warning("No hay datos para mostrar en el resumen")
-                
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
-                    with st.spinner("Actualizando..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista actualizada")
-                        st.rerun()
-            else:
-                st.warning("No se encontraron clientes")
+            
+        if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+            with st.spinner("Actualizando..."):
+                nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                st.session_state.clientes = nuevos_clientes
+                st.success("✅ Lista actualizada")
+                st.rerun()
+    else:
+        st.warning("No se encontraron clientes")
 
     # Contenido principal
     try:
