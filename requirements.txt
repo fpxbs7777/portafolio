@@ -18,4 +18,4 @@ arch
 statsmodels
 tradingview
 SHDA==0.0.4rc4
-
+pyfolio-reloaded>=0.9.5
