@@ -52,6 +52,10 @@ components = get_import('streamlit.components.v1')
 # Ensure requests is available in the global scope
 requests = requests
 
+# Import scipy.stats as stats for statistical functions
+from scipy import stats
+import scipy.optimize as op
+
 # Caching configuration
 CACHE_TTL = 3600  # 1 hour cache
 try:
