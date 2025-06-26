@@ -3713,13 +3713,16 @@ def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
     
     with tab1:
         with st.expander("Consultar Cotización MEP", expanded=True):
-            with st.form("mep_form"):
+            form = st.form("mep_form")
+            with form:
                 col1, col2, col3 = st.columns(3)
                 simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
                 id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
                 id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
+                
+                submitted = st.form_submit_button("🔍 Consultar MEP")
             
-            if st.form_submit_button("🔍 Consultar MEP"):
+            if submitted and simbolo_mep:
                 if simbolo_mep:
                     with st.spinner("Consultando cotización MEP..."):
                         cotizacion_mep = obtener_cotizacion_mep(
@@ -3846,86 +3849,128 @@ def mostrar_cotizaciones_mercado(token_acceso, id_cliente=None):
                             else:
                                 st.warning("No se pudieron obtener los datos históricos completos para calcular el MEP.")
                                 
-                    else:
-                        st.error("❌ No se pudo obtener la cotización MEP")
     
         # Pestaña para vender bonos
         with tab2:
-            if not id_cliente:
-                st.warning("🔒 Inicie sesión para ver su portafolio de bonos")
-            elif not bonos_pesos:
-                st.info("No tiene bonos en pesos en su portafolio para operar en MEP")
+            # Mostrar el formulario de venta de especie D solo si hay un token de acceso
+            if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+                st.warning("Por favor, inicie sesión para acceder a la venta de bonos.")
             else:
-                st.markdown("### 📊 Bonos disponibles en su portafolio")
-                
-                # Mostrar tabla de bonos disponibles
-                bonos_data = []
-                for bono in bonos_pesos:
-                    bonos_data.append({
-                        'Símbolo': bono.get('simbolo', ''),
-                        'Descripción': bono.get('descripcion', ''),
-                        'Cantidad': bono.get('cantidad', 0),
-                        'Último Precio': bono.get('ultimoPrecio', 0),
-                        'Moneda': bono.get('moneda', '')
-                    })
-                
-                if bonos_data:
-                    df_bonos = pd.DataFrame(bonos_data)
-                    st.dataframe(
-                        df_bonos,
-                        use_container_width=True,
-                        column_config={
-                            'Símbolo': st.column_config.TextColumn('Símbolo'),
-                            'Descripción': st.column_config.TextColumn('Descripción'),
-                            'Cantidad': st.column_config.NumberColumn('Cantidad', format='%d'),
-                            'Último Precio': st.column_config.NumberColumn('Último Precio', format='%.2f'),
-                            'Moneda': st.column_config.TextColumn('Moneda')
-                        }
-                    )
-                    
-                    # Formulario para vender
-                    with st.form("vender_bono_form"):
-                        st.markdown("### 🛒 Vender Bono")
+                # Obtener el portafolio del cliente para mostrar los bonos disponibles
+                with st.spinner("Cargando portafolio..."):
+                    try:
+                        # Verificar si hay un cliente seleccionado
+                        if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
+                            st.warning("Por favor, seleccione un cliente primero.")
+                            return
                         
-                        # Seleccionar bono
-                        bono_seleccionado = st.selectbox(
-                            "Seleccione el bono a vender",
-                            options=[b['Símbolo'] for b in bonos_data]
-                        )
+                        cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente')
+                        if not cliente_id:
+                            st.error("No se pudo obtener el ID del cliente.")
+                            return
                         
-                        # Obtener cantidad máxima disponible
-                        bono_info = next((b for b in bonos_data if b['Símbolo'] == bono_seleccionado), None)
-                        cantidad_max = int(bono_info['Cantidad']) if bono_info else 0
+                        portafolio = obtener_portafolio(st.session_state.token_acceso, cliente_id)
                         
-                        # Campos del formulario
-                        cantidad = st.number_input(
-                            "Cantidad",
-                            min_value=1,
-                            max_value=cantidad_max,
-                            value=min(1, cantidad_max),
-                            help=f"Máximo disponible: {cantidad_max}"
-                        )
+                        # Filtrar bonos en pesos (que no terminan con 'D')
+                        bonos_pesos = []
+                        if portafolio and 'activos' in portafolio:
+                            bonos_pesos = [
+                                activo for activo in portafolio['activos'] 
+                                if (isinstance(activo, dict) and 
+                                    activo.get('tipo') == 'Bonos' and 
+                                    not str(activo.get('simbolo', '')).endswith('D') and 
+                                    activo.get('cantidad_disponible', 0) > 0)
+                            ]
                         
-                        precio = st.number_input(
-                            "Precio",
-                            min_value=0.0,
-                            value=float(bono_info['Último Precio']) if bono_info else 0.0,
-                            step=0.01,
-                            format="%.2f"
-                        )
-                        
-                        plazo_liquidacion = st.selectbox(
-                            "Plazo de liquidación",
-                            ["T+0", "T+1", "T+2"],
-                            index=1
-                        )
-                        
-                        if st.form_submit_button("📤 Vender Bono"):
-                            with st.spinner("Procesando orden de venta..."):
-                                # Aquí iría la lógica para enviar la orden de venta
-                                # Por ahora solo mostramos un mensaje de éxito
-                                st.success(f"✅ Orden de venta para {cantidad} títulos de {bono_seleccionado} a ${precio:.2f} cada uno")
-                
+                        if not bonos_pesos:
+                            st.warning("No se encontraron bonos en pesos disponibles para vender en su portafolio.")
+                        else:
+                            # Mostrar tabla de bonos disponibles
+                            st.subheader("📊 Bonos en Pesos Disponibles")
+                            df_bonos = pd.DataFrame([{
+                                'Símbolo': bono.get('simbolo', ''),
+                                'Descripción': bono.get('descripcion', 'Sin descripción'),
+                                'Cantidad': bono.get('cantidad_disponible', 0),
+                                'Precio': bono.get('ultimo_precio', 0),
+                                'Moneda': bono.get('moneda', 'ARS')
+                            } for bono in bonos_pesos])
+                            
+                            st.dataframe(df_bonos, use_container_width=True)
+                            
+                            # Formulario para vender bonos
+                            with st.form("venta_bono_form"):
+                                st.subheader("📝 Vender Bono")
+                                
+                                # Seleccionar bono
+                                bono_opciones = [f"{bono['simbolo']} - {bono.get('descripcion', 'Sin descripción')}" for bono in bonos_pesos]
+                                bono_seleccionado = st.selectbox(
+                                    "Seleccione el bono a vender",
+                                    options=bono_opciones,
+                                    index=0
+                                )
+                                
+                                # Obtener el símbolo del bono seleccionado
+                                bono_info = bonos_pesos[bono_opciones.index(bono_seleccionado)]
+                                simbolo = bono_info.get('simbolo', '')
+                                cantidad_max = int(bono_info.get('cantidad_disponible', 0))
+                                
+                                # Campos del formulario
+                                col1, col2 = st.columns(2)
+                                cantidad = col1.number_input(
+                                    "Cantidad", 
+                                    min_value=1, 
+                                    max_value=cantidad_max if cantidad_max > 0 else 1, 
+                                    value=1,
+                                    step=1,
+                                    help=f"Máximo disponible: {cantidad_max}"
+                                )
+                                
+                                precio_actual = bono_info.get('ultimo_precio', 0)
+                                precio = col2.number_input(
+                                    "Precio", 
+                                    min_value=0.0, 
+                                    value=float(precio_actual) if precio_actual else 0.0,
+                                    step=0.01,
+                                    format="%.2f"
+                                )
+                                
+                                # Fecha de validez (hoy + 1 día por defecto)
+                                validez = st.date_input(
+                                    "Válido hasta",
+                                    value=date.today() + timedelta(days=1),
+                                    min_value=date.today()
+                                )
+                                
+                                # Botón de envío
+                                submitted = st.form_submit_button("📤 Enviar Orden de Venta", use_container_width=True)
+                                
+                                if submitted:
+                                    if not all([simbolo, cantidad, precio]):
+                                        st.error("Por favor complete todos los campos obligatorios.")
+                                    else:
+                                        with st.spinner("Procesando orden de venta..."):
+                                            try:
+                                                # Llamar a la función vender_especie_d
+                                                resultado = vender_especie_d(
+                                                    token_portador=st.session_state.token_acceso,
+                                                    id_cliente=cliente_id,
+                                                    simbolo=simbolo,
+                                                    cantidad=int(cantidad),
+                                                    precio=float(precio),
+                                                    mercado="bCBA",  # Mercado por defecto
+                                                    validez=validez.strftime("%Y-%m-%d")
+                                                )
+                                                
+                                                if resultado:
+                                                    st.success("✅ Orden de venta enviada correctamente")
+                                                    st.balloons()
+                                                    st.json(resultado)
+                                                else:
+                                                    st.error("No se pudo procesar la orden de venta.")
+                                            except Exception as e:
+                                                st.error(f"Error al procesar la orden: {str(e)}")
+                    except Exception as e:
+                        st.error(f"Error al cargar el portafolio: {str(e)}")
     
     # Sección de Tasas de Caución (fuera de las pestañas)
     with st.expander("🏦 Tasas de Caución", expanded=True):
@@ -4953,67 +4998,68 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         return None
 
 
-def mostrar_venta_especie_d():
-    st.title("📉 Venta de Especie D")
-    # ... (rest of the code remains the same)
+def vender_especie_d(token_portador, id_cliente, simbolo, cantidad, precio, mercado, validez, cuenta_comitente=None):
+    """
+    Realiza una operación de venta de especie D a través de la API de IOL.
     
-    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-        st.error("No se encontró token de acceso. Por favor, inicie sesión.")
-        return
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        simbolo (str): Símbolo del activo a vender
+        cantidad (int): Cantidad a vender
+        precio (float): Precio de venta
+        mercado (str): Mercado donde se opera (ej: 'bCBA')
+        validez (str): Fecha de validez de la orden (formato 'YYYY-MM-DD')
+        cuenta_comitente (str, optional): Número de cuenta comitente
         
-    if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
-        st.warning("Por favor, seleccione un cliente primero.")
-        return
+    Returns:
+        dict: Respuesta de la API o None en caso de error
+    """
+    url_venta = 'https://api.invertironline.com/api/v2/operar/Vender'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
     
-    with st.form("venta_especie_d_form"):
-        st.subheader("Datos de la Operación")
+    # Asegurarse de que el símbolo no termine en 'D' (ya que estamos vendiendo la especie en pesos)
+    if simbolo.upper().endswith('D'):
+        st.error("Error: No se puede vender una especie que ya está en dólares.")
+        return None
+    
+    # Configurar los datos de la orden
+    datos_orden = {
+        'mercado': mercado.upper(),
+        'simbolo': simbolo.upper(),
+        'cantidad': int(cantidad),
+        'precio': float(precio),
+        'validez': validez,
+        'tipo': 'precioLimite',  # Tipo de orden: precioLimite, mercado, etc.
+        'plazo': 't2',  # T+2 días para bonos
+        'cliente': id_cliente
+    }
+    
+    # Agregar cuenta comitente si se especificó
+    if cuenta_comitente:
+        datos_orden['cuentaComitente'] = cuenta_comitente
+    
+    try:
+        # Realizar la solicitud POST
+        respuesta = requests.post(url_venta, headers=encabezados, json=datos_orden)
+        respuesta.raise_for_status()  # Lanza una excepción para códigos de error HTTP
         
-        # Obtener datos del cliente
-        cliente = st.session_state.cliente_seleccionado
-        cliente_id = cliente.get('numeroCliente', cliente.get('id'))
+        # Si la respuesta es exitosa, devolver los datos
+        return respuesta.json()
         
-        # Campos del formulario
-        simbolo = st.text_input("Símbolo", placeholder="Ej: GGAL")
-        cantidad = st.number_input("Cantidad", min_value=1, step=1, value=1)
-        precio = st.number_input("Precio", min_value=0.0, step=0.01, format="%.2f")
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f"❌ Error al enviar la orden de venta: {http_err}")
+        if hasattr(http_err, 'response') and http_err.response is not None:
+            try:
+                error_details = http_err.response.json()
+                st.json(error_details)
+            except:
+                st.error(f"Detalles del error: {http_err.response.text[:500]}")
+        return None
         
-        # Selector de mercado
-        mercado = st.selectbox(
-            "Mercado",
-            ["bCBA", "bCBA24hs", "bCBAp", "bBYMA", "bROFX"]
-        )
-        
-        # Fecha de validez (hoy + 1 día por defecto)
-        validez = st.date_input(
-            "Válido hasta",
-            value=date.today() + timedelta(days=1),
-            min_value=date.today()
-        )
-        
-        # Cuenta comitente (opcional)
-        cuenta_comitente = st.text_input("Cuenta Comitente (opcional)", "")
-        
-        # Botón de envío
-        if st.form_submit_button("📤 Enviar Orden de Venta", use_container_width=True):
-            if not all([simbolo, cantidad, precio, mercado, validez]):
-                st.error("Por favor complete todos los campos obligatorios.")
-                return
-                
-            with st.spinner("Procesando orden de venta..."):
-                resultado = vender_especie_d(
-                    token_portador=token_acceso,
-                    id_cliente=id_cliente,
-                    simbolo=simbolo.upper(),
-                    cantidad=int(cantidad),
-                    precio=float(precio),
-                    mercado=mercado,
-                    validez=validez.strftime("%Y-%m-%d"),
-                    cuenta_comitente=cuenta_comitente if cuenta_comitente else None
-                )
-                
-                if resultado:
-                    st.success("✅ Orden de venta enviada correctamente")
-                    st.json(resultado)
+    except Exception as e:
+        st.error(f"❌ Error inesperado al enviar la orden de venta: {str(e)}")
+        return None
 
 
 def mostrar_movimientos_asesor():
