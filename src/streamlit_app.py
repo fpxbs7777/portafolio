@@ -4658,6 +4658,71 @@ def graficar_serie_historica_mep(token_portador, simbolo_base, simbolo_mep, fech
         return None
 
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
+    """
+    Muestra el análisis técnico con gráficos de MEP dollar.
+    """
+    st.markdown("### 📊 Análisis Técnico")
+    
+    # Configuración inicial
+    simbolos_base = ['AL30', 'GD30', 'GD29']
+    simbolos_mep = {'AL30': 'AL30D', 'GD30': 'GD30D', 'GD29': 'GD29D'}
+    
+    # Selección de bono
+    bono_seleccionado = st.selectbox(
+        'Selecciona un bono para analizar:',
+        options=simbolos_base
+    )
+    
+    if bono_seleccionado:
+        try:
+            # Obtener fechas
+            fecha_actual = pd.Timestamp.now()
+            fecha_desde = (fecha_actual - pd.DateOffset(years=1)).strftime('%Y-%m-%d')
+            fecha_hasta = fecha_actual.strftime('%Y-%m-%d')
+            
+            # Mostrar gráfico MEP
+            with st.spinner('Cargando gráfico MEP...'):
+                fig = graficar_serie_historica_mep(
+                    token_portador=token_acceso,
+                    simbolo_base=bono_seleccionado,
+                    simbolo_mep=simbolos_mep[bono_seleccionado],
+                    fecha_desde=fecha_desde,
+                    fecha_hasta=fecha_hasta,
+                    ajustada="SinAjustar"
+                )
+                
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.error("No se pudo generar el gráfico")
+                    
+        except Exception as e:
+            st.error(f"Error al mostrar el análisis técnico: {str(e)}")
+
+    st.markdown("### 📊 Análisis Técnico")
+    
+    """
+    **Estrategias de Optimización:**
+    - **Sharpe Ratio Máximo:**
+      - Maximiza la relación retorno/risk
+      - Considera volatilidad y correlaciones
+      - Genera portafolios equilibrados
+    
+    **Mínima Varianza:**
+    - Minimiza la varianza del portafolio
+    - No considera correlaciones históricas
+    
+    **Solo Posiciones Largas:**
+    - Optimización estándar sin restricciones adicionales
+    - Permite solo posiciones compradoras (sin ventas en corto)
+    - Suma de pesos = 100%
+    
+    **Métricas Estadísticas:"
+    - **Skewness**: Medida de asimetría de la distribución
+    - **Kurtosis**: Medida de la forma de la distribución (colas)
+    - **Jarque-Bera**: Test de normalidad de los retornos
+    - **VaR 95%**: Valor en riesgo al 95% de confianza
+    """
     st.markdown("### 📊 Análisis Técnico")
     
     with st.spinner("Obteniendo portafolio..."):
