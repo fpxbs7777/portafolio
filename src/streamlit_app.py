@@ -3473,26 +3473,30 @@ def calcular_vwap(high, low, close, volume, window=20, method='sma'):
     return vwap
 
 
-def aplicar_estilo_vwap(fig, line_color='#2196F3', line_width=1, line_style=0, opacity=1.0):
+def aplicar_estilo_vwap(fig, line_color='#2196F3', line_width=1, line_style=0, opacity=1.0, track_price=False):
     """
-    Aplica el estilo VWAP al gráfico
+    Aplica el estilo VWAP al gráfico según los estándares de TradingView
     
     Args:
         fig: Figura de Plotly
-        line_color: Color de la línea (formato hexadecimal)
-        line_width: Ancho de la línea
+        line_color: Color de la línea (formato hexadecimal, default: #2196F3)
+        line_width: Ancho de la línea (default: 1)
         line_style: Estilo de la línea (0=sólida, 1=punteada, 2=rayas, 3=punto-raya)
-        opacity: Opacidad de la línea (0-1)
+        opacity: Opacidad de la línea (0-1, default: 1.0)
+        track_price: Si es True, muestra el precio actual en el eje Y (default: False)
+        
+    Returns:
+        Figura de Plotly con los estilos VWAP aplicados
     """
-    # Mapeo de estilos de línea
+    # Mapeo de estilos de línea según TradingView
     dash_map = {
-        0: None,  # sólida
-        1: 'dot',  # punteada
-        2: 'dash',  # rayas
-        3: 'dashdot'  # punto-raya
+        0: None,      # Sólida
+        1: 'dot',     # Punteada
+        2: 'dash',    # Rayas
+        3: 'dashdot'  # Punto-raya
     }
     
-    # Aplicar estilo a todas las trazas VWAP
+    # Aplicar estilos a las trazas VWAP
     for trace in fig.data:
         if 'VWAP' in trace.name:
             trace.update(
