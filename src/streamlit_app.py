@@ -2073,8 +2073,7 @@ class PortfolioManager:
             return None
     
     def optimizar_portafolio_vwap(self, target_return=None, max_volatility=None, min_weight=0.0, max_weight=1.0):
-        """
-        Optimiza el portafolio utilizando el VWAP como referencia para los precios.
+        """Optimiza el portafolio utilizando el VWAP como referencia para los precios.
         
         Args:
             target_return (float, optional): Retorno objetivo anualizado. Si no se especifica,
