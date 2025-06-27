@@ -1447,7 +1447,7 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
-    def __init__(self, activos, token, fecha_desde, fecha_hasta, capital=100000):
+    def __init__(self, activos, token, fecha_desde, fecha_hasta):
         self.activos = activos
         self.token = token
         self.fecha_desde = fecha_desde
@@ -1456,7 +1456,7 @@ class PortfolioManager:
         self.returns = None
         self.prices = None
         self.volumes = None
-        self.notional = capital  # Valor nominal definido por el usuario
+        self.notional = 100000  # Valor nominal por defecto
         self.manager = None
         self.garch_models = {}
         self.monte_carlo_results = {}
@@ -2657,362 +2657,57 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     fecha_hasta = st.session_state.fecha_hasta
     
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
-
-    # --- Función de selección aleatoria de activos respetando el capital ---
-    def seleccion_aleatoria_activos_con_capital(activos, token, capital):
-        '''
-        Selecciona activos aleatorios de la lista sin superar el capital, usando el precio actual de cada activo.
-        Retorna lista de activos seleccionados y el total invertido.
-        '''
-        import random
-        random.shuffle(activos)
-        seleccionados = []
-        capital_restante = capital
-        total_invertido = 0
-        for activo in activos:
-            simbolo = activo.get('simbolo')
-            mercado = activo.get('mercado')
-            if not simbolo or not mercado:
-                continue
-            precio = obtener_precio_actual(token, mercado, simbolo)
-            if precio is not None and precio > 0 and precio <= capital_restante:
-                seleccionados.append({'simbolo': simbolo, 'mercado': mercado, 'precio': precio})
-                capital_restante -= precio
-                total_invertido += precio
-            if capital_restante < 1:
-                break
-        return seleccionados, total_invertido
     
-    # Configuración de selección de universo y optimización
-    col_sel, col1, col2, col3 = st.columns(4)
-
-    with col_sel:
-        metodo_seleccion = st.selectbox(
-            "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
-            format_func=lambda x: {
-                'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
-            }[x]
-        )
-
-    # Mostrar input de capital y filtro de tipo de activo solo si corresponde
-    if metodo_seleccion == 'aleatoria':
-        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
-        tipo_seleccionado = st.selectbox(
-            "Filtrar por tipo de activo:",
-            options=['Todos'] + tipos_disponibles,
-            format_func=lambda x: "Todos" if x == 'Todos' else x
-        )
-        activos_filtrados = activos_para_optimizacion
-        if tipo_seleccionado != 'Todos':
-            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
-        capital_inicial = st.number_input(
-            "Capital Inicial para Optimización (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección aleatoria de activos"
-        )
-    else:
-        activos_filtrados = activos_para_optimizacion
-        capital_inicial = None
-
-        metodo_seleccion = st.selectbox(
-            "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
-            format_func=lambda x: {
-                'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
-            }[x]
-        )
-
-    # Mostrar input de capital solo si corresponde
-    if metodo_seleccion == 'aleatoria':
-        # Filtro de tipo de activo solo en aleatoria
-        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
-        tipo_seleccionado = st.selectbox(
-            "Filtrar por tipo de activo:",
-            options=['Todos'] + tipos_disponibles,
-            key="opt_tipo_activo"
-        )
-        if tipo_seleccionado != 'Todos':
-            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
-        else:
-            activos_filtrados = activos_para_optimizacion
-        capital_inicial = st.number_input(
-            "Capital Inicial para Optimización (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección aleatoria de activos",
-            key="opt_capital_aleatoria"
-        )
-    else:
-        activos_filtrados = activos_para_optimizacion
-        capital_inicial = None
-
-    # --- Métodos avanzados de optimización ---
-    metodos_optimizacion = {
-        'Maximizar Sharpe (Markowitz)': 'max_sharpe',
-        'Mínima Varianza L1': 'min-variance-l1',
-        'Mínima Varianza L2': 'min-variance-l2',
-        'Pesos Iguales': 'equi-weight',
-        'Solo Posiciones Largas': 'long-only',
-        'Markowitz con Retorno Objetivo': 'markowitz-target'
-    }
-    metodo_ui = st.selectbox(
-        "Método de Optimización de Portafolio:",
-        options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
-    )
-    metodo = metodos_optimizacion[metodo_ui]
-
-    # Pedir retorno objetivo solo si corresponde
-    target_return = None
-    if metodo == 'markowitz-target':
-        target_return = st.number_input(
-            "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
-            min_value=0.01, value=0.10, step=0.01, format="%.4f",
-            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
-        )
-
-    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
-
-    # --- Scheduling y tipo de orden ---
-    scheduling_methods = {
-        'TWAP (Time-Weighted)': 'twap',
-        'VWAP (Volume-Weighted)': 'vwap'
-    }
-    scheduling_ui = st.selectbox(
-        "Algoritmo de Scheduling:",
-        options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
-    )
-    scheduling = scheduling_methods[scheduling_ui]
-
-    order_types = {
-        'Market Order': 'mo',
-        'Limit Order': 'lo',
-        'Peg Order': 'peg',
-        'Float Peg': 'float_peg',
-        'Fill or Kill': 'fok',
-        'Immediate or Cancel': 'ioc'
-    }
-    order_type_ui = st.selectbox(
-        "Tipo de Orden:",
-        options=list(order_types.keys()),
-        key="opt_tipo_orden"
-    )
-    order_type = order_types[order_type_ui]
-
-    # Input de capital inicial
-    capital_inicial = st.number_input(
-        "Capital Inicial para Optimización (ARS):",
-        min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-        help="El monto máximo a invertir en la selección y optimización de activos"
-    )
-
-    # Widget TradingView (requiere streamlit-tradingview-widget instalado)
-    try:
-        from streamlit_tradingview_ta import TradingViewWidget
-        st.subheader("Gráfico interactivo TradingView")
-        TradingViewWidget(
-            symbol="NASDAQ:AAPL",  # Cambia por símbolo seleccionado
-            interval="D",
-            theme="dark",
-            studies=["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
-            height=600,
-            width="100%",
-        )
-    except ImportError:
-        st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
-
+    # Configuración de optimización extendida
     col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        estrategia = st.selectbox(
+            "Estrategia de Optimización:",
+            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
+            format_func=lambda x: {
+                'markowitz': 'Optimización de Markowitz',
+                'equi-weight': 'Pesos Iguales',
+                'min-variance-l1': 'Mínima Varianza L1',
+                'min-variance-l2': 'Mínima Varianza L2',
+                'long-only': 'Solo Posiciones Largas'
+            }[x]
+        )
+    
+    with col2:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+            help="Solo aplica para estrategia Markowitz"
+        )
+    
+    with col3:
+        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    
+    col1, col2 = st.columns(2)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-    with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
-
-    def obtener_cotizaciones_cauciones(bearer_token):
-        import requests
-        import pandas as pd
-        url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {bearer_token}'
-        }
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            if 'titulos' in data:
-                return pd.DataFrame(data['titulos'])
-        return None
-
-    def graficar_cauciones(df):
-        import plotly.graph_objects as go
-        import pandas as pd
-        if df is not None and not df.empty:
-            # Agrupar por plazo y calcular tasa promedio
-            curva_prom = df.groupby('plazo')['tasa'].mean().reset_index()
-            fig = go.Figure()
-            # Scatter de todos los puntos
-            fig.add_trace(go.Scatter(
-                x=df['plazo'], y=df['tasa'],
-                mode='markers',
-                name='Tasa Individual',
-                marker=dict(color='rgba(99, 110, 250, 0.6)', size=8)
-            ))
-            # Línea curva promedio
-            fig.add_trace(go.Scatter(
-                x=curva_prom['plazo'], y=curva_prom['tasa'],
-                mode='lines+markers',
-                name='Curva Promedio',
-                line=dict(color='firebrick', width=3)
-            ))
-            fig.update_layout(title='Curva Promedio y Tasas de Cauciones por Plazo',
-                              xaxis_title='Plazo (días)',
-                              yaxis_title='Tasa (%)',
-                              legend=dict(orientation="h"))
-            return fig
-        return None
-
-    if 'bearer_token' not in st.session_state:
-        st.session_state['bearer_token'] = None
-    if mostrar_cauciones:
-        st.subheader('Cauciones: Curva Promedio y Tasas por Plazo')
-        try:
-            from tokens import obtener_tokens, refrescar_token
-            username = st.secrets.get('iol_user', '') if hasattr(st, 'secrets') else ''
-            password = st.secrets.get('iol_pass', '') if hasattr(st, 'secrets') else ''
-            if not username or not password:
-                username = st.text_input('Usuario IOL', type='default', value='')
-                password = st.text_input('Password IOL', type='password', value='')
-            if st.button('Obtener Token Cauciones'):
-                bearer_token, _ = obtener_tokens(username, password)
-                st.session_state['bearer_token'] = bearer_token
-            if st.session_state['bearer_token']:
-                df_cauciones = obtener_cotizaciones_cauciones(st.session_state['bearer_token'])
-                if df_cauciones is not None:
-                    fig_cauc = graficar_cauciones(df_cauciones)
-                    if fig_cauc:
-                        st.plotly_chart(fig_cauc, use_container_width=True)
-                    st.dataframe(df_cauciones)
-                else:
-                    st.warning('No se pudieron obtener cauciones. Verifica el token.')
-            else:
-                st.info('Ingresa usuario y password y haz click en "Obtener Token Cauciones".')
-        except ImportError:
-            st.warning('No se encontró el módulo tokens.py. Agrega tus funciones de autenticación.')
-     # --- Funciones de simulación de scheduling ---
-    def ejecutar_twap(volumen_total, n_intervalos):
-        return [volumen_total // n_intervalos] * (n_intervalos - 1) + [volumen_total - (volumen_total // n_intervalos) * (n_intervalos - 1)]
-
-    def ejecutar_vwap(volumen_total, perfil_volumen):
-        return [int(volumen_total * p) for p in perfil_volumen]
-
-    def simular_ejecucion(volumen, scheduling, order_type):
-        import numpy as np
-        import plotly.graph_objects as go
-        n_intervalos = 10
-        if scheduling == 'twap':
-            cantidades = ejecutar_twap(volumen, n_intervalos)
-        else:
-            # Simula un perfil de volumen creciente (como VWAP real)
-            perfil = np.linspace(1, 2, n_intervalos)
-            perfil = perfil / perfil.sum()
-            cantidades = ejecutar_vwap(volumen, perfil)
-        # Simula precios de ejecución
-        precio_base = 100
-        if order_type == 'mo':
-            precios = [precio_base + np.random.normal(0, 0.2) for _ in cantidades]
-        elif order_type == 'lo':
-            precios = [precio_base + np.random.normal(-0.1, 0.1) for _ in cantidades]
-        elif order_type == 'peg':
-            precios = [precio_base + np.sin(i/3)*0.05 for i in range(n_intervalos)]
-        elif order_type == 'float_peg':
-            precios = [precio_base + np.cos(i/3)*0.07 for i in range(n_intervalos)]
-        elif order_type == 'fok':
-            precios = [precio_base + 0.05 if np.random.rand() > 0.2 else None for _ in cantidades]
-        elif order_type == 'ioc':
-            precios = [precio_base + 0.03 if np.random.rand() > 0.1 else None for _ in cantidades]
-        else:
-            precios = [precio_base for _ in cantidades]
-        # Calcula ejecución efectiva
-        ejecucion = [c if p is not None else 0 for c, p in zip(cantidades, precios)]
-        precios_efectivos = [p if p is not None else 0 for p in precios]
-        # Métricas
-        total_ejecutado = sum(ejecucion)
-        precio_promedio = np.average([p for p in precios if p is not None], weights=[c for c,p in zip(cantidades, precios) if p is not None]) if total_ejecutado > 0 else 0
-        # Gráfico
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=list(range(1, n_intervalos+1)), y=ejecucion, name="Volumen Ejecutado"))
-        fig.add_trace(go.Scatter(x=list(range(1, n_intervalos+1)), y=precios_efectivos, name="Precio de Ejecución", yaxis="y2"))
-        fig.update_layout(title="Simulación de Ejecución ({} / {})".format(scheduling_ui, order_type_ui),
-                          xaxis_title="Intervalo",
-                          yaxis=dict(title="Volumen"),
-                          yaxis2=dict(title="Precio", overlaying="y", side="right"),
-                          legend=dict(orientation="h"))
-        return fig, total_ejecutado, precio_promedio
-
+    
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
-                # --- Selección de universo de activos ---
-                if metodo_seleccion == 'aleatoria':
-                    st.info("🔀 Selección aleatoria de activos respetando el capital inicial")
-                    if capital_inicial is None:
-                        st.warning("Debe ingresar el capital inicial para la selección aleatoria.")
-                        return
-                    seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
-                        activos_filtrados, token_acceso, capital_inicial
-                    )
-                    if not seleccionados:
-                        st.warning("No se pudieron seleccionar activos aleatorios dentro del capital disponible.")
-                        return
-                    else:
-                        st.success(f"✅ Selección aleatoria completada. Total invertido: {total_invertido:.2f} ARS")
-                        df_sel = pd.DataFrame(seleccionados)
-                        df_sel['Peso (%)'] = (df_sel['precio'] / total_invertido) * 100
-                        st.markdown("#### Activos seleccionados aleatoriamente:")
-                        st.dataframe(df_sel[['simbolo', 'mercado', 'precio', 'Peso (%)']], use_container_width=True)
-                        # Solo optimizar sobre los activos seleccionados aleatoriamente (usando símbolo y mercado)
-                        universo_para_opt = [a for a in activos_filtrados if any(
-                            s['simbolo'] == a['simbolo'] and s['mercado'] == a['mercado'] for s in seleccionados
-                        )]
-                        if not universo_para_opt:
-                            st.warning("No hay activos seleccionados aleatoriamente para optimizar.")
-                            return
-                else:
-                    universo_para_opt = activos_para_optimizacion
-
-                # --- Optimización sobre el universo seleccionado ---
-                if not universo_para_opt:
-                    st.warning("No hay activos suficientes para optimizar.")
-                    return
-                manager_inst = PortfolioManager(universo_para_opt, token_acceso, fecha_desde, fecha_hasta, capital=capital_inicial)
+                # Crear manager de portafolio con la lista de activos (símbolo y mercado)
+                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
+                
+                # Cargar datos
                 if manager_inst.load_data():
-                    # Elegir método y target_return según selección
-                    if metodo == 'markowitz-target':
-                        max_attempts = 10
-                        attempt = 0
-                        portfolio_result = None
-                        while attempt < max_attempts:
-                            result = manager_inst.compute_portfolio(strategy='markowitz', target_return=target_return)
-                            if result and abs(result.return_annual - target_return) < 0.001:
-                                portfolio_result = result
-                                break
-                            attempt += 1
-                        if not portfolio_result:
-                            st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos. El resultado más cercano se muestra.")
-                            # Mostrar el mejor resultado aunque no cumpla exactamente
-                            portfolio_result = result
-                    else:
-                        portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
+                    # Computar optimización
+                    use_target = target_return if estrategia == 'markowitz' else None
+                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+                    
                     if portfolio_result:
                         st.success("✅ Optimización completada")
-                        total_invertido = (portfolio_result.weights * capital_inicial).sum()
-                        if total_invertido > capital_inicial + 1e-6:
-                            st.warning(f"La suma de pesos ({total_invertido:.2f}) supera el capital inicial ({capital_inicial:.2f})")
+                        
+                        # Mostrar resultados extendidos
                         col1, col2 = st.columns(2)
+                        
                         with col1:
                             st.markdown("#### 📊 Pesos Optimizados")
                             if portfolio_result.dataframe_allocation is not None:
@@ -3020,9 +2715,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 weights_df['Peso (%)'] = weights_df['weights'] * 100
                                 weights_df = weights_df.sort_values('Peso (%)', ascending=False)
                                 st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                        
                         with col2:
                             st.markdown("#### 📈 Métricas del Portafolio")
                             metricas = portfolio_result.get_metrics_dict()
+                            
                             col_a, col_b = st.columns(2)
                             with col_a:
                                 st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
@@ -3035,37 +2732,29 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
                                 normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
                                 st.metric("Normalidad", normalidad)
-                        # Histograma avanzado con Plotly
-                        st.markdown("#### 📊 Histograma de Retornos del Portafolio")
-                        fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
-                        st.plotly_chart(fig, use_container_width=True)
-
-                        # Mostrar frontera eficiente si el usuario lo solicita
-                        if show_frontier:
-                            st.markdown("#### 📈 Frontera Eficiente (Efficient Frontier)")
-                            try:
-                                frontier, valid_returns, volatilities = manager_inst.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
-                                fig_frontier = go.Figure()
-                                fig_frontier.add_trace(go.Scatter(
-                                    x=volatilities, y=valid_returns, mode='lines+markers', name='Frontera Eficiente',
-                                    line=dict(color='royalblue', width=2)
-                                ))
-                                fig_frontier.update_layout(
-                                    title="Frontera Eficiente",
-                                    xaxis_title="Volatilidad Anual",
-                                    yaxis_title="Retorno Anual",
-                                    template="plotly_dark"
-                                )
-                                st.plotly_chart(fig_frontier, use_container_width=True)
-                            except Exception as e:
-                                st.warning(f"No se pudo calcular la frontera eficiente: {e}")
-                        # Simulación de ejecución
-                        st.markdown("---")
-                        st.subheader("Simulación de Ejecución Algorítmica")
-                        volumen_total = int(capital_inicial // portfolio_result.price if hasattr(portfolio_result, 'price') and portfolio_result.price > 0 else capital_inicial // 100)
-                        fig_exec, total_exec, avg_price = simular_ejecucion(volumen_total, scheduling, order_type)
-                        st.plotly_chart(fig_exec, use_container_width=True)
-                        st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
+                        
+                        # Gráfico de distribución de retornos
+                        if portfolio_result.returns is not None:
+                            st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
+                            fig = portfolio_result.plot_histogram_streamlit()
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Gráfico de pesos
+                        if portfolio_result.weights is not None:
+                            st.markdown("#### 🥧 Distribución de Pesos")
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=portfolio_result.dataframe_allocation['rics'],
+                                values=portfolio_result.weights,
+                                textinfo='label+percent',
+                                hole=0.4,
+                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                            )])
+                            fig_pie.update_layout(
+                                title="Distribución Optimizada de Activos",
+                                template='plotly_white'
+                            )
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        
                     else:
                         st.error("❌ Error en la optimización")
                 else:
@@ -3212,20 +2901,10 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         st.warning("No se encontraron símbolos válidos")
         return
     
-    # Inicializar el símbolo seleccionado en el estado de la sesión si no existe
-    if 'selected_tech_asset' not in st.session_state:
-        st.session_state.selected_tech_asset = simbolos[0] if simbolos else None
-    
-    # Crear el selectbox con una clave única y mantener el estado
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos,
-        key="tech_asset_selector",
-        index=simbolos.index(st.session_state.selected_tech_asset) if st.session_state.selected_tech_asset in simbolos else 0
+        options=simbolos
     )
-    
-    # Actualizar el estado de la sesión cuando cambia la selección
-    st.session_state.selected_tech_asset = simbolo_seleccionado
     
     if simbolo_seleccionado:
         st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
@@ -3437,20 +3116,11 @@ def mostrar_analisis_portafolio():
             if not simbolos:
                 st.warning("No se encontraron símbolos válidos para analizar")
             else:
-                # Initialize selected symbol in session state if not exists
-                if 'selected_vol_asset' not in st.session_state:
-                    st.session_state.selected_vol_asset = simbolos[0] if simbolos else None
-                
-                # Create the selectbox with session state binding
                 simbolo_seleccionado = st.selectbox(
                     "Seleccione un activo para analizar:",
                     options=simbolos,
-                    key="vol_asset_selector",
-                    index=simbolos.index(st.session_state.selected_vol_asset) if st.session_state.selected_vol_asset in simbolos else 0
+                    key="vol_asset_selector"
                 )
-                
-                # Update session state when selection changes
-                st.session_state.selected_vol_asset = simbolo_seleccionado
                 
                 # Configuración del análisis
                 with st.expander("⚙️ Configuración del análisis", expanded=False):
@@ -3603,8 +3273,7 @@ def main():
                     "Seleccione un cliente:",
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed",
-                    key="cliente_selector"
+                    label_visibility="collapsed"
                 )
                 
                 st.session_state.cliente_seleccionado = next(
