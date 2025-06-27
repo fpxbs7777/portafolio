@@ -2066,6 +2066,10 @@ class PortfolioManager:
             }
             
         except Exception as e:
+            st.error(f"Error al calcular el VWAP: {str(e)}")
+            st.exception(e)
+            return None
+            
     def optimizar_portafolio_vwap(self, target_return=None, max_volatility=None, min_weight=0.0, max_weight=1.0):
         """
         Optimiza el portafolio utilizando el VWAP como referencia para los precios.
