@@ -1329,8 +1329,14 @@ class output:
     def __init__(self, returns, notional):
         self.returns = returns
         self.notional = notional
-        self.mean_daily = np.mean(returns)
-        self.volatility_daily = np.std(returns)
+        # Ensure we're working with numpy arrays
+        if isinstance(returns, dict):
+            returns = pd.Series(returns)
+        elif isinstance(returns, pd.DataFrame):
+            returns = returns.values.flatten()
+        
+        self.mean_daily = float(np.mean(returns))
+        self.volatility_daily = float(np.std(returns))
         self.sharpe_ratio = (self.mean_daily / self.volatility_daily).where(self.volatility_daily > 0, 0)
         self.var_95 = np.percentile(returns, 5)
         self.skewness = stats.skew(returns)
