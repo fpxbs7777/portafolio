@@ -3212,10 +3212,20 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         st.warning("No se encontraron símbolos válidos")
         return
     
+    # Inicializar el símbolo seleccionado en el estado de la sesión si no existe
+    if 'selected_tech_asset' not in st.session_state:
+        st.session_state.selected_tech_asset = simbolos[0] if simbolos else None
+    
+    # Crear el selectbox con una clave única y mantener el estado
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        key="tech_asset_selector",
+        index=simbolos.index(st.session_state.selected_tech_asset) if st.session_state.selected_tech_asset in simbolos else 0
     )
+    
+    # Actualizar el estado de la sesión cuando cambia la selección
+    st.session_state.selected_tech_asset = simbolo_seleccionado
     
     if simbolo_seleccionado:
         st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
