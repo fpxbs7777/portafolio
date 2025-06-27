@@ -1220,6 +1220,42 @@ class manager:
         
         return self.cov_matrix, self.mean_returns
 
+    def _create_output(self, weights):
+        """
+        Crea un objeto de salida con los pesos optimizados y métricas del portafolio.
+        
+        Args:
+            weights (np.array): Array de pesos optimizados
+            
+        Returns:
+            output: Objeto con la cartera optimizada y sus métricas
+        """
+        # Calcular retorno y riesgo del portafolio
+        port_return = np.sum(self.mean_returns * weights)
+        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+        
+        # Crear diccionario con los pesos
+        weights_dict = dict(zip(self.rics, weights))
+        
+        # Crear objeto de salida con las métricas básicas
+        port_output = output(
+            returns=self.returns,
+            notional=self.notional
+        )
+        
+        # Actualizar con los pesos y métricas calculadas
+        port_output.weights = weights_dict
+        port_output.return_annual = port_return
+        port_output.volatility_annual = port_vol
+        
+        # Calcular y asignar el ratio de Sharpe
+        if port_vol > 0:
+            port_output.sharpe_ratio = (port_return - self.risk_free_rate) / port_vol
+        else:
+            port_output.sharpe_ratio = 0
+            
+        return port_output
+        
     def compute_portfolio(self, portfolio_type=None, target_return=None):
         if self.cov_matrix is None:
             self.compute_covariance()
