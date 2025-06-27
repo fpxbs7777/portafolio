@@ -2753,7 +2753,14 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     manager_actual = PortfolioManager(universo_actual, token_acceso, fecha_desde, fecha_hasta, capital=capital_actual)
                     portfolio_result_actual = None
                     if manager_actual.load_data():
-                        portfolio_result_actual = manager_actual.compute_portfolio(strategy=metodo, target_return=target_return) if metodo == 'markowitz-target' else manager_actual.compute_portfolio(strategy=metodo)
+                        # Mapear el método de optimización al tipo de cartera correcto
+                        if metodo == 'max_sharpe':
+                            portfolio_result_actual = manager_actual.compute_portfolio(strategy='max_sharpe')
+                        elif metodo == 'markowitz-target':
+                            portfolio_result_actual = manager_actual.compute_portfolio(strategy='markowitz', target_return=target_return)
+                        else:
+                            # Para min-variance-l1, min-variance-l2, equi-weight, long-only
+                            portfolio_result_actual = manager_actual.compute_portfolio(strategy=metodo)
                     # 2. Portafolio aleatorio (misma cantidad de activos)
                     st.info("🔀 Selección aleatoria de activos para benchmarking")
                     cantidad_activos = len(universo_actual)
@@ -2769,7 +2776,14 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     manager_aleatorio = PortfolioManager(universo_aleatorio, token_acceso, fecha_desde, fecha_hasta, capital=capital_actual)
                     portfolio_result_aleatorio = None
                     if manager_aleatorio.load_data():
-                        portfolio_result_aleatorio = manager_aleatorio.compute_portfolio(strategy=metodo, target_return=target_return) if metodo == 'markowitz-target' else manager_aleatorio.compute_portfolio(strategy=metodo)
+                        # Mapear el método de optimización al tipo de cartera correcto
+                        if metodo == 'max_sharpe':
+                            portfolio_result_aleatorio = manager_aleatorio.compute_portfolio(strategy='max_sharpe')
+                        elif metodo == 'markowitz-target':
+                            portfolio_result_aleatorio = manager_aleatorio.compute_portfolio(strategy='markowitz', target_return=target_return)
+                        else:
+                            # Para min-variance-l1, min-variance-l2, equi-weight, long-only
+                            portfolio_result_aleatorio = manager_aleatorio.compute_portfolio(strategy=metodo)
                     # Mostrar resultados comparados
                     col1, col2 = st.columns(2)
                     with col1:
@@ -2898,7 +2912,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos. El resultado más cercano se muestra.")
                             # Mostrar el mejor resultado aunque no cumpla exactamente
                             portfolio_result = result
+                    elif metodo == 'max_sharpe':
+                        portfolio_result = manager_inst.compute_portfolio(strategy='max_sharpe')
                     else:
+                        # Para min-variance-l1, min-variance-l2, equi-weight, long-only
                         portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
                     if portfolio_result:
                         st.success("✅ Optimización completada")
