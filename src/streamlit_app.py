@@ -2031,16 +2031,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             
         # Calcular retornos diarios
         df_historico = df_historico.sort_values('fecha')
-        df_historico['retorno'] = df_historico['precio'].pct_change().dropna()
-        
-        # Guardar los retornos para cálculos posteriores
-        retornos_diarios[simbolo] = df_historico['retorno'].dropna()
-        
-        # Calcular métricas individuales
-        retorno_total = (df_historico['precio'].iloc[-1] / df_historico['precio'].iloc[0]) - 1
-        retorno_anual = (1 + retorno_total) ** (252/len(df_historico)) - 1
-        volatilidad_anual = df_historico['retorno'].std() * np.sqrt(252)
-        sharpe_ratio = (retorno_anual - 0.40) / (volatilidad_anual if volatilidad_anual > 0 else 1)
+        df_historico['retorno'] = df_historico['precio'].pct_change()
         
         # Filtrar valores atípicos usando un enfoque más robusto
         if len(df_historico) > 5:  # Necesitamos suficientes puntos para el filtrado
@@ -2050,7 +2041,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 (df_historico['retorno'] >= q_low) & 
                 (df_historico['retorno'] <= q_high)
             ]
-        
+            
         # Filtrar valores no finitos y asegurar suficientes datos
         retornos_validos = df_historico['retorno'].replace(
             [np.inf, -np.inf], np.nan
@@ -2059,60 +2050,49 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         if len(retornos_validos) < 5:  # Mínimo de datos para métricas confiables
             print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
             continue
-                    (df_historico['retorno'] <= q_high)
-                ]
             
-            # Filtrar valores no finitos y asegurar suficientes datos
-            retornos_validos = df_historico['retorno'].replace(
-                [np.inf, -np.inf], np.nan
-            ).dropna()
+        # Verificar si hay suficientes variaciones de precio
+        if retornos_validos.nunique() < 2:
+            print(f"No hay suficiente variación en los precios de {simbolo}")
+            continue
             
-            if len(retornos_validos) < 5:  # Mínimo de datos para métricas confiables
-                print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
-                continue
-                
-            # Verificar si hay suficientes variaciones de precio
-            if retornos_validos.nunique() < 2:
-                print(f"No hay suficiente variación en los precios de {simbolo}")
-                continue
-            
-            # Calcular métricas básicas
-            retorno_medio = retornos_validos.mean() * 252  # Anualizado
-            volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
-            
-            # Asegurar valores razonables
-            retorno_medio = np.clip(retorno_medio, -5, 5)  # Límite de ±500% anual
-            volatilidad = min(volatilidad, 3)  # Límite de 300% de volatilidad
-            
-            # Calcular métricas de riesgo basadas en la distribución de retornos
-            ret_pos = retornos_validos[retornos_validos > 0]
-            ret_neg = retornos_validos[retornos_validos < 0]
-            n_total = len(retornos_validos)
-            
-            # Calcular probabilidades
-            prob_ganancia = len(ret_pos) / n_total if n_total > 0 else 0.5
-            prob_perdida = len(ret_neg) / n_total if n_total > 0 else 0.5
-            
-            # Calcular probabilidades de movimientos extremos
-            prob_ganancia_10 = len(ret_pos[ret_pos > 0.1]) / n_total if n_total > 0 else 0
-            prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
-            
-            # Calcular el peso del activo en el portafolio
-            peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
-            
-            # Guardar métricas
-            metricas_activos[simbolo] = {
-                'retorno_medio': retorno_medio,
-                'volatilidad': volatilidad,
-                'prob_ganancia': prob_ganancia,
-                'prob_perdida': prob_perdida,
-                'prob_ganancia_10': prob_ganancia_10,
-                'prob_perdida_10': prob_perdida_10,
-                'peso': peso
-            }
-            
-            # Guardar retornos para cálculo de correlaciones
-            retornos_diarios[simbolo] = df_historico.set_index('fecha')['retorno']
+        # Calcular métricas básicas
+        retorno_medio = retornos_validos.mean() * 252  # Anualizado
+        volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
+        
+        # Asegurar valores razonables
+        retorno_medio = np.clip(retorno_medio, -5, 5)  # Límite de ±500% anual
+        volatilidad = min(volatilidad, 3)  # Límite de 300% de volatilidad
+        
+        # Calcular métricas de riesgo basadas en la distribución de retornos
+        ret_pos = retornos_validos[retornos_validos > 0]
+        ret_neg = retornos_validos[retornos_validos < 0]
+        n_total = len(retornos_validos)
+        
+        # Calcular probabilidades
+        prob_ganancia = len(ret_pos) / n_total if n_total > 0 else 0.5
+        prob_perdida = len(ret_neg) / n_total if n_total > 0 else 0.5
+        
+        # Calcular probabilidades de movimientos extremos
+        prob_ganancia_10 = len(ret_pos[ret_pos > 0.1]) / n_total if n_total > 0 else 0
+        prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
+        
+        # Calcular el peso del activo en el portafolio
+        peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
+        
+        # Guardar métricas
+        metricas_activos[simbolo] = {
+            'retorno_medio': retorno_medio,
+            'volatilidad': volatilidad,
+            'prob_ganancia': prob_ganancia,
+            'prob_perdida': prob_perdida,
+            'prob_ganancia_10': prob_ganancia_10,
+            'prob_perdida_10': prob_perdida_10,
+            'peso': peso
+        }
+        
+        # Guardar retornos para cálculo de correlaciones
+        retornos_diarios[simbolo] = df_historico.set_index('fecha')['retorno']
             
         except Exception as e:
             print(f"Error procesando {simbolo}: {str(e)}")
