@@ -2693,7 +2693,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format_func=lambda x: {
                 'actual': 'Portafolio actual',
                 'aleatoria': 'Selección aleatoria'
-            }[x]
+            }[x],
+            key="metodo_seleccion_activos"
         )
 
     # Mostrar input de capital y filtro de tipo de activo solo si corresponde
@@ -2723,7 +2724,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format_func=lambda x: {
                 'actual': 'Portafolio actual',
                 'aleatoria': 'Selección aleatoria'
-            }[x]
+            }[x],
+            key="metodo_seleccion_activos"
         )
 
     # Mostrar input de capital solo si corresponde
