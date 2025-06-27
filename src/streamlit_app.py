@@ -1337,7 +1337,7 @@ class output:
         
         self.mean_daily = float(np.mean(returns))
         self.volatility_daily = float(np.std(returns))
-        self.sharpe_ratio = (self.mean_daily / self.volatility_daily).where(self.volatility_daily > 0, 0)
+        self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
         self.var_95 = np.percentile(returns, 5)
         self.skewness = stats.skew(returns)
         self.kurtosis = stats.kurtosis(returns)
