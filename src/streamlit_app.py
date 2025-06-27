@@ -1944,9 +1944,10 @@ class PortfolioManager:
 
 # --- Historical Data Methods ---
 def _deprecated_serie_historica_iol(*args, **kwargs):
-    """Deprecated duplicate of `obtener_serie_historica_iol`. Kept for backward compatibility."""
-    return None
-    """Obtiene series históricas desde la API de IOL
+    """
+    Deprecated duplicate of `obtener_serie_historica_iol`. Kept for backward compatibility.
+    
+    Obtiene series históricas desde la API de IOL
     
     Args:
         token_portador: Token de autenticación Bearer
@@ -1957,50 +1958,9 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         ajustada: "Ajustada" o "SinAjustar"
     
     Returns:
-        DataFrame con datos históricos o None si hay error
+        None: Esta función está obsoleta, siempre retorna None
     """
-    # Manejar caso donde simbolo es un diccionario
-    if isinstance(simbolo, dict):
-        simbolo = simbolo.get('simbolo', '')
-    
-    if not simbolo:
-        st.warning("No se proporcionó un símbolo válido")
-        return None
-        
-    # Asegurarse de que el mercado esté en mayúsculas
-    mercado = mercado.upper() if mercado else 'BCBA'
-    try:
-        # Construir la URL de la API
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {token_portador}'
-        }
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        data = response.json()
-        df = pd.DataFrame(data)
-        
-        if 'fechaHora' in df.columns:
-            # Handle different datetime formats
-            df['fecha'] = pd.to_datetime(
-                df['fechaHora'], 
-                format='mixed',  # Automatically infer format for each element
-                utc=True,        # Ensure timezone awareness
-                errors='coerce'  # Convert parsing errors to NaT
-            ).dt.tz_convert(None).dt.date  # Convert to naive date
-            
-            # Drop rows where date parsing failed
-            df = df.dropna(subset=['fecha'])
-            df = df.sort_values('fecha')
-            
-        return df
-        
-    except Exception as e:
-        st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
-        return None
+    return None
 
 # --- Portfolio Metrics Function ---
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
