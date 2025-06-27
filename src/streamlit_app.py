@@ -4147,7 +4147,7 @@ def mostrar_analisis_portafolio():
                                                 
                                                 # Explicación del VaR
                                                 st.info(f"""
-                                                💡 El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_95):.2%} 
+                                                INFO: El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_95):.2%} 
                                                 indica que hay un {100-conf_level}% de probabilidad de que la pérdida 
                                                 diaria no supere este valor en condiciones normales de mercado.
                                                 """)
@@ -4155,6 +4155,7 @@ def mostrar_analisis_portafolio():
                                             # Guardar tiempo del último análisis
                                             st.session_state.last_analysis_time = datetime.now()
                                             st.session_state.analysis_cache[simbolo_seleccionado] = {
+{{ ... }}
                                                 'fecha': datetime.now(),
                                                 'resultados': result
                                             }
