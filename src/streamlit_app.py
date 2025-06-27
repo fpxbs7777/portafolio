@@ -1871,30 +1871,20 @@ class PortfolioManager:
                 # Cargar datos y calcular covarianzas
                 self.manager.returns = self.returns
                 self.manager.compute_covariance()
-                
-            # Calcular cartera según estrategia
-            if strategy in ['max_sharpe', 'min_vol']:
+            
+            # Mapear estrategias a los tipos de portafolio esperados por el manager
+            if strategy == 'max_sharpe':
+                portfolio_type = 'markowitz'  # Usar 'markowitz' sin target_return para maximizar Sharpe
                 portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type=strategy,
+                    portfolio_type=portfolio_type,
                     target_return=target_return
                 )
-                
-                if portfolio_output is None:
-                    st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
-                    n_assets = len(self.returns.columns)
-                    weights = np.array([1/n_assets] * n_assets)
-                    portfolio_returns = (self.returns * weights).sum(axis=1)
-                    portfolio_output = output(portfolio_returns, self.notional)
-                    portfolio_output.weights = weights
-                    portfolio_output.dataframe_allocation = pd.DataFrame({
-                        'rics': list(self.returns.columns),
-                        'weights': weights,
-                        'volatilities': self.returns.std().values,
-                        'returns': self.returns.mean().values
-                    })
-                
-                return portfolio_output
-                
+            elif strategy == 'min_vol':
+                portfolio_type = 'min-variance-l1'  # Usar 'min-variance-l1' para mínima varianza
+                portfolio_output = self.manager.compute_portfolio(
+                    portfolio_type=portfolio_type,
+                    target_return=target_return
+                )
             elif strategy == 'equi-weight':
                 n_assets = len(self.returns.columns)
                 weights = np.array([1/n_assets] * n_assets)
@@ -1908,10 +1898,25 @@ class PortfolioManager:
                     'returns': self.returns.mean().values
                 })
                 return portfolio_output
-                
             else:
                 st.error(f"Estrategia no soportada: {strategy}")
                 return None
+                
+            if portfolio_output is None:
+                st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
+                n_assets = len(self.returns.columns)
+                weights = np.array([1/n_assets] * n_assets)
+                portfolio_returns = (self.returns * weights).sum(axis=1)
+                portfolio_output = output(portfolio_returns, self.notional)
+                portfolio_output.weights = weights
+                portfolio_output.dataframe_allocation = pd.DataFrame({
+                    'rics': list(self.returns.columns),
+                    'weights': weights,
+                    'volatilities': self.returns.std().values,
+                    'returns': self.returns.mean().values
+                })
+                
+            return portfolio_output
                 
         except Exception as e:
             st.error(f"Error al calcular la cartera: {str(e)}")
@@ -2039,22 +2044,6 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         try:
             # Obtener datos históricos usando el método estándar
             mercado = activo.get('mercado', 'BCBA')
-            tipo_activo = activo.get('Tipo', 'Desconocido')
-            
-            # Debug: Mostrar información del activo que se está procesando
-            print(f"\nProcesando activo: {simbolo} (Mercado: {mercado}, Tipo: {tipo_activo})")
-            
-            # Obtener la serie histórica
-            try:
-                df_historico = obtener_serie_historica_iol(
-                    token_portador=token_portador,
-                    mercado=mercado,
-                    simbolo=simbolo,
-                    fecha_desde=fecha_desde,
-                    fecha_hasta=fecha_hasta,
-                    ajustada="SinAjustar"
-                )
-            except Exception as e:
                 print(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
                 continue
             
