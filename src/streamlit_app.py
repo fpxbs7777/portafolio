@@ -1339,8 +1339,8 @@ class output:
         self.is_normal = self.p_value > 0.05
         self.decimals = 4
         self.str_title = 'Portfolio Returns'
-        self.volatility_annual = self.volatility_daily * np.sqrt(252)
-        self.return_annual = self.mean_daily * 252
+        self.volatility_annual = float(self.volatility_daily) * np.sqrt(252)
+        self.return_annual = float(self.mean_daily) * 252
         
         # Placeholders que serán actualizados por el manager
         self.weights = None
