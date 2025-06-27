@@ -904,6 +904,7 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         if isinstance(data, list):
             fechas = []
             precios = []
+            
             for item in data:
                 if 'fecha' in item and 'valorCuota' in item:
                     fechas.append(pd.to_datetime(item['fecha']))
@@ -999,7 +1000,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                             
                         fechas.append(fecha)
                         precios.append(precio_float)
-                        
                     except (ValueError, TypeError) as e:
                         print(f"  - Error al convertir datos: {e}")
                         continue
@@ -1103,7 +1103,6 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
                     if not pd.isna(fecha):
                         fechas.append(fecha)
                         precios.append(float(precio))
-                        
                 except (ValueError, TypeError, AttributeError) as e:
                     continue
             
@@ -1331,9 +1330,11 @@ class output:
         self.notional = notional
         # Ensure we're working with numpy arrays
         if isinstance(returns, dict):
-            returns = pd.Series(returns)
+            returns = pd.Series(returns).astype(float)
         elif isinstance(returns, pd.DataFrame):
-            returns = returns.values.flatten()
+            returns = returns.values.flatten().astype(float)
+        elif not isinstance(returns, (np.ndarray, pd.Series)):
+            raise ValueError("returns must be dict, DataFrame, Series or numpy array")
         
         self.mean_daily = float(np.mean(returns))
         self.volatility_daily = float(np.std(returns))
@@ -1730,7 +1731,7 @@ class PortfolioManager:
         
         # 4. Riesgo (VaR)
         var_levels = np.arange(1, 11) * 10  # 10% a 100%
-        var_values = [np.percentile(final_returns, level) for level in var_levels]
+        var_values = [np.percentile(returns_paths, level) for level in var_levels]
         
         fig.add_trace(
             go.Bar(
@@ -2090,7 +2091,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
                 continue
                 
-            # Verificar si hay suficientes variaciones de precio
+            # Verificar si hay suficiente variación en los precios
             if retornos_validos.nunique() < 2:
                 print(f"No hay suficiente variación en los precios de {simbolo}")
                 continue
@@ -2335,7 +2336,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             except (ValueError, TypeError):
                                 continue
                 
-                # Intento final: consultar precio actual vía API si sigue en cero
+            # Intento final: consultar precio actual vía API si sigue en cero
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
@@ -3700,6 +3701,12 @@ def backtest_portfolio(price_df, weights, risk_free_rate=0.0):
         'max_drawdown': max_drawdown,
         'returns': portfolio_returns
     }
+```
+```
+{{ ... }}
+    'max_drawdown': max_drawdown,
+    'returns': portfolio_returns
+}
 
 if __name__ == "__main__":
     main()
