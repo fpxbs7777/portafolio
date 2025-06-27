@@ -2678,6 +2678,41 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         activos_filtrados = activos_para_optimizacion
         capital_inicial = None
 
+    # --- Backtesting del portafolio actual ---
+    st.markdown("#### 📅 Backtesting Básico del Portafolio Actual")
+    if len(activos_filtrados) > 1:
+        if st.button("▶️ Ejecutar Backtest", key="btn_backtest_portfolio"):
+            with st.spinner("Ejecutando backtest sobre el portafolio actual..."):
+                try:
+                    # Obtener precios históricos de todos los activos
+                    precios = get_historical_data_for_optimization(token_acceso, activos_filtrados, fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'))
+                    # Unir precios por fecha
+                    df_precios = pd.DataFrame({k: v['precio'] for k, v in precios.items() if v is not None and not v.empty})
+                    df_precios = df_precios.dropna()
+                    # Calcular pesos actuales (por monto invertido)
+                    montos = []
+                    total = 0
+                    for activo in activos_filtrados:
+                        simbolo = activo['simbolo']
+                        if simbolo in df_precios.columns:
+                            precio_ultimo = df_precios[simbolo].iloc[-1]
+                            montos.append(precio_ultimo)
+                            total += precio_ultimo
+                        else:
+                            montos.append(0)
+                    if total > 0:
+                        pesos = [m/total for m in montos]
+                        res = backtest_portfolio(df_precios, pesos)
+                        st.success(f"Sharpe Ratio anualizado: {res['sharpe_ratio']:.2f}")
+                        st.info(f"Drawdown máximo: {res['max_drawdown']*100:.2f}%")
+                        st.line_chart((1+res['returns']).cumprod(), use_container_width=True)
+                    else:
+                        st.warning("No se pudo calcular el peso de los activos. Verifique los datos.")
+                except Exception as e:
+                    st.error(f"Error en el backtest: {str(e)}")
+    else:
+        st.info("Agregue al menos 2 activos para realizar un backtest significativo.")
+
     # --- Métodos avanzados de optimización ---
     metodos_optimizacion = {
         'Maximizar Sharpe (Markowitz)': 'max_sharpe',
@@ -3624,6 +3659,41 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+import numpy as np
+import pandas as pd
+
+def backtest_portfolio(price_df, weights, risk_free_rate=0.0):
+    """
+    Realiza backtesting de una estrategia de portafolio con datos históricos.
+
+    Args:
+        price_df (pd.DataFrame): Precios históricos (índice=fechas, columnas=activos)
+        weights (array-like): Pesos del portafolio (suma 1)
+        risk_free_rate (float): Tasa libre de riesgo anualizada (por defecto 0.0)
+
+    Returns:
+        dict: {'sharpe_ratio': float, 'max_drawdown': float, 'returns': pd.Series}
+    """
+    # Calcular retornos logarítmicos diarios
+    returns = np.log(price_df / price_df.shift(1)).dropna()
+    # Retorno diario del portafolio
+    portfolio_returns = returns.dot(weights)
+    # Ajuste de tasa libre de riesgo diaria
+    rf_daily = risk_free_rate / 252
+    # Sharpe ratio anualizado
+    sharpe_ratio = ((portfolio_returns.mean() - rf_daily) / portfolio_returns.std()) * np.sqrt(252)
+    # Equity curve
+    cumulative = (1 + portfolio_returns).cumprod()
+    # Drawdown
+    rolling_max = cumulative.cummax()
+    drawdown = (cumulative - rolling_max) / rolling_max
+    max_drawdown = drawdown.min()
+    return {
+        'sharpe_ratio': sharpe_ratio,
+        'max_drawdown': max_drawdown,
+        'returns': portfolio_returns
+    }
 
 if __name__ == "__main__":
     main()
