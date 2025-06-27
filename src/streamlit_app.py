@@ -2004,38 +2004,61 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         try:
             # Obtener datos históricos usando el método estándar
             mercado = activo.get('mercado', 'BCBA')
-                print(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
-                continue
+            df_historico = obtener_serie_historica_iol(
+                token_portador=token_portador,
+                mercado=mercado,
+                simbolo=simbolo,
+                fecha_desde=(datetime.now() - timedelta(days=dias_historial*2)).strftime('%Y-%m-%d'),
+                fecha_hasta=datetime.now().strftime('%Y-%m-%d')
+            )
+        except Exception as e:
+            print(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
+            continue
             
-            if df_historico is None:
-                print(f"No se obtuvieron datos para {simbolo} (None)")
-                continue
+        if df_historico is None:
+            print(f"No se obtuvieron datos para {simbolo} (None)")
+            continue
                 
-            if df_historico.empty:
-                print(f"Datos vacíos para {simbolo}")
-                continue
+        if df_historico.empty:
+            print(f"Datos vacíos para {simbolo}")
+            continue
+        
+        # Asegurarse de que tenemos las columnas necesarias
+        if 'fecha' not in df_historico.columns or 'precio' not in df_historico.columns:
+            print(f"Faltan columnas necesarias en los datos de {simbolo}")
+            print(f"Columnas disponibles: {df_historico.columns.tolist()}")
+            continue
             
-            # Asegurarse de que tenemos las columnas necesarias
-            if 'fecha' not in df_historico.columns or 'precio' not in df_historico.columns:
-                print(f"Faltan columnas necesarias en los datos de {simbolo}")
-                print(f"Columnas disponibles: {df_historico.columns.tolist()}")
-                continue
-                
-            print(f"Datos obtenidos: {len(df_historico)} registros desde {df_historico['fecha'].min()} hasta {df_historico['fecha'].max()}")
-                
-            # Ordenar por fecha y limpiar duplicados
-            df_historico = df_historico.sort_values('fecha')
-            df_historico = df_historico.drop_duplicates(subset=['fecha'], keep='last')
-            
-            # Calcular retornos diarios
-            df_historico['retorno'] = df_historico['precio'].pct_change()
-            
-            # Filtrar valores atípicos usando un enfoque más robusto
-            if len(df_historico) > 5:  # Necesitamos suficientes puntos para el filtrado
-                q_low = df_historico['retorno'].quantile(0.01)
-                q_high = df_historico['retorno'].quantile(0.99)
-                df_historico = df_historico[
-                    (df_historico['retorno'] >= q_low) & 
+        # Calcular retornos diarios
+        df_historico = df_historico.sort_values('fecha')
+        df_historico['retorno'] = df_historico['precio'].pct_change().dropna()
+        
+        # Guardar los retornos para cálculos posteriores
+        retornos_diarios[simbolo] = df_historico['retorno'].dropna()
+        
+        # Calcular métricas individuales
+        retorno_total = (df_historico['precio'].iloc[-1] / df_historico['precio'].iloc[0]) - 1
+        retorno_anual = (1 + retorno_total) ** (252/len(df_historico)) - 1
+        volatilidad_anual = df_historico['retorno'].std() * np.sqrt(252)
+        sharpe_ratio = (retorno_anual - 0.40) / (volatilidad_anual if volatilidad_anual > 0 else 1)
+        
+        # Filtrar valores atípicos usando un enfoque más robusto
+        if len(df_historico) > 5:  # Necesitamos suficientes puntos para el filtrado
+            q_low = df_historico['retorno'].quantile(0.01)
+            q_high = df_historico['retorno'].quantile(0.99)
+            df_historico = df_historico[
+                (df_historico['retorno'] >= q_low) & 
+                (df_historico['retorno'] <= q_high)
+            ]
+        
+        # Filtrar valores no finitos y asegurar suficientes datos
+        retornos_validos = df_historico['retorno'].replace(
+            [np.inf, -np.inf], np.nan
+        ).dropna()
+        
+        if len(retornos_validos) < 5:  # Mínimo de datos para métricas confiables
+            print(f"No hay suficientes datos válidos para {simbolo} (solo {len(retornos_validos)} registros)")
+            continue
                     (df_historico['retorno'] <= q_high)
                 ]
             
