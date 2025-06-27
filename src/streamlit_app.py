@@ -2071,16 +2071,18 @@ class PortfolioManager:
             return None
     
     def optimizar_portafolio_vwap(self, target_return=None, max_volatility=None, min_weight=0.0, max_weight=1.0):
-        """Optimiza el portafolio usando VWAP como referencia de precios.
+        """
+        Optimiza el portafolio utilizando el VWAP como referencia para los precios.
         
         Args:
-            target_return (float, optional): Retorno objetivo anualizado. Si no se especifica, maximiza el ratio de Sharpe.
+            target_return (float, optional): Retorno objetivo anualizado. Si no se especifica,
+                                          se maximiza el ratio de Sharpe.
             max_volatility (float, optional): Volatilidad máxima permitida.
-            min_weight (float, optional): Peso mínimo por activo. Default: 0.0
-            max_weight (float, optional): Peso máximo por activo. Default: 1.0
+            min_weight (float): Peso mínimo por activo (default: 0.0).
+            max_weight (float): Peso máximo por activo (default: 1.0).
             
         Returns:
-            dict: Pesos óptimos y métricas del portafolio
+            dict: Diccionario con los pesos óptimos y métricas del portafolio
         """
         # Calcular VWAP si no está calculado
         if self.vwap_data is None:
@@ -2734,29 +2736,29 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         if metricas:
             if metricas['concentracion'] > 0.5:
                 st.warning("""
-                **ADVERTENCIA: Portafolio Altamente Concentrado**  
+                **⚠️ Portafolio Altamente Concentrado**  
                 Considere diversificar sus inversiones para reducir el riesgo.
                 """)
             elif metricas['concentracion'] > 0.25:
                 st.info("""
-                **INFO: Concentración Moderada**  
+                **ℹ️ Concentración Moderada**  
                 Podría mejorar su diversificación para optimizar el riesgo.
                 """)
             else:
                 st.success("""
-                **OK: Buena Diversificación**  
+                **✅ Buena Diversificación**  
                 Su portafolio está bien diversificado.
                 """)
             
             ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
             if ratio_riesgo_retorno > 0.5:
                 st.success("""
-                **OK: Buen Balance Riesgo-Retorno**  
+                **✅ Buen Balance Riesgo-Retorno**  
                 La relación entre riesgo y retorno es favorable.
                 """)
             else:
                 st.warning("""
-                **ADVERTENCIA: Revisar Balance Riesgo-Retorno**  
+                **⚠️ Revisar Balance Riesgo-Retorno**  
                 El riesgo podría ser alto en relación al retorno esperado.
                 """)
     else:
@@ -4145,7 +4147,7 @@ def mostrar_analisis_portafolio():
                                                 
                                                 # Explicación del VaR
                                                 st.info(f"""
-                                                INFO: El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_95):.2%} 
+                                                💡 El Valor en Riesgo (VaR) al {conf_level}% de {abs(var_95):.2%} 
                                                 indica que hay un {100-conf_level}% de probabilidad de que la pérdida 
                                                 diaria no supere este valor en condiciones normales de mercado.
                                                 """)
@@ -4153,7 +4155,6 @@ def mostrar_analisis_portafolio():
                                             # Guardar tiempo del último análisis
                                             st.session_state.last_analysis_time = datetime.now()
                                             st.session_state.analysis_cache[simbolo_seleccionado] = {
-{{ ... }}
                                                 'fecha': datetime.now(),
                                                 'resultados': result
                                             }
