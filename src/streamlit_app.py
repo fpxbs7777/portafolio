@@ -3427,11 +3427,20 @@ def mostrar_analisis_portafolio():
             if not simbolos:
                 st.warning("No se encontraron símbolos válidos para analizar")
             else:
+                # Initialize selected symbol in session state if not exists
+                if 'selected_vol_asset' not in st.session_state:
+                    st.session_state.selected_vol_asset = simbolos[0] if simbolos else None
+                
+                # Create the selectbox with session state binding
                 simbolo_seleccionado = st.selectbox(
                     "Seleccione un activo para analizar:",
                     options=simbolos,
-                    key="vol_asset_selector"
+                    key="vol_asset_selector",
+                    index=simbolos.index(st.session_state.selected_vol_asset) if st.session_state.selected_vol_asset in simbolos else 0
                 )
+                
+                # Update session state when selection changes
+                st.session_state.selected_vol_asset = simbolo_seleccionado
                 
                 # Configuración del análisis
                 with st.expander("⚙️ Configuración del análisis", expanded=False):
