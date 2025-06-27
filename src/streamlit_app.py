@@ -2077,7 +2077,7 @@ class PortfolioManager:
         
         Args:
             target_return (float, optional): Retorno objetivo anualizado. Si no se especifica,
-                                          se maximiza el ratio de Sharpe.
+                se maximiza el ratio de Sharpe.
             max_volatility (float, optional): Volatilidad máxima permitida.
             min_weight (float): Peso mínimo por activo (default: 0.0).
             max_weight (float): Peso máximo por activo (default: 1.0).
