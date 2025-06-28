@@ -2156,24 +2156,25 @@ def determinar_perfil_composicion(composicion, tipos_instrumentos=None):
             'Desconocido': 0
         }
         
+        # Clasificar instrumentos según su tipo y riesgo
         for item in composicion:
             tipo = item.get('tipo', 'Otras').lower()
             porcentaje = item['porcentaje']
             
-            # Clasificar según el tipo y el mapeo de riesgo
+            # Obtener el nivel de riesgo del instrumento
             riesgo = tipos_instrumentos.get(tipo, {}).get('riesgo', 'Desconocido') if tipos_instrumentos else 'Desconocido'
             
+            # Asignar el porcentaje al nivel de riesgo correspondiente
             if riesgo in porcentajes:
                 porcentajes[riesgo] += porcentaje
             else:
                 porcentajes['Desconocido'] += porcentaje
         
-        # Determinar perfil basado en la composición
+        # Calcular porcentajes relativos
         total = sum(porcentajes.values())
         if total == 0:
             return "Desconocido"
         
-        # Calcular porcentajes relativos
         porcentajes_relativos = {
             'Alto': porcentajes['Alto'] / total,
             'Medio': porcentajes['Medio'] / total,
@@ -2182,27 +2183,12 @@ def determinar_perfil_composicion(composicion, tipos_instrumentos=None):
             'Desconocido': porcentajes['Desconocido'] / total
         }
         
-        # Determinar perfil basado en los porcentajes relativos
+        # Determinar perfil basado en los porcentajes
         if porcentajes_relativos['Alto'] >= 0.6:
             return "Agresivo"
         elif porcentajes_relativos['Bajo'] >= 0.6:
             return "Conservador"
         elif porcentajes_relativos['Variable'] >= 0.4:
-            return "Variable"
-        elif porcentajes_relativos['Medio'] >= 0.4:
-            return "Moderado"
-        else:
-            # Si hay una mezcla equilibrada
-            if porcentajes_relativos['Alto'] >= 0.3:
-                return "Mixto Agresivo"
-            elif porcentajes_relativos['Bajo'] >= 0.3:
-                return "Mixto Conservador"
-            else:
-                return "Mixto"
-    except Exception as e:
-        st.error(f"Error al determinar perfil: {str(e)}")
-        return "Desconocido"
-
             return "Variable"
         elif porcentajes_relativos['Medio'] >= 0.4:
             return "Moderado"
