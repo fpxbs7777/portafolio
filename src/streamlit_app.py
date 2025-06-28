@@ -2894,69 +2894,69 @@ def obtener_activos_disponibles_mercado(token_acceso):
             url = f'https://api.invertironline.com/api/v2/{panel}/Titulos/Cotizacion/panel'
             
             with st.spinner(f'Obteniendo datos de {panel}...'):
-                response = requests.get(url, headers=headers, timeout=30)
-                
-                if response.status_code == 200:
-                    try:
-                        datos = response.json()
-                        st.write(f"Datos crudos para {panel}:", datos)  # Debug
-                        
-                        if not isinstance(datos, (list, dict)):
-                            st.warning(f"Formato de datos inesperado para {panel}: {type(datos)}")
-                            continue
-                            
-                        # Si es un diccionario, verificar si tiene una lista dentro
-                        if isinstance(datos, dict):
-                            # Buscar la primera lista en el diccionario
-                            for key, value in datos.items():
-                                if isinstance(value, list):
-                                    datos = value
-                                    st.info(f"Encontrada lista de activos en la clave: {key}")
-                                    break
-                            else:
-                                st.warning(f"No se encontró una lista de activos en la respuesta de {panel}")
-                                continue
-                        
-                        for i, titulo in enumerate(datos):
-                            try:
-                                # Debug: Mostrar el tipo de cada título
-                                if not isinstance(titulo, dict):
-                                    st.warning(f"Título {i} en {panel} no es un diccionario: {type(titulo)}")
-                                    continue
-                                    
-                                # Debug: Mostrar las claves disponibles
-                                st.write(f"Claves disponibles en título {i}:", titulo.keys())
-                                
-                                # Solo agregar si tiene símbolo y precio
-                                simbolo = titulo.get('simbolo') or titulo.get('ticker') or titulo.get('simbolo')
-                                precio = titulo.get('ultimoPrecio') or titulo.get('precioUltimo')
-                                
-                                if simbolo and precio is not None:
-                                    todos_los_activos.append({
-                                        'simbolo': str(simbolo).strip(),
-                                        'nombre': titulo.get('descripcion', titulo.get('nombre', 'Sin nombre')).strip(),
-                                        'tipo': panel,
-                                        'mercado': titulo.get('mercado', titulo.get('marketId', 'BCBA')),
-                                        'ultimoPrecio': float(precio),
-                                        'moneda': titulo.get('monedaCotizacion', titulo.get('moneda', 'ARS')),
-                                        'variacion': float(titulo.get('variacion', titulo.get('variacionPorcentual', 0))),
-                                        'volumen': float(titulo.get('volumen', titulo.get('volumenNominal', 0)))
-                                    })
-                            except Exception as e:
-                                st.error(f"Error procesando título {i} en {panel}: {str(e)}")
-                                st.write("Datos del título con error:", titulo)
-                                continue  # Saltar activos con datos inválidos
-                        
-                        st.success(f'Datos de {panel} obtenidos correctamente')
-                    except Exception as e:
-                        st.error(f'Error al procesar la respuesta de {panel}: {str(e)}')
-                else:
-                    st.warning(f'No se pudieron obtener los datos de {panel}. Código: {response.status_code}')
+                try:
+                    response = requests.get(url, headers=headers, timeout=30)
                     
-        except requests.exceptions.RequestException as e:
-            st.error(f'Error de conexión al obtener datos de {panel}: {str(e)}')
-        except Exception as e:
-            st.error(f'Error inesperado al obtener datos de {panel}: {str(e)}')
+                    if response.status_code == 200:
+                        try:
+                            datos = response.json()
+                            st.write(f"Datos crudos para {panel}:", datos)  # Debug
+                            
+                            if not isinstance(datos, (list, dict)):
+                                st.warning(f"Formato de datos inesperado para {panel}: {type(datos)}")
+                                continue
+                                
+                            # Si es un diccionario, verificar si tiene una lista dentro
+                            if isinstance(datos, dict):
+                                # Buscar la primera lista en el diccionario
+                                for key, value in datos.items():
+                                    if isinstance(value, list):
+                                        datos = value
+                                        st.info(f"Encontrada lista de activos en la clave: {key}")
+                                        break
+                                else:
+                                    st.warning(f"No se encontró una lista de activos en la respuesta de {panel}")
+                                    continue
+                            
+                            for i, titulo in enumerate(datos):
+                                try:
+                                    # Debug: Mostrar el tipo de cada título
+                                    if not isinstance(titulo, dict):
+                                        st.warning(f"Título {i} en {panel} no es un diccionario: {type(titulo)}")
+                                        continue
+                                        
+                                    # Debug: Mostrar las claves disponibles
+                                    st.write(f"Claves disponibles en título {i}:", titulo.keys())
+                                    
+                                    # Solo agregar si tiene símbolo y precio
+                                    simbolo = titulo.get('simbolo') or titulo.get('ticker')
+                                    precio = titulo.get('ultimoPrecio') or titulo.get('precioUltimo')
+                                    
+                                    if simbolo and precio is not None:
+                                        todos_los_activos.append({
+                                            'simbolo': str(simbolo).strip(),
+                                            'nombre': titulo.get('descripcion', titulo.get('nombre', 'Sin nombre')).strip(),
+                                            'tipo': panel,
+                                            'mercado': titulo.get('mercado', titulo.get('marketId', 'BCBA')),
+                                            'ultimoPrecio': float(precio),
+                                            'moneda': titulo.get('monedaCotizacion', titulo.get('moneda', 'ARS')),
+                                            'variacion': float(titulo.get('variacion', titulo.get('variacionPorcentual', 0))),
+                                            'volumen': float(titulo.get('volumen', titulo.get('volumenNominal', 0)))
+                                        })
+                                except Exception as e:
+                                    st.error(f"Error procesando título {i} en {panel}: {str(e)}")
+                                    st.write("Datos del título con error:", titulo)
+                                    continue  # Saltar activos con datos inválidos
+                            
+                            st.success(f'Datos de {panel} obtenidos correctamente')
+                        except Exception as e:
+                            st.error(f'Error al procesar la respuesta de {panel}: {str(e)}')
+                    else:
+                        st.warning(f'No se pudieron obtener los datos de {panel}. Código: {response.status_code}')
+                except requests.exceptions.RequestException as e:
+                    st.error(f'Error de conexión al obtener datos de {panel}: {str(e)}')
+                except Exception as e:
+                    st.error(f'Error inesperado al obtener datos de {panel}: {str(e)}')
     
     # Si no se obtuvieron activos, mostrar un error crítico
     if not todos_los_activos:
