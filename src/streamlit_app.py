@@ -2724,7 +2724,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format_func=lambda x: {
                 'actual': 'Portafolio actual',
                 'aleatoria': 'Selección aleatoria'
-            }[x]
+            }[x],
+            key=f"metodo_seleccion_{id_cliente}"
         )
 
     # Mostrar input de capital y filtro de tipo de activo solo si corresponde
@@ -2733,7 +2734,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         tipo_seleccionado = st.selectbox(
             "Filtrar por tipo de activo:",
             options=['Todos'] + tipos_disponibles,
-            format_func=lambda x: "Todos" if x == 'Todos' else x
+            format_func=lambda x: "Todos" if x == 'Todos' else x,
+            key=f"tipo_activo_{id_cliente}"
         )
         activos_filtrados = activos_para_optimizacion
         if tipo_seleccionado != 'Todos':
@@ -2791,7 +2793,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"select_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -2801,7 +2803,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         target_return = st.number_input(
             "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
             min_value=0.01, value=0.10, step=0.01, format="%.4f",
-            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
+            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger.",
+            key=f"input_retorno_objetivo_{id_cliente}"
         )
 
     show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
@@ -2814,7 +2817,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"select_scheduling_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -2829,7 +2832,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"select_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -2837,7 +2840,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     capital_inicial = st.number_input(
         "Capital Inicial para Optimización (ARS):",
         min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-        help="El monto máximo a invertir en la selección y optimización de activos"
+        help="El monto máximo a invertir en la selección y optimización de activos",
+        key=f"input_capital_inicial_optimizacion_{id_cliente}"
     )
 
     # Widget TradingView (requiere streamlit-tradingview-widget instalado)
@@ -3245,7 +3249,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        key=f"select_analisis_tecnico_{id_cliente}"
     )
     
     if simbolo_seleccionado:
@@ -3301,7 +3306,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         """
         components.html(tv_widget, height=680)
 
-def mostrar_movimientos_asesor():
+def mostrar_movimientos_asesor(id_cliente=None):
     st.title("👨‍💼 Panel del Asesor")
     
     if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
@@ -3309,6 +3314,9 @@ def mostrar_movimientos_asesor():
         return
         
     token_acceso = st.session_state.token_acceso
+    
+    # Si no se proporciona id_cliente, usar un valor por defecto para la clave
+    id_unico = id_cliente if id_cliente is not None else 'asesor_default'
     
     # Obtener lista de clientes
     clientes = obtener_lista_clientes(token_acceso)
@@ -3343,12 +3351,14 @@ def mostrar_movimientos_asesor():
             tipo_fecha = st.selectbox(
                 "Tipo de fecha",
                 ["fechaOperacion", "fechaLiquidacion"],
-                index=0
+                index=0,
+                key=f"select_tipo_fecha_{id_unico}"
             )
             estado = st.selectbox(
                 "Estado",
                 ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
+                index=0,
+                key=f"select_estado_{id_unico}"
             )
         with col2:
             tipo_operacion = st.text_input("Tipo de operación")
