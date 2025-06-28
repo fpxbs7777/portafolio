@@ -3592,8 +3592,35 @@ def mostrar_test_perfil_inversor(token_portador, id_cliente=None):
         if not test_data:
             st.error("No se pudo obtener el test de perfil de inversor")
             return
-        
-        # ... (resto del código del test API)
+            
+        # Mostrar preguntas del test API
+        if 'preguntas' in test_data:
+            respuestas_api = {}
+            for i, pregunta in enumerate(test_data['preguntas']):
+                st.markdown(f"**{i+1}. {pregunta['pregunta']}**")
+                respuesta = st.selectbox(
+                    f"Respuesta {i+1}",
+                    pregunta['opciones'],
+                    key=f"api_{i}"
+                )
+                respuestas_api[f"pregunta_{i+1}"] = respuesta
+            
+            if st.button("Enviar Test API"):
+                with st.spinner("Enviando respuestas..."):
+                    resultado = enviar_respuestas_test(token_portador, respuestas_api, id_cliente)
+                    if resultado:
+                        st.success("✅ Test completado exitosamente")
+                        if 'perfilSugerido' in resultado:
+                            perfil_sugerido = resultado['perfilSugerido'].get('nombre', 'Desconocido')
+                            st.markdown(f"### 🎯 Perfil Recomendado: {perfil_sugerido}")
+                            st.markdown("""
+                            **Recomendaciones:**
+                            - Este perfil refleja su tolerancia al riesgo y objetivos de inversión
+                            - Considere ajustar su portafolio según este perfil
+                            - Consulte con un asesor financiero para una mejor interpretación
+                            """)
+                    else:
+                        st.error("Error al enviar el test")
     
     with col2:
         st.subheader("📝 Test Manual")
@@ -3608,7 +3635,7 @@ def mostrar_test_perfil_inversor(token_portador, id_cliente=None):
                     "Baja (acepto algo de riesgo)",
                     "Media (balance entre riesgo y retorno)",
                     "Alta (busco altos retornos)",
-                    "Muy Alta (acepto mucho riesgo)
+                    "Muy Alta (acepto mucho riesgo)"
                 ]
             },
             {
@@ -3660,8 +3687,8 @@ def mostrar_test_perfil_inversor(token_portador, id_cliente=None):
                 st.markdown(f"### 🎯 Perfil de Inversor (Manual): {perfil_manual}")
                 
                 # Si hay un perfil recomendado de la API, comparar
-                if 'perfilSugerido' in locals():
-                    perfil_api = perfilSugerido.get('nombre', 'Desconocido')
+                if test_data and 'perfilSugerido' in test_data:
+                    perfil_api = test_data['perfilSugerido'].get('nombre', 'Desconocido')
                     st.markdown("### 📊 Comparación de Perfiles")
                     st.markdown(f"- 🎯 Perfil API: {perfil_api}")
                     st.markdown(f"- 📝 Perfil Manual: {perfil_manual}")
@@ -3677,6 +3704,10 @@ def mostrar_test_perfil_inversor(token_portador, id_cliente=None):
                         st.success("✅ Los perfiles coinciden.")
                         st.markdown("""
                         **¡Excelente!** Ambos métodos de evaluación coinciden en su perfil de riesgo.
+                        - Este es un buen indicador de que sus respuestas son consistentes
+                        - Puede tener más confianza en su perfil de riesgo
+                        - Recuerde que el perfil de riesgo puede cambiar con el tiempo
+                        """)
                         """)
 
 def analizar_test_manual(respuestas):
@@ -3756,16 +3787,6 @@ def analizar_test_manual(respuestas):
     except Exception as e:
         st.error(f"Error al analizar el test manual: {str(e)}")
         return "Desconocido"
-    """
-    Muestra el test de perfil de inversor y procesa las respuestas
-    """
-    st.title("Test de Perfil de Inversor")
-    
-    with st.expander("Instrucciones", expanded=True):
-        st.markdown("""
-        Complete el siguiente cuestionario para determinar su perfil de inversor. 
-        Sus respuestas nos ayudarán a recomendar la estrategia de inversión más adecuada para usted.
-        """)
     
     # Obtener preguntas del test
     test_data = obtener_test_inversor(token_portador)
