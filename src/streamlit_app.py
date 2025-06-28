@@ -1219,12 +1219,26 @@ class manager:
         for ric in self.rics:
             if ric in self.timeseries:
                 prices = self.timeseries[ric]
-                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+                # Asegurarse de que los precios sean numéricos
+                if pd.api.types.is_numeric_dtype(prices):
+                    returns = np.log(prices / prices.shift(1)).dropna()
+                    if not returns.empty:
+                        returns_matrix[ric] = returns
         
+        if not returns_matrix:
+            raise ValueError("No se pudieron calcular retornos para ningún activo")
+            
         # Convertir a DataFrame para alinear fechas
-        self.returns = pd.DataFrame(returns_matrix)
+        self.returns = pd.DataFrame(returns_matrix).dropna()
         
-        # Calcular matriz de covarianza y retornos medios
+        if self.returns.empty:
+            raise ValueError("No hay datos de retornos válidos después de limpieza")
+            
+        # Calcular matriz de covarianza y retornos medios (anualizados)
+        self.cov_matrix = self.returns.cov() * 252  # Anualizar (252 días hábiles)
+        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        
+        return self.cov_matrix, self.mean_returns
 
     def compute_portfolio(self, portfolio_type=None, target_return=None):
         if self.cov_matrix is None:
