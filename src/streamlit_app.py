@@ -830,53 +830,135 @@ def parse_datetime_flexible(date_str: str):
         st.warning(f"Error parsing date '{date_str}': {str(e)}")
         return None
 
-def procesar_respuesta_historico(data, tipo_activo):
+def procesar_respuesta_historico(data, tipo_activo: str = None) -> pd.DataFrame:
     """
-    Procesa la respuesta de la API según el tipo de activo
+    Procesa la respuesta de la API de series históricas y la convierte en un DataFrame estandarizado.
+    
+    Args:
+        data: Datos de respuesta de la API (puede ser dict, list, int, float, etc.)
+        tipo_activo (str, opcional): Tipo de activo para mensajes de error más descriptivos
+        
+    Returns:
+        pd.DataFrame: DataFrame con columnas 'fecha' (datetime) y 'precio' (float), o None en caso de error
     """
-    if not data:
+    import pandas as pd
+    import numpy as np
+    from typing import Union, Dict, List, Any, Optional
+    
+    # Validación de entrada
+    if data is None:
+        st.warning("No se proporcionaron datos para procesar")
         return None
     
+    # Mensaje de depuración
+    debug_msg = f"Procesando datos para {tipo_activo or 'activo desconocido'}"
+    if hasattr(data, '__len__') and not isinstance(data, (str, bytes)):
+        debug_msg += f" - Elementos: {len(data)}"
+    
     try:
-        # Para series históricas estándar
-        if isinstance(data, list):
-            precios = []
-            fechas = []
+        # Caso 1: Respuesta es una lista de diccionarios (formato estándar)
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            registros = []
             
             for item in data:
                 try:
-                    # Manejar diferentes estructuras de respuesta
-                    if isinstance(item, dict):
-                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
-                        if not precio or precio == 0:
-                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                        
-                        fecha_str = item.get('fechaHora') or item.get('fecha')
-                        
-                        if precio is not None and precio > 0 and fecha_str:
+                    # Extraer precio de diferentes campos posibles
+                    campos_precio = ['ultimoPrecio', 'precio', 'valor', 'cierre', 'apertura', 'cierreAnterior', 'precioPromedio', 'precioApertura', 'precioCierre']
+                    precio = next((item[field] for field in campos_precio if field in item and item[field] is not None), None)
+                    
+                    # Extraer fecha de diferentes campos posibles
+                    campos_fecha = ['fechaHora', 'fecha', 'fechaCotizacion', 'fechaOperacion']
+                    fecha_str = next((item[field] for field in campos_fecha if field in item and item[field] is not None), None)
+                    
+                    # Parsear fechas y precios
+                    if precio is not None and fecha_str:
+                        try:
+                            # Convertir precio a float, manejando diferentes formatos
+                            if isinstance(precio, str):
+                                precio = float(precio.replace('.', '').replace(',', '.'))
+                            else:
+                                precio = float(precio)
+                                
+                            # Parsear fecha
                             fecha_parsed = parse_datetime_flexible(fecha_str)
-                            if pd.notna(fecha_parsed):
-                                precios.append(float(precio))
-                                fechas.append(fecha_parsed)
-                except (ValueError, AttributeError) as e:
+                            
+                            if pd.notna(fecha_parsed) and np.isfinite(precio) and precio > 0:
+                                registros.append({'fecha': fecha_parsed, 'precio': precio})
+                                
+                        except (ValueError, TypeError) as e:
+                            continue
+                            
+                except Exception as e:
                     continue
             
-            if precios and fechas:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                # Eliminar duplicados manteniendo el último
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                return df
-        
-        # Para respuestas que son un solo valor (ej: MEP)
-        elif isinstance(data, (int, float)):
-            df = pd.DataFrame({'fecha': [pd.Timestamp.now(tz='UTC').date()], 'precio': [float(data)]})
-            return df
+            if not registros:
+                st.warning(f"No se encontraron datos válidos en la respuesta para {tipo_activo or 'el activo'}")
+                return None
+                
+            # Crear DataFrame y limpiar
+            df = pd.DataFrame(registros)
             
+            # Eliminar duplicados manteniendo el último
+            df = df.drop_duplicates(subset=['fecha'], keep='last')
+            
+            # Ordenar por fecha
+            df = df.sort_values('fecha').reset_index(drop=True)
+            
+            # Validar que tengamos suficientes datos
+            if len(df) < 2:
+                st.warning(f"Datos insuficientes para {tipo_activo or 'el activo'} (solo {len(df)} puntos)")
+                return None
+                
+            return df
+        
+        # Caso 2: Respuesta es un diccionario con datos anidados
+        elif isinstance(data, dict):
+            # Intentar extraer datos de diferentes estructuras comunes
+            if 'datos' in data and isinstance(data['datos'], list):
+                return procesar_respuesta_historico(data['datos'], tipo_activo)
+            elif 'serie' in data and isinstance(data['serie'], list):
+                return procesar_respuesta_historico(data['serie'], tipo_activo)
+            elif 'data' in data and isinstance(data['data'], list):
+                return procesar_respuesta_historico(data['data'], tipo_activo)
+            
+            # Si el diccionario tiene campos de precio y fecha directos
+            campos_precio = set(['ultimoPrecio', 'precio', 'valor', 'cierre'])
+            campos_fecha = set(['fechaHora', 'fecha', 'fechaCotizacion'])
+            
+            if campos_precio.intersection(data.keys()) and campos_fecha.intersection(data.keys()):
+                return procesar_respuesta_historico([data], tipo_activo)
+        
+        # Caso 3: Respuesta es un único valor numérico (ej: MEP)
+        elif isinstance(data, (int, float, str)):
+            try:
+                precio = float(data) if isinstance(data, str) else data
+                if np.isfinite(precio) and precio > 0:
+                    df = pd.DataFrame({
+                        'fecha': [pd.Timestamp.now(tz='UTC').date()], 
+                        'precio': [precio]
+                    })
+                    return df
+            except (ValueError, TypeError):
+                pass
+        
+        # Si llegamos aquí, no se pudo procesar el formato
+        st.warning(f"Formato de respuesta no soportado para {tipo_activo or 'el activo'}")
+        if st.checkbox("Mostrar datos sin procesar"):
+            st.json(data)
         return None
         
     except Exception as e:
-        st.error(f"Error al procesar respuesta histórica: {str(e)}")
+        import traceback
+        st.error(f"Error al procesar respuesta histórica para {tipo_activo or 'el activo'}:")
+        with st.expander("Detalles del error"):
+            st.code(f"""
+            Tipo de error: {type(e).__name__}
+            
+            Mensaje: {str(e)}
+            
+            Traceback:
+            {traceback.format_exc()}
+            """)
         return None
 
 def obtener_fondos_comunes(token_portador):
@@ -2842,10 +2924,56 @@ def obtener_series_historicas_aleatorias_con_capital(token_acceso, paneles_selec
 
     return series_historicas, seleccion_final
 
-def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
-    """Obtiene la serie histórica de precios para un símbolo dado."""
-    import requests
+def obtener_serie_historica(simbolo: str, mercado: str, fecha_desde: str, fecha_hasta: str, 
+                          ajustada: str, bearer_token: str, max_retries: int = 3) -> dict:
+    """
+    Obtiene la serie histórica de precios para un símbolo dado desde la API de InvertirOnline.
     
+    Args:
+        simbolo (str): Símbolo del activo (ej: 'GGAL', 'YPFD')
+        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE')
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
+        ajustada (str): 'Ajustada' o 'SinAjustar'
+        bearer_token (str): Token de autenticación
+        max_retries (int): Número máximo de reintentos ante fallos
+        
+    Returns:
+        dict: Datos históricos en formato JSON o None en caso de error
+    """
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    
+    # Validación de parámetros
+    if not all([simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token]):
+        st.warning("Faltan parámetros requeridos para obtener la serie histórica")
+        return None
+        
+    # Validación de fechas
+    try:
+        from datetime import datetime
+        fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
+        fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+        if fecha_desde_dt > fecha_hasta_dt:
+            st.warning("La fecha de inicio no puede ser posterior a la fecha de fin")
+            return None
+    except ValueError as e:
+        st.warning(f"Formato de fecha inválido. Use 'YYYY-MM-DD': {str(e)}")
+        return None
+    
+    # Configuración de reintentos
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=max_retries,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    
+    # Construir URL
     url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     headers = {
         'Accept': 'application/json',
@@ -2853,15 +2981,43 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.warning(f"Error al obtener serie histórica para {simbolo}: {response.status_code}")
+        # Realizar la petición con manejo de reintentos
+        response = session.get(url, headers=headers, timeout=30)
+        response.raise_for_status()  # Lanza excepción para códigos 4XX/5XX
+        
+        # Validar la respuesta
+        data = response.json()
+        if not data:
+            st.warning(f"No se encontraron datos para {simbolo} en el período seleccionado")
             return None
-    except Exception as e:
-        st.error(f"Error de conexión al obtener {simbolo}: {str(e)}")
+            
+        return data
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Error al conectar con la API para {simbolo}: {str(e)}"
+        if hasattr(e, 'response') and e.response is not None:
+            status_code = e.response.status_code
+            error_msg += f" (Código: {status_code})"
+            
+            if status_code == 401:
+                error_msg += " - Token inválido o expirado"
+            elif status_code == 404:
+                error_msg += " - Recurso no encontrado (¿símbolo o mercado incorrecto?)"
+            elif status_code == 429:
+                error_msg += " - Límite de solicitudes excedido"
+                
+        st.error(error_msg)
         return None
+        
+    except ValueError as e:
+        st.error(f"Error al procesar la respuesta JSON para {simbolo}: {str(e)}")
+        return None
+        
+    except Exception as e:
+        st.error(f"Error inesperado al obtener datos para {simbolo}: {str(e)}")
+        return None
+    finally:
+        session.close()
 
 def obtener_activos_disponibles_mercado(token_acceso):
     """
@@ -4266,8 +4422,28 @@ def main():
                 - Tasas de caución actualizadas  
                 - Estado de cuenta consolidado  
                 """)
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ Error de conexión: {str(e)}\n\nPor favor verifica tu conexión a internet e inténtalo de nuevo.")
+    except KeyError as e:
+        st.error(f"❌ Error en la estructura de datos: Falta la clave {str(e)}\n\nPuede que los datos recibidos no estén en el formato esperado.")
+    except ValueError as e:
+        st.error(f"❌ Error de valor: {str(e)}\n\nVerifica que los datos ingresados sean correctos.")
     except Exception as e:
-        st.error(f"❌ Error en la aplicación: {str(e)}")
+        import traceback
+        st.error(f"❌ Error inesperado en la aplicación")
+        with st.expander("Detalles del error (para soporte técnico)"):
+            st.code(f"""
+            Error: {str(e)}
+            
+            Tipo: {type(e).__name__}
+            
+            Traceback:
+            {traceback.format_exc()}
+            """)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"❌ Error crítico al iniciar la aplicación: {str(e)}")
+        st.stop()
