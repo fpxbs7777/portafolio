@@ -1,650 +1,29 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from scipy import stats
-import scipy.optimize as op
 import requests
-import json
-from datetime import datetime, timedelta
-import time
-import os
-import base64
-import io
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import pandas as pd
+from plotly.subplots import make_subplots
 from arch import arch_model
 from scipy.stats import norm
+import matplotlib.pyplot as plt
+import yfinance as yf
+import numpy as np
+from datetime import datetime, timedelta, date
+import scipy.optimize as op
+from scipy import stats
+import random
 import warnings
-from typing import Dict, List, Optional, Union, Any, Tuple
-from enum import Enum
+import streamlit.components.v1 as components
+
 warnings.filterwarnings('ignore')
 
-class PerfilInversor(str, Enum):
-    CONSERVADOR = "Conservador"
-    MODERADO = "Moderado"
-    AGRESIVO = "Agresivo"
-    NO_DEFINIDO = "No definido"
-
-class InvestorProfileTest:
-    BASE_URL = "https://api.invertironline.com/api/v2/asesores"
-    
-    def __init__(self, token: str):
-        self.token = token
-        self.test_questions = None
-        self.test_results = None
-    
-    def get_test_questions(self) -> Dict:
-        headers = {
-            'Authorization': f'Bearer {self.token}',
-            'Accept': 'application/json'
-        }
-        try:
-            response = requests.get(f"{self.BASE_URL}/test-inversor", headers=headers, timeout=30)
-            response.raise_for_status()
-            self.test_questions = response.json()
-            return self.test_questions
-        except requests.exceptions.RequestException as e:
-            st.error(f"Error al obtener las preguntas del test: {str(e)}")
-            return {}
-    
-    def submit_test(self, answers: Dict) -> Dict:
-        headers = {
-            'Authorization': f'Bearer {self.token}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        try:
-            response = requests.post(
-                f"{self.BASE_URL}/test-inversor/resultado",
-                headers=headers,
-                json=answers,
-                timeout=30
-            )
-            response.raise_for_status()
-            self.test_results = response.json()
-            return self.test_results
-        except requests.exceptions.RequestException as e:
-            st.error(f"Error al enviar las respuestas del test: {str(e)}")
-            return {}
-    
-    @staticmethod
-    def analizar_portafolio_vs_perfil(perfil_usuario: str, metricas_portafolio: Dict) -> Tuple[str, str]:
-        """
-        Analiza la compatibilidad entre el perfil del inversor y las métricas del portafolio.
-        
-        Args:
-            perfil_usuario (str): Perfil del usuario (Conservador, Moderado, Agresivo)
-            metricas_portafolio (Dict): Diccionario con métricas del portafolio
-            
-        Returns:
-            Tuple[str, str]: (nivel_compatibilidad, mensaje_detallado)
-        """
-        try:
-            # Valores de referencia por perfil (ajustar según sea necesario)
-            perfiles = {
-                PerfilInversor.CONSERVADOR: {
-                    'vol_max': 0.10,  # 10% de volatilidad anual
-                    'var_95_max': -0.02,  # -2% VaR diario
-                    'drawdown_max': 0.05,  # 5% máximo drawdown
-                    'deuda_max': 0.20  # 20% de exposición a deuda
-                },
-                PerfilInversor.MODERADO: {
-                    'vol_max': 0.20,  # 20% de volatilidad anual
-                    'var_95_max': -0.04,  # -4% VaR diario
-                    'drawdown_max': 0.15,  # 15% máximo drawdown
-                    'deuda_max': 0.40  # 40% de exposición a deuda
-                },
-                PerfilInversor.AGRESIVO: {
-                    'vol_max': 0.35,  # 35% de volatilidad anual
-                    'var_95_max': -0.07,  # -7% VaR diario
-                    'drawdown_max': 0.30,  # 30% máximo drawdown
-                    'deuda_max': 0.60  # 60% de exposición a deuda
-                }
-            }
-            
-            if perfil_usuario not in [p.value for p in PerfilInversor]:
-                return "error", "Perfil de usuario no válido"
-                
-            perfil = perfiles.get(PerfilInversor(perfil_usuario))
-            if not perfil:
-                return "error", "No se encontró el perfil especificado"
-            
-            # Obtener métricas del portafolio
-            volatilidad = metricas_portafolio.get('volatilidad_anual', 0)
-            var_95 = metricas_portafolio.get('var_95', 0)
-            max_drawdown = metricas_portafolio.get('max_drawdown', 0)
-            exposicion_riesgo = metricas_portafolio.get('exposicion_riesgo', 0)
-            
-            # Calcular puntuación de compatibilidad (0-100%)
-            compatibilidad = 100
-            mensajes = []
-            
-            # Verificar volatilidad
-            if volatilidad > perfil['vol_max']:
-                reduccion = min(100, int((volatilidad / perfil['vol_max'] - 1) * 100))
-                compatibilidad -= reduccion * 0.3
-                mensajes.append(f"⚠️ Alta volatilidad ({volatilidad:.1%} vs {perfil['vol_max']:.0%} esperado)")
-            
-            # Verificar VaR
-            if var_95 < perfil['var_95_max']:
-                reduccion = min(100, int((perfil['var_95_max'] / var_95 - 1) * 100))
-                compatibilidad -= reduccion * 0.3
-                mensajes.append(f"⚠️ Riesgo de pérdida elevado (VaR 95%: {var_95:.1%} vs {perfil['var_95_max']:.1%} esperado)")
-            
-            # Verificar drawdown
-            if max_drawdown > perfil['drawdown_max']:
-                reduccion = min(100, int((max_drawdown / perfil['drawdown_max'] - 1) * 100))
-                compatibilidad -= reduccion * 0.2
-                mensajes.append(f"⚠️ Alto drawdown histórico ({max_drawdown:.1%} vs {perfil['drawdown_max']:.0%} esperado)")
-            
-            # Verificar exposición a riesgo
-            if exposicion_riesgo > perfil['deuda_max']:
-                reduccion = min(100, int((exposicion_riesgo / perfil['deuda_max'] - 1) * 100))
-                compatibilidad -= reduccion * 0.2
-                mensajes.append(f"⚠️ Alta exposición a activos de riesgo ({exposicion_riesgo:.1%} vs {perfil['deuda_max']:.0%} esperado)")
-            
-            # Asegurar que la compatibilidad esté entre 0 y 100
-            compatibilidad = max(0, min(100, compatibilidad))
-            
-            # Determinar nivel de compatibilidad
-            if compatibilidad >= 80:
-                nivel = "alta"
-                mensaje_final = f"✅ Excelente perfil de riesgo para un inversor {perfil_usuario.lower()}. "
-            elif compatibilidad >= 50:
-                nivel = "media"
-                mensaje_final = f"⚠️ Perfil de riesgo moderado para un inversor {perfil_usuario.lower()}. "
-            else:
-                nivel = "baja"
-                mensaje_final = f"❌ Perfil de riesgo inadecuado para un inversor {perfil_usuario.lower()}. "
-            
-            # Añadir recomendaciones si hay advertencias
-            if mensajes:
-                mensaje_final += "Consideraciones:\n" + "\n".join([f"• {msg}" for msg in mensajes])
-            
-            # Añadir recomendaciones generales
-            if nivel == "baja":
-                if perfil_usuario == PerfilInversor.CONSERVADOR:
-                    mensaje_final += "\n\n🔍 Recomendación: Considere reducir la exposición a activos volátiles y aumentar la asignación a bonos y fondos de renta fija."
-                elif perfil_usuario == PerfilInversor.MODERADO:
-                    mensaje_final += "\n\n🔍 Recomendación: Considere rebalancear su cartera para reducir la volatilidad, quizás reduciendo posiciones en acciones de alto riesgo."
-                else:  # Agresivo
-                    mensaje_final += "\n\n🔍 Recomendación: Aunque su perfil tolera riesgo, la cartera actual podría ser muy volátil. Considere diversificar para reducir el riesgo específico."
-            
-            return nivel, mensaje_final
-        except Exception as e:
-            return "error", f"Error al analizar el portafolio: {str(e)}"
-
-def mostrar_test_perfil_inversor(token_portador: str):
-    """
-    Muestra el test de perfil de inversor y procesa las respuestas.
-    
-    Args:
-        token_portador (str): Token de autenticación de la API
-    """
-    st.markdown("## 📝 Test de Perfil de Inversor")
-    
-    # Inicializar el test en el estado de sesión si no existe
-    if 'test_inversor' not in st.session_state:
-        st.session_state.test_inversor = InvestorProfileTest(token_portador)
-        st.session_state.test_questions = None
-        st.session_state.test_answers = {}
-        st.session_state.test_completed = False
-        st.session_state.test_result = None
-    
-    test = st.session_state.test_inversor
-    
-    # Obtener preguntas si no están cargadas
-    if st.session_state.test_questions is None:
-        with st.spinner("Cargando preguntas del test..."):
-            st.session_state.test_questions = test.get_test_questions()
-    
-    # Mostrar el test si hay preguntas disponibles
-    if st.session_state.test_questions and not st.session_state.test_completed:
-        st.markdown("""
-        ### Instrucciones:
-        Por favor, responda las siguientes preguntas para determinar su perfil de inversor.
-        Sus respuestas nos ayudarán a recomendar la estrategia de inversión más adecuada para usted.
-        """)
-        
-        with st.form("test_form"):
-            # Pregunta 1: Edad
-            edad = st.slider(
-                "1. ¿Cuál es su rango de edad?",
-                min_value=18,
-                max_value=80,
-                value=30,
-                step=1,
-                key="edad"
-            )
-            
-            # Pregunta 2: Objetivo de inversión
-            objetivo = st.radio(
-                "2. ¿Cuál es su principal objetivo de inversión?",
-                options=[
-                    "Preservar el capital",
-                    "Ingresos estables",
-                    "Crecimiento moderado",
-                    "Máximo crecimiento"
-                ],
-                key="objetivo"
-            )
-            
-            # Pregunta 3: Horizonte de inversión
-            horizonte = st.select_slider(
-                "3. ¿Cuál es su horizonte de inversión?",
-                options=[
-                    "Menos de 1 año",
-                    "1-3 años",
-                    "3-5 años",
-                    "5-10 años",
-                    "Más de 10 años"
-                ],
-                key="horizonte"
-            )
-            
-            # Pregunta 4: Tolerancia al riesgo
-            tolerancia = st.slider(
-                "4. En una escala del 1 al 10, ¿cómo calificaría su tolerancia al riesgo?\n(1 = Muy bajo riesgo, 10 = Muy alto riesgo)",
-                min_value=1,
-                max_value=10,
-                value=5,
-                step=1,
-                key="tolerancia"
-            )
-            
-            # Pregunta 5: Experiencia en inversiones
-            experiencia = st.radio(
-                "5. ¿Cuál es su nivel de experiencia en inversiones?",
-                options=[
-                    "Principiante (menos de 1 año)",
-                    "Intermedio (1-5 años)",
-                    "Avanzado (más de 5 años)",
-                    "Experto (profesional del sector financiero)"
-                ],
-                key="experiencia"
-            )
-            
-            # Pregunta 6: Capacidad de ahorro
-            ahorro = st.radio(
-                "6. ¿Qué porcentaje de sus ingresos destina al ahorro e inversión?",
-                options=[
-                    "Menos del 10%",
-                    "10-20%",
-                    "20-30%",
-                    "Más del 30%"
-                ],
-                key="ahorro"
-            )
-            
-            # Botón de envío
-            submitted = st.form_submit_button("🔍 Analizar mi perfil")
-            
-            if submitted:
-                # Calcular perfil basado en respuestas
-                puntuacion = 0
-                
-                # Puntuación por edad
-                if edad < 30:
-                    puntuacion += 3
-                elif edad < 50:
-                    puntuacion += 2
-                else:
-                    puntuacion += 1
-                
-                # Puntuación por objetivo
-                if objetivo == "Preservar el capital":
-                    puntuacion += 1
-                elif objetivo == "Ingresos estables":
-                    puntuacion += 2
-                elif objetivo == "Crecimiento moderado":
-                    puntuacion += 3
-                else:  # Máximo crecimiento
-                    puntuacion += 4
-                
-                # Puntuación por horizonte
-                if horizonte in ["Menos de 1 año", "1-3 años"]:
-                    puntuacion += 1
-                elif horizonte == "3-5 años":
-                    puntuacion += 2
-                else:
-                    puntuacion += 3
-                
-                # Puntuación por tolerancia al riesgo (ya está en escala 1-10)
-                puntuacion += (tolerancia / 2.5)  # Normalizar a escala 0-4
-                
-                # Puntuación por experiencia
-                if "Principiante" in experiencia:
-                    puntuacion += 1
-                elif "Intermedio" in experiencia:
-                    puntuacion += 2
-                elif "Avanzado" in experiencia:
-                    puntuacion += 3
-                else:  # Experto
-                    puntuacion += 4
-                
-                # Puntuación por ahorro
-                if ahorro == "Menos del 10%":
-                    puntuacion += 1
-                elif ahorro == "10-20%":
-                    puntuacion += 2
-                elif ahorro == "20-30%":
-                    puntuacion += 3
-                else:  # Más del 30%
-                    puntuacion += 4
-                
-                # Determinar perfil (escala de 5 a 22)
-                if puntuacion <= 10:
-                    perfil = PerfilInversor.CONSERVADOR
-                elif puntuacion <= 16:
-                    perfil = PerfilInversor.MODERADO
-                else:
-                    perfil = PerfilInversor.AGRESIVO
-                
-                # Guardar resultados en sesión
-                st.session_state.test_completed = True
-                st.session_state.test_result = {
-                    'perfil': perfil,
-                    'puntuacion': puntuacion,
-                    'detalles': {
-                        'edad': edad,
-                        'objetivo': objetivo,
-                        'horizonte': horizonte,
-                        'tolerancia': tolerancia,
-                        'experiencia': experiencia,
-                        'ahorro': ahorro
-                    }
-                }
-                st.rerun()
-    
-    # Mostrar resultados si el test está completo
-    elif st.session_state.test_completed and st.session_state.test_result:
-        resultado = st.session_state.test_result
-        perfil = resultado['perfil']
-        
-        # Mostrar resumen de respuestas
-        with st.expander("📋 Ver mis respuestas", expanded=False):
-            st.write(f"**Edad:** {resultado['detalles']['edad']} años")
-            st.write(f"**Objetivo de inversión:** {resultado['detalles']['objetivo']}")
-            st.write(f"**Horizonte de inversión:** {resultado['detalles']['horizonte']}")
-            st.write(f"**Tolerancia al riesgo:** {resultado['detalles']['tolerancia']}/10")
-            st.write(f"**Experiencia en inversiones:** {resultado['detalles']['experiencia']}")
-            st.write(f"**Capacidad de ahorro:** {resultado['detalles']['ahorro']}")
-        
-        # Mostrar perfil con estilo
-        st.markdown("### 🎯 Su perfil de inversor es:")
-        
-        if perfil == PerfilInversor.CONSERVADOR:
-            color = "#2ecc71"  # Verde
-            icono = "🛡️"
-            descripcion = """
-            **Inversor Conservador**  
-            Prioriza la seguridad del capital sobre los rendimientos. Prefiere inversiones de bajo riesgo 
-            y está dispuesto a aceptar rendimientos más bajos a cambio de estabilidad.
-            """
-        elif perfil == PerfilInversor.MODERADO:
-            color = "#f39c12"  # Naranja
-            icono = "⚖️"
-            descripcion = """
-            **Inversor Moderado**  
-            Busca un equilibrio entre riesgo y rendimiento. Está dispuesto a asumir ciertos riesgos 
-            a cambio de rendimientos potencialmente mayores, pero con cierta protección del capital.
-            """
-        else:  # AGRESIVO
-            color = "#e74c3c"  # Rojo
-            icono = "🚀"
-            descripcion = """
-            **Inversor Agresivo**  
-            Busca maximizar los rendimientos a largo plazo y está dispuesto a asumir niveles significativos 
-            de riesgo. Tolera la volatilidad a corto plazo con el objetivo de obtener mayores rendimientos.
-            """
-        
-        # Mostrar tarjeta de perfil
-        st.markdown(f"""
-        <div style='background-color: rgba(30, 30, 30, 0.7); 
-                    border-left: 5px solid {color};
-                    padding: 20px; 
-                    border-radius: 5px; 
-                    margin: 10px 0;'>
-            <h2 style='color: {color}; margin-top: 0;'>{icono} {perfil}</h2>
-            <p>{descripcion}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Mostrar recomendaciones
-        st.markdown("### 📊 Recomendaciones para su perfil:")
-        
-        if perfil == PerfilInversor.CONSERVADOR:
-            st.markdown("""
-            - **Asignación sugerida:** 70-80% Renta Fija, 20-30% Renta Variable
-            - **Productos recomendados:** Plazos fijos, FCI de renta fija, Bonos gubernamentales
-            - **Estrategia:** Enfoque en preservación de capital y generación de ingresos
-            - **Rentabilidad esperada:** Baja volatilidad, rendimientos por debajo del mercado
-            """)
-        elif perfil == PerfilInversor.MODERADO:
-            st.markdown("""
-            - **Asignación sugerida:** 40-60% Renta Fija, 40-60% Renta Variable
-            - **Productos recomendados:** FCI balanceados, ETFs diversificados, Acciones blue chips
-            - **Estrategia:** Equilibrio entre crecimiento y generación de ingresos
-            - **Rentabilidad esperada:** Volatilidad moderada, rendimientos en línea con el mercado
-            """)
-        else:  # AGRESIVO
-            st.markdown("""
-            - **Asignación sugerida:** 20-30% Renta Fija, 70-80% Renta Variable
-            - **Productos recomendados:** Acciones individuales, ETFs sectoriales, FCI de renta variable
-            - **Estrategia:** Crecimiento agresivo del capital a largo plazo
-            - **Rentabilidad esperada:** Alta volatilidad, potencial de rendimientos superiores al mercado
-            """)
-        
-        # Botón para reiniciar el test
-        if st.button("🔄 Realizar el test nuevamente"):
-            st.session_state.test_completed = False
-            st.session_state.test_result = None
-            st.rerun()
-        
-        # Botón para analizar portafolio actual
-        if st.button("📊 Analizar mi portafolio actual"):
-            # Aquí se podría implementar la lógica para analizar el portafolio actual
-            # contra el perfil del usuario
-            st.session_state.mostrar_analisis_portafolio = True
-    
-    # Mostrar mensaje de error si no se pueden cargar las preguntas
-    elif not st.session_state.test_questions:
-        st.error("No se pudieron cargar las preguntas del test. Por favor, intente más tarde.")
-        if st.button("🔄 Reintentar"):
-            st.session_state.test_questions = None
-            st.rerun()
-
-def mostrar_analisis_portafolio():
-    """Muestra el análisis del portafolio del cliente seleccionado."""
-    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-        st.warning("Por favor inicie sesión primero")
-        return
-        
-    if 'cliente_seleccionado' not in st.session_state:
-        st.warning("Seleccione un cliente primero")
-        return
-    
-    cliente = st.session_state.cliente_seleccionado
-    token = st.session_state.token_acceso
-    
-    # Obtener y mostrar el portafolio
-    with st.spinner("Obteniendo información del portafolio..."):
-        portafolio = obtener_portafolio(token, cliente.get('numeroCliente') or cliente.get('id'))
-    
-    if not portafolio:
-        st.error("No se pudo obtener el portafolio del cliente")
-        return
-    
-    # Mostrar resumen del portafolio
-    st.markdown(f"## 📊 Portafolio de {cliente.get('apellidoYNombre', 'Cliente')}")
-    
-    # Calcular métricas del portafolio
-    with st.spinner("Calculando métricas del portafolio..."):
-        try:
-            # Calcular métricas básicas
-            valor_total = sum(activo['valorMercado'] for activo in portafolio if 'valorMercado' in activo)
-            
-            # Agrupar por tipo de activo
-            activos_por_tipo = {}
-            for activo in portafolio:
-                tipo = activo.get('tipo', 'Otros')
-                if tipo not in activos_por_tipo:
-                    activos_por_tipo[tipo] = 0
-                activos_por_tipo[tipo] += activo.get('valorMercado', 0)
-            
-            # Mostrar métricas principales
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Valor Total", f"${valor_total:,.2f}")
-            with col2:
-                st.metric("Número de Activos", len(portafolio))
-            with col3:
-                st.metric("Tipos de Activos", len(activos_por_tipo))
-            
-            # Mostrar distribución por tipo de activo
-            st.markdown("### Distribución por Tipo de Activo")
-            if activos_por_tipo:
-                fig = px.pie(
-                    names=list(activos_por_tipo.keys()),
-                    values=list(activos_por_tipo.values()),
-                    title="Composición del Portafolio"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Mostrar tabla de activos
-            st.markdown("### Detalle de Activos")
-            df_portafolio = pd.DataFrame([{
-                'Símbolo': a.get('simbolo', 'N/A'),
-                'Descripción': a.get('descripcion', 'N/A'),
-                'Tipo': a.get('tipo', 'N/A'),
-                'Cantidad': a.get('cantidad', 0),
-                'Precio': a.get('ultimoPrecio', 0),
-                'Valor de Mercado': a.get('valorMercado', 0),
-                '% del Total': (a.get('valorMercado', 0) / valor_total * 100) if valor_total > 0 else 0
-            } for a in portafolio])
-            
-            # Formatear columnas
-            df_portafolio['Precio'] = df_portafolio['Precio'].apply(lambda x: f"${x:,.2f}")
-            df_portafolio['Valor de Mercado'] = df_portafolio['Valor de Mercado'].apply(lambda x: f"${x:,.2f}")
-            df_portafolio['% del Total'] = df_portafolio['% del Total'].apply(lambda x: f"{x:.2f}%")
-            
-            st.dataframe(df_portafolio, use_container_width=True)
-            
-            # Calcular métricas de riesgo si hay suficiente historial
-            if 'test_result' in st.session_state and st.session_state.test_result:
-                st.markdown("### 🔍 Análisis de Compatibilidad con su Perfil")
-                perfil_inversor = st.session_state.test_result['perfil']
-                
-                # Simular métricas de riesgo (en una implementación real, estas se calcularían del portafolio)
-                metricas_riesgo = {
-                    'volatilidad_anual': 12.5,  # Ejemplo: porcentaje
-                    'var_95': 8.2,  # Valor en Riesgo al 95%
-                    'max_drawdown': 15.3,  # Máxima caída histórica
-                    'exposicion_riesgo': 65.0  # Exposición al riesgo (% en activos de riesgo)
-                }
-                
-                # Analizar compatibilidad
-                compatibilidad, mensaje = InvestorProfileTest.analizar_portafolio_vs_perfil(
-                    perfil_inversor,
-                    metricas_riesgo
-                )
-                
-                # Mostrar resultado
-                if compatibilidad == "alta":
-                    st.success("✅ Alta compatibilidad con su perfil de riesgo")
-                elif compatibilidad == "media":
-                    st.warning("⚠️ Compatibilidad media con su perfil de riesgo")
-                else:
-                    st.error("❌ Baja compatibilidad con su perfil de riesgo")
-                
-                # Mostrar detalles del análisis
-                with st.expander("Ver análisis detallado", expanded=True):
-                    st.markdown(mensaje)
-                
-                # Recomendaciones basadas en el análisis
-                st.markdown("### 📌 Recomendaciones")
-                if compatibilidad == "baja":
-                    st.markdown("""
-                    - **Reconsidere** la asignación de activos para que se ajuste mejor a su perfil de riesgo
-                    - **Diversifique** su cartera para reducir el riesgo
-                    - Considere activos más **conservadores** si el riesgo lo supera
-                    """)
-                elif compatibilidad == "media":
-                    st.markdown("""
-                    - Su cartera está **bien equilibrada** pero podría optimizarse
-                    - Considere ajustar ligeramente la asignación de activos
-                    - Revise periódicamente su perfil de riesgo
-                    """)
-                else:
-                    st.markdown("""
-                    - ¡Excelente! Su cartera está **bien alineada** con su perfil
-                    - Mantenga su estrategia actual
-                    - Continúe monitoreando periódicamente
-                    """)
-        except Exception as e:
-            st.error(f"Error al analizar el portafolio: {str(e)}")
-
-def mostrar_menu_principal():
-    """Muestra el menú principal de la aplicación."""
-    st.sidebar.title("Menú Principal")
-    
-    # Opciones del menú
-    opciones = [
-        "🏠 Inicio",
-        "📊 Análisis de Portafolio",
-        "📝 Test de Perfil de Inversor",
-        "⚙️ Configuración"
-    ]
-    
-    seleccion = st.sidebar.radio("Navegación", opciones)
-    
-    # Mostrar contenido según la opción seleccionada
-    if seleccion == "🏠 Inicio":
-        st.markdown("""
-        # Bienvenido al Analizador de Portafolios IOL
-        
-        Esta herramienta le permite analizar y optimizar sus carteras de inversión 
-        de manera profesional utilizando datos en tiempo real de Invertir Online.
-        
-        ### Características principales:
-        - 📊 Visualización detallada de su portafolio actual
-        - 📝 Test de perfil de inversor personalizado
-        - 🔍 Análisis de riesgo y rendimiento
-        - ⚙️ Optimización de cartera basada en sus objetivos
-        
-        ### Cómo comenzar:
-        1. Seleccione un cliente en la barra lateral
-        2. Utilice el menú de navegación para acceder a las diferentes funcionalidades
-        3. Realice el test de perfil de inversor para obtener recomendaciones personalizadas
-        """)
-        
-    elif seleccion == "📊 Análisis de Portafolio":
-        mostrar_analisis_portafolio()
-        
-    elif seleccion == "📝 Test de Perfil de Inversor":
-        if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-            mostrar_test_perfil_inversor(st.session_state.token_acceso)
-        else:
-            st.warning("Por favor inicie sesión primero para realizar el test de perfil de inversor.")
-    
-    elif seleccion == "⚙️ Configuración":
-        st.markdown("## Configuración")
-        st.write("Ajustes de la aplicación")
-        # Aquí se pueden agregar opciones de configuración
-
-def main():
-    # Configuración de la página debe ser lo primero
-    st.set_page_config(
-        page_title="IOL Portfolio Analyzer",
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    st.title("📊 IOL Portfolio Analyzer")
-    
-    # Mostrar menú principal
-    mostrar_menu_principal()
+# Configuración de la página con tema oscuro profesional
+st.set_page_config(
+    page_title="IOL Portfolio Analyzer",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Estilos CSS personalizados para tema oscuro
 st.markdown("""
@@ -1029,10 +408,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def obtener_encabezado_autorizacion(token_portador):
-    return {
-        'Authorization': f'Bearer {token_portador}',
-        'Content-Type': 'application/json'
-    }
+    return {"Authorization": f"Bearer {token_portador}", "Content-Type": "application/json"}
 
 def obtener_tokens(usuario, contraseña):
     url_login = 'https://api.invertironline.com/token'
@@ -2938,6 +2314,56 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
+def obtener_test_inversor(token_portador):
+    """
+    Obtiene las preguntas del test de perfil de inversor
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Diccionario con las preguntas del test o None en caso de error
+    """
+    try:
+        url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener el test de perfil de inversor: {str(e)}")
+        return None
+
+def enviar_respuestas_test(token_portador, respuestas, id_cliente_asesorado=None):
+    """
+    Envía las respuestas del test de perfil de inversor
+    
+    Args:
+        token_portador (str): Token de autenticación
+        respuestas (dict): Diccionario con las respuestas del usuario
+        id_cliente_asesorado (str, optional): ID del cliente si es un asesor
+        
+    Returns:
+        dict: Resultado del test con el perfil sugerido o None en caso de error
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        if id_cliente_asesorado:
+            url = f"https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente_asesorado}"
+        else:
+            url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+            
+        response = requests.post(url, headers=headers, json=respuestas)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al enviar las respuestas del test: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Respuesta del servidor: {e.response.text}")
+        return None
+
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
@@ -2967,92 +2393,81 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 'importe'
             ]
             
-            try:
-                # Intento 1: Buscar valuación directa
-                valuacion = 0
-                for campo in campos_valuacion:
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            if valuacion == 0 and cantidad:
+                campos_precio = [
+                    'precioPromedio',
+                    'precioCompra',
+                    'precioActual',
+                    'precio',
+                    'precioUnitario',
+                    'ultimoPrecio',
+                    'cotizacion'
+                ]
+                
+                precio_unitario = 0
+                for campo in campos_precio:
                     if campo in activo and activo[campo] is not None:
                         try:
-                            val = float(activo[campo])
-                            if val > 0:
-                                valuacion = val
+                            precio = float(activo[campo])
+                            if precio > 0:
+                                precio_unitario = precio
                                 break
                         except (ValueError, TypeError):
                             continue
                 
-                # Intento 2: Calcular valuación por precio y cantidad
-                if valuacion == 0 and cantidad:
-                    campos_precio = [
-                        'precioPromedio',
-                        'precioCompra',
-                        'precioActual',
-                        'precio',
-                        'precioUnitario',
-                        'ultimoPrecio',
-                        'cotizacion'
-                    ]
-                    
-                    precio_unitario = 0
-                    # Buscar precio en activo
+                if precio_unitario > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                        else:
+                            valuacion = cantidad_num * precio_unitario
+                    except (ValueError, TypeError):
+                        pass
+                if precio_unitario == 0:
                     for campo in campos_precio:
-                        if campo in activo and activo[campo] is not None:
+                        if campo in titulo and titulo[campo] is not None:
                             try:
-                                precio = float(activo[campo])
+                                precio = float(titulo[campo])
                                 if precio > 0:
                                     precio_unitario = precio
                                     break
                             except (ValueError, TypeError):
                                 continue
-                    
-                    # Calcular valuación si se encontró precio
-                    if precio_unitario > 0:
-                        try:
-                            cantidad_num = float(cantidad)
-                            if tipo == 'TitulosPublicos':
-                                valuacion = (cantidad_num * precio_unitario) / 100.0
-                            else:
-                                valuacion = cantidad_num * precio_unitario
-                        except (ValueError, TypeError):
-                            pass
-                    
-                    # Buscar precio en título si no se encontró en activo
-                    if precio_unitario == 0:
-                        for campo in campos_precio:
-                            if campo in titulo and titulo[campo] is not None:
-                                try:
-                                    precio = float(titulo[campo])
-                                    if precio > 0:
-                                        precio_unitario = precio
-                                        break
-                                except (ValueError, TypeError):
-                                    continue
-                    
-                    # Intento final: Consultar precio actual via API
-                    if valuacion == 0:
-                        ultimo_precio = None
-                        if mercado := titulo.get('mercado'):
-                            ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
-                        if ultimo_precio:
-                            try:
-                                cantidad_num = float(cantidad)
-                                if tipo == 'TitulosPublicos':
-                                    valuacion = (cantidad_num * ultimo_precio) / 100.0
-                                else:
-                                    valuacion = cantidad_num * ultimo_precio
-                            except (ValueError, TypeError):
-                                pass
                 
-                # Guardar resultado
-                datos_activos.append({
-                    'Símbolo': simbolo,
-                    'Descripción': descripcion,
-                    'Tipo': tipo,
-                    'Cantidad': cantidad,
-                    'Valuación': valuacion,
-                })
-            except Exception as e:
-                st.error(f"Error al calcular la valuación: {str(e)}")
-                continue
+                # Intento final: consultar precio actual vía API si sigue en cero
+            if valuacion == 0:
+                ultimo_precio = None
+                if mercado := titulo.get('mercado'):
+                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                if ultimo_precio:
+                    try:
+                        cantidad_num = float(cantidad)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * ultimo_precio) / 100.0
+                        else:
+                            valuacion = cantidad_num * ultimo_precio
+                    except (ValueError, TypeError):
+                        pass
+            
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+            })
             
             valor_total += valuacion
         except Exception as e:
@@ -3662,23 +3077,761 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             if portfolio_result.dataframe_allocation is not None:
                                 weights_df = portfolio_result.dataframe_allocation.copy()
                                 weights_df['Peso (%)'] = weights_df['weights'] * 100
-            try:
-                with col1:
-                    st.metric("Retorno Anual", f"{portafolio_metrics['retorno_anual']*100:.2f}%")
-                    st.metric("Volatilidad Anual", f"{portafolio_metrics['volatilidad_anual']*100:.2f}%")
-                with col2:
-                    st.metric("Ratio de Sharpe", f"{portafolio_metrics['sharpe_ratio']:.2f}")
-                    st.metric("VaR 95% (1 día)", f"{portafolio_metrics['var_95']*100:.2f}%")
-                with col3:
-                    st.metric("Máximo Drawdown", f"{portafolio_metrics['max_drawdown']*100:.2f}%")
-                    st.metric("Ratio de Sortino", f"{portafolio_metrics['sortino_ratio']:.2f}" if 'sortino_ratio' in portafolio_metrics else "N/A")
+                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                        with col2:
+                            st.markdown("#### 📈 Métricas del Portafolio")
+                            metricas = portfolio_result.get_metrics_dict()
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
+                                st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
+                                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                            with col_b:
+                                st.metric("Skewness", f"{metricas['Skewness']:.4f}")
+                                st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+                                st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+                                normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
+                                st.metric("Normalidad", normalidad)
+                        # Histograma avanzado con Plotly
+                        st.markdown("#### 📊 Histograma de Retornos del Portafolio")
+                        fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # Mostrar frontera eficiente si el usuario lo solicita
+                        if show_frontier:
+                            st.markdown("#### 📈 Frontera Eficiente (Efficient Frontier)")
+                            try:
+                                frontier, valid_returns, volatilities = manager_inst.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+                                fig_frontier = go.Figure()
+                                fig_frontier.add_trace(go.Scatter(
+                                    x=volatilities, y=valid_returns, mode='lines+markers', name='Frontera Eficiente',
+                                    line=dict(color='royalblue', width=2)
+                                ))
+                                fig_frontier.update_layout(
+                                    title="Frontera Eficiente",
+                                    xaxis_title="Volatilidad Anual",
+                                    yaxis_title="Retorno Anual",
+                                    template="plotly_dark"
+                                )
+                                st.plotly_chart(fig_frontier, use_container_width=True)
+                            except Exception as e:
+                                st.warning(f"No se pudo calcular la frontera eficiente: {e}")
+                        # Simulación de ejecución
+                        st.markdown("---")
+                        st.subheader("Simulación de Ejecución Algorítmica")
+                        volumen_total = int(capital_inicial // portfolio_result.price if hasattr(portfolio_result, 'price') and portfolio_result.price > 0 else capital_inicial // 100)
+                        fig_exec, total_exec, avg_price = simular_ejecucion(volumen_total, scheduling, order_type)
+                        st.plotly_chart(fig_exec, use_container_width=True)
+                        st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
+                    else:
+                        st.error("❌ Error en la optimización")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
             except Exception as e:
-                st.error(f"Error al mostrar métricas del portafolio: {str(e)}")
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+    
+    if ejecutar_frontier and show_frontier:
+        with st.spinner("Calculando frontera eficiente..."):
+            try:
+                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
+                
+                if manager_inst.load_data():
+                    portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
+                        target_return=target_return, include_min_variance=True
+                    )
+                    
+                    if portfolios and returns and volatilities:
+                        st.success("✅ Frontera eficiente calculada")
+                        
+                        # Crear gráfico de frontera eficiente
+                        fig = go.Figure()
+                        
+                        # Línea de frontera eficiente
+                        fig.add_trace(go.Scatter(
+                            x=volatilities, y=returns,
+                            mode='lines+markers',
+                            name='Frontera Eficiente',
+                            line=dict(color='#0d6efd', width=3),
+                            marker=dict(size=6)
+                        ))
+                        
+                        # Portafolios especiales
+                        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
+                        
+                        for i, (label, portfolio) in enumerate(portfolios.items()):
+                            if portfolio is not None:
+                                fig.add_trace(go.Scatter(
+                                    x=[portfolio.volatility_annual], 
+                                    y=[portfolio.return_annual],
+                                    mode='markers',
+                                    name=labels[i] if i < len(labels) else label,
+                                    marker=dict(size=12, color=colors[i % len(colors)])
+                                ))
+                        
+                        fig.update_layout(
+                            title='Frontera Eficiente del Portafolio',
+                            xaxis_title='Volatilidad Anual',
+                            yaxis_title='Retorno Anual',
+                            showlegend=True,
+                            template='plotly_white',
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tabla comparativa de portafolios
+                        st.markdown("#### 📊 Comparación de Estrategias")
+                        comparison_data = []
+                        for label, portfolio in portfolios.items():
+                            if portfolio is not None:
+                                comparison_data.append({
+                                    'Estrategia': label,
+                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                    'VaR 95%': f"{portfolio.var_95:.4f}",
+                                    'Skewness': f"{portfolio.skewness:.4f}",
+                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                })
+                        
+                        if comparison_data:
+                            df_comparison = pd.DataFrame(comparison_data)
+                            st.dataframe(df_comparison, use_container_width=True)
+                    
+                    else:
+                        st.error("❌ No se pudo calcular la frontera eficiente")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+    
+    # Información adicional extendida
+    with st.expander("ℹ️ Información sobre las Estrategias"):
+        st.markdown("""
+        **Optimización de Markowitz:**
+        - Maximiza el ratio de Sharpe (retorno/riesgo)
+        - Considera la correlación entre activos
+        - Busca la frontera eficiente de riesgo-retorno
+        
+        **Pesos Iguales:**
+        - Distribución uniforme entre todos los activos (1/n)
+        - Estrategia simple de diversificación
+        - No considera correlaciones históricas
+        
+        **Mínima Varianza L1:**
+        - Minimiza la varianza del portafolio
+        - Restricción L1 para regularización (suma de valores absolutos)
+        - Tiende a generar portafolios más concentrados
+        
+        **Mínima Varianza L2:**
+        - Minimiza la varianza del portafolio
+        - Restricción L2 para regularización (suma de cuadrados)
+        - Genera portafolios más diversificados que L1
+        
+        **Solo Posiciones Largas:**
+        - Optimización estándar sin restricciones adicionales
+        - Permite solo posiciones compradoras (sin ventas en corto)
+        - Suma de pesos = 100%
+        
+        **Métricas Estadísticas:**
+        - **Skewness**: Medida de asimetría de la distribución
+        - **Kurtosis**: Medida de la forma de la distribución (colas)
+        - **Jarque-Bera**: Test de normalidad de los retornos
+        - **VaR 95%**: Valor en riesgo al 95% de confianza
+        """)
+
+def mostrar_analisis_tecnico(token_acceso, id_cliente):
+    st.markdown("### 📊 Análisis Técnico")
+    
+    with st.spinner("Obteniendo portafolio..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    
+    if not portafolio:
+        st.warning("No se pudo obtener el portafolio del cliente")
+        return
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("El portafolio está vacío")
+        return
+    
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if not simbolos:
+        st.warning("No se encontraron símbolos válidos")
+        return
+    
+    simbolo_seleccionado = st.selectbox(
+        "Seleccione un activo para análisis técnico:",
+        options=simbolos
+    )
+    
+    if simbolo_seleccionado:
+        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
+        
+        # Widget de TradingView
+        tv_widget = f"""
+        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+          "container_id": "tradingview_{simbolo_seleccionado}",
+          "width": "100%",
+          "height": 650,
+          "symbol": "{simbolo_seleccionado}",
+          "interval": "D",
+          "timezone": "America/Argentina/Buenos_Aires",
+          "theme": "light",
+          "style": "1",
+          "locale": "es",
+          "toolbar_bg": "#f4f7f9",
+          "enable_publishing": false,
+          "allow_symbol_change": true,
+          "hide_side_toolbar": false,
+          "studies": [
+            "MACD@tv-basicstudies",
+            "RSI@tv-basicstudies",
+            "StochasticRSI@tv-basicstudies",
+            "Volume@tv-basicstudies",
+            "Moving Average@tv-basicstudies"
+          ],
+          "drawings_access": {{
+            "type": "black",
+            "tools": [
+              {{"name": "Trend Line"}},
+              {{"name": "Horizontal Line"}},
+              {{"name": "Fibonacci Retracement"}},
+              {{"name": "Rectangle"}},
+              {{"name": "Text"}}
+            ]
+          }},
+          "enabled_features": [
+            "study_templates",
+            "header_indicators",
+            "header_compare",
+            "header_screenshot",
+            "header_fullscreen_button",
+            "header_settings",
+            "header_symbol_search"
+          ]
+        }});
+        </script>
+        """
+        components.html(tv_widget, height=680)
+
+def mostrar_movimientos_asesor():
+    st.title("👨‍💼 Panel del Asesor")
+    
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.error("Debe iniciar sesión primero")
+        return
+        
+    token_acceso = st.session_state.token_acceso
+    
+    # Obtener lista de clientes
+    clientes = obtener_lista_clientes(token_acceso)
+    if not clientes:
+        st.warning("No se encontraron clientes")
+        return
+    
+    # Formulario de búsqueda
+    with st.form("form_buscar_movimientos"):
+        st.subheader("🔍 Buscar Movimientos")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30))
+        with col2:
+            fecha_hasta = st.date_input("Fecha hasta", value=date.today())
+        
+        # Selección múltiple de clientes
+        cliente_opciones = [{"label": f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} ({c.get('numeroCliente', c.get('id', ''))})", 
+                           "value": c.get('numeroCliente', c.get('id'))} for c in clientes]
+        
+        clientes_seleccionados = st.multiselect(
+            "Seleccione clientes",
+            options=[c['value'] for c in cliente_opciones],
+            format_func=lambda x: next((c['label'] for c in cliente_opciones if c['value'] == x), x),
+            default=[cliente_opciones[0]['value']] if cliente_opciones else []
+        )
+        
+        # Filtros adicionales
+        col1, col2 = st.columns(2)
+        with col1:
+            tipo_fecha = st.selectbox(
+                "Tipo de fecha",
+                ["fechaOperacion", "fechaLiquidacion"],
+                index=0
+            )
+            estado = st.selectbox(
+                "Estado",
+                ["", "Pendiente", "Aprobado", "Rechazado"],
+                index=0
+            )
+        with col2:
+            tipo_operacion = st.text_input("Tipo de operación")
+            moneda = st.text_input("Moneda", "ARS")
+        
+        buscar = st.form_submit_button("🔍 Buscar movimientos")
+    
+    if buscar and clientes_seleccionados:
+        with st.spinner("Buscando movimientos..."):
+            movimientos = obtener_movimientos_asesor(
+                token_portador=token_acceso,
+                clientes=clientes_seleccionados,
+                fecha_desde=fecha_desde.isoformat(),
+                fecha_hasta=fecha_hasta.isoformat(),
+                tipo_fecha=tipo_fecha,
+                estado=estado or None,
+                tipo_operacion=tipo_operacion or None,
+                moneda=moneda or None
+            )
             
-            if clientes:
-                st.session_state.clientes = clientes
+            if movimientos and isinstance(movimientos, list):
+                df = pd.DataFrame(movimientos)
+                if not df.empty:
+                    st.subheader("📋 Resultados de la búsqueda")
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # Mostrar resumen
+                    st.subheader("📊 Resumen de Movimientos")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Total Movimientos", len(df))
+                    
+                    if 'monto' in df.columns:
+                        col2.metric("Monto Total", f"${df['monto'].sum():,.2f}")
+                    
+                    if 'estado' in df.columns:
+                        estados = df['estado'].value_counts().to_dict()
+                        col3.metric("Estados", ", ".join([f"{k} ({v})" for k, v in estados.items()]))
+                else:
+                    st.info("No se encontraron movimientos con los filtros seleccionados")
             else:
-                st.warning("No se encontraron clientes")
+                st.warning("No se encontraron movimientos o hubo un error en la consulta")
+                if movimientos and not isinstance(movimientos, list):
+                    st.json(movimientos)  # Mostrar respuesta cruda para depuración
+
+def mostrar_test_perfil_inversor(token_portador, id_cliente=None):
+    """
+    Muestra el test de perfil de inversor y procesa las respuestas
+    """
+    st.title("Test de Perfil de Inversor")
+    
+    with st.expander("Instrucciones", expanded=True):
+        st.markdown("""
+        Complete el siguiente cuestionario para determinar su perfil de inversor. 
+        Sus respuestas nos ayudarán a recomendar la estrategia de inversión más adecuada para usted.
+        """)
+    
+    # Obtener preguntas del test
+    test_data = obtener_test_inversor(token_portador)
+    if not test_data:
+        return
+    
+    respuestas = {}
+    
+    # Pregunta 1: Instrumentos invertidos anteriormente
+    st.subheader("1. " + test_data.get("instrumentosInvertidosAnteriormente", {}).get("pregunta", 
+                  "¿En cuáles de los siguientes instrumentos ha invertido anteriormente?"))
+    instrumentos = test_data.get("instrumentosInvertidosAnteriormente", {}).get("instrumentos", [])
+    opciones_instrumentos = {f"{i['nombre']}": i['id'] for i in instrumentos}
+    seleccionados = st.multiselect("Seleccione uno o más instrumentos:", 
+                                 options=list(opciones_instrumentos.keys()))
+    respuestas["instrumentosInvertidosAnteriormente"] = [opciones_instrumentos[i] for i in seleccionados]
+    
+    # Pregunta 2: Niveles de conocimiento
+    st.subheader("2. " + test_data.get("nivelesConocimientoInstrumentos", {}).get("pregunta", 
+                  "¿Cómo calificaría su conocimiento sobre los siguientes instrumentos?"))
+    niveles = test_data.get("nivelesConocimientoInstrumentos", {}).get("niveles", [])
+    respuestas_niveles = {}
+    
+    for nivel in niveles:
+        opciones = {f"{op['nombre']}": op['id'] for op in nivel.get('opciones', [])}
+        seleccion = st.radio(
+            nivel.get('nombre', 'Nivel de conocimiento'),
+            options=list(opciones.keys()),
+            key=f"nivel_{nivel.get('id')}"
+        )
+        respuestas_niveles[nivel.get('id')] = {
+            'opcionElegida': opciones[seleccion]
+        }
+    
+    respuestas["nivelesConocimientoInstrumentos"] = respuestas_niveles
+    
+    # Pregunta 3: Plazo de inversión
+    st.subheader("3. " + test_data.get("plazosInversion", {}).get("pregunta", 
+                  "¿Cuál es su horizonte de inversión?"))
+    plazos = test_data.get("plazosInversion", {}).get("plazos", [])
+    opcion_plazo = st.selectbox("Seleccione el plazo:", 
+                               [p['nombre'] for p in plazos], 
+                               key="plazo_inversion")
+    respuestas["idPlazoElegido"] = next((p['id'] for p in plazos if p['nombre'] == opcion_plazo), 0)
+    
+    # Pregunta 4: Edad
+    st.subheader("4. " + test_data.get("edadesPosibles", {}).get("pregunta", 
+                  "¿En qué rango de edad se encuentra?"))
+    edades = test_data.get("edadesPosibles", {}).get("edades", [])
+    opcion_edad = st.selectbox("Seleccione su rango de edad:", 
+                             [e['nombre'] for e in edades], 
+                             key="rango_edad")
+    respuestas["idEdadElegida"] = next((e['id'] for e in edades if e['nombre'] == opcion_edad), 0)
+    
+    # Pregunta 5: Objetivo de inversión
+    st.subheader("5. " + test_data.get("objetivosInversion", {}).get("pregunta", 
+                  "¿Cuál es su objetivo principal de inversión?"))
+    objetivos = test_data.get("objetivosInversion", {}).get("objetivos", [])
+    opcion_objetivo = st.selectbox("Seleccione su objetivo:", 
+                                 [o['nombre'] for o in objetivos], 
+                                 key="objetivo_inversion")
+    respuestas["idObjetivoInversionElegida"] = next((o['id'] for o in objetivos if o['nombre'] == opcion_objetivo), 0)
+    
+    # Pregunta 6: Pólizas de seguro
+    st.subheader("6. " + test_data.get("polizasSeguro", {}).get("pregunta", 
+                  "¿Tiene contratadas pólizas de seguro?"))
+    polizas = test_data.get("polizasSeguro", {}).get("polizas", [])
+    opcion_poliza = st.selectbox("Seleccione una opción:", 
+                               [p['nombre'] for p in polizas], 
+                               key="poliza_seguro")
+    respuestas["idPolizaElegida"] = next((p['id'] for p in polizas if p['nombre'] == opcion_poliza), 0)
+    
+    # Pregunta 7: Capacidad de ahorro
+    st.subheader("7. " + test_data.get("capacidadesAhorro", {}).get("pregunta", 
+                  "¿Cuál es su capacidad de ahorro mensual?"))
+    capacidades = test_data.get("capacidadesAhorro", {}).get("capacidadesAhorro", [])
+    opcion_capacidad = st.selectbox("Seleccione su capacidad de ahorro:", 
+                                  [c['nombre'] for c in capacidades], 
+                                  key="capacidad_ahorro")
+    respuestas["idCapacidadAhorroElegida"] = next((c['id'] for c in capacidades if c['nombre'] == opcion_capacidad), 0)
+    
+    # Pregunta 8: Porcentaje del patrimonio
+    st.subheader("8. " + test_data.get("porcentajesPatrimonioDedicado", {}).get("pregunta", 
+                  "¿Qué porcentaje de su patrimonio está dispuesto a invertir?"))
+    porcentajes = test_data.get("porcentajesPatrimonioDedicado", {}).get("porcentajesPatrimonioDedicado", [])
+    opcion_porcentaje = st.selectbox("Seleccione el porcentaje:", 
+                                   [p['nombre'] for p in porcentajes], 
+                                   key="porcentaje_patrimonio")
+    respuestas["idPorcentajePatrimonioDedicado"] = next((p['id'] for p in porcentajes if p['nombre'] == opcion_porcentaje), 0)
+    
+    # Opción para enviar por email
+    respuestas["enviarEmailCliente"] = st.checkbox("Recibir los resultados por correo electrónico", value=True)
+    
+    # Botón para enviar respuestas
+    if st.button("Obtener Perfil de Inversor"):
+        with st.spinner("Analizando sus respuestas..."):
+            resultado = enviar_respuestas_test(token_portador, respuestas, id_cliente)
+            
+            if resultado and resultado.get('ok', False):
+                st.success("¡Análisis completado con éxito!")
+                perfil = resultado.get('perfilSugerido', {})
+                
+                st.markdown(f"### Perfil de Inversor: {perfil.get('nombre', 'No determinado')}")
+                st.markdown(f"{perfil.get('detalle', '')}")
+                
+                # Mostrar composición recomendada
+                st.markdown("### Composición Recomendada")
+                composiciones = perfil.get('perfilComposiciones', [])
+                
+                if composiciones:
+                    # Crear gráfico de torta
+                    fig = go.Figure(data=[go.Pie(
+                        labels=[c['nombre'] for c in composiciones],
+                        values=[c['porcentaje'] for c in composiciones],
+                        hole=.3,
+                        marker_colors=px.colors.qualitative.Plotly
+                    )])
+                    
+                    fig.update_layout(
+                        title="Distribución de Activos Recomendada",
+                        showlegend=True,
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar tabla con porcentajes
+                    df_composicion = pd.DataFrame([
+                        {"Activo": c['nombre'], "Porcentaje": f"{c['porcentaje']}%"} 
+                        for c in composiciones
+                    ])
+                    st.dataframe(df_composicion, use_container_width=True)
+                else:
+                    st.warning("No se pudo obtener la composición recomendada.")
+                
+                # Mostrar mensajes adicionales si los hay
+                mensajes = resultado.get('messages', [])
+                if mensajes:
+                    st.markdown("### Recomendaciones Adicionales")
+                    for msg in mensajes:
+                        with st.expander(msg.get('title', 'Recomendación'), expanded=False):
+                            st.write(msg.get('description', ''))
+            else:
+                st.error("No se pudo determinar el perfil de inversor. Por favor, intente nuevamente.")
+
+def mostrar_analisis_portafolio():
+    cliente = st.session_state.cliente_seleccionado
+    token_acceso = st.session_state.token_acceso
+
+    if not cliente:
+        st.error("No se ha seleccionado ningún cliente")
+        return
+        
+    # Inicializar el gestor de portafolio en session_state si no existe
+    if 'portfolio_manager' not in st.session_state:
+        st.session_state.portfolio_manager = None
+
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+
+    st.title(f"Análisis de Portafolio - {nombre_cliente}")
+    
+    # Crear tabs con iconos
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📈 Resumen Portafolio", 
+        "💰 Estado de Cuenta", 
+        "📊 Análisis Técnico",
+        "💱 Cotizaciones",
+        "🔄 Optimización",
+        "📉 Análisis de Volatilidad"
+    ])
+
+    with tab1:
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if portafolio:
+            mostrar_resumen_portafolio(portafolio, token_acceso)
+        else:
+            st.warning("No se pudo obtener el portafolio del cliente")
+    
+    with tab2:
+        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        if estado_cuenta:
+            mostrar_estado_cuenta(estado_cuenta)
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
+    
+    with tab3:
+        mostrar_analisis_tecnico(token_acceso, id_cliente)
+    
+    with tab4:
+        mostrar_cotizaciones_mercado(token_acceso)
+    
+    with tab5:
+        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+        
+    with tab6:
+        st.header("📊 Análisis de Volatilidad")
+        
+        # Obtener datos históricos
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+            st.warning("No hay activos en el portafolio para analizar")
+        else:
+            # Mostrar selector de activos
+            activos = portafolio['activos']
+            simbolos = [a['titulo']['simbolo'] for a in activos if 'titulo' in a and 'simbolo' in a['titulo']]
+            
+            if not simbolos:
+                st.warning("No se encontraron símbolos válidos para analizar")
+            else:
+                simbolo_seleccionado = st.selectbox(
+                    "Seleccione un activo para analizar:",
+                    options=simbolos,
+                    key="vol_asset_selector"
+                )
+                
+                # Configuración del análisis
+                with st.expander("⚙️ Configuración del análisis", expanded=False):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        n_simulaciones = st.number_input(
+                            "Número de simulaciones",
+                            min_value=100,
+                            max_value=10000,
+                            value=1000,
+                            step=100,
+                            help="Cantidad de trayectorias a simular en el análisis de Monte Carlo"
+                        )
+                    with col2:
+                        dias_proyeccion = st.number_input(
+                            "Días de proyección",
+                            min_value=5,
+                            max_value=365,
+                            value=30,
+                            step=5,
+                            help="Horizonte temporal para las proyecciones"
+                        )
+                
+                # Botón para ejecutar el análisis
+                if st.button("🔍 Analizar Volatilidad", use_container_width=True):
+                    with st.spinner("Realizando análisis de volatilidad..."):
+                        try:
+                            # Inicializar el gestor de portafolio si no existe
+                            if st.session_state.portfolio_manager is None:
+                                st.session_state.portfolio_manager = PortfolioManager(
+                                    activos=[{'simbolo': s} for s in simbolos],
+                                    token=token_acceso,
+                                    fecha_desde=(date.today() - timedelta(days=365)).strftime('%Y-%m-%d'),
+                                    fecha_hasta=date.today().strftime('%Y-%m-%d')
+                                )
+                                
+                                # Cargar datos históricos
+                                if not st.session_state.portfolio_manager.load_data():
+                                    st.error("Error al cargar datos históricos")
+                                    return
+                            
+                            # Obtener retornos del activo seleccionado
+                            if simbolo_seleccionado in st.session_state.portfolio_manager.returns:
+                                returns = st.session_state.portfolio_manager.returns[simbolo_seleccionado]
+                                
+                                # Realizar análisis de volatilidad
+                                result = st.session_state.portfolio_manager.analyze_volatility(
+                                    symbol=simbolo_seleccionado,
+                                    returns=returns,
+                                    n_simulations=n_simulaciones,
+                                    n_days=dias_proyeccion
+                                )
+                                
+                                if result is not None:
+                                    # Mostrar gráficos
+                                    fig = st.session_state.portfolio_manager.plot_volatility_analysis(simbolo_seleccionado)
+                                    if fig is not None:
+                                        st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.warning(f"No se encontraron datos de retornos para {simbolo_seleccionado}")
+                                
+                        except Exception as e:
+                            st.error(f"Error en el análisis de volatilidad: {str(e)}")
+                            st.exception(e)
+
+def main():
+    st.set_page_config(
+        page_title="IOL Portfolio Analyzer",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Inicializar variables de sesión si no existen
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'usuario' not in st.session_state:
+        st.session_state.usuario = None
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    if 'portafolio' not in st.session_state:
+        st.session_state.portafolio = None
+
+    # Barra lateral para navegación
+    st.sidebar.title("🔍 Navegación")
+    
+    # Menú de navegación
+    menu_opciones = [
+        "🏠 Inicio",
+        "🧠 Test de Perfil de Inversor",
+        "📊 Estado de Cuenta",
+        "📈 Análisis de Portafolio",
+        "📊 Optimización de Portafolio",
+        "📊 Análisis Técnico",
+        "📝 Movimientos"
+    ]
+    
+    # Mostrar menú de navegación solo si el usuario está autenticado
+    if st.session_state.token_acceso:
+        opcion_seleccionada = st.sidebar.selectbox("Seleccione una opción:", menu_opciones)
+    else:
+        opcion_seleccionada = "🏠 Inicio"
+    
+    # Mostrar contenido según la opción seleccionada
+    if opcion_seleccionada == "🏠 Inicio":
+        st.info("👆 Seleccione una opción del menú para comenzar")
+    elif opcion_seleccionada == "🧠 Test de Perfil de Inversor":
+        if st.session_state.token_acceso:
+            mostrar_test_perfil_inversor(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+        else:
+            st.warning("Debe iniciar sesión para acceder al test de perfil de inversor.")
+    elif opcion_seleccionada == "📊 Estado de Cuenta":
+        mostrar_estado_cuenta(st.session_state.estado_cuenta)
+    elif opcion_seleccionada == "📈 Análisis de Portafolio":
+        mostrar_analisis_portafolio()
+    elif opcion_seleccionada == "📊 Optimización de Portafolio":
+        mostrar_optimizacion_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+    elif opcion_seleccionada == "📊 Análisis Técnico":
+        mostrar_analisis_tecnico(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+    elif opcion_seleccionada == "📝 Movimientos":
+        mostrar_movimientos_asesor()
+
+    # Pie de página
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ℹ️ Información")
+    st.sidebar.info(
+        "Esta aplicación está diseñada para ayudar en el análisis y gestión de portafolios de inversión. "
+        "Para más información, contacte al equipo de soporte."
+    )
+
+    # Barra lateral - Autenticación
+    with st.sidebar:
+        st.header("🔐 Autenticación IOL")
+        
+        if st.session_state.token_acceso is None:
+            with st.form("login_form"):
+                st.subheader("Ingreso a IOL")
+                usuario = st.text_input("Usuario", placeholder="su_usuario")
+                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+                
+                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
+                    if usuario and contraseña:
+                        with st.spinner("Conectando..."):
+                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            
+                            if token_acceso:
+                                st.session_state.token_acceso = token_acceso
+                                st.session_state.refresh_token = refresh_token
+                                st.success("✅ Conexión exitosa!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error en la autenticación")
+                    else:
+                        st.warning("⚠️ Complete todos los campos")
+        else:
+            st.success("✅ Conectado a IOL")
+            st.divider()
+            
+            st.subheader("Configuración de Fechas")
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_desde = st.date_input(
+                    "Desde:",
+                    value=st.session_state.fecha_desde,
+                    max_value=date.today()
+                )
+            with col2:
+                fecha_hasta = st.date_input(
+                    "Hasta:",
+                    value=st.session_state.fecha_hasta,
+                    max_value=date.today()
+                )
+            
+            st.session_state.fecha_desde = fecha_desde
+            st.session_state.fecha_hasta = fecha_hasta
+            
+            # Obtener lista de clientes
+            if not st.session_state.clientes and st.session_state.token_acceso:
+                with st.spinner("Cargando clientes..."):
+                    try:
+                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        if clientes:
+                            st.session_state.clientes = clientes
+                        else:
+                            st.warning("No se encontraron clientes")
                     except Exception as e:
                         st.error(f"Error al cargar clientes: {str(e)}")
             
