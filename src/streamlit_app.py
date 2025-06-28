@@ -2897,23 +2897,54 @@ def obtener_activos_disponibles_mercado(token_acceso):
                 response = requests.get(url, headers=headers, timeout=30)
                 
                 if response.status_code == 200:
-                    datos = response.json()
-                    if isinstance(datos, list):
-                        for titulo in datos:
+                    try:
+                        datos = response.json()
+                        st.write(f"Datos crudos para {panel}:", datos)  # Debug
+                        
+                        if not isinstance(datos, (list, dict)):
+                            st.warning(f"Formato de datos inesperado para {panel}: {type(datos)}")
+                            continue
+                            
+                        # Si es un diccionario, verificar si tiene una lista dentro
+                        if isinstance(datos, dict):
+                            # Buscar la primera lista en el diccionario
+                            for key, value in datos.items():
+                                if isinstance(value, list):
+                                    datos = value
+                                    st.info(f"Encontrada lista de activos en la clave: {key}")
+                                    break
+                            else:
+                                st.warning(f"No se encontró una lista de activos en la respuesta de {panel}")
+                                continue
+                        
+                        for i, titulo in enumerate(datos):
                             try:
+                                # Debug: Mostrar el tipo de cada título
+                                if not isinstance(titulo, dict):
+                                    st.warning(f"Título {i} en {panel} no es un diccionario: {type(titulo)}")
+                                    continue
+                                    
+                                # Debug: Mostrar las claves disponibles
+                                st.write(f"Claves disponibles en título {i}:", titulo.keys())
+                                
                                 # Solo agregar si tiene símbolo y precio
-                                if titulo.get('simbolo') and titulo.get('ultimoPrecio') is not None:
+                                simbolo = titulo.get('simbolo') or titulo.get('ticker') or titulo.get('simbolo')
+                                precio = titulo.get('ultimoPrecio') or titulo.get('precioUltimo')
+                                
+                                if simbolo and precio is not None:
                                     todos_los_activos.append({
-                                        'simbolo': titulo.get('simbolo', '').strip(),
-                                        'nombre': titulo.get('descripcion', 'Sin nombre').strip(),
+                                        'simbolo': str(simbolo).strip(),
+                                        'nombre': titulo.get('descripcion', titulo.get('nombre', 'Sin nombre')).strip(),
                                         'tipo': panel,
-                                        'mercado': titulo.get('mercado', 'BCBA'),
-                                        'ultimoPrecio': float(titulo.get('ultimoPrecio', 0)),
-                                        'moneda': titulo.get('monedaCotizacion', 'ARS'),
-                                        'variacion': float(titulo.get('variacion', 0)),
-                                        'volumen': float(titulo.get('volumen', 0))
+                                        'mercado': titulo.get('mercado', titulo.get('marketId', 'BCBA')),
+                                        'ultimoPrecio': float(precio),
+                                        'moneda': titulo.get('monedaCotizacion', titulo.get('moneda', 'ARS')),
+                                        'variacion': float(titulo.get('variacion', titulo.get('variacionPorcentual', 0))),
+                                        'volumen': float(titulo.get('volumen', titulo.get('volumenNominal', 0)))
                                     })
-                            except (ValueError, TypeError) as e:
+                            except Exception as e:
+                                st.error(f"Error procesando título {i} en {panel}: {str(e)}")
+                                st.write("Datos del título con error:", titulo)
                                 continue  # Saltar activos con datos inválidos
                     
                     st.success(f'Datos de {panel} obtenidos correctamente')
