@@ -2839,10 +2839,7 @@ def obtener_series_historicas_aleatorias_con_capital(token_acceso, paneles_selec
     except Exception as e:
         st.error(f"Error al procesar los resultados finales: {str(e)}")
         return pd.DataFrame(), {}
-        if panel not in seleccion_final:
-            panel = paneles_seleccionados[0]  # Usar el primer panel si el tipo no coincide
-        seleccion_final[panel].append(activo['simbolo'])
-    
+
     return series_historicas, seleccion_final
 
 def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
