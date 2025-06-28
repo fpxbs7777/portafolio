@@ -1447,8 +1447,20 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
-    def __init__(self, activos, token, fecha_desde, fecha_hasta, capital=100000):
+    def __init__(self, activos, token, fecha_desde, fecha_hasta, capital=100000, activos_adicionales=None):
+        """
+        Inicializa el gestor de cartera con activos existentes y opcionalmente activos adicionales para optimización.
+        
+        Args:
+            activos (list): Lista de diccionarios con los activos actuales del portafolio
+            token (str): Token de autenticación para la API
+            fecha_desde (str): Fecha de inicio para los datos históricos (YYYY-MM-DD)
+            fecha_hasta (str): Fecha de fin para los datos históricos (YYYY-MM-DD)
+            capital (float): Capital total del portafolio
+            activos_adicionales (list, optional): Lista de diccionarios con activos adicionales para optimización
+        """
         self.activos = activos
+        self.activos_adicionales = activos_adicionales or []
         self.token = token
         self.fecha_desde = fecha_desde
         self.fecha_hasta = fecha_hasta
@@ -1872,74 +1884,93 @@ class PortfolioManager:
             st.exception(e)
             return False
 
-    def compute_portfolio(self, strategy='max_sharpe', target_return=None):
+    def compute_portfolio(self, strategy='max_sharpe', target_return=None, incluir_adicionales=True):
         """
         Calcula la cartera óptima según la estrategia especificada.
         
         Args:
             strategy (str): Estrategia de optimización ('max_sharpe', 'min_vol', 'equi-weight')
             target_return (float, optional): Retorno objetivo para estrategias que lo requieran
+            incluir_adicionales (bool): Si se deben incluir activos adicionales en la optimización
             
         Returns:
             output: Objeto output con la cartera optimizada o None en caso de error
         """
-        if not self.data_loaded or self.returns is None or self.returns.empty:
-            st.error("No hay datos de retornos disponibles")
-            return None
-            
         try:
-            # Inicializar el manager si no existe
-            if not hasattr(self, 'manager') or not self.manager:
-                self.manager = manager(
-                    rics=self.returns.columns.tolist(),
-                    notional=self.notional,
-                    data=self.prices.to_dict('series')
-                )
+            # Determinar qué activos incluir en la optimización
+            activos_a_optimizar = self.activos.copy()
+            
+            if incluir_adicionales and hasattr(self, 'activos_adicionales') and self.activos_adicionales:
+                # Filtrar duplicados
+                activos_unicos = {a['simbolo']: a for a in activos_a_optimizar + self.activos_adicionales}
+                activos_a_optimizar = list(activos_unicos.values())
                 
-                # Cargar datos y calcular covarianzas
-                self.manager.returns = self.returns
+                # Mostrar información sobre los activos incluidos
+                st.info(f"Optimizando con {len(activos_a_optimizar)} activos ({len(self.activos)} actuales + {len(activos_unicos) - len(self.activos)} adicionales)")
+            
+            # Obtener datos históricos para todos los activos seleccionados
+            with st.spinner("Obteniendo datos históricos para optimización..."):
+                datos_historicos = get_historical_data_for_optimization(
+                    self.token,
+                    activos_a_optimizar,
+                    self.fecha_desde,
+                    self.fecha_hasta
+                )
+            
+            if not datos_historicos:
+                st.error("No se pudieron obtener datos históricos para la optimización")
+                return None
+                
+            # Verificar que tengamos datos para al menos 2 activos
+            if len(datos_historicos) < 2:
+                st.warning("Se requieren al menos 2 activos con datos para la optimización")
+                return None
+            
+            # Crear diccionario de precios para el gestor
+            precios = {k: v['precio'] for k, v in datos_historicos.items()}
+            
+            # Inicializar gestor con los activos seleccionados
+            self.manager = manager(
+                rics=list(precios.keys()),
+                notional=self.notional,
+                data=precios
+            )
+            
+            # Calcular covarianza
+            with st.spinner("Calculando matriz de covarianza..."):
                 self.manager.compute_covariance()
-                
-            # Calcular cartera según estrategia
-            if strategy in ['max_sharpe', 'min_vol']:
-                portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type=strategy,
-                    target_return=target_return
-                )
-                
-                if portfolio_output is None:
-                    st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
-                    n_assets = len(self.returns.columns)
+            
+            # Seleccionar estrategia
+            with st.spinner("Optimizando cartera..."):
+                if strategy == 'max_sharpe':
+                    return self.manager.compute_portfolio('markowitz')
+                elif strategy == 'min_vol':
+                    return self.manager.compute_portfolio('min-variance-l1')
+                elif strategy == 'equi-weight':
+                    # Estrategia de pesos iguales
+                    n_assets = len(precios)
                     weights = np.array([1/n_assets] * n_assets)
-                    portfolio_returns = (self.returns * weights).sum(axis=1)
+                    
+                    # Crear retornos diarios para el cálculo
+                    retornos = pd.DataFrame({k: v.pct_change().dropna() for k, v in precios.items()})
+                    portfolio_returns = (retornos * weights).sum(axis=1)
+                    
+                    # Crear objeto de salida
                     portfolio_output = output(portfolio_returns, self.notional)
                     portfolio_output.weights = weights
                     portfolio_output.dataframe_allocation = pd.DataFrame({
-                        'rics': list(self.returns.columns),
+                        'rics': list(precios.keys()),
                         'weights': weights,
-                        'volatilities': self.returns.std().values,
-                        'returns': self.returns.mean().values
+                        'volatilities': retornos.std().values,
+                        'returns': retornos.mean().values
                     })
-                
-                return portfolio_output
-                
-            elif strategy == 'equi-weight':
-                n_assets = len(self.returns.columns)
-                weights = np.array([1/n_assets] * n_assets)
-                portfolio_returns = (self.returns * weights).sum(axis=1)
-                portfolio_output = output(portfolio_returns, self.notional)
-                portfolio_output.weights = weights
-                portfolio_output.dataframe_allocation = pd.DataFrame({
-                    'rics': list(self.returns.columns),
-                    'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
-                })
-                return portfolio_output
-                
-            else:
-                st.error(f"Estrategia no soportada: {strategy}")
-                return None
+                    return portfolio_output
+                    
+                elif strategy == 'target_return' and target_return is not None:
+                    return self.manager.compute_portfolio('markowitz', target_return)
+                else:
+                    st.error(f"Estrategia no soportada: {strategy}")
+                    return None
                 
         except Exception as e:
             st.error(f"Error al calcular la cartera: {str(e)}")
