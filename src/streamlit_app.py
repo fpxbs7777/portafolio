@@ -1225,10 +1225,6 @@ class manager:
         self.returns = pd.DataFrame(returns_matrix)
         
         # Calcular matriz de covarianza y retornos medios
-        self.cov_matrix = self.returns.cov() * 252  # Anualizar
-        self.mean_returns = self.returns.mean() * 252  # Anualizar
-        
-        return self.cov_matrix, self.mean_returns
 
     def compute_portfolio(self, portfolio_type=None, target_return=None):
         if self.cov_matrix is None:
@@ -1236,6 +1232,9 @@ class manager:
             
         n_assets = len(self.rics)
         bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        # Initialize constraints with default (sum to 1)
+        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
         
         if portfolio_type == 'min-variance-l1':
             # Minimizar varianza con restricción L1
@@ -1258,7 +1257,8 @@ class manager:
             
         elif portfolio_type == 'long-only':
             # Optimización long-only estándar
-            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            # Usa la restricción por defecto (suma a 1)
+            pass
             
         elif portfolio_type == 'markowitz':
             if target_return is not None:
@@ -1286,16 +1286,29 @@ class manager:
                 )
                 return self._create_output(result.x)
         
+        # Verificar que constraints esté definido
+        if 'constraints' not in locals():
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
         # Optimización general de varianza mínima
-        result = op.minimize(
-            lambda x: portfolio_variance(x, self.cov_matrix),
-            x0=np.ones(n_assets)/n_assets,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-        
-        return self._create_output(result.x)
+        try:
+            result = op.minimize(
+                lambda x: portfolio_variance(x, self.cov_matrix),
+                x0=np.ones(n_assets)/n_assets,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+            
+            if result.success:
+                return self._create_output(result.x)
+            else:
+                st.error(f"Error en la optimización: {result.message}")
+                return None
+                
+        except Exception as e:
+            st.error(f"Error al optimizar la cartera: {str(e)}")
+            return None
 
     def _create_output(self, weights):
         """Crea un objeto output con los pesos optimizados"""
