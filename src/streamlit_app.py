@@ -2653,6 +2653,89 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
+def obtener_activos_disponibles_mercado(token_acceso=None):
+    """
+    Obtiene una lista de activos disponibles en el mercado para la selección aleatoria
+    utilizando la API de InvertirOnline.
+    
+    Args:
+        token_acceso (str, optional): Token de acceso para la API de InvertirOnline.
+        
+    Returns:
+        list: Lista de diccionarios con información de los activos disponibles.
+    """
+    import requests
+    
+    if not token_acceso:
+        st.warning("No se proporcionó token de acceso para obtener activos del mercado")
+        return []
+    
+    try:
+        url = 'https://api.invertironline.com/api/v2/Titulos/Cotizacion/panel/general/argentina'
+        headers = {
+            'Authorization': f'Bearer {token_acceso}',
+            'Accept': 'application/json'
+        }
+        
+        with st.spinner("Obteniendo lista de activos disponibles..."):
+            response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            datos = response.json()
+            activos = []
+            
+            for panel in datos.get('paneles', []):
+                panel_nombre = panel.get('nombrePanel', 'Sin nombre')
+                
+                for titulo in panel.get('titulos', []):
+                    # Obtener el último precio disponible
+                    ultimo_precio = None
+                    if 'ultimoPrecio' in titulo and titulo['ultimoPrecio'] is not None:
+                        ultimo_precio = float(titulo['ultimoPrecio'])
+                    
+                    # Solo incluir activos con precio válido
+                    if ultimo_precio and ultimo_precio > 0:
+                        activo = {
+                            'simbolo': titulo.get('simbolo', '').strip(),
+                            'nombre': titulo.get('descripcion', 'Sin nombre').strip(),
+                            'tipo': panel_nombre,
+                            'mercado': titulo.get('mercado', 'BCBA'),
+                            'ultimoPrecio': ultimo_precio,
+                            'moneda': titulo.get('moneda', 'ARS'),
+                            'variacion': titulo.get('variacion', 0),
+                            'volumen': titulo.get('volumen', 0)
+                        }
+                        
+                        # Filtrar activos sin símbolo o con nombres muy cortos que podrían ser inválidos
+                        if (activo['simbolo'] and 
+                            len(activo['simbolo']) >= 2 and 
+                            len(activo['nombre']) > 3):
+                            activos.append(activo)
+            
+            # Ordenar por símbolo para consistencia
+            activos_ordenados = sorted(activos, key=lambda x: x['simbolo'])
+            
+            # Mostrar información de depuración
+            st.session_state['debug_activos'] = {
+                'total_activos': len(activos_ordenados),
+                'tipos_activos': {a['tipo'] for a in activos_ordenados}
+            }
+            
+            return activos_ordenados
+        else:
+            st.error(f"Error al obtener activos: {response.status_code}")
+            st.json(response.json() if response.text else {})
+            return []
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return []
+    except Exception as e:
+        st.error(f"Error inesperado al obtener activos: {str(e)}")
+        import traceback
+        st.text(traceback.format_exc())
+        return []
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
@@ -2730,7 +2813,13 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 
     # Mostrar input de capital y filtro de tipo de activo solo si corresponde
     if metodo_seleccion == 'aleatoria':
-        tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+        st.info("Modo selección aleatoria: Se seleccionarán activos aleatorios del mercado")
+        
+# Obtener lista de activos disponibles en el mercado
+        with st.spinner("Cargando activos disponibles..."):
+            activos_mercado = obtener_activos_disponibles_mercado()
+        
+        tipos_disponibles = sorted(set([a.get('tipo', 'Sin tipo') for a in activos_mercado]))
         tipo_seleccionado = st.selectbox(
             "Filtrar por tipo de activo:",
             options=['Todos'] + tipos_disponibles,
@@ -2738,18 +2827,42 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             key=f"tipo_activo_{id_cliente}"
         )
         
+        # Filtrar activos por tipo si es necesario
         if tipo_seleccionado != 'Todos':
-            activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+            activos_filtrados = [a for a in activos_mercado if a.get('tipo') == tipo_seleccionado]
         else:
-            activos_filtrados = activos_para_optimizacion
+            activos_filtrados = activos_mercado
             
+        # Seleccionar activos aleatorios
+        n_activos = st.slider(
+            "Número de activos a seleccionar:",
+            min_value=1,
+            max_value=min(20, len(activos_filtrados)),
+            value=min(5, len(activos_filtrados)),
+            key=f"n_activos_{id_cliente}"
+        )
+        
+        # Mezclar y seleccionar activos aleatorios
+        import random
+        activos_seleccionados = random.sample(activos_filtrados, n_activos) if activos_filtrados else []
+        
+        # Mostrar activos seleccionados
+        if activos_seleccionados:
+            st.write("Activos seleccionados para optimización:")
+            for i, activo in enumerate(activos_seleccionados, 1):
+                st.write(f"{i}. {activo.get('simbolo')} - {activo.get('nombre', 'Sin nombre')}")
+        
         capital_inicial = st.number_input(
             "Capital Inicial para Optimización (ARS):",
             min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="El monto máximo a invertir en la selección aleatoria de activos",
+            help="El monto máximo a invertir en la selección de activos",
             key=f"capital_inicial_{id_cliente}"
         )
+        
+        # Reemplazar los activos a optimizar con los seleccionados aleatoriamente
+        activos_para_optimizacion = activos_seleccionados
     else:
+        st.info("Modo portafolio actual: Se optimizarán los activos actuales del portafolio")
         activos_filtrados = activos_para_optimizacion
         capital_inicial = None
 
@@ -2808,13 +2921,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     )
     order_type = order_types[order_type_ui]
 
-    # Input de capital inicial
-    capital_inicial = st.number_input(
-        "Capital Inicial para Optimización (ARS):",
-        min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-        help="El monto máximo a invertir en la selección y optimización de activos",
-        key=f"input_capital_inicial_optimizacion_{id_cliente}"
-    )
+# Este input duplicado ha sido eliminado
 
     # Widget TradingView (requiere streamlit-tradingview-widget instalado)
     try:
