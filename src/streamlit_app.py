@@ -2653,22 +2653,118 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
-def obtener_activos_disponibles_mercado(token_acceso=None):
+def obtener_series_historicas_aleatorias_con_capital(token_acceso, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, capital_ars):
+    """
+    Selecciona aleatoriamente activos por panel, asegurando que sean asequibles con el capital disponible.
+    
+    Args:
+        token_acceso (str): Token de autenticación para la API de InvertirOnline
+        paneles_seleccionados (list): Lista de paneles a considerar (ej: ['acciones', 'cedears'])
+        cantidad_activos (int): Número de activos a seleccionar por panel
+        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
+        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
+        capital_ars (float): Capital disponible en ARS
+        
+    Returns:
+        tuple: (DataFrame con series históricas, diccionario con activos seleccionados por panel)
+    """
+    import pandas as pd
+    import random
+    from datetime import datetime
+    
+    series_historicas = pd.DataFrame()
+    seleccion_final = {panel: [] for panel in paneles_seleccionados}
+    
+    # Obtener lista de activos disponibles
+    activos_mercado = obtener_activos_disponibles_mercado(token_acceso)
+    if not activos_mercado:
+        st.error("No se pudieron obtener los activos del mercado")
+        return pd.DataFrame(), {}
+    
+    # Filtrar activos por paneles seleccionados
+    activos_filtrados = [a for a in activos_mercado if a.get('tipo') in paneles_seleccionados]
+    
+    # Agrupar por panel
+    activos_por_panel = {panel: [] for panel in paneles_seleccionados}
+    for activo in activos_filtrados:
+        panel = activo.get('tipo')
+        if panel in activos_por_panel:
+            activos_por_panel[panel].append(activo)
+    
+    # Procesar cada panel
+    for panel, activos in activos_por_panel.items():
+        if not activos:
+            continue
+            
+        # Ordenar por precio (más baratos primero) y limitar a 100 para no sobrecargar
+        activos_ordenados = sorted(activos, key=lambda x: x.get('ultimoPrecio', float('inf')))
+        activos_ordenados = activos_ordenados[:100]  # Limitar para no sobrecargar
+        
+        # Intentar seleccionar activos que quepan en el capital
+        seleccionados = []
+        capital_restante = capital_ars
+        
+        for intento in range(3):  # Hasta 3 intentos
+            random.shuffle(activos_ordenados)
+            for activo in activos_ordenados:
+                precio = activo.get('ultimoPrecio', 0)
+                if precio <= capital_restante and len(seleccionados) < cantidad_activos:
+                    seleccionados.append(activo)
+                    capital_restante -= precio
+                    if capital_restante <= 0 or len(seleccionados) >= cantidad_activos:
+                        break
+            
+            if seleccionados:  # Si encontramos al menos un activo, salir del bucle
+                break
+                
+            # Si no encontramos con el capital actual, reducirlo un 20% y reintentar
+            capital_restante = capital_ars * 0.8
+        
+        # Guardar selección
+        seleccion_final[panel] = seleccionados
+        
+        # Obtener series históricas para los seleccionados
+        for activo in seleccionados:
+            simbolo = activo['simbolo']
+            mercado = activo.get('mercado', 'BCBA')
+            
+            # Obtener serie histórica
+            serie = obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, 'SinAjustar', token_acceso)
+            if serie and isinstance(serie, list):
+                df = pd.DataFrame(serie)
+                df['simbolo'] = simbolo
+                df['panel'] = panel
+                series_historicas = pd.concat([series_historicas, df], ignore_index=True)
+    
+    return series_historicas, seleccion_final
+
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """Obtiene la serie histórica de precios para un símbolo dado."""
+    import requests
+    
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.warning(f"Error al obtener serie histórica para {simbolo}: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión al obtener {simbolo}: {str(e)}")
+        return None
+
+def obtener_activos_disponibles_mercado(token_acceso):
     """
     Obtiene una lista de activos disponibles en el mercado para la selección aleatoria
     utilizando la API de InvertirOnline.
-    
-    Args:
-        token_acceso (str, optional): Token de acceso para la API de InvertirOnline.
-        
-    Returns:
-        list: Lista de diccionarios con información de los activos disponibles.
     """
     import requests
-    
-    if not token_acceso:
-        st.warning("No se proporcionó token de acceso para obtener activos del mercado")
-        return []
     
     try:
         url = 'https://api.invertironline.com/api/v2/Titulos/Cotizacion/panel/general/argentina'
@@ -2691,7 +2787,10 @@ def obtener_activos_disponibles_mercado(token_acceso=None):
                     # Obtener el último precio disponible
                     ultimo_precio = None
                     if 'ultimoPrecio' in titulo and titulo['ultimoPrecio'] is not None:
-                        ultimo_precio = float(titulo['ultimoPrecio'])
+                        try:
+                            ultimo_precio = float(titulo['ultimoPrecio'])
+                        except (ValueError, TypeError):
+                            continue
                     
                     # Solo incluir activos con precio válido
                     if ultimo_precio and ultimo_precio > 0:
@@ -2712,19 +2811,10 @@ def obtener_activos_disponibles_mercado(token_acceso=None):
                             len(activo['nombre']) > 3):
                             activos.append(activo)
             
-            # Ordenar por símbolo para consistencia
-            activos_ordenados = sorted(activos, key=lambda x: x['simbolo'])
+            return activos
             
-            # Mostrar información de depuración
-            st.session_state['debug_activos'] = {
-                'total_activos': len(activos_ordenados),
-                'tipos_activos': {a['tipo'] for a in activos_ordenados}
-            }
-            
-            return activos_ordenados
         else:
             st.error(f"Error al obtener activos: {response.status_code}")
-            st.json(response.json() if response.text else {})
             return []
             
     except requests.exceptions.RequestException as e:
@@ -2732,30 +2822,124 @@ def obtener_activos_disponibles_mercado(token_acceso=None):
         return []
     except Exception as e:
         st.error(f"Error inesperado al obtener activos: {str(e)}")
-        import traceback
-        st.text(traceback.format_exc())
         return []
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    # Configuración de parámetros de optimización
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_desde = st.date_input("Fecha desde", value=pd.to_datetime('2024-01-01'))
+    with col2:
+        fecha_hasta = st.date_input("Fecha hasta", value=pd.to_datetime('today'))
     
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
-        return
+    # Selección de método de optimización
+    metodo_optimizacion = st.radio(
+        "Método de optimización:",
+        ['Portafolio actual', 'Selección aleatoria'],
+        key=f'metodo_opt_{id_cliente}'
+    )
     
-    activos_raw = portafolio.get('activos', [])
-    if not activos_raw:
-        st.warning("El portafolio está vacío")
-        return
+    # Variables para almacenar los activos a optimizar
+    activos_para_optimizacion = []
     
+    if metodo_optimizacion == 'Portafolio actual':
+        with st.spinner("Obteniendo portafolio..."):
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if not portafolio:
+            st.warning("No se pudo obtener el portafolio del cliente")
+            return
+        
+        activos_raw = portafolio.get('activos', [])
+        if not activos_raw:
+            st.warning("El portafolio está vacío")
+            return
+            
+        # Procesar activos del portafolio
+        for activo in activos_raw:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo')
+            mercado = titulo.get('mercado')
+            tipo = titulo.get('tipo')
+            if simbolo:
+                activos_para_optimizacion.append({
+                    'simbolo': simbolo,
+                    'mercado': mercado,
+                    'tipo': tipo,
+                    'nombre': titulo.get('descripcion', 'Sin nombre')
+                })
+    else:  # Selección aleatoria
+        st.info("Seleccione los parámetros para la generación aleatoria de cartera")
+        
+        # Paneles disponibles
+        paneles_disponibles = [
+            'Acciones', 'Cedears', 'ADRs', 'Títulos Públicos', 'Obligaciones Negociables'
+        ]
+        paneles_seleccionados = st.multiselect(
+            "Seleccione los paneles para la selección aleatoria:",
+            options=paneles_disponibles,
+            default=['Acciones', 'Cedears'],
+            key=f'paneles_aleatorios_{id_cliente}'
+        )
+        
+        # Número de activos y capital
+        col1, col2 = st.columns(2)
+        with col1:
+            n_activos = st.number_input(
+                "Número de activos a seleccionar:",
+                min_value=2, max_value=20, value=5, step=1,
+                key=f'n_activos_aleatorios_{id_cliente}'
+            )
+        with col2:
+            capital_ars = st.number_input(
+                "Capital disponible (ARS):",
+                min_value=1000.0, value=100000.0, step=1000.0,
+                key=f'capital_aleatorio_{id_cliente}'
+            )
+        
+        # Botón para generar selección aleatoria
+        if st.button("🎲 Generar selección aleatoria", key=f'btn_aleatorio_{id_cliente}'):
+            with st.spinner("Generando cartera aleatoria..."):
+                # Obtener series históricas con selección aleatoria
+                series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
+                    token_acceso=token_acceso,
+                    paneles_seleccionados=paneles_seleccionados,
+                    cantidad_activos=n_activos,
+                    fecha_desde=fecha_desde.strftime('%Y-%m-%d'),
+                    fecha_hasta=fecha_hasta.strftime('%Y-%m-%d'),
+                    capital_ars=capital_ars
+                )
+                
+                # Procesar la selección para mostrarla
+                if not seleccion_final or all(not v for v in seleccion_final.values()):
+                    st.error("No se pudo generar una selección con los parámetros actuales. Intente con más capital o menos activos.")
+                else:
+                    st.session_state['seleccion_aleatoria'] = seleccion_final
+                    st.session_state['series_aleatorias'] = series_historicas
+                    
+        # Mostrar selección actual si existe
+        if 'seleccion_aleatoria' in st.session_state and st.session_state.seleccion_aleatoria:
+            st.subheader("Activos seleccionados aleatoriamente")
+            for panel, activos in st.session_state.seleccion_aleatoria.items():
+                if activos:  # Solo mostrar paneles con activos
+                    with st.expander(f"{panel} ({len(activos)} activos)"):
+                        for activo in activos:
+                            st.write(f"- {activo['simbolo']}: {activo['nombre']} (${activo['ultimoPrecio']:.2f} {activo['moneda']})")
+                    
+                    # Configurar activos para optimización
+                    activos_para_optimizacion.extend(activos)
+    
+    # Si no hay activos para optimizar, salir
+    if not activos_para_optimizacion:
+        return   
     # Extraer símbolos, mercados y tipos de activo
     activos_para_optimizacion = []
     for activo in activos_raw:
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo')
+    # ... rest of the code remains the same ...
         mercado = titulo.get('mercado')
         tipo = titulo.get('tipo')
         if simbolo:
