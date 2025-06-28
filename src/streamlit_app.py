@@ -3613,7 +3613,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col1:
         try:
             fecha_desde = st.date_input("Fecha desde", value=pd.to_datetime('2024-01-01'))
-            if not isinstance(fecha_desde, (pd.Timestamp, datetime.date)):
+            # Convertir a datetime si es necesario
+            if not isinstance(fecha_desde, (pd.Timestamp, datetime.datetime)):
                 fecha_desde = pd.to_datetime(fecha_desde)
         except Exception as e:
             st.error(f"Error en la fecha desde: {str(e)}")
@@ -3622,7 +3623,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col2:
         try:
             fecha_hasta = st.date_input("Fecha hasta", value=pd.to_datetime('today'))
-            if not isinstance(fecha_hasta, (pd.Timestamp, datetime.date)):
+            # Convertir a datetime si es necesario
+            if not isinstance(fecha_hasta, (pd.Timestamp, datetime.datetime)):
                 fecha_hasta = pd.to_datetime(fecha_hasta)
             
             if fecha_hasta <= fecha_desde:
