@@ -2672,82 +2672,173 @@ def obtener_series_historicas_aleatorias_con_capital(token_acceso, paneles_selec
     import numpy as np
     from datetime import datetime, timedelta
     
+    # Validar parámetros de entrada
+    try:
+        if not isinstance(paneles_seleccionados, (list, tuple)) or not paneles_seleccionados:
+            raise ValueError("Se requiere al menos un panel para la selección")
+            
+        cantidad_activos = int(cantidad_activos)
+        if cantidad_activos <= 0:
+            raise ValueError("La cantidad de activos debe ser mayor a cero")
+            
+        capital_ars = float(capital_ars)
+        if capital_ars <= 0:
+            raise ValueError("El capital debe ser mayor a cero")
+            
+        # Convertir fechas a datetime para validación
+        datetime.strptime(fecha_desde, '%Y-%m-%d')
+        datetime.strptime(fecha_hasta, '%Y-%m-%d')
+        
+    except (ValueError, TypeError) as e:
+        st.error(f"Error en los parámetros de entrada: {str(e)}")
+        return pd.DataFrame(), {}
+    
     # Obtener lista de activos disponibles
     activos_mercado = obtener_activos_disponibles_mercado(token_acceso)
     if not activos_mercado:
         st.warning("No se pudieron obtener activos del mercado. Usando datos de ejemplo.")
+        # Crear datos de ejemplo si no hay conexión
+        activos_mercado = [
+            {'simbolo': 'GGAL', 'tipo': 'Acciones', 'ultimoPrecio': 1500.0, 'moneda': 'ARS'},
+            {'simbolo': 'YPFD', 'tipo': 'Acciones', 'ultimoPrecio': 4200.0, 'moneda': 'ARS'},
+            {'simbolo': 'PAMP', 'tipo': 'Acciones', 'ultimoPrecio': 1800.0, 'moneda': 'ARS'},
+            {'simbolo': 'AAPL', 'tipo': 'Cedears', 'ultimoPrecio': 25000.0, 'moneda': 'ARS'},
+            {'simbolo': 'MSFT', 'tipo': 'Cedears', 'ultimoPrecio': 32000.0, 'moneda': 'ARS'}
+        ]
+    
+    # Filtrar por paneles seleccionados
+    try:
+        activos_filtrados = [a for a in activos_mercado 
+                           if isinstance(a, dict) and 
+                           a.get('tipo') in paneles_seleccionados and 
+                           isinstance(a.get('ultimoPrecio'), (int, float)) and
+                           a.get('ultimoPrecio', 0) > 0]
+        
+        if not activos_filtrados:  # Si no hay coincidencias, usar todos los disponibles
+            activos_filtrados = [a for a in activos_mercado 
+                               if isinstance(a, dict) and 
+                               isinstance(a.get('ultimoPrecio'), (int, float)) and
+                               a.get('ultimoPrecio', 0) > 0]
+    except Exception as e:
+        st.error(f"Error al filtrar activos: {str(e)}")
         return pd.DataFrame(), {}
     
-    # Filtrar por paneles seleccionados si es posible
-    try:
-        activos_filtrados = [a for a in activos_mercado if a.get('tipo') in paneles_seleccionados]
-        if not activos_filtrados:  # Si no hay coincidencias, usar todos los disponibles
-            activos_filtrados = activos_mercado
-    except:
-        activos_filtrados = activos_mercado
+    if not activos_filtrados:
+        st.error("No se encontraron activos válidos para la selección.")
+        return pd.DataFrame(), {}
     
-    # Ordenar por precio y seleccionar los más baratos primero
-    activos_ordenados = sorted(activos_filtrados, key=lambda x: x.get('ultimoPrecio', float('inf')))
+    # Ordenar por precio (más baratos primero) y limitar la cantidad
+    try:
+        activos_ordenados = sorted(activos_filtrados, 
+                                  key=lambda x: float(x.get('ultimoPrecio', float('inf'))))
+        activos_ordenados = activos_ordenados[:min(100, len(activos_ordenados))]  # Limitar para mejorar rendimiento
+    except Exception as e:
+        st.error(f"Error al ordenar activos: {str(e)}")
+        return pd.DataFrame(), {}
     
     # Seleccionar activos que quepan en el capital
     seleccionados = []
-    capital_restante = capital_ars
+    capital_restante = float(capital_ars)
     
     for activo in activos_ordenados:
-        precio = activo.get('ultimoPrecio', 0)
-        if precio > 0 and precio <= capital_restante and len(seleccionados) < cantidad_activos:
-            seleccionados.append(activo)
-            capital_restante -= precio
+        try:
+            precio = float(activo.get('ultimoPrecio', 0))
+            if precio > 0 and precio <= capital_restante and len(seleccionados) < cantidad_activos:
+                seleccionados.append(activo)
+                capital_restante -= precio
+        except (ValueError, TypeError):
+            continue
     
     if not seleccionados:
-        st.error("No se pudo seleccionar ningún activo con el capital disponible.")
+        st.error("No se pudo seleccionar ningún activo con el capital disponible. "
+                "Intente con un capital mayor o reduzca la cantidad de activos.")
         return pd.DataFrame(), {}
     
     # Generar fechas para la serie histórica simulada
-    fecha_inicio = datetime.strptime(fecha_desde, '%Y-%m-%d')
-    fecha_fin = datetime.strptime(fecha_hasta, '%Y-%m-%d')
-    fechas = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='B')  # Días hábiles
+    try:
+        fecha_inicio = datetime.strptime(str(fecha_desde), '%Y-%m-%d')
+        fecha_fin = datetime.strptime(str(fecha_hasta), '%Y-%m-%d')
+        if fecha_inicio >= fecha_fin:
+            raise ValueError("La fecha de inicio debe ser anterior a la fecha de fin")
+            
+        fechas = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='B')  # Días hábiles
+        if len(fechas) < 5:  # Mínimo 5 días para análisis
+            raise ValueError("El rango de fechas es demasiado corto")
+            
+    except Exception as e:
+        st.error(f"Error en el rango de fechas: {str(e)}")
+        return pd.DataFrame(), {}
     
     # Crear DataFrame con datos simulados
     series_historicas = pd.DataFrame()
     
     for activo in seleccionados:
-        # Crear serie de precios simulada con tendencia aleatoria
-        np.random.seed(hash(activo['simbolo']) % 10000)  # Para reproducibilidad
-        n_dias = len(fechas)
-        retornos = np.random.normal(0.0005, 0.02, n_dias)  # Retornos diarios simulados
-        precios = [activo['ultimoPrecio']]
-        
-        for r in retornos[1:]:
-            nuevo_precio = precios[-1] * (1 + r)
-            precios.append(max(0.01, nuevo_precio))  # Evitar precios negativos
-        
-        # Crear DataFrame para este activo
-        df_activo = pd.DataFrame({
-            'fecha': fechas,
-            'simbolo': activo['simbolo'],
-            'panel': activo.get('tipo', 'Sin tipo'),
-            'apertura': precios,
-            'maximo': [p * (1 + abs(np.random.normal(0, 0.01))) for p in precios],
-            'minimo': [p * (1 - abs(np.random.normal(0, 0.01))) for p in precios],
-            'cierre': precios,
-            'volumen': [int(abs(np.random.normal(1000, 500))) for _ in range(n_dias)]
-        })
-        
-        # Asegurar que el máximo sea mayor o igual que el cierre y el mínimo menor o igual
-        df_activo['maximo'] = df_activo[['maximo', 'cierre']].max(axis=1)
-        df_activo['minimo'] = df_activo[['minimo', 'cierre']].min(axis=1)
-        
-        # Agregar al DataFrame principal
-        series_historicas = pd.concat([series_historicas, df_activo])
+        try:
+            simbolo = str(activo.get('simbolo', 'SIN_SIMBOLO'))
+            panel = str(activo.get('tipo', 'Sin tipo'))
+            precio_inicial = float(activo.get('ultimoPrecio', 1.0))
+            
+            # Crear serie de precios simulada con tendencia aleatoria
+            np.random.seed(hash(simbolo) % 10000)  # Para reproducibilidad
+            n_dias = len(fechas)
+            
+            # Generar retornos diarios con cierta tendencia y volatilidad
+            tendencia = np.random.uniform(-0.0003, 0.0005)  # Ligera tendencia aleatoria
+            volatilidad = 0.01 + abs(np.random.normal(0.01, 0.005))  # Volatilidad aleatoria
+            retornos = np.random.normal(tendencia, volatilidad, n_dias)
+            
+            # Generar precios con el modelo de caminata aleatoria
+            precios = [precio_inicial]
+            for r in retornos[1:]:
+                nuevo_precio = precios[-1] * (1 + r)
+                precios.append(max(0.01, nuevo_precio))  # Evitar precios negativos
+            
+            # Crear DataFrame para este activo
+            df_activo = pd.DataFrame({
+                'fecha': fechas,
+                'simbolo': simbolo,
+                'panel': panel,
+                'apertura': precios,
+                'maximo': [p * (1 + abs(np.random.normal(0, 0.01))) for p in precios],
+                'minimo': [p * (1 - abs(np.random.normal(0, 0.008))) for p in precios],
+                'cierre': precios,
+                'volumen': [int(abs(np.random.normal(1000, 300))) for _ in range(n_dias)]
+            })
+            
+            # Asegurar que los máximos y mínimos sean consistentes
+            df_activo['maximo'] = df_activo[['maximo', 'cierre']].max(axis=1)
+            df_activo['minimo'] = df_activo[['minimo', 'cierre']].min(axis=1)
+            df_activo['maximo'] = df_activo[['maximo', 'apertura']].max(axis=1)
+            df_activo['minimo'] = df_activo[['minimo', 'apertura']].min(axis=1)
+            
+            # Agregar al DataFrame principal
+            series_historicas = pd.concat([series_historicas, df_activo], ignore_index=True)
+            
+        except Exception as e:
+            st.warning(f"Error al generar datos para {activo.get('simbolo', 'desconocido')}: {str(e)}")
+            continue
     
-    # Ordenar por fecha y símbolo
-    series_historicas = series_historicas.sort_values(['fecha', 'simbolo']).reset_index(drop=True)
+    if series_historicas.empty:
+        st.error("No se pudieron generar series históricas para los activos seleccionados.")
+        return pd.DataFrame(), {}
     
-    # Crear diccionario de selección final por panel
-    seleccion_final = {panel: [] for panel in paneles_seleccionados}
-    for activo in seleccionados:
-        panel = activo.get('tipo', paneles_seleccionados[0])
+    try:
+        # Ordenar por fecha y símbolo
+        series_historicas = series_historicas.sort_values(['fecha', 'simbolo']).reset_index(drop=True)
+        
+        # Crear diccionario de selección final por panel
+        seleccion_final = {panel: [] for panel in paneles_seleccionados}
+        for activo in seleccionados:
+            panel = str(activo.get('tipo', paneles_seleccionados[0] if paneles_seleccionados else 'General'))
+            simbolo = str(activo.get('simbolo', ''))
+            if simbolo and panel in seleccion_final:
+                seleccion_final[panel].append(simbolo)
+        
+        return series_historicas, seleccion_final
+        
+    except Exception as e:
+        st.error(f"Error al procesar los resultados finales: {str(e)}")
+        return pd.DataFrame(), {}
         if panel not in seleccion_final:
             panel = paneles_seleccionados[0]  # Usar el primer panel si el tipo no coincide
         seleccion_final[panel].append(activo['simbolo'])
