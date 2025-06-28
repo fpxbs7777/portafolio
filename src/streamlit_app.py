@@ -3729,6 +3729,12 @@ def main():
         st.session_state.cliente_seleccionado = None
     if 'portafolio' not in st.session_state:
         st.session_state.portafolio = None
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    if 'estado_cuenta' not in st.session_state:
+        st.session_state.estado_cuenta = None
 
     # Barra lateral para navegación
     st.sidebar.title("🔍 Navegación")
