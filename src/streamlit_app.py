@@ -3756,110 +3756,89 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             st.error(f"Error al procesar un activo: {str(e)}")
                             continue
     
-    # Si no hay activos para optimizar, salir
+    # Si no hay activos para optimizar, mostrar mensaje y salir
     if not activos_para_optimizacion:
-        return   
-    # Extraer símbolos, mercados y tipos de activo
-    activos_para_optimizacion = []
-    for activo in activos_raw:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo')
-    # ... rest of the code remains the same ...
-        mercado = titulo.get('mercado')
-        tipo = titulo.get('tipo')
-        if simbolo:
-            activos_para_optimizacion.append({'simbolo': simbolo,
-                                              'mercado': mercado,
-                                              'tipo': tipo})
-    
-    if not activos_para_optimizacion:
-        st.warning("No se encontraron activos con información de mercado válida para optimizar.")
+        st.warning("No hay activos disponibles para optimizar.")
         return
     
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
-    
+    # Mostrar información sobre los activos a analizar
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
-
-    # --- Función de selección aleatoria de activos respetando el capital ---
-    def seleccion_aleatoria_activos_con_capital(activos, token, capital):
-        '''
-        Selecciona activos aleatorios de la lista sin superar el capital, usando el precio actual de cada activo.
-        Retorna lista de activos seleccionados y el total invertido.
-        '''
-        import random
-        random.shuffle(activos)
-        seleccionados = []
-        capital_restante = capital
-        total_invertido = 0
-        for activo in activos:
-            simbolo = activo.get('simbolo')
-            mercado = activo.get('mercado')
-            if not simbolo or not mercado:
-                continue
-            precio = obtener_precio_actual(token, mercado, simbolo)
-            if precio is not None and precio > 0 and precio <= capital_restante:
-                seleccionados.append({'simbolo': simbolo, 'mercado': mercado, 'precio': precio})
-                capital_restante -= precio
-                total_invertido += precio
-            if capital_restante < 1:
-                break
-        return seleccionados, total_invertido
     
-    # Configuración de selección de universo y optimización
-    col_sel, col1, col2, col3 = st.columns(4)
-
-    with col_sel:
-        metodo_seleccion = st.selectbox(
-            "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
+    # Configuración de optimización
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Selección de método de optimización
+        metodo_optimizacion = st.selectbox(
+            "Método de optimización:",
+            options=['max_sharpe', 'min_vol', 'efficient_risk', 'efficient_return', 'equal_weight'],
             format_func=lambda x: {
-                'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
+                'max_sharpe': 'Máximo Ratio de Sharpe',
+                'min_vol': 'Mínima Volatilidad',
+                'efficient_risk': 'Retorno Óptimo para Riesgo Objetivo',
+                'efficient_return': 'Riesgo Mínimo para Retorno Objetivo',
+                'equal_weight': 'Ponderación Equitativa'
             }[x],
-            key=f"metodo_seleccion_{id_cliente}"
+            key=f'metodo_opt_{id_cliente}'
         )
-
-    # Mostrar input de capital y filtro de tipo de activo solo si corresponde
-    if metodo_seleccion == 'aleatoria':
-        st.info("Modo selección aleatoria: Se seleccionarán activos aleatorios del mercado")
-        
-# Obtener lista de activos disponibles en el mercado
-        with st.spinner("Cargando activos disponibles..."):
-            activos_mercado = obtener_activos_disponibles_mercado()
-        
-        tipos_disponibles = sorted(set([a.get('tipo', 'Sin tipo') for a in activos_mercado]))
-        tipo_seleccionado = st.selectbox(
-            "Filtrar por tipo de activo:",
-            options=['Todos'] + tipos_disponibles,
-            format_func=lambda x: "Todos" if x == 'Todos' else x,
-            key=f"tipo_activo_{id_cliente}"
-        )
-        
-        # Filtrar activos por tipo si es necesario
-        if tipo_seleccionado != 'Todos':
-            activos_filtrados = [a for a in activos_mercado if a.get('tipo') == tipo_seleccionado]
-        else:
-            activos_filtrados = activos_mercado
-            
-        # Seleccionar activos aleatorios
-        n_activos = st.slider(
-            "Número de activos a seleccionar:",
-            min_value=1,
-            max_value=min(20, len(activos_filtrados)),
-            value=min(5, len(activos_filtrados)),
-            key=f"n_activos_{id_cliente}"
-        )
-        
-        # Mezclar y seleccionar activos aleatorios
-        import random
-        activos_seleccionados = random.sample(activos_filtrados, n_activos) if activos_filtrados else []
-        
-        # Mostrar activos seleccionados
-        if activos_seleccionados:
-            st.write("Activos seleccionados para optimización:")
-            for i, activo in enumerate(activos_seleccionados, 1):
-                st.write(f"{i}. {activo.get('simbolo')} - {activo.get('nombre', 'Sin nombre')}")
+    
+    # Mostrar parámetros adicionales según el método seleccionado
+    if metodo_optimizacion in ['efficient_risk', 'efficient_return']:
+        with col2:
+            if metodo_optimizacion == 'efficient_risk':
+                parametro = st.number_input(
+                    "Riesgo objetivo (volatilidad anual):",
+                    min_value=0.01, max_value=1.0, value=0.15, step=0.01,
+                    key=f'parametro_opt_{id_cliente}'
+                )
+            else:  # efficient_return
+                parametro = st.number_input(
+                    "Retorno objetivo (anual):",
+                    min_value=0.0, max_value=1.0, value=0.15, step=0.01,
+                    key=f'parametro_opt_{id_cliente}'
+                )
+    
+    # Botón para ejecutar la optimización
+    if st.button("🔄 Optimizar Portafolio", key=f'btn_optimizar_{id_cliente}'):
+        with st.spinner("Optimizando portafolio..."):
+            try:
+                # Obtener datos históricos para optimización
+                st.write("Obteniendo datos históricos...")
+                
+                # Preparar lista de activos con sus mercados
+                activos_con_mercado = [
+                    {'simbolo': a['simbolo'], 'mercado': a.get('mercado', 'BCBA')} 
+                    for a in activos_para_optimizacion 
+                    if 'simbolo' in a
+                ]
+                
+                if not activos_con_mercado:
+                    st.error("No hay activos válidos para optimizar.")
+                    return
+                    
+                # Obtener datos históricos
+                datos_historicos = get_historical_data_for_optimization(
+                    token_portador=token_acceso,
+                    activos=activos_con_mercado,
+                    fecha_desde=fecha_desde.strftime('%Y-%m-%d'),
+                    fecha_hasta=fecha_hasta.strftime('%Y-%m-%d')
+                )
+                
+                if not datos_historicos:
+                    st.error("No se pudieron obtener datos históricos para los activos seleccionados.")
+                    return
+                
+                # Mostrar los activos que se están optimizando
+                st.success(f"Optimizando portafolio con {len(activos_con_mercado)} activos")
+                
+                # Aquí iría la lógica de optimización real
+                # ...
+                
+            except Exception as e:
+                st.error(f"Error al optimizar el portafolio: {str(e)}")
+                import traceback
+                st.error(f"Detalles del error (para soporte técnico):\n{traceback.format_exc()}")
+                return
         
         capital_inicial = st.number_input(
             "Capital Inicial para Optimización (ARS):",
