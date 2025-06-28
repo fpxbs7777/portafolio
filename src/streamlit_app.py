@@ -1365,72 +1365,126 @@ class manager:
         
         return self.cov_matrix, self.mean_returns
 
-    def compute_portfolio(self, portfolio_type=None, target_return=None):
-        if self.cov_matrix is None:
-            self.compute_covariance()
-            
-        n_assets = len(self.rics)
-        bounds = tuple((0, 1) for _ in range(n_assets))
+    def compute_portfolio(self, portfolio_type=None, target_return=None, n_simulations=1000):
+        """
+        Calcula la cartera óptima según el método especificado.
         
-        if portfolio_type == 'min-variance-l1':
-            # Minimizar varianza con restricción L1
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
-            ]
+        Args:
+            portfolio_type (str): Tipo de optimización a realizar
+            target_return (float, optional): Retorno objetivo para optimización con restricción
+            n_simulations (int): Número de simulaciones para métodos estocásticos
             
-        elif portfolio_type == 'min-variance-l2':
-            # Minimizar varianza con restricción L2
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
-            ]
+        Returns:
+            output: Objeto con los resultados de la optimización
+        """
+        try:
+            if self.cov_matrix is None or self.mean_returns is None:
+                self.compute_covariance()
+                
+            n_assets = len(self.rics)
+            if n_assets == 0:
+                raise ValueError("No hay activos para optimizar")
+                
+            bounds = tuple((0, 1) for _ in range(n_assets))
             
-        elif portfolio_type == 'equi-weight':
-            # Pesos iguales
-            weights = np.ones(n_assets) / n_assets
-            return self._create_output(weights)
+            # Función objetivo común para minimizar varianza
+            def objective_function(weights):
+                return portfolio_variance(weights, self.cov_matrix)
             
-        elif portfolio_type == 'long-only':
-            # Optimización long-only estándar
+            # Restricción de suma de pesos = 1
             constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
             
-        elif portfolio_type == 'markowitz':
-            if target_return is not None:
-                # Optimización con retorno objetivo
-                constraints = [
-                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
-                ]
-            else:
-                # Maximizar Sharpe Ratio
-                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-                def neg_sharpe_ratio(weights):
-                    port_ret = np.sum(self.mean_returns * weights)
-                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-                    if port_vol == 0:
-                        return np.inf
-                    return -(port_ret - self.risk_free_rate) / port_vol
+            # Configuración específica por tipo de optimización
+            if portfolio_type == 'min-variance-l1':
+                # Minimizar varianza con restricción L1
+                constraints.append({'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))})
                 
-                result = op.minimize(
-                    neg_sharpe_ratio, 
-                    x0=np.ones(n_assets)/n_assets,
-                    method='SLSQP',
-                    bounds=bounds,
-                    constraints=constraints
-                )
-                return self._create_output(result.x)
-        
-        # Optimización general de varianza mínima
-        result = op.minimize(
-            lambda x: portfolio_variance(x, self.cov_matrix),
-            x0=np.ones(n_assets)/n_assets,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-        
-        return self._create_output(result.x)
+            elif portfolio_type == 'min-variance-l2':
+                # Minimizar varianza con restricción L2
+                constraints.append({'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)})
+                
+            elif portfolio_type == 'equi-weight':
+                # Pesos iguales
+                weights = np.ones(n_assets) / n_assets
+                return self._create_output(weights)
+                
+            elif portfolio_type == 'long-only':
+                # No se necesitan restricciones adicionales
+                pass
+                
+            elif portfolio_type == 'markowitz':
+                if target_return is not None:
+                    # Optimización con retorno objetivo
+                    constraints.append({
+                        'type': 'eq', 
+                        'fun': lambda x: np.sum(self.mean_returns * x) - target_return
+                    })
+                else:
+                    # Maximizar Sharpe Ratio usando optimización estocástica
+                    best_sharpe = -np.inf
+                    best_weights = None
+                    
+                    for _ in range(n_simulations):
+                        # Generar pesos aleatorios
+                        w = np.random.random(n_assets)
+                        w = w / np.sum(w)  # Normalizar a suma 1
+                        
+                        # Calcular ratio de Sharpe
+                        port_ret = np.sum(self.mean_returns * w)
+                        port_vol = np.sqrt(portfolio_variance(w, self.cov_matrix))
+                        
+                        if port_vol > 1e-8:  # Evitar división por cero
+                            sharpe = (port_ret - self.risk_free_rate) / port_vol
+                            if sharpe > best_sharpe:
+                                best_sharpe = sharpe
+                                best_weights = w
+                    
+                    if best_weights is not None:
+                        return self._create_output(best_weights)
+                    else:
+                        # Si falla la optimización estocástica, usar optimización numérica
+                        def neg_sharpe_ratio(weights):
+                            port_ret = np.sum(self.mean_returns * weights)
+                            port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                            if port_vol < 1e-8:  # Evitar división por cero
+                                return np.inf
+                            return -(port_ret - self.risk_free_rate) / port_vol
+                        
+                        # Intentar con diferentes puntos iniciales
+                        for _ in range(5):
+                            try:
+                                result = op.minimize(
+                                    neg_sharpe_ratio,
+                                    x0=np.random.dirichlet(np.ones(n_assets)),
+                                    method='SLSQP',
+                                    bounds=bounds,
+                                    constraints=constraints
+                                )
+                                if result.success:
+                                    return self._create_output(result.x)
+                            except:
+                                continue
+                        
+                        raise RuntimeError("No se pudo optimizar el ratio de Sharpe")
+            
+            # Optimización numérica para métodos que no sean markowitz sin objetivo
+            result = op.minimize(
+                objective_function,
+                x0=np.ones(n_assets)/n_assets,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+            
+            if not result.success:
+                st.warning(f"La optimización no convergió: {result.message}")
+                
+            return self._create_output(result.x)
+            
+        except Exception as e:
+            st.error(f"Error en compute_portfolio: {str(e)}")
+            st.exception(e)
+            raise
 
     def _create_output(self, weights):
         """Crea un objeto output con los pesos optimizados"""
@@ -1440,22 +1494,38 @@ class manager:
             
         weights = np.array(weights, dtype=float)  # Asegurar que sean floats
         
+        # Validar que no haya valores None en los pesos
+        if np.any(weights == None):  # noqa: E711
+            raise ValueError("Los pesos no pueden contener valores None")
+            
         # Validar dimensiones de las matrices
         if self.mean_returns is None or self.cov_matrix is None:
             raise ValueError("Los retornos medios o la matriz de covarianza no están definidos")
             
         if len(weights) != len(self.mean_returns) or len(weights) != len(self.cov_matrix):
-            raise ValueError("Dimensiones inconsistentes entre pesos, retornos y matriz de covarianza")
+            raise ValueError(f"Dimensiones inconsistentes: pesos({len(weights)}), retornos({len(self.mean_returns)}), cov({len(self.cov_matrix)})")
             
         # Calcular métricas del portafolio con manejo de errores
         try:
-            port_ret = np.sum(self.mean_returns * weights)
-            port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+            # Validar que no haya valores None en los retornos
+            if np.any(pd.isna(self.mean_returns)):
+                raise ValueError("Los retornos medios contienen valores nulos o no válidos")
+                
+            # Calcular retorno del portafolio con validación
+            port_ret = np.nansum(self.mean_returns * weights)
             
-            # Calcular retornos del portafolio
-            portfolio_returns = self.returns.dot(weights)
+            # Calcular volatilidad con validación
+            port_vol = 0.0
+            if len(weights) > 0 and len(self.cov_matrix) > 0:
+                port_vol = np.sqrt(np.maximum(0, portfolio_variance(weights, self.cov_matrix)))
             
-            # Crear objeto output
+            # Calcular retornos del portafolio con validación
+            if self.returns is not None and not self.returns.empty:
+                portfolio_returns = self.returns.dot(weights)
+            else:
+                portfolio_returns = pd.Series([port_ret])
+            
+            # Crear objeto output con manejo de errores
             port_output = output(portfolio_returns, self.notional)
             port_output.weights = weights
             
@@ -3630,6 +3700,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         capital_inicial = None
 
     # --- Configuración de simulación ---
+    st.markdown("### ⚙️ Parámetros de Optimización")
     col1, col2 = st.columns(2)
     with col1:
         n_simulaciones = st.number_input(
@@ -3638,8 +3709,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             max_value=10000,
             value=1000,
             step=100,
-            help="Número de simulaciones para los métodos estocásticos"
+            help="Número de simulaciones para los métodos estocásticos (mayor precisión con más simulaciones pero más lento)",
+            key=f"n_simulaciones_{id_cliente}"
         )
+        
+        # Mostrar información sobre el número de simulaciones
+        with st.expander("ℹ️ Sobre las simulaciones"):
+            st.info("""
+            El número de simulaciones afecta la precisión de los métodos estocásticos:
+            - **100-500**: Rápido pero menos preciso
+            - **1,000-2,000**: Buen equilibrio entre precisión y velocidad
+            - **5,000+**: Mayor precisión pero más lento
+            
+            Para portafolios grandes (>10 activos) se recomiendan al menos 2,000 simulaciones.
+            """)
     
     # --- Métodos avanzados de optimización ---
     metodos_optimizacion = {
