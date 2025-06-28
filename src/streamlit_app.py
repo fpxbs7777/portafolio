@@ -2050,6 +2050,93 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
+def analizar_composicion_portafolio(portafolio, token_portador):
+    """
+    Analiza la composición actual del portafolio y determina su perfil de riesgo
+    
+    Args:
+        portafolio (dict): Portafolio del cliente
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Análisis de la composición y perfil del portafolio
+    """
+    try:
+        # Obtener la composición actual del portafolio
+        total_valor = sum(item['valor'] for item in portafolio)
+        composicion_actual = []
+        
+        for item in portafolio:
+            porcentaje = (item['valor'] / total_valor) * 100
+            composicion_actual.append({
+                'nombre': item['instrumento'],
+                'porcentaje': porcentaje,
+                'tipo': item.get('tipo', 'Desconocido')
+            })
+        
+        # Determinar el perfil actual basado en la composición
+        perfil_actual = determinar_perfil_composicion(composicion_actual)
+        
+        return {
+            'composicion_actual': composicion_actual,
+            'perfil_actual': perfil_actual,
+            'total_valor': total_valor
+        }
+    except Exception as e:
+        st.error(f"Error al analizar la composición del portafolio: {str(e)}")
+        return None
+
+def determinar_perfil_composicion(composicion):
+    """
+    Determina el perfil de riesgo basado en la composición del portafolio
+    
+    Args:
+        composicion (list): Lista de instrumentos con sus porcentajes
+        
+    Returns:
+        str: Perfil de riesgo (Conservador, Moderado, Agresivo)
+    """
+    try:
+        # Categorizar instrumentos por tipo de riesgo
+        porcentajes = {
+            'Acciones': 0,  # Alto riesgo
+            'Bonos': 0,    # Medio riesgo
+            'Cedears': 0,  # Medio riesgo
+            'Cuentas': 0,  # Bajo riesgo
+            'Fondos': 0,   # Variable dependiendo del fondo
+            'Otras': 0     # Desconocido
+        }
+        
+        for item in composicion:
+            tipo = item.get('tipo', 'Otras').lower()
+            porcentaje = item['porcentaje']
+            
+            if 'acciones' in tipo:
+                porcentajes['Acciones'] += porcentaje
+            elif 'bonos' in tipo or 'cedears' in tipo:
+                porcentajes['Bonos'] += porcentaje
+            elif 'cuenta' in tipo:
+                porcentajes['Cuentas'] += porcentaje
+            elif 'fondo' in tipo:
+                porcentajes['Fondos'] += porcentaje
+            else:
+                porcentajes['Otras'] += porcentaje
+        
+        # Determinar perfil basado en la composición
+        acciones = porcentajes['Acciones']
+        bonos = porcentajes['Bonos']
+        cuentas = porcentajes['Cuentas']
+        
+        if acciones >= 70:
+            return "Agresivo"
+        elif acciones >= 40 and acciones < 70:
+            return "Moderado"
+        else:
+            return "Conservador"
+    except Exception as e:
+        st.error(f"Error al determinar perfil: {str(e)}")
+        return "Desconocido"
+
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
@@ -3425,6 +3512,186 @@ def mostrar_test_perfil_inversor(token_portador, id_cliente=None):
     """
     Muestra el test de perfil de inversor y procesa las respuestas
     """
+    st.title("📊 Test de Perfil de Inversor")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📊 Test API de IOL")
+        st.info("Complete el test de perfil de inversor oficial de IOL")
+        
+        # Obtener preguntas del test
+        test_data = obtener_test_inversor(token_portador)
+        if not test_data:
+            st.error("No se pudo obtener el test de perfil de inversor")
+            return
+        
+        # ... (resto del código del test API)
+    
+    with col2:
+        st.subheader("📝 Test Manual")
+        st.info("Complete este test manual para comparar resultados")
+        
+        # Preguntas del test manual
+        preguntas = [
+            {
+                "pregunta": "¿Cuál es su tolerancia al riesgo?",
+                "opciones": [
+                    "Muy Baja (prefiero inversiones seguras)",
+                    "Baja (acepto algo de riesgo)",
+                    "Media (balance entre riesgo y retorno)",
+                    "Alta (busco altos retornos)",
+                    "Muy Alta (acepto mucho riesgo)
+                ]
+            },
+            {
+                "pregunta": "¿Cuál es su horizonte de inversión?",
+                "opciones": [
+                    "Menos de 1 año",
+                    "1-3 años",
+                    "3-5 años",
+                    "5-10 años",
+                    "Más de 10 años"
+                ]
+            },
+            {
+                "pregunta": "¿Cuál es su objetivo principal de inversión?",
+                "opciones": [
+                    "Preservar capital",
+                    "Generar ingresos regulares",
+                    "Crecimiento a largo plazo",
+                    "Oportunidades de mercado",
+                    "Maximizar retornos"
+                ]
+            },
+            {
+                "pregunta": "¿Qué porcentaje de su patrimonio está dispuesto a invertir en activos de riesgo?",
+                "opciones": [
+                    "Menos del 20%",
+                    "20-40%",
+                    "40-60%",
+                    "60-80%",
+                    "Más del 80%"
+                ]
+            }
+        ]
+        
+        respuestas_manual = {}
+        
+        for i, pregunta in enumerate(preguntas):
+            st.markdown(f"**{i+1}. {pregunta['pregunta']}**")
+            respuesta = st.selectbox(
+                f"Respuesta {i+1}",
+                pregunta['opciones'],
+                key=f"manual_{i}"
+            )
+            respuestas_manual[f"pregunta_{i+1}"] = respuesta
+        
+        if st.button("🔍 Analizar Test Manual"):
+            with st.spinner("Analizando su perfil..."):
+                perfil_manual = analizar_test_manual(respuestas_manual)
+                st.markdown(f"### 🎯 Perfil de Inversor (Manual): {perfil_manual}")
+                
+                # Si hay un perfil recomendado de la API, comparar
+                if 'perfilSugerido' in locals():
+                    perfil_api = perfilSugerido.get('nombre', 'Desconocido')
+                    st.markdown("### 📊 Comparación de Perfiles")
+                    st.markdown(f"- 🎯 Perfil API: {perfil_api}")
+                    st.markdown(f"- 📝 Perfil Manual: {perfil_manual}")
+                    
+                    if perfil_api != perfil_manual:
+                        st.warning("⚠️ Los perfiles obtenidos son diferentes.")
+                        st.markdown("""
+                        **Recomendación:**
+                        - Revise sus respuestas y considere cuál perfil se ajusta mejor a su situación
+                        - Consulte con un asesor financiero si los perfiles divergen significativamente
+                        """)
+                    else:
+                        st.success("✅ Los perfiles coinciden.")
+                        st.markdown("""
+                        **¡Excelente!** Ambos métodos de evaluación coinciden en su perfil de riesgo.
+                        """)
+
+def analizar_test_manual(respuestas):
+    """
+    Analiza las respuestas del test manual y determina el perfil de inversor
+    
+    Args:
+        respuestas (dict): Respuestas del usuario al test manual
+        
+    Returns:
+        str: Perfil de inversor (Conservador, Moderado, Agresivo)
+    """
+    try:
+        # Ponderar respuestas
+        puntos = 0
+        
+        # Tolerancia al riesgo
+        riesgo = respuestas.get("pregunta_1", "")
+        if "Muy Baja" in riesgo:
+            puntos += 1
+        elif "Baja" in riesgo:
+            puntos += 2
+        elif "Media" in riesgo:
+            puntos += 3
+        elif "Alta" in riesgo:
+            puntos += 4
+        elif "Muy Alta" in riesgo:
+            puntos += 5
+        
+        # Horizonte de inversión
+        horizonte = respuestas.get("pregunta_2", "")
+        if "Menos de 1 año" in horizonte:
+            puntos += 1
+        elif "1-3 años" in horizonte:
+            puntos += 2
+        elif "3-5 años" in horizonte:
+            puntos += 3
+        elif "5-10 años" in horizonte:
+            puntos += 4
+        elif "Más de 10 años" in horizonte:
+            puntos += 5
+        
+        # Objetivo de inversión
+        objetivo = respuestas.get("pregunta_3", "")
+        if "Preservar" in objetivo:
+            puntos += 1
+        elif "Ingresos" in objetivo:
+            puntos += 2
+        elif "Crecimiento" in objetivo:
+            puntos += 3
+        elif "Oportunidades" in objetivo:
+            puntos += 4
+        elif "Maximizar" in objetivo:
+            puntos += 5
+        
+        # Porcentaje en activos de riesgo
+        porcentaje = respuestas.get("pregunta_4", "")
+        if "Menos del 20%" in porcentaje:
+            puntos += 1
+        elif "20-40%" in porcentaje:
+            puntos += 2
+        elif "40-60%" in porcentaje:
+            puntos += 3
+        elif "60-80%" in porcentaje:
+            puntos += 4
+        elif "Más del 80%" in porcentaje:
+            puntos += 5
+        
+        # Determinar perfil basado en puntos
+        if puntos <= 8:
+            return "Conservador"
+        elif puntos <= 14:
+            return "Moderado"
+        else:
+            return "Agresivo"
+            
+    except Exception as e:
+        st.error(f"Error al analizar el test manual: {str(e)}")
+        return "Desconocido"
+    """
+    Muestra el test de perfil de inversor y procesa las respuestas
+    """
     st.title("Test de Perfil de Inversor")
     
     with st.expander("Instrucciones", expanded=True):
@@ -3531,6 +3798,106 @@ def mostrar_test_perfil_inversor(token_portador, id_cliente=None):
             resultado = enviar_respuestas_test(token_portador, respuestas, id_cliente)
             
             if resultado and resultado.get('ok', False):
+        st.success("¡Análisis completado con éxito!")
+        perfil = resultado.get('perfilSugerido', {})
+        
+        st.markdown(f"### 🎯 Perfil de Inversor: {perfil.get('nombre', 'No determinado')}")
+        st.markdown(f"{perfil.get('detalle', '')}")
+        
+        # Mostrar composición recomendada
+        st.markdown("### 📊 Composición Recomendada")
+        composiciones = perfil.get('perfilComposiciones', [])
+        
+        if composiciones:
+            # Crear gráfico de torta para la composición recomendada
+            fig = go.Figure(data=[go.Pie(
+                labels=[c['nombre'] for c in composiciones],
+                values=[c['porcentaje'] for c in composiciones],
+                hole=.3,
+                marker_colors=px.colors.qualitative.Plotly
+            )])
+            
+            fig.update_layout(
+                title="Distribución de Activos Recomendada",
+                showlegend=True,
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar tabla con porcentajes recomendados
+            df_composicion = pd.DataFrame([
+                {"Activo": c['nombre'], "Porcentaje": f"{c['porcentaje']}%"} 
+                for c in composiciones
+            ])
+            st.dataframe(df_composicion, use_container_width=True)
+        else:
+            st.warning("No se pudo obtener la composición recomendada.")
+        
+        # Si hay un portafolio actual, mostrar comparación
+        if st.session_state.portafolio:
+            with st.expander("🔍 Comparación con Composición Actual", expanded=True):
+                # Analizar composición actual
+                analisis_actual = analizar_composicion_portafolio(
+                    st.session_state.portafolio,
+                    token_portador
+                )
+                
+                if analisis_actual:
+                    st.markdown("### 📊 Composición Actual")
+                    
+                    # Crear gráfico de torta para la composición actual
+                    composicion_actual = analisis_actual['composicion_actual']
+                    fig_actual = go.Figure(data=[go.Pie(
+                        labels=[c['nombre'] for c in composicion_actual],
+                        values=[c['porcentaje'] for c in composicion_actual],
+                        hole=.3,
+                        marker_colors=px.colors.qualitative.Plotly
+                    )])
+                    
+                    fig_actual.update_layout(
+                        title="Distribución de Activos Actual",
+                        showlegend=True,
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig_actual, use_container_width=True)
+                    
+                    # Mostrar tabla con porcentajes actuales
+                    df_actual = pd.DataFrame([
+                        {"Activo": c['nombre'], "Porcentaje": f"{c['porcentaje']}%"} 
+                        for c in composicion_actual
+                    ])
+                    st.dataframe(df_actual, use_container_width=True)
+                    
+                    # Comparar perfiles
+                    perfil_recomendado = perfil.get('nombre', 'Desconocido')
+                    perfil_actual = analisis_actual.get('perfil_actual', 'Desconocido')
+                    
+                    st.markdown("### 📊 Comparación de Perfiles")
+                    st.markdown(f"- 🎯 Perfil Recomendado: {perfil_recomendado}")
+                    st.markdown(f"- 📊 Perfil Actual: {perfil_actual}")
+                    
+                    if perfil_recomendado != perfil_actual:
+                        st.warning("⚠️ Su perfil actual no coincide con el recomendado.")
+                        st.markdown("""
+                        **Recomendación:**
+                        - Revise su portafolio actual y considere ajustar la distribución de activos
+                        - El perfil recomendado se basa en sus respuestas al test de perfil de inversor
+                        """)
+                    else:
+                        st.success("✅ Su perfil actual coincide con el recomendado.")
+                        st.markdown("""
+                        **¡Excelente!** Su distribución de activos actual se alinea con su perfil de inversor.
+                        """)
+        
+        # Mostrar mensajes adicionales si los hay
+        mensajes = resultado.get('messages', [])
+        if mensajes:
+            st.markdown("### 📝 Recomendaciones Adicionales")
+            for msg in mensajes:
+                with st.expander(msg.get('title', 'Recomendación'), expanded=False):
+                    st.write(msg.get('description', ''))
                 st.success("¡Análisis completado con éxito!")
                 perfil = resultado.get('perfilSugerido', {})
                 
