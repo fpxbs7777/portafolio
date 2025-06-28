@@ -1274,7 +1274,7 @@ def get_historical_data_for_optimization(token_portador, activos, fecha_desde, f
 
 # --- Enhanced Portfolio Management Classes ---
 class manager:
-    def __init__(self, rics, notional, data):
+    def __init__(self, rics, notional, data, benchmark='^MERV'):
         self.rics = rics
         self.notional = notional
         self.data = data
@@ -1282,7 +1282,60 @@ class manager:
         self.returns = None
         self.cov_matrix = None
         self.mean_returns = None
-        self.risk_free_rate = 0.40  # Tasa libre de riesgo anual para Argentina
+        self.benchmark = benchmark
+        self.risk_free_rate = self.calcular_tasa_libre_riesgo()
+        
+    def calcular_tasa_libre_riesgo(self):
+        """
+        Calcula la tasa libre de riesgo basada en el rendimiento del benchmark seleccionado.
+        Usa yfinance para obtener datos históricos del benchmark.
+        """
+        import yfinance as yf
+        from datetime import datetime, timedelta
+        
+        try:
+            # Definir mapeo de benchmarks a sus tickers en yfinance
+            benchmark_map = {
+                'MERVAL': '^MERV',
+                'S&P 500': '^GSPC',
+                'NASDAQ': '^IXIC',
+                'DOW JONES': '^DJI',
+                'BONOS USD 10Y': '^TNX',
+                'BONOS ARG 10Y': 'AL30D.BA',
+                'EMBI+': 'JPM.PR.EMBI+'
+            }
+            
+            # Obtener el ticker del benchmark
+            ticker = benchmark_map.get(self.benchmark, self.benchmark)
+            
+            # Obtener datos históricos del benchmark (último año)
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=365)
+            
+            benchmark_data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+            
+            if benchmark_data.empty:
+                st.warning(f"No se pudieron obtener datos para el benchmark {self.benchmark}. Usando tasa por defecto del 40%.")
+                return 0.40
+                
+            # Calcular retorno anualizado
+            if len(benchmark_data) > 1:
+                returns = benchmark_data['Adj Close'].pct_change().dropna()
+                annual_return = ((1 + returns.mean()) ** 252 - 1)  # Anualizado a 252 días hábiles
+                
+                # La tasa libre de riesgo será un porcentaje del retorno del benchmark
+                # Para bonos usamos el rendimiento directamente, para índices usamos un porcentaje
+                if 'BONO' in self.benchmark.upper() or 'EMBI' in self.benchmark.upper():
+                    risk_free = max(0.01, annual_return * 0.8)  # 80% del rendimiento de bonos
+                else:
+                    risk_free = max(0.01, annual_return * 0.3)  # 30% del rendimiento de índices
+                    
+                return min(risk_free, 1.0)  # Limitar al 100%
+                
+        except Exception as e:
+            st.warning(f"Error al calcular tasa libre de riesgo: {str(e)}. Usando valor por defecto del 40%.")
+            
+        return 0.40  # Valor por defecto si algo falla
 
     def load_intraday_timeseries(self, ticker):
         return self.data[ticker]
@@ -1381,21 +1434,47 @@ class manager:
 
     def _create_output(self, weights):
         """Crea un objeto output con los pesos optimizados"""
-        port_ret = np.sum(self.mean_returns * weights)
-        port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+        # Validar que los pesos no sean None y sean un array numpy
+        if weights is None:
+            raise ValueError("Los pesos no pueden ser None")
+            
+        weights = np.array(weights, dtype=float)  # Asegurar que sean floats
         
-        # Calcular retornos del portafolio
-        portfolio_returns = self.returns.dot(weights)
-        
-        # Crear objeto output
-        port_output = output(portfolio_returns, self.notional)
-        port_output.weights = weights
-        port_output.dataframe_allocation = pd.DataFrame({
-            'rics': self.rics,
-            'weights': weights,
-            'volatilities': np.sqrt(np.diag(self.cov_matrix)),
-            'returns': self.mean_returns
-        })
+        # Validar dimensiones de las matrices
+        if self.mean_returns is None or self.cov_matrix is None:
+            raise ValueError("Los retornos medios o la matriz de covarianza no están definidos")
+            
+        if len(weights) != len(self.mean_returns) or len(weights) != len(self.cov_matrix):
+            raise ValueError("Dimensiones inconsistentes entre pesos, retornos y matriz de covarianza")
+            
+        # Calcular métricas del portafolio con manejo de errores
+        try:
+            port_ret = np.sum(self.mean_returns * weights)
+            port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+            
+            # Calcular retornos del portafolio
+            portfolio_returns = self.returns.dot(weights)
+            
+            # Crear objeto output
+            port_output = output(portfolio_returns, self.notional)
+            port_output.weights = weights
+            
+            # Crear DataFrame de asignación con manejo de errores
+            volatilities = np.sqrt(np.diag(self.cov_matrix)) if len(self.cov_matrix) > 0 else np.zeros_like(weights)
+            
+            port_output.dataframe_allocation = pd.DataFrame({
+                'rics': self.rics,
+                'weights': weights,
+                'volatilities': volatilities,
+                'returns': self.mean_returns if len(self.mean_returns) == len(weights) else np.zeros_like(weights)
+            })
+            
+            return port_output
+            
+        except Exception as e:
+            st.error(f"Error al crear la salida del portafolio: {str(e)}")
+            st.exception(e)
+            raise
         
         return port_output
 
@@ -1476,8 +1555,18 @@ def portfolio_variance(x, mtx_var_covar):
     variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
     return variance
 
-def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
-    """Computa la frontera eficiente y portafolios especiales"""
+def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data, benchmark='MERVAL'):
+    """
+    Computa la frontera eficiente y portafolios especiales
+    
+    Args:
+        rics: Lista de símbolos de activos
+        notional: Valor nominal del portafolio
+        target_return: Retorno objetivo para el portafolio objetivo
+        include_min_variance: Incluir portafolio de mínima varianza
+        data: Datos de precios de los activos
+        benchmark: Benchmark para calcular la tasa libre de riesgo (default: 'MERVAL')
+    """
     # special portfolios    
     label1 = 'min-variance-l1'
     label2 = 'min-variance-l2'
@@ -1486,8 +1575,8 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     label5 = 'markowitz-none'
     label6 = 'markowitz-target'
     
-    # compute covariance matrix
-    port_mgr = manager(rics, notional, data)
+    # compute covariance matrix with benchmark for risk-free rate
+    port_mgr = manager(rics, notional, data, benchmark=benchmark)
     port_mgr.compute_covariance()
     
     # compute vectors of returns and volatilities for Markowitz portfolios
@@ -1529,7 +1618,7 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
-    def __init__(self, activos, token, fecha_desde, fecha_hasta, capital=100000, activos_adicionales=None):
+    def __init__(self, activos, token, fecha_desde, fecha_hasta, capital=100000, activos_adicionales=None, benchmark='MERVAL'):
         """
         Inicializa el gestor de cartera con activos existentes y opcionalmente activos adicionales para optimización.
         
@@ -1540,6 +1629,7 @@ class PortfolioManager:
             fecha_hasta (str): Fecha de fin para los datos históricos (YYYY-MM-DD)
             capital (float): Capital total del portafolio
             activos_adicionales (list, optional): Lista de diccionarios con activos adicionales para optimización
+            benchmark (str, optional): Benchmark para calcular la tasa libre de riesgo (default: 'MERVAL')
         """
         self.activos = activos
         self.activos_adicionales = activos_adicionales or []
@@ -1555,6 +1645,7 @@ class PortfolioManager:
         self.garch_models = {}
         self.monte_carlo_results = {}
         self.volatility_forecasts = {}
+        self.benchmark = benchmark
     
     def analyze_volatility(self, symbol, returns, volumes=None, n_simulations=1000, n_days=30):
         """
@@ -3271,6 +3362,32 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col2:
         fecha_hasta = st.date_input("Fecha hasta", value=pd.to_datetime('today'))
     
+    # Selección de benchmark para tasa libre de riesgo
+    benchmark_seleccionado = st.selectbox(
+        "Benchmark para tasa libre de riesgo:",
+        options=[
+            'MERVAL',
+            'S&P 500',
+            'NASDAQ',
+            'DOW JONES',
+            'BONOS USD 10Y',
+            'BONOS ARG 10Y',
+            'EMBI+'
+        ],
+        index=0,
+        help="Seleccione el benchmark para calcular la tasa libre de riesgo"
+    )
+    
+    # Mostrar información sobre la tasa libre de riesgo
+    with st.expander("ℹ️ Información sobre la tasa libre de riesgo"):
+        st.info("""
+        La tasa libre de riesgo se calcula en base al rendimiento histórico del benchmark seleccionado:
+        - Para índices bursátiles: 30% del rendimiento anualizado
+        - Para bonos y EMBI+: 80% del rendimiento anualizado
+        
+        Se usa un valor mínimo del 1% y máximo del 100% para evitar valores extremos.
+        """)
+    
     # Selección de método de optimización
     metodo_optimizacion = st.radio(
         "Método de optimización:",
@@ -3512,6 +3629,18 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         activos_filtrados = activos_para_optimizacion
         capital_inicial = None
 
+    # --- Configuración de simulación ---
+    col1, col2 = st.columns(2)
+    with col1:
+        n_simulaciones = st.number_input(
+            "Número de simulaciones",
+            min_value=100,
+            max_value=10000,
+            value=1000,
+            step=100,
+            help="Número de simulaciones para los métodos estocásticos"
+        )
+    
     # --- Métodos avanzados de optimización ---
     metodos_optimizacion = {
         'Maximizar Sharpe (Markowitz)': 'max_sharpe',
@@ -3584,13 +3713,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     except ImportError:
         st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
         ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-    with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
 
     def obtener_cotizaciones_cauciones(bearer_token):
         import requests
@@ -3669,10 +3796,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     def ejecutar_vwap(volumen_total, perfil_volumen):
         return [int(volumen_total * p) for p in perfil_volumen]
 
-    def simular_ejecucion(volumen, scheduling, order_type):
+    def simular_ejecucion(volumen, scheduling, order_type, n_intervalos=10):
         import numpy as np
         import plotly.graph_objects as go
-        n_intervalos = 10
         if scheduling == 'twap':
             cantidades = ejecutar_twap(volumen, n_intervalos)
         else:
@@ -3823,7 +3949,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         st.markdown("---")
                         st.subheader("Simulación de Ejecución Algorítmica")
                         volumen_total = int(capital_inicial // portfolio_result.price if hasattr(portfolio_result, 'price') and portfolio_result.price > 0 else capital_inicial // 100)
-                        fig_exec, total_exec, avg_price = simular_ejecucion(volumen_total, scheduling, order_type)
+                        fig_exec, total_exec, avg_price = simular_ejecucion(
+                            volumen_total, 
+                            scheduling, 
+                            order_type,
+                            n_intervalos=min(10, n_simulaciones // 100)  # Ajustar basado en el número de simulaciones
+                        )
                         st.plotly_chart(fig_exec, use_container_width=True)
                         st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
                     else:
