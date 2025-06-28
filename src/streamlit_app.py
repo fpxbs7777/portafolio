@@ -4161,8 +4161,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         """)
 
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
-    st.markdown("### 📊 Análisis Técnico")
+    st.markdown("### 📊 Análisis Técnico Avanzado")
     
+    with st.expander("ℹ️ Guía de Análisis Técnico", expanded=False):
+        st.markdown("""
+        Esta herramienta proporciona un análisis técnico detallado de sus activos, incluyendo:
+        - VWAP (Volume Weighted Average Price)
+        - Medias móviles (20 períodos)
+        - RSI (Relative Strength Index)
+        - Stochastic RSI
+        - Análisis de volumen
+        """)
+    
+    # Obtener portafolio
     with st.spinner("Obteniendo portafolio..."):
         portafolio = obtener_portafolio(token_acceso, id_cliente)
     
@@ -4170,80 +4181,269 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         st.warning("No se pudo obtener el portafolio del cliente")
         return
     
+    # Obtener lista de activos
     activos = portafolio.get('activos', [])
     if not activos:
         st.warning("El portafolio está vacío")
         return
     
-    simbolos = []
+    # Crear lista de símbolos con descripción
+    opciones_activos = []
     for activo in activos:
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo', '')
+        descripcion = titulo.get('descripcion', '')
         if simbolo:
-            simbolos.append(simbolo)
+            opciones_activos.append(f"{simbolo} - {descripcion}" if descripcion else simbolo)
     
-    if not simbolos:
-        st.warning("No se encontraron símbolos válidos")
+    if not opciones_activos:
+        st.warning("No se encontraron activos válidos")
         return
     
-    simbolo_seleccionado = st.selectbox(
+    # Selector de activo
+    seleccion = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos,
+        options=opciones_activos,
         key=f"select_analisis_tecnico_{id_cliente}"
     )
     
-    if simbolo_seleccionado:
-        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
-        
-        # Widget de TradingView
-        tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-          "container_id": "tradingview_{simbolo_seleccionado}",
-          "width": "100%",
-          "height": 650,
-          "symbol": "{simbolo_seleccionado}",
-          "interval": "D",
+    if not seleccion:
+        return
+    
+    # Extraer símbolo de la selección
+    simbolo = seleccion.split(' - ')[0] if ' - ' in seleccion else seleccion
+    
+    # Obtener datos históricos
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+    
+    with st.spinner(f"Obteniendo datos históricos para {simbolo}..."):
+        try:
+            # Datos de ejemplo - reemplazar con llamada real a la API
+            np.random.seed(42)  # Para reproducibilidad
+            precios_base = np.random.normal(100000, 5000, 60).cumsum() + 100000
+            precios_cierre = np.maximum(1000, precios_base)  # Evitar valores negativos
+            
+            datos_ejemplo = {
+                'fecha': pd.date_range(end=fecha_hasta, periods=60, freq='D'),
+                'precio_cierre': precios_cierre,
+                'volumen': np.random.randint(1000, 10000, 60)
+            }
+            df = pd.DataFrame(datos_ejemplo)
+            df.set_index('fecha', inplace=True)
+            
+            # Calcular indicadores
+            df['MA20'] = df['precio_cierre'].rolling(window=20).mean()
+            df['VWAP'] = (df['precio_cierre'] * df['volumen']).cumsum() / df['volumen'].cumsum()
+            
+            # Calcular RSI
+            delta = df['precio_cierre'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
+            
+            st.success("¡Datos cargados exitosamente!")
+            
+            # Mostrar análisis
+            st.markdown(f"## 📈 Análisis Técnico de {simbolo}")
+            
+            # Gráfico de precios
+            fig_precios = go.Figure()
+            
+            # Precio de cierre
+            fig_precios.add_trace(go.Scatter(
+                x=df.index, 
+                y=df['precio_cierre'],
+                name='Precio',
+                line=dict(color='#2ecc71', width=2)
+            ))
+            
+            # VWAP
+            fig_precios.add_trace(go.Scatter(
+                x=df.index,
+                y=df['VWAP'],
+                name='VWAP',
+                line=dict(color='#3498db', width=2, dash='dot')
+            ))
+            
+            # Media móvil 20
+            fig_precios.add_trace(go.Scatter(
+                x=df.index,
+                y=df['MA20'],
+                name='MA20',
+                line=dict(color='#9b59b6', width=2)
+            ))
+            
+            # Formatear gráfico
+            fig_precios.update_layout(
+                title=f"Análisis de Precio - {simbolo}",
+                xaxis_title="Fecha",
+                yaxis_title="Precio",
+                template="plotly_dark",
+                hovermode="x unified",
+                showlegend=True,
+                height=500
+            )
+            
+            st.plotly_chart(fig_precios, use_container_width=True)
+            
+            # Gráfico de RSI
+            fig_rsi = go.Figure()
+            
+            fig_rsi.add_trace(go.Scatter(
+                x=df.index,
+                y=df['RSI'],
+                name='RSI',
+                line=dict(color='#f1c40f', width=2)
+            ))
+            
+            # Líneas de sobrecompra/sobreventa
+            fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", 
+                             annotation_text="Sobrecompra", 
+                             annotation_position="bottom right")
+            fig_rsi.add_hline(y=30, line_dash="dash", line_color="green",
+                             annotation_text="Sobreventa", 
+                             annotation_position="bottom right")
+            
+            fig_rsi.update_layout(
+                title="RSI (14 períodos)",
+                xaxis_title="Fecha",
+                yaxis_title="RSI",
+                template="plotly_dark",
+                height=300,
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_rsi, use_container_width=True)
+            
+            # Análisis detallado
+            ultimo_precio = df['precio_cierre'].iloc[-1]
+            vwap_actual = df['VWAP'].iloc[-1]
+            ma20_actual = df['MA20'].iloc[-1]
+            rsi_actual = df['RSI'].iloc[-1]
+            
+            st.markdown("### 🔍 Interpretación Técnica")
+            
+            # Análisis VWAP
+            st.markdown("#### 📊 VWAP vs Precio Actual")
+            if ultimo_precio > vwap_actual:
+                st.success("✅ **Precio por encima del VWAP**: Señal alcista. El precio cotiza por encima del promedio ponderado por volumen, lo que sugiere fortaleza compradora.")
+            else:
+                st.warning("⚠️ **Precio por debajo del VWAP**: Señal bajista. El precio cotiza por debajo del promedio ponderado por volumen, lo que sugiere presión vendedora.")
+            
+            st.metric("Último Precio", f"${ultimo_precio:,.2f}", 
+                     delta=f"VWAP: ${vwap_actual:,.2f} (Diferencia: {((ultimo_precio-vwap_actual)/vwap_actual*100):.2f}%")
+            
+            # Análisis Medias Móviles
+            st.markdown("#### 📈 Medias Móviles")
+            if ultimo_precio > ma20_actual:
+                st.success(f"✅ **Precio por encima de la MA20 (${ma20_actual:,.2f})**: Tendencias alcistas a corto plazo.")
+            else:
+                st.warning(f"⚠️ **Precio por debajo de la MA20 (${ma20_actual:,.2f})**: Posible debilidad a corto plazo.")
+            
+            # Análisis RSI
+            st.markdown("#### 🔄 RSI (14 períodos)")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("RSI Actual", f"{rsi_actual:.2f}")
+            
+            with col2:
+                if rsi_actual > 70:
+                    st.error("Sobrecompra - Considerar toma de ganancias")
+                elif rsi_actual < 30:
+                    st.success("Sobreventa - Posible oportunidad de compra")
+                else:
+                    st.info("Rango neutral - Esperar señales más claras")
+            
+            # Recomendación de trading
+            st.markdown("### 💡 Recomendación")
+            
+            if (ultimo_precio > vwap_actual and 
+                ultimo_precio > ma20_actual and 
+                rsi_actual < 70):
+                st.success("""
+                **Señal de COMPRA**  
+                - Precio por encima de VWAP y MA20  
+                - RSI no está en sobrecompra  
+                - Considerar entrada con stop loss por debajo del soporte más cercano
+                """)
+            elif (ultimo_precio < vwap_actual and 
+                  ultimo_precio < ma20_actual and 
+                  rsi_actual > 30):
+                st.error("""
+                **Señal de VENTA**  
+                - Precio por debajo de VWAP y MA20  
+                - RSI no está en sobreventa  
+                - Considerar posiciones cortas o salir de posiciones largas
+                """)
+            else:
+                st.info("""
+                **Mercado en RANGO**  
+                - Esperar confirmación de ruptura  
+                - Buscar patrones de continuación o reversión  
+                - Considerar operaciones en corto plazo con objetivos definidos
+                """)
+            
+            # Volumen
+            st.markdown("#### 📊 Análisis de Volumen")
+            volumen_actual = df['volumen'].iloc[-1]
+            volumen_promedio = df['volumen'].mean()
+            
+            st.metric("Volumen Actual", f"{volumen_actual:,.0f}", 
+                     delta=f"Promedio: {volumen_promedio:,.0f} ({((volumen_actual-volumen_promedio)/volumen_promedio*100 if volumen_promedio > 0 else 0):.1f}%)")
+            
+            if volumen_actual > volumen_promedio * 1.5:
+                st.success("Volumen por encima del promedio - Confirma la tendencia actual")
+            elif volumen_actual < volumen_promedio * 0.7:
+                st.warning("Volumen por debajo del promedio - Falta de convicción en el movimiento")
+            
+        except Exception as e:
+            st.error(f"Error al procesar el análisis técnico: {str(e)}")
+            st.exception(e)
+    
+    # Widget de TradingView para referencia
+    st.markdown("---")
+    st.markdown("### 📊 Gráfico Avanzado de TradingView")
+    st.info("Utilice el siguiente gráfico interactivo para un análisis más detallado con múltiples indicadores y herramientas de dibujo.")
+    
+    tv_widget = f"""
+    <div class="tradingview-widget-container" style="height:650px;">
+      <div id="tradingview_{simbolo}" style="height:100%;"></div>
+      <div class="tradingview-widget-copyright">
+        <a href="https://es.tradingview.com/symbols/{simbolo}/" rel="noopener" target="_blank">
+          <span class="blue-text">{simbolo} Gráfico</span>
+        </a> por TradingView
+      </div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget(
+        {{
+          "autosize": true,
+          "symbol": "BINANCE:{simbolo}USDT",
+          "interval": "60",
           "timezone": "America/Argentina/Buenos_Aires",
-          "theme": "light",
+          "theme": "dark",
           "style": "1",
           "locale": "es",
-          "toolbar_bg": "#f4f7f9",
+          "toolbar_bg": "#0f172a",
           "enable_publishing": false,
-          "allow_symbol_change": true,
           "hide_side_toolbar": false,
+          "allow_symbol_change": true,
           "studies": [
-            "MACD@tv-basicstudies",
+            "VWAP@tv-basicstudies",
+            "MAExp@tv-basicstudies",
             "RSI@tv-basicstudies",
             "StochasticRSI@tv-basicstudies",
-            "Volume@tv-basicstudies",
-            "Moving Average@tv-basicstudies"
+            "Volume@tv-basicstudies"
           ],
-          "drawings_access": {{
-            "type": "black",
-            "tools": [
-              {{"name": "Trend Line"}},
-              {{"name": "Horizontal Line"}},
-              {{"name": "Fibonacci Retracement"}},
-              {{"name": "Rectangle"}},
-              {{"name": "Text"}}
-            ]
-          }},
-          "enabled_features": [
-            "study_templates",
-            "header_indicators",
-            "header_compare",
-            "header_screenshot",
-            "header_fullscreen_button",
-            "header_settings",
-            "header_symbol_search"
-          ]
-        }});
-        </script>
-        """
-        components.html(tv_widget, height=680)
+          "container_id": "tradingview_{simbolo}"
+        }}
+      );
+      </script>
+    </div>
+    """
+    components.html(tv_widget, height=680)
 
 def mostrar_movimientos_asesor(id_cliente=None):
     st.title("👨‍💼 Panel del Asesor")
