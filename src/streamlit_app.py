@@ -2946,8 +2946,10 @@ def obtener_activos_disponibles_mercado(token_acceso):
                                 st.error(f"Error procesando título {i} en {panel}: {str(e)}")
                                 st.write("Datos del título con error:", titulo)
                                 continue  # Saltar activos con datos inválidos
-                    
-                    st.success(f'Datos de {panel} obtenidos correctamente')
+                        
+                        st.success(f'Datos de {panel} obtenidos correctamente')
+                    except Exception as e:
+                        st.error(f'Error al procesar la respuesta de {panel}: {str(e)}')
                 else:
                     st.warning(f'No se pudieron obtener los datos de {panel}. Código: {response.status_code}')
                     
