@@ -2968,6 +2968,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             ]
             
             try:
+                # Intento 1: Buscar valuación directa
                 valuacion = 0
                 for campo in campos_valuacion:
                     if campo in activo and activo[campo] is not None:
@@ -2979,6 +2980,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         except (ValueError, TypeError):
                             continue
                 
+                # Intento 2: Calcular valuación por precio y cantidad
                 if valuacion == 0 and cantidad:
                     campos_precio = [
                         'precioPromedio',
@@ -2991,6 +2993,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     ]
                     
                     precio_unitario = 0
+                    # Buscar precio en activo
                     for campo in campos_precio:
                         if campo in activo and activo[campo] is not None:
                             try:
@@ -3001,6 +3004,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             except (ValueError, TypeError):
                                 continue
                     
+                    # Calcular valuación si se encontró precio
                     if precio_unitario > 0:
                         try:
                             cantidad_num = float(cantidad)
@@ -3011,6 +3015,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         except (ValueError, TypeError):
                             pass
                     
+                    # Buscar precio en título si no se encontró en activo
                     if precio_unitario == 0:
                         for campo in campos_precio:
                             if campo in titulo and titulo[campo] is not None:
@@ -3022,7 +3027,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 except (ValueError, TypeError):
                                     continue
                     
-                    # Intento final: consultar precio actual vía API si sigue en cero
+                    # Intento final: Consultar precio actual via API
                     if valuacion == 0:
                         ultimo_precio = None
                         if mercado := titulo.get('mercado'):
@@ -3036,17 +3041,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     valuacion = cantidad_num * ultimo_precio
                             except (ValueError, TypeError):
                                 pass
+                
+                # Guardar resultado
+                datos_activos.append({
+                    'Símbolo': simbolo,
+                    'Descripción': descripcion,
+                    'Tipo': tipo,
+                    'Cantidad': cantidad,
+                    'Valuación': valuacion,
+                })
             except Exception as e:
                 st.error(f"Error al calcular la valuación: {str(e)}")
                 continue
-            
-            datos_activos.append({
-                'Símbolo': simbolo,
-                'Descripción': descripcion,
-                'Tipo': tipo,
-                'Cantidad': cantidad,
-                'Valuación': valuacion,
-            })
             
             valor_total += valuacion
         except Exception as e:
@@ -3656,18 +3662,23 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             if portfolio_result.dataframe_allocation is not None:
                                 weights_df = portfolio_result.dataframe_allocation.copy()
                                 weights_df['Peso (%)'] = weights_df['weights'] * 100
-            with col1:
-                st.metric("Retorno Anual", f"{portafolio_metrics['retorno_anual']*100:.2f}%")
-                st.metric("Volatilidad Anual", f"{portafolio_metrics['volatilidad_anual']*100:.2f}%")
-            with col2:
-                st.metric("Ratio de Sharpe", f"{portafolio_metrics['sharpe_ratio']:.2f}")
-                st.metric("VaR 95% (1 día)", f"{portafolio_metrics['var_95']*100:.2f}%")
-            with col3:
-                st.metric("Máximo Drawdown", f"{portafolio_metrics['max_drawdown']*100:.2f}%")
-                st.metric("Ratio de Sortino", f"{portafolio_metrics['sortino_ratio']:.2f}" if 'sortino_ratio' in portafolio_metrics else "N/A")
-                            st.session_state.clientes = clientes
-                        else:
-                            st.warning("No se encontraron clientes")
+            try:
+                with col1:
+                    st.metric("Retorno Anual", f"{portafolio_metrics['retorno_anual']*100:.2f}%")
+                    st.metric("Volatilidad Anual", f"{portafolio_metrics['volatilidad_anual']*100:.2f}%")
+                with col2:
+                    st.metric("Ratio de Sharpe", f"{portafolio_metrics['sharpe_ratio']:.2f}")
+                    st.metric("VaR 95% (1 día)", f"{portafolio_metrics['var_95']*100:.2f}%")
+                with col3:
+                    st.metric("Máximo Drawdown", f"{portafolio_metrics['max_drawdown']*100:.2f}%")
+                    st.metric("Ratio de Sortino", f"{portafolio_metrics['sortino_ratio']:.2f}" if 'sortino_ratio' in portafolio_metrics else "N/A")
+            except Exception as e:
+                st.error(f"Error al mostrar métricas del portafolio: {str(e)}")
+            
+            if clientes:
+                st.session_state.clientes = clientes
+            else:
+                st.warning("No se encontraron clientes")
                     except Exception as e:
                         st.error(f"Error al cargar clientes: {str(e)}")
             
