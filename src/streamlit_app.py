@@ -3597,7 +3597,6 @@ def procesar_titulo(titulo, panel_nombre, lista_activos, debug=False):
             error_msg += f"\n{traceback.format_exc()}"
             print(error_msg)
         return False
-        return
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
