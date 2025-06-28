@@ -2086,7 +2086,122 @@ def analizar_composicion_portafolio(portafolio, token_portador):
         st.error(f"Error al analizar la composición del portafolio: {str(e)}")
         return None
 
-def determinar_perfil_composicion(composicion):
+def obtener_tipos_instrumentos(token_portador):
+    """
+    Obtiene los tipos de instrumentos disponibles desde la API de IOL
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Diccionario con los tipos de instrumentos y sus características
+    """
+    try:
+        # Obtener tipos de instrumentos de la API
+        url = "https://api.invertironline.com/api/v2/tiposInstrumentos"
+        headers = obtener_encabezado_autorizacion(token_portador)
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        tipos = response.json()
+        
+        # Mapeo de riesgo por tipo de instrumento
+        mapeo_riesgo = {
+            'Acciones': 'Alto',
+            'Bonos': 'Medio',
+            'Cedears': 'Alto',
+            'Fondos': 'Variable',
+            'Cuentas': 'Bajo',
+            'Plazo Fijo': 'Bajo',
+            'LEBAC': 'Bajo',
+            'LELIQ': 'Bajo',
+            'Criptomonedas': 'Alto',
+            'Opciones': 'Alto',
+            'Futuros': 'Alto'
+        }
+        
+        # Construir diccionario con tipos y riesgos
+        tipos_con_riesgo = {}
+        for tipo in tipos:
+            nombre = tipo.get('nombre', '').lower()
+            riesgo = mapeo_riesgo.get(nombre, 'Desconocido')
+            tipos_con_riesgo[nombre] = {
+                'nombre': nombre,
+                'riesgo': riesgo,
+                'descripcion': tipo.get('descripcion', '')
+            }
+        
+        return tipos_con_riesgo
+    except Exception as e:
+        st.error(f"Error al obtener tipos de instrumentos: {str(e)}")
+        return None
+
+def determinar_perfil_composicion(composicion, tipos_instrumentos=None):
+    """
+    Determina el perfil de riesgo basado en la composición del portafolio
+    
+    Args:
+        composicion (list): Lista de instrumentos con sus porcentajes
+        tipos_instrumentos (dict): Diccionario con tipos de instrumentos y sus riesgos
+        
+    Returns:
+        str: Perfil de riesgo (Conservador, Moderado, Agresivo)
+    """
+    try:
+        # Categorizar instrumentos por tipo de riesgo
+        porcentajes = {
+            'Alto': 0,      # Acciones, CEDEARS, ETF, Criptomonedas, Opciones, Futuros
+            'Medio': 0,     # Bonos Corporativos, Fondos Mixtos
+            'Bajo': 0,      # Bonos Gubernamentales, Fondos Renta Fija, Cuentas, Plazos Fijos, LEBAC/LELIQ
+            'Variable': 0,  # Fondos de Inversión, Fondos de Valores
+            'Desconocido': 0
+        }
+        
+        for item in composicion:
+            tipo = item.get('tipo', 'Otras').lower()
+            porcentaje = item['porcentaje']
+            
+            # Clasificar según el tipo y el mapeo de riesgo
+            riesgo = tipos_instrumentos.get(tipo, {}).get('riesgo', 'Desconocido') if tipos_instrumentos else 'Desconocido'
+            
+            if riesgo in porcentajes:
+                porcentajes[riesgo] += porcentaje
+            else:
+                porcentajes['Desconocido'] += porcentaje
+        
+        # Determinar perfil basado en la composición
+        total = sum(porcentajes.values())
+        if total == 0:
+            return "Desconocido"
+        
+        # Calcular porcentajes relativos
+        porcentajes_relativos = {
+            'Alto': porcentajes['Alto'] / total,
+            'Medio': porcentajes['Medio'] / total,
+            'Bajo': porcentajes['Bajo'] / total,
+            'Variable': porcentajes['Variable'] / total,
+            'Desconocido': porcentajes['Desconocido'] / total
+        }
+        
+        # Determinar perfil basado en los porcentajes relativos
+        if porcentajes_relativos['Alto'] >= 0.6:
+            return "Agresivo"
+        elif porcentajes_relativos['Bajo'] >= 0.6:
+            return "Conservador"
+        elif porcentajes_relativos['Variable'] >= 0.4:
+            return "Variable"
+        elif porcentajes_relativos['Medio'] >= 0.4:
+            return "Moderado"
+        else:
+            # Si hay una mezcla equilibrada
+            if porcentajes_relativos['Alto'] >= 0.3:
+                return "Mixto Agresivo"
+            elif porcentajes_relativos['Bajo'] >= 0.3:
+                return "Mixto Conservador"
+            else:
+                return "Mixto"
+    except Exception as e:
+        st.error(f"Error al determinar perfil: {str(e)}")
+        return "Desconocido"
     """
     Determina el perfil de riesgo basado en la composición del portafolio
     
@@ -2099,40 +2214,119 @@ def determinar_perfil_composicion(composicion):
     try:
         # Categorizar instrumentos por tipo de riesgo
         porcentajes = {
-            'Acciones': 0,  # Alto riesgo
-            'Bonos': 0,    # Medio riesgo
-            'Cedears': 0,  # Medio riesgo
-            'Cuentas': 0,  # Bajo riesgo
-            'Fondos': 0,   # Variable dependiendo del fondo
-            'Otras': 0     # Desconocido
+            'Alto': 0,      # Acciones, CEDEARS, ETF, Criptomonedas, Opciones, Futuros
+            'Medio': 0,     # Bonos Corporativos, Fondos Mixtos
+            'Bajo': 0,      # Bonos Gubernamentales, Fondos Renta Fija, Cuentas, Plazos Fijos, LEBAC/LELIQ
+            'Variable': 0,  # Fondos de Inversión, Fondos de Valores
+            'Desconocido': 0
+        }
+            'Acciones': 0,               # Alto riesgo
+            'CEDEARS': 0,               # Alto riesgo (renta variable + tipo de cambio)
+            'ETF': 0,                   # Alto riesgo (renta variable)
+            'Bonos': 0,                 # Medio riesgo
+            'Bonos Gubernamentales': 0, # Bajo riesgo
+            'Bonos Corporativos': 0,    # Medio riesgo
+            'Fondos Comunes': 0,        # Variable dependiendo del fondo
+            'Fondos de Inversión': 0,   # Variable dependiendo del fondo
+            'Fondos de Valores': 0,     # Variable dependiendo del fondo
+            'Fondos de Renta Fija': 0,  # Bajo riesgo
+            'Fondos de Renta Variable': 0, # Alto riesgo
+            'Cuentas': 0,              # Bajo riesgo
+            'Cuentas Bancarias': 0,     # Bajo riesgo
+            'Cuentas Corrientes': 0,    # Bajo riesgo
+            'Cuentas Ahorro': 0,        # Bajo riesgo
+            'Plazo Fijo': 0,            # Bajo riesgo
+            'LEBACS': 0,                # Bajo riesgo
+            'LEBAC': 0,                 # Bajo riesgo
+            'LELIQS': 0,                # Bajo riesgo
+            'LELIC': 0,                 # Bajo riesgo
+            'Monedas': 0,               # Bajo riesgo
+            'Criptomonedas': 0,         # Alto riesgo
+            'Opciones': 0,              # Alto riesgo
+            'Futuros': 0,               # Alto riesgo
+            'Otras': 0                  # Desconocido
         }
         
         for item in composicion:
             tipo = item.get('tipo', 'Otras').lower()
             porcentaje = item['porcentaje']
             
-            if 'acciones' in tipo:
+            # Clasificar según el tipo y el mapeo de riesgo
+            riesgo = tipos_instrumentos.get(tipo, {}).get('riesgo', 'Desconocido') if tipos_instrumentos else 'Desconocido'
+            
+            if riesgo in porcentajes:
+                porcentajes[riesgo] += porcentaje
+            else:
+                porcentajes['Desconocido'] += porcentaje
                 porcentajes['Acciones'] += porcentaje
-            elif 'bonos' in tipo or 'cedears' in tipo:
-                porcentajes['Bonos'] += porcentaje
-            elif 'cuenta' in tipo:
+            elif 'cedears' in tipo:
+                porcentajes['CEDEARS'] += porcentaje
+            elif 'bonos' in tipo:
+                if 'gubernamental' in tipo:
+                    porcentajes['Bonos Gubernamentales'] += porcentaje
+                elif 'corporativo' in tipo:
+                    porcentajes['Bonos Corporativos'] += porcentaje
+                else:
+                    porcentajes['Bonos'] += porcentaje
+            elif any(x in tipo for x in ['fondo', 'fci', 'fondo de inversion', 'fondo de valores']):
+                if 'renta fija' in tipo:
+                    porcentajes['Fondos de Renta Fija'] += porcentaje
+                elif 'renta variable' in tipo:
+                    porcentajes['Fondos de Renta Variable'] += porcentaje
+                else:
+                    porcentajes['Fondos Comunes'] += porcentaje
+            elif any(x in tipo for x in ['cuenta', 'plazo fijo', 'lebac', 'leliq', 'lelic']):
                 porcentajes['Cuentas'] += porcentaje
-            elif 'fondo' in tipo:
-                porcentajes['Fondos'] += porcentaje
+            elif any(x in tipo for x in ['cripto', 'bitcoin', 'ethereum', 'crypto']):
+                porcentajes['Criptomonedas'] += porcentaje
+            elif any(x in tipo for x in ['opciones', 'futuros', 'derivados']):
+                porcentajes['Opciones'] += porcentaje
+            elif 'etf' in tipo:
+                porcentajes['ETF'] += porcentaje
             else:
                 porcentajes['Otras'] += porcentaje
         
         # Determinar perfil basado en la composición
-        acciones = porcentajes['Acciones']
-        bonos = porcentajes['Bonos']
-        cuentas = porcentajes['Cuentas']
+        total = sum(porcentajes.values())
+        if total == 0:
+            return "Desconocido"
         
-        if acciones >= 70:
+        # Calcular porcentajes relativos
+        porcentajes_relativos = {
+            'Alto': porcentajes['Alto'] / total,
+            'Medio': porcentajes['Medio'] / total,
+            'Bajo': porcentajes['Bajo'] / total,
+            'Variable': porcentajes['Variable'] / total,
+            'Desconocido': porcentajes['Desconocido'] / total
+        }
+        
+        # Categorías de medio riesgo
+        medio_riesgo = porcentajes['Bonos'] + porcentajes['Bonos Corporativos'] + \
+                     porcentajes['Fondos Comunes'] + porcentajes['Fondos de Inversión']
+        
+        # Categorías de bajo riesgo
+        bajo_riesgo = porcentajes['Bonos Gubernamentales'] + porcentajes['Fondos de Renta Fija'] + \
+                    porcentajes['Cuentas'] + porcentajes['Plazo Fijo'] + porcentajes['LEBACS'] + \
+                    porcentajes['LEBAC'] + porcentajes['LELIQS'] + porcentajes['LELIC'] + \
+                    porcentajes['Monedas']
+        
+        # Determinar perfil basado en los porcentajes relativos
+        if porcentajes_relativos['Alto'] >= 0.6:
             return "Agresivo"
-        elif acciones >= 40 and acciones < 70:
+        elif porcentajes_relativos['Bajo'] >= 0.6:
+            return "Conservador"
+        elif porcentajes_relativos['Variable'] >= 0.4:
+            return "Variable"
+        elif porcentajes_relativos['Medio'] >= 0.4:
             return "Moderado"
         else:
-            return "Conservador"
+            # Si hay una mezcla equilibrada
+            if porcentajes_relativos['Alto'] >= 0.3:
+                return "Mixto Agresivo"
+            elif porcentajes_relativos['Bajo'] >= 0.3:
+                return "Mixto Conservador"
+            else:
+                return "Mixto"
     except Exception as e:
         st.error(f"Error al determinar perfil: {str(e)}")
         return "Desconocido"
