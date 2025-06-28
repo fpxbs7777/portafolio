@@ -3599,30 +3599,65 @@ def procesar_titulo(titulo, panel_nombre, lista_activos, debug=False):
         return False
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
+    """
+    Muestra la interfaz de optimización de portafolio con diferentes métodos de optimización.
+    
+    Args:
+        token_acceso (str): Token de autenticación para la API
+        id_cliente (str): Identificador del cliente
+    """
     st.markdown("### 🔄 Optimización de Portafolio")
     
     # Configuración de parámetros de optimización
     col1, col2 = st.columns(2)
     with col1:
-        fecha_desde = st.date_input("Fecha desde", value=pd.to_datetime('2024-01-01'))
+        try:
+            fecha_desde = st.date_input("Fecha desde", value=pd.to_datetime('2024-01-01'))
+            if not isinstance(fecha_desde, (pd.Timestamp, datetime.date)):
+                fecha_desde = pd.to_datetime(fecha_desde)
+        except Exception as e:
+            st.error(f"Error en la fecha desde: {str(e)}")
+            return
+            
     with col2:
-        fecha_hasta = st.date_input("Fecha hasta", value=pd.to_datetime('today'))
+        try:
+            fecha_hasta = st.date_input("Fecha hasta", value=pd.to_datetime('today'))
+            if not isinstance(fecha_hasta, (pd.Timestamp, datetime.date)):
+                fecha_hasta = pd.to_datetime(fecha_hasta)
+            
+            if fecha_hasta <= fecha_desde:
+                st.error("La fecha hasta debe ser posterior a la fecha desde")
+                return
+                
+        except Exception as e:
+            st.error(f"Error en la fecha hasta: {str(e)}")
+            return
     
+    # Validar token de acceso
+    if not token_acceso or not isinstance(token_acceso, str):
+        st.error("Token de acceso inválido o faltante")
+        return
+        
     # Selección de benchmark para tasa libre de riesgo
-    benchmark_seleccionado = st.selectbox(
-        "Benchmark para tasa libre de riesgo:",
-        options=[
-            'MERVAL',
-            'S&P 500',
-            'NASDAQ',
-            'DOW JONES',
-            'BONOS USD 10Y',
-            'BONOS ARG 10Y',
-            'EMBI+'
-        ],
-        index=0,
-        help="Seleccione el benchmark para calcular la tasa libre de riesgo"
-    )
+    try:
+        benchmark_seleccionado = st.selectbox(
+            "Benchmark para tasa libre de riesgo:",
+            options=[
+                'MERVAL',
+                'S&P 500',
+                'NASDAQ',
+                'DOW JONES',
+                'BONOS USD 10Y',
+                'BONOS ARG 10Y',
+                'EMBI+'
+            ],
+            index=0,
+            help="Seleccione el benchmark para calcular la tasa libre de riesgo",
+            key=f'benchmark_select_{id_cliente}'
+        )
+    except Exception as e:
+        st.error(f"Error al seleccionar el benchmark: {str(e)}")
+        return
     
     # Mostrar información sobre la tasa libre de riesgo
     with st.expander("ℹ️ Información sobre la tasa libre de riesgo"):
@@ -3635,41 +3670,75 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         """)
     
     # Selección de método de optimización
-    metodo_optimizacion = st.radio(
-        "Método de optimización:",
-        ['Portafolio actual', 'Selección aleatoria'],
-        key=f'metodo_opt_{id_cliente}'
-    )
+    try:
+        metodo_optimizacion = st.radio(
+            "Método de optimización:",
+            ['Portafolio actual', 'Selección aleatoria'],
+            key=f'metodo_opt_{id_cliente}'
+        )
+    except Exception as e:
+        st.error(f"Error al seleccionar el método de optimización: {str(e)}")
+        return
     
     # Variables para almacenar los activos a optimizar
     activos_para_optimizacion = []
     
+    # Validar que las fechas sean válidas
+    if fecha_hasta <= fecha_desde:
+        st.error("La fecha de fin debe ser posterior a la fecha de inicio")
+        return
+    
+    # Selección de método de optimización
+    try:
+        metodo_optimizacion = st.radio(
+            "Método de optimización:",
+            ['Portafolio actual', 'Selección aleatoria'],
+            key=f'metodo_opt_{id_cliente}'
+        )
+    except Exception as e:
+        st.error(f"Error al seleccionar el método de optimización: {str(e)}")
+        return
+    
     if metodo_optimizacion == 'Portafolio actual':
         with st.spinner("Obteniendo portafolio..."):
-            portafolio = obtener_portafolio(token_acceso, id_cliente)
-        
-        if not portafolio:
-            st.warning("No se pudo obtener el portafolio del cliente")
-            return
-        
-        activos_raw = portafolio.get('activos', [])
-        if not activos_raw:
-            st.warning("El portafolio está vacío")
-            return
-            
-        # Procesar activos del portafolio
-        for activo in activos_raw:
-            titulo = activo.get('titulo', {})
-            simbolo = titulo.get('simbolo')
-            mercado = titulo.get('mercado')
-            tipo = titulo.get('tipo')
-            if simbolo:
-                activos_para_optimizacion.append({
-                    'simbolo': simbolo,
-                    'mercado': mercado,
-                    'tipo': tipo,
-                    'nombre': titulo.get('descripcion', 'Sin nombre')
-                })
+            try:
+                portafolio = obtener_portafolio(token_acceso, id_cliente)
+                if not portafolio:
+                    st.warning("No se pudo obtener el portafolio del cliente")
+                    return
+                    
+                activos_raw = portafolio.get('activos', [])
+                if not activos_raw:
+                    st.warning("El portafolio está vacío")
+                    return
+                    
+                # Procesar activos del portafolio
+                for activo in activos_raw:
+                    titulo = activo.get('titulo', {})
+                    simbolo = titulo.get('simbolo')
+                    mercado = titulo.get('mercado')
+                    tipo = titulo.get('tipo')
+                    
+                    if not simbolo or not mercado:
+                        st.warning(f"Activo sin símbolo o mercado: {activo}")
+                        continue
+                        
+                    activos_para_optimizacion.append({
+                        'simbolo': str(simbolo).strip(),
+                        'mercado': str(mercado).strip(),
+                        'tipo': str(tipo).strip() if tipo else 'Desconocido',
+                        'nombre': str(titulo.get('descripcion', 'Sin nombre')).strip()
+                    })
+                    
+                if not activos_para_optimizacion:
+                    st.warning("No se encontraron activos válidos en el portafolio")
+                    return
+                    
+            except Exception as e:
+                st.error(f"Error al obtener el portafolio: {str(e)}")
+                import traceback
+                st.error(f"Detalles del error:\n{traceback.format_exc()}")
+                return
     else:  # Selección aleatoria
         st.info("Seleccione los parámetros para la generación aleatoria de cartera")
         
