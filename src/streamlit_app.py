@@ -3735,6 +3735,8 @@ def main():
         st.session_state.fecha_hasta = datetime.now().strftime('%Y-%m-%d')
     if 'estado_cuenta' not in st.session_state:
         st.session_state.estado_cuenta = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
 
     # Barra lateral para navegación
     st.sidebar.title("🔍 Navegación")
