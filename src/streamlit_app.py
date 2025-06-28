@@ -2765,8 +2765,24 @@ def obtener_activos_disponibles_mercado(token_acceso):
     utilizando la API de InvertirOnline.
     """
     import requests
+    import json
+    
+    # Mapeo de paneles para compatibilidad con la API
+    PANELES_API = {
+        'Acciones': 'acciones',
+        'Cedears': 'cedears',
+        'ADRs': 'adrs',
+        'Títulos Públicos': 'titulosPublicos',
+        'Obligaciones Negociables': 'obligacionesNegociables',
+        'FCI': 'fondos',
+        'Cheques': 'cheques',
+        'Cauciones': 'cauciones'
+    }
+    
+    activos = []
     
     try:
+        # Primero intentamos obtener el panel general
         url = 'https://api.invertironline.com/api/v2/Titulos/Cotizacion/panel/general/argentina'
         headers = {
             'Authorization': f'Bearer {token_acceso}',
@@ -2775,54 +2791,83 @@ def obtener_activos_disponibles_mercado(token_acceso):
         
         with st.spinner("Obteniendo lista de activos disponibles..."):
             response = requests.get(url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
+            
+            # Si falla el panel general, intentamos con paneles específicos
+            if response.status_code != 200:
+                st.warning("No se pudo obtener el panel general, intentando con paneles específicos...")
+                
+                for panel_nombre, panel_id in PANELES_API.items():
+                    try:
+                        panel_url = f'https://api.invertironline.com/api/v2/{panel_id}/Titulos/Cotizacion/panel/argentina'
+                        panel_response = requests.get(panel_url, headers=headers, timeout=30)
+                        
+                        if panel_response.status_code == 200:
+                            panel_data = panel_response.json()
+                            for titulo in panel_data.get('titulos', []):
+                                procesar_titulo(titulo, panel_nombre, activos)
+                    except Exception as e:
+                        st.warning(f"Error al obtener panel {panel_nombre}: {str(e)}")
+                        continue
+                        
+                if not activos:
+                    st.error("No se pudieron obtener activos de ningún panel")
+                    return []
+                    
+                return activos
+            
+            # Si llegamos aquí, el panel general funcionó
             datos = response.json()
-            activos = []
             
             for panel in datos.get('paneles', []):
                 panel_nombre = panel.get('nombrePanel', 'Sin nombre')
                 
                 for titulo in panel.get('titulos', []):
-                    # Obtener el último precio disponible
-                    ultimo_precio = None
-                    if 'ultimoPrecio' in titulo and titulo['ultimoPrecio'] is not None:
-                        try:
-                            ultimo_precio = float(titulo['ultimoPrecio'])
-                        except (ValueError, TypeError):
-                            continue
-                    
-                    # Solo incluir activos con precio válido
-                    if ultimo_precio and ultimo_precio > 0:
-                        activo = {
-                            'simbolo': titulo.get('simbolo', '').strip(),
-                            'nombre': titulo.get('descripcion', 'Sin nombre').strip(),
-                            'tipo': panel_nombre,
-                            'mercado': titulo.get('mercado', 'BCBA'),
-                            'ultimoPrecio': ultimo_precio,
-                            'moneda': titulo.get('moneda', 'ARS'),
-                            'variacion': titulo.get('variacion', 0),
-                            'volumen': titulo.get('volumen', 0)
-                        }
-                        
-                        # Filtrar activos sin símbolo o con nombres muy cortos que podrían ser inválidos
-                        if (activo['simbolo'] and 
-                            len(activo['simbolo']) >= 2 and 
-                            len(activo['nombre']) > 3):
-                            activos.append(activo)
+                    procesar_titulo(titulo, panel_nombre, activos)
             
             return activos
             
-        else:
-            st.error(f"Error al obtener activos: {response.status_code}")
-            return []
-            
     except requests.exceptions.RequestException as e:
-        st.error(f"Error de conexión: {str(e)}")
+        st.error(f"Error de conexión al obtener activos: {str(e)}")
         return []
     except Exception as e:
         st.error(f"Error inesperado al obtener activos: {str(e)}")
+        import traceback
+        st.text(traceback.format_exc())
         return []
+
+def procesar_titulo(titulo, panel_nombre, lista_activos):
+    """Procesa un título individual y lo agrega a la lista de activos si es válido."""
+    try:
+        # Obtener el último precio disponible
+        ultimo_precio = None
+        if 'ultimoPrecio' in titulo and titulo['ultimoPrecio'] is not None:
+            try:
+                ultimo_precio = float(titulo['ultimoPrecio'])
+            except (ValueError, TypeError):
+                return
+        
+        # Solo incluir activos con precio válido
+        if ultimo_precio and ultimo_precio > 0:
+            activo = {
+                'simbolo': titulo.get('simbolo', '').strip(),
+                'nombre': titulo.get('descripcion', 'Sin nombre').strip(),
+                'tipo': panel_nombre,
+                'mercado': titulo.get('mercado', 'BCBA'),
+                'ultimoPrecio': ultimo_precio,
+                'moneda': titulo.get('moneda', 'ARS'),
+                'variacion': titulo.get('variacion', 0),
+                'volumen': titulo.get('volumen', 0)
+            }
+            
+            # Filtrar activos sin símbolo o con nombres muy cortos que podrían ser inválidos
+            if (activo['simbolo'] and 
+                len(activo['simbolo']) >= 2 and 
+                len(activo['nombre']) > 3 and
+                activo not in lista_activos):  # Evitar duplicados
+                lista_activos.append(activo)
+    except Exception as e:
+        st.warning(f"Error al procesar título: {str(e)}")
+        return
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
