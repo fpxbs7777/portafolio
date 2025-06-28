@@ -2868,94 +2868,69 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
 
 def obtener_activos_disponibles_mercado(token_acceso):
     """
-    Obtiene una lista de activos disponibles en el mercado para la selección aleatoria.
-    Si falla la conexión con la API, usa una lista estática de activos comunes.
+    Obtiene una lista de activos disponibles en el mercado desde la API de InvertirOnline.
+    
+    Args:
+        token_acceso (str): Token de autenticación para la API
+        
+    Returns:
+        list: Lista de diccionarios con información de los activos
     """
-    import random
+    import requests
     
-    # Primero intentamos obtener los activos del portafolio actual
-    try:
-        with st.spinner("Obteniendo activos del portafolio..."):
-            portafolio = obtener_portafolio(token_acceso, 'current')  # 'current' es un valor por defecto
+    headers = {
+        'Authorization': f'Bearer {token_acceso}'
+    }
+    
+    # Lista para almacenar todos los activos
+    todos_los_activos = []
+    
+    # Lista de paneles a consultar (puedes ajustar según necesidad)
+    paneles = ['Acciones', 'Bonos', 'Cedears', 'ETFs']
+    
+    for panel in paneles:
+        try:
+            # Endpoint para obtener los títulos por panel
+            url = f'https://api.invertironline.com/api/v2/{panel}/Titulos/Cotizacion/panel'
             
-        if portafolio and 'activos' in portafolio and portafolio['activos']:
-            activos = []
-            for activo in portafolio['activos']:
-                titulo = activo.get('titulo', {})
-                if titulo and 'simbolo' in titulo:
-                    activos.append({
-                        'simbolo': titulo.get('simbolo', '').strip(),
-                        'nombre': titulo.get('descripcion', 'Sin nombre').strip(),
-                        'tipo': titulo.get('tipo', 'Acción'),
-                        'mercado': titulo.get('mercado', 'BCBA'),
-                        'ultimoPrecio': float(titulo.get('ultimoPrecio', random.uniform(100, 10000))),
-                        'moneda': titulo.get('moneda', 'ARS'),
-                        'variacion': titulo.get('variacion', 0),
-                        'volumen': titulo.get('volumen', 0)
-                    })
-            if activos:
-                return activos
-    except Exception as e:
-        st.warning(f"No se pudieron obtener los activos del portafolio: {str(e)}")
+            with st.spinner(f'Obteniendo datos de {panel}...'):
+                response = requests.get(url, headers=headers, timeout=30)
+                
+                if response.status_code == 200:
+                    datos = response.json()
+                    if isinstance(datos, list):
+                        for titulo in datos:
+                            try:
+                                # Solo agregar si tiene símbolo y precio
+                                if titulo.get('simbolo') and titulo.get('ultimoPrecio') is not None:
+                                    todos_los_activos.append({
+                                        'simbolo': titulo.get('simbolo', '').strip(),
+                                        'nombre': titulo.get('descripcion', 'Sin nombre').strip(),
+                                        'tipo': panel,
+                                        'mercado': titulo.get('mercado', 'BCBA'),
+                                        'ultimoPrecio': float(titulo.get('ultimoPrecio', 0)),
+                                        'moneda': titulo.get('monedaCotizacion', 'ARS'),
+                                        'variacion': float(titulo.get('variacion', 0)),
+                                        'volumen': float(titulo.get('volumen', 0))
+                                    })
+                            except (ValueError, TypeError) as e:
+                                continue  # Saltar activos con datos inválidos
+                    
+                    st.success(f'Datos de {panel} obtenidos correctamente')
+                else:
+                    st.warning(f'No se pudieron obtener los datos de {panel}. Código: {response.status_code}')
+                    
+        except requests.exceptions.RequestException as e:
+            st.error(f'Error de conexión al obtener datos de {panel}: {str(e)}')
+        except Exception as e:
+            st.error(f'Error inesperado al obtener datos de {panel}: {str(e)}')
     
-    # Si no hay activos en el portafolio o falló, usar lista estática
-    st.warning("Usando lista de activos de ejemplo...")
+    # Si no se obtuvieron activos, mostrar un error crítico
+    if not todos_los_activos:
+        st.error('No se pudieron obtener datos de mercado. Por favor, intente más tarde.')
+        return []
     
-    # Lista de activos de ejemplo (puedes personalizarla)
-    activos_ejemplo = [
-        {
-            'simbolo': 'GGAL',
-            'nombre': 'Grupo Financiero Galicia',
-            'tipo': 'Acciones',
-            'mercado': 'BCBA',
-            'ultimoPrecio': 1200.50,
-            'moneda': 'ARS',
-            'variacion': 2.5,
-            'volumen': 15000
-        },
-        {
-            'simbolo': 'PAMP',
-            'nombre': 'Pampa Energía',
-            'tipo': 'Acciones',
-            'mercado': 'BCBA',
-            'ultimoPrecio': 1850.75,
-            'moneda': 'ARS',
-            'variacion': 1.2,
-            'volumen': 8500
-        },
-        {
-            'simbolo': 'YPFD',
-            'nombre': 'YPF',
-            'tipo': 'Acciones',
-            'mercado': 'BCBA',
-            'ultimoPrecio': 9500.25,
-            'moneda': 'ARS',
-            'variacion': -0.8,
-            'volumen': 25000
-        },
-        {
-            'simbolo': 'AAPL',
-            'nombre': 'Apple Inc.',
-            'tipo': 'Cedears',
-            'mercado': 'BCBA',
-            'ultimoPrecio': 25000.00,
-            'moneda': 'ARS',
-            'variacion': 0.5,
-            'volumen': 1200
-        },
-        {
-            'simbolo': 'MSFT',
-            'nombre': 'Microsoft Corporation',
-            'tipo': 'Cedears',
-            'mercado': 'BCBA',
-            'ultimoPrecio': 32000.75,
-            'moneda': 'ARS',
-            'variacion': 1.1,
-            'volumen': 980
-        }
-    ]
-    
-    return activos_ejemplo
+    return todos_los_activos
 
 def procesar_titulo(titulo, panel_nombre, lista_activos):
     """Procesa un título individual y lo agrega a la lista de activos si es válido."""
