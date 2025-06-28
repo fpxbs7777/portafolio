@@ -581,7 +581,6 @@ def mostrar_analisis_portafolio():
                     - Mantenga su estrategia actual
                     - Continúe monitoreando periódicamente
                     """)
-                
         except Exception as e:
             st.error(f"Error al analizar el portafolio: {str(e)}")
 
@@ -2968,73 +2967,78 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 'importe'
             ]
             
-            valuacion = 0
-            for campo in campos_valuacion:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        val = float(activo[campo])
-                        if val > 0:
-                            valuacion = val
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            if valuacion == 0 and cantidad:
-                campos_precio = [
-                    'precioPromedio',
-                    'precioCompra',
-                    'precioActual',
-                    'precio',
-                    'precioUnitario',
-                    'ultimoPrecio',
-                    'cotizacion'
-                ]
-                
-                precio_unitario = 0
-                for campo in campos_precio:
+            try:
+                valuacion = 0
+                for campo in campos_valuacion:
                     if campo in activo and activo[campo] is not None:
                         try:
-                            precio = float(activo[campo])
-                            if precio > 0:
-                                precio_unitario = precio
+                            val = float(activo[campo])
+                            if val > 0:
+                                valuacion = val
                                 break
                         except (ValueError, TypeError):
                             continue
                 
-                if precio_unitario > 0:
-                    try:
-                        cantidad_num = float(cantidad)
-                        if tipo == 'TitulosPublicos':
-                            valuacion = (cantidad_num * precio_unitario) / 100.0
-                        else:
-                            valuacion = cantidad_num * precio_unitario
-                    except (ValueError, TypeError):
-                        pass
-                if precio_unitario == 0:
+                if valuacion == 0 and cantidad:
+                    campos_precio = [
+                        'precioPromedio',
+                        'precioCompra',
+                        'precioActual',
+                        'precio',
+                        'precioUnitario',
+                        'ultimoPrecio',
+                        'cotizacion'
+                    ]
+                    
+                    precio_unitario = 0
                     for campo in campos_precio:
-                        if campo in titulo and titulo[campo] is not None:
+                        if campo in activo and activo[campo] is not None:
                             try:
-                                precio = float(titulo[campo])
+                                precio = float(activo[campo])
                                 if precio > 0:
                                     precio_unitario = precio
                                     break
                             except (ValueError, TypeError):
                                 continue
-                
-                # Intento final: consultar precio actual vía API si sigue en cero
-            if valuacion == 0:
-                ultimo_precio = None
-                if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
-                if ultimo_precio:
-                    try:
-                        cantidad_num = float(cantidad)
-                        if tipo == 'TitulosPublicos':
-                            valuacion = (cantidad_num * ultimo_precio) / 100.0
-                        else:
-                            valuacion = cantidad_num * ultimo_precio
-                    except (ValueError, TypeError):
-                        pass
+                    
+                    if precio_unitario > 0:
+                        try:
+                            cantidad_num = float(cantidad)
+                            if tipo == 'TitulosPublicos':
+                                valuacion = (cantidad_num * precio_unitario) / 100.0
+                            else:
+                                valuacion = cantidad_num * precio_unitario
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    if precio_unitario == 0:
+                        for campo in campos_precio:
+                            if campo in titulo and titulo[campo] is not None:
+                                try:
+                                    precio = float(titulo[campo])
+                                    if precio > 0:
+                                        precio_unitario = precio
+                                        break
+                                except (ValueError, TypeError):
+                                    continue
+                    
+                    # Intento final: consultar precio actual vía API si sigue en cero
+                    if valuacion == 0:
+                        ultimo_precio = None
+                        if mercado := titulo.get('mercado'):
+                            ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                        if ultimo_precio:
+                            try:
+                                cantidad_num = float(cantidad)
+                                if tipo == 'TitulosPublicos':
+                                    valuacion = (cantidad_num * ultimo_precio) / 100.0
+                                else:
+                                    valuacion = cantidad_num * ultimo_precio
+                            except (ValueError, TypeError):
+                                pass
+            except Exception as e:
+                st.error(f"Error al calcular la valuación: {str(e)}")
+                continue
             
             datos_activos.append({
                 'Símbolo': simbolo,
