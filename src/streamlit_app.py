@@ -3360,13 +3360,38 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         if 'seleccion_aleatoria' in st.session_state and st.session_state.seleccion_aleatoria:
             st.subheader("Activos seleccionados aleatoriamente")
             for panel, activos in st.session_state.seleccion_aleatoria.items():
-                if activos:  # Solo mostrar paneles con activos
-                    with st.expander(f"{panel} ({len(activos)} activos)"):
-                        for activo in activos:
-                            st.write(f"- {activo['simbolo']}: {activo['nombre']} (${activo['ultimoPrecio']:.2f} {activo['moneda']})")
+                if not activos:  # Saltar si no hay activos en este panel
+                    continue
                     
-                    # Configurar activos para optimización
-                    activos_para_optimizacion.extend(activos)
+                # Asegurarse de que activos sea una lista
+                if not isinstance(activos, list):
+                    st.warning(f"Formato de datos inesperado para el panel {panel}. Se esperaba una lista de activos.")
+                    continue
+                
+                with st.expander(f"{panel} ({len(activos)} activos)"):
+                    for activo in activos:
+                        try:
+                            # Verificar que el activo sea un diccionario con las claves necesarias
+                            if not isinstance(activo, dict):
+                                st.warning(f"Se encontró un activo que no es un diccionario: {activo}")
+                                continue
+                                
+                            # Obtener valores con valores por defecto seguros
+                            simbolo = activo.get('simbolo', 'N/A')
+                            nombre = activo.get('nombre', 'Sin nombre')
+                            ultimo_precio = activo.get('ultimoPrecio', 0)
+                            moneda = activo.get('moneda', 'USD')
+                            
+                            # Mostrar el activo
+                            st.write(f"- {simbolo}: {nombre} (${ultimo_precio:.2f} {moneda})")
+                            
+                            # Agregar a la lista de optimización solo si tiene los campos mínimos requeridos
+                            if simbolo != 'N/A' and 'mercado' in activo:
+                                activos_para_optimizacion.append(activo)
+                                
+                        except Exception as e:
+                            st.error(f"Error al procesar un activo: {str(e)}")
+                            continue
     
     # Si no hay activos para optimizar, salir
     if not activos_para_optimizacion:
