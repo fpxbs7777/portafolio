@@ -3159,45 +3159,45 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col4:
         comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.", key=f"comparar_opt_{id_cliente}")
 
-if ejecutar_optimizacion:
-    with st.spinner("Ejecutando optimización..."):
-        try:
-            # --- Configuración común ---
-            if modo_optimizacion == 'Rebalanceo':
-                # Usar datos diarios de IOL y el capital actual del portafolio
-                activos_para_opt = activos_filtrados
-                manager = PortfolioManager(
-                    activos_para_opt,
-                    token_acceso,
-                    fecha_desde,
-                    fecha_hasta,
-                    capital=capital_inicial
-                )
-                if manager.load_data():
-                    portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
-                    if portfolio_result:
-                        st.success("✅ Optimización de Rebalanceo completada")
-                        mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
-            else:  # Optimización desde Cero
-                if frecuencia_datos == 'Intradía':
-                    # Usar yfinance para acciones y cedears
-                    import yfinance as yf
-                    activos_yf = []
-                    for activo in activos_filtrados:
-                        tipo = activo.get('tipo')
-                        if tipo in ['Acciones', 'Cedears']:
-                            simbolo = activo.get('simbolo')
-                            if simbolo:
-                                # Agregar sufijo .BA para acciones y cedears
-                                activos_yf.append({
-                                    'simbolo': f"{simbolo}.BA",
-                                    'tipo': tipo
-                                })
-                    if activos_yf:
-                        # Obtener datos intradía
-                        data_yf = yf.download(
-                            [a['simbolo'] for a in activos_yf],
-                            start=fecha_desde,
+    if ejecutar_optimizacion:
+        with st.spinner("Ejecutando optimización..."):
+            try:
+                # --- Configuración común ---
+                if modo_optimizacion == 'Rebalanceo':
+                    # Usar datos diarios de IOL y el capital actual del portafolio
+                    activos_para_opt = activos_filtrados
+                    manager = PortfolioManager(
+                        activos_para_opt,
+                        token_acceso,
+                        fecha_desde,
+                        fecha_hasta,
+                        capital=capital_inicial
+                    )
+                    if manager.load_data():
+                        portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
+                        if portfolio_result:
+                            st.success("✅ Optimización de Rebalanceo completada")
+                            mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
+                else:  # Optimización desde Cero
+                    if frecuencia_datos == 'Intradía':
+                        # Usar yfinance para acciones y cedears
+                        import yfinance as yf
+                        activos_yf = []
+                        for activo in activos_filtrados:
+                            tipo = activo.get('tipo')
+                            if tipo in ['Acciones', 'Cedears']:
+                                simbolo = activo.get('simbolo')
+                                if simbolo:
+                                    # Agregar sufijo .BA para acciones y cedears
+                                    activos_yf.append({
+                                        'simbolo': f"{simbolo}.BA",
+                                        'tipo': tipo
+                                    })
+                        if activos_yf:
+                            # Obtener datos intradía
+                            data_yf = yf.download(
+                                [a['simbolo'] for a in activos_yf],
+                                start=fecha_desde,
                             end=fecha_hasta,
                             interval="1h"  # Intervalo intradía
                         )
