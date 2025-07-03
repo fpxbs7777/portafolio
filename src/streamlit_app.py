@@ -1433,6 +1433,8 @@ class PortfolioManager:
         self.garch_models = {}
         self.monte_carlo_results = {}
         self.volatility_forecasts = {}
+        self.optimal_weights = None
+        self.random_portfolios = None
     
     def analyze_volatility(self, symbol, returns, volumes=None, n_simulations=1000, n_days=30):
         """
@@ -1918,6 +1920,128 @@ class PortfolioManager:
             st.exception(e)
             return None
     
+    def generate_random_portfolios(self, n_portfolios=10000, risk_free_rate=0.0):
+        """
+        Genera carteras aleatorias y calcula sus métricas de riesgo/retorno.
+        
+        Args:
+            n_portfolios (int): Número de carteras aleatorias a generar
+            risk_free_rate (float): Tasa libre de riesgo para el cálculo del ratio de Sharpe
+            
+        Returns:
+            dict: Diccionario con los resultados de la simulación
+        """
+        if self.returns is None or len(self.returns.columns) == 0:
+            return None
+            
+        n_assets = len(self.returns.columns)
+        results = np.zeros((3 + n_assets, n_portfolios))
+        weights_record = []
+        
+        for i in range(n_portfolios):
+            # Generar pesos aleatorios
+            weights = np.random.random(n_assets)
+            weights /= np.sum(weights)
+            weights_record.append(weights)
+            
+            # Calcular métricas de la cartera
+            portfolio_return = np.sum(self.returns.mean() * weights) * 252  # Retorno anualizado
+            portfolio_std = np.sqrt(np.dot(weights.T, np.dot(self.returns.cov() * 252, weights)))
+            sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std if portfolio_std > 0 else 0
+            
+            # Almacenar resultados
+            results[0, i] = portfolio_return
+            results[1, i] = portfolio_std
+            results[2, i] = sharpe_ratio
+            
+            # Almacenar pesos
+            for j in range(n_assets):
+                results[j + 3, i] = weights[j]
+        
+        # Encontrar la cartera con mejor ratio de Sharpe
+        max_sharpe_idx = np.argmax(results[2])
+        optimal_weights = results[3:, max_sharpe_idx]
+        
+        self.optimal_weights = dict(zip(self.returns.columns, optimal_weights))
+        self.random_portfolios = {
+            'returns': results[0],
+            'volatility': results[1],
+            'sharpe': results[2],
+            'weights': np.array(weights_record),
+            'max_sharpe_return': results[0, max_sharpe_idx],
+            'max_sharpe_vol': results[1, max_sharpe_idx],
+            'optimal_weights': self.optimal_weights
+        }
+        
+        return self.random_portfolios
+    
+    def get_efficient_frontier(self, target_returns=None, n_points=20):
+        """
+        Calcula la frontera eficiente usando optimización.
+        
+        Args:
+            target_returns (list): Lista de retornos objetivo para la frontera eficiente
+            n_points (int): Número de puntos en la frontera eficiente si target_returns es None
+            
+        Returns:
+            tuple: (frontier_returns, frontier_volatility, frontier_weights)
+        """
+        if self.returns is None or len(self.returns.columns) == 0:
+            return None, None, None
+            
+        n_assets = len(self.returns.columns)
+        
+        # Si no se especifican retornos objetivo, generamos algunos entre el mínimo y máximo esperado
+        if target_returns is None:
+            min_return = self.returns.mean().min() * 252
+            max_return = self.returns.mean().max() * 252
+            target_returns = np.linspace(min_return, max_return, n_points)
+        
+        # Función objetivo: minimizar la volatilidad
+        def portfolio_volatility(weights):
+            return np.sqrt(np.dot(weights.T, np.dot(self.returns.cov() * 252, weights)))
+        
+        # Restricciones
+        constraints = [
+            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}  # Suma de pesos = 1
+        ]
+        
+        # Límites para los pesos (entre 0 y 1)
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        # Punto de inicio (igual ponderación)
+        init_weights = np.ones(n_assets) / n_assets
+        
+        # Optimizar para cada retorno objetivo
+        frontier_returns = []
+        frontier_volatility = []
+        frontier_weights = []
+        
+        for target in target_returns:
+            # Restricción de retorno objetivo
+            constraints.append(
+                {'type': 'eq', 'fun': lambda x, target=target: np.sum(x * self.returns.mean()) * 252 - target}
+            )
+            
+            # Optimización
+            result = op.minimize(
+                portfolio_volatility,
+                init_weights,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+            
+            if result.success:
+                frontier_returns.append(target)
+                frontier_volatility.append(result.fun)
+                frontier_weights.append(result.x)
+            
+            # Eliminar la restricción de retorno objetivo para la siguiente iteración
+            constraints = constraints[:-1]
+        
+        return np.array(frontier_returns), np.array(frontier_volatility), np.array(frontier_weights)
+
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
         if not self.data_loaded or not hasattr(self, 'prices') or self.prices is None:
@@ -2722,8 +2846,315 @@ def mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager):
     st.plotly_chart(fig_exec, use_container_width=True)
     st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
 
+def plot_efficient_frontier(returns, cov_matrix, n_portfolios=10000, risk_free_rate=0.0):
+    """
+    Grafica la frontera eficiente y las carteras aleatorias.
+    
+    Args:
+        returns: DataFrame de retornos (activos en columnas)
+        cov_matrix: Matriz de covarianza de los retornos
+        n_portfolios: Número de carteras aleatorias a generar
+        risk_free_rate: Tasa libre de riesgo para el cálculo del ratio de Sharpe
+        
+    Returns:
+        fig: Figura de Plotly
+    """
+    import plotly.graph_objects as go
+    from scipy.optimize import minimize
+    
+    # Calcular métricas de los activos individuales
+    asset_returns = returns.mean() * 252
+    asset_volatility = returns.std() * np.sqrt(252)
+    
+    # Generar carteras aleatorias
+    n_assets = len(returns.columns)
+    results = np.zeros((3, n_portfolios))
+    weights_record = []
+    
+    for i in range(n_portfolios):
+        weights = np.random.random(n_assets)
+        weights /= np.sum(weights)
+        weights_record.append(weights)
+        
+        portfolio_return = np.sum(returns.mean() * weights) * 252
+        portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))
+        sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std if portfolio_std > 0 else 0
+        
+        results[0, i] = portfolio_return
+        results[1, i] = portfolio_std
+        results[2, i] = sharpe_ratio
+    
+    # Encontrar cartera con mejor ratio de Sharpe
+    max_sharpe_idx = np.argmax(results[2])
+    max_sharpe_return = results[0, max_sharpe_idx]
+    max_sharpe_vol = results[1, max_sharpe_idx]
+    
+    # Encontrar cartera con mínima volatilidad
+    min_vol_idx = np.argmin(results[1])
+    min_vol_return = results[0, min_vol_idx]
+    min_vol_vol = results[1, min_vol_idx]
+    
+    # Crear figura
+    fig = go.Figure()
+    
+    # Agregar carteras aleatorias
+    fig.add_trace(go.Scatter(
+        x=results[1, :],
+        y=results[0, :],
+        mode='markers',
+        marker=dict(
+            color=results[2, :],
+            colorscale='Viridis',
+            showscale=True,
+            colorbar=dict(title='Ratio de Sharpe')
+        ),
+        name='Carteras Aleatorias',
+        hovertemplate='<b>Volatilidad:</b> %{x:.2%}<br>' +
+                      '<b>Retorno:</b> %{y:.2%}<br>' +
+                      '<b>Sharpe:</b> %{marker.color:.2f}<extra></extra>'
+    ))
+    
+    # Agregar activos individuales
+    fig.add_trace(go.Scatter(
+        x=asset_volatility,
+        y=asset_returns,
+        mode='markers+text',
+        marker=dict(color='red', size=10, symbol='diamond'),
+        text=returns.columns,
+        textposition='top center',
+        name='Activos Individuales',
+        hovertemplate='<b>%{text}</b><br>' +
+                      'Volatilidad: %{x:.2%}<br>' +
+                      'Retorno: %{y:.2%}<extra></extra>'
+    ))
+    
+    # Agregar cartera de máxima relación de Sharpe
+    fig.add_trace(go.Scatter(
+        x=[max_sharpe_vol],
+        y=[max_sharpe_return],
+        mode='markers',
+        marker=dict(color='gold', size=15, symbol='star'),
+        name='Máximo Ratio de Sharpe',
+        hovertemplate='<b>Máximo Ratio de Sharpe</b><br>' +
+                      'Volatilidad: %{x:.2%}<br>' +
+                      'Retorno: %{y:.2%}<br>' +
+                      'Sharpe: ' + f'{results[2, max_sharpe_idx]:.2f}<extra></extra>'
+    ))
+    
+    # Agregar cartera de mínima volatilidad
+    fig.add_trace(go.Scatter(
+        x=[min_vol_vol],
+        y=[min_vol_return],
+        mode='markers',
+        marker=dict(color='green', size=15, symbol='x'),
+        name='Mínima Volatilidad',
+        hovertemplate='<b>Mínima Volatilidad</b><br>' +
+                      'Volatilidad: %{x:.2%}<br>' +
+                      'Retorno: %{y:.2%}<br>' +
+                      'Sharpe: ' + f'{results[2, min_vol_idx]:.2f}<extra></extra>'
+    ))
+    
+    # Actualizar diseño
+    fig.update_layout(
+        title='Frontera Eficiente y Carteras Aleatorias',
+        xaxis_title='Volatilidad Anualizada',
+        yaxis_title='Retorno Anualizado',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        hovermode='closest',
+        template='plotly_dark'
+    )
+    
+    return fig
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
+    
+    # Sección de optimización aleatoria
+    st.subheader("Optimización Aleatoria de Portafolio")
+    
+    # Verificar si ya hay un portfolio manager en la sesión
+    if 'portfolio_manager' not in st.session_state:
+        st.warning("Por favor, cargue los datos históricos primero.")
+        return
+        
+        
+    pm = st.session_state['portfolio_manager']
+    
+    # Parámetros de la optimización
+    col1, col2 = st.columns(2)
+    with col1:
+        n_portfolios = st.number_input("Número de carteras a generar", 
+                                     min_value=1000, max_value=50000, 
+                                     value=10000, step=1000)
+    with col2:
+        risk_free_rate = st.number_input("Tasa libre de riesgo (%)", 
+                                        min_value=0.0, max_value=50.0, 
+                                        value=40.0, step=0.1) / 100.0
+    
+    if st.button("Ejecutar Optimización Aleatoria"):
+        with st.spinner("Generando carteras aleatorias..."):
+            # Generar carteras aleatorias
+            results = pm.generate_random_portfolios(
+                n_portfolios=n_portfolios,
+                risk_free_rate=risk_free_rate
+            )
+            
+            if results is None:
+                st.error("No se pudieron generar las carteras. Verifique los datos de entrada.")
+                return
+            
+            # Mostrar resultados
+            st.success("Optimización completada exitosamente!")
+            
+            # Mostrar métricas de la cartera óptima
+            st.subheader("Cartera Óptima")
+            
+            # Crear DataFrame con los pesos óptimos
+            optimal_weights = pd.DataFrame({
+                'Activo': list(pm.optimal_weights.keys()),
+                'Peso (%)': [w * 100 for w in pm.optimal_weights.values()]
+            }).sort_values('Peso (%)', ascending=False)
+            
+            # Mostrar tabla de pesos
+            st.dataframe(optimal_weights, use_container_width=True)
+            
+            # Mostrar métricas
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Retorno Anual Esperado", f"{results['max_sharpe_return']*100:.2f}%")
+            with col2:
+                st.metric("Volatilidad Anual", f"{results['max_sharpe_vol']*100:.2f}%")
+            with col3:
+                st.metric("Ratio de Sharpe", f"{results['sharpe'].max():.2f}")
+            
+            # Mostrar gráfico de la frontera eficiente
+            st.subheader("Frontera Eficiente")
+            
+            # Calcular frontera eficiente
+            frontier_returns, frontier_volatility, _ = pm.get_efficient_frontier()
+            
+            # Crear figura con Plotly
+            fig = go.Figure()
+            
+            # Agregar carteras aleatorias
+            fig.add_trace(go.Scatter(
+                x=results['volatility'],
+                y=results['returns'],
+                mode='markers',
+                marker=dict(
+                    color=results['sharpe'],
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title='Ratio de Sharpe')
+                ),
+                name='Carteras Aleatorias',
+                hovertemplate='<b>Volatilidad:</b> %{x:.2%}<br>' +
+                              '<b>Retorno:</b> %{y:.2%}<br>' +
+                              '<b>Sharpe:</b> %{marker.color:.2f}<extra></extra>'
+            ))
+            
+            # Agregar frontera eficiente si está disponible
+            if frontier_returns is not None and frontier_volatility is not None:
+                fig.add_trace(go.Scatter(
+                    x=frontier_volatility,
+                    y=frontier_returns,
+                    mode='lines',
+                    line=dict(color='red', width=2, dash='dash'),
+                    name='Frontera Eficiente'
+                ))
+            
+            # Agregar cartera óptima
+            fig.add_trace(go.Scatter(
+                x=[results['max_sharpe_vol']],
+                y=[results['max_sharpe_return']],
+                mode='markers',
+                marker=dict(color='gold', size=15, symbol='star'),
+                name='Cartera Óptima',
+                hovertemplate='<b>Cartera Óptima</b><br>' +
+                              'Volatilidad: %{x:.2%}<br>' +
+                              'Retorno: %{y:.2%}<br>' +
+                              'Sharpe: ' + f"{results['sharpe'].max():.2f}<extra></extra>"
+            ))
+            
+            # Actualizar diseño
+            fig.update_layout(
+                title='Optimización de Portafolio - Frontera Eficiente',
+                xaxis_title='Volatilidad Anualizada',
+                yaxis_title='Retorno Anualizado',
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                hovermode='closest',
+                template='plotly_dark',
+                height=600
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar distribución de pesos
+            st.subheader("Distribución de la Cartera Óptima")
+            
+            # Crear gráfico de torta
+            fig_pie = go.Figure(go.Pie(
+                labels=list(pm.optimal_weights.keys()),
+                values=[v * 100 for v in pm.optimal_weights.values()],
+                textinfo='label+percent',
+                insidetextorientation='radial',
+                hole=0.4,
+                marker=dict(colors=px.colors.sequential.Viridis)
+            ))
+            
+            fig_pie.update_layout(
+                title='Distribución de Activos en la Cartera Óptima',
+                template='plotly_dark',
+                height=500
+            )
+            
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Mostrar análisis de riesgo
+            st.subheader("Análisis de Riesgo")
+            
+            # Calcular métricas de riesgo
+            portfolio_returns = (pm.returns * list(pm.optimal_weights.values())).sum(axis=1)
+            
+            # Calcular métricas
+            annual_return = portfolio_returns.mean() * 252
+            annual_volatility = portfolio_returns.std() * np.sqrt(252)
+            sharpe_ratio = (annual_return - risk_free_rate) / annual_volatility if annual_volatility > 0 else 0
+            
+            # Valor en Riesgo (VaR) al 95% de confianza
+            var_95 = np.percentile(portfolio_returns, 5) * 100
+            cvar_95 = portfolio_returns[portfolio_returns <= np.percentile(portfolio_returns, 5)].mean() * 100
+            
+            # Mostrar métricas en columnas
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("VaR 95% (1 día)", f"{var_95:.2f}%")
+            col2.metric("CVaR 95% (1 día)", f"{cvar_95:.2f}%")
+            col3.metric("Volatilidad Anual", f"{annual_volatility*100:.2f}%")
+            col4.metric("Ratio de Sharpe", f"{sharpe_ratio:.2f}")
+            
+            # Mostrar distribución de retornos
+            fig_hist = px.histogram(
+                portfolio_returns * 100,
+                nbins=50,
+                title='Distribución de Retornos Diarios de la Cartera',
+                labels={'value': 'Retorno Diario (%)'},
+                color_discrete_sequence=['#636EFA']
+            )
+            
+            # Agregar línea para el VaR
+            fig_hist.add_vline(x=var_95, line_dash='dash', line_color='red', 
+                              annotation_text=f'VaR 95%: {var_95:.2f}%')
+            
+            fig_hist.update_layout(
+                template='plotly_dark',
+                showlegend=False,
+                height=400
+            )
+            
+            st.plotly_chart(fig_hist, use_container_width=True)
+    
+    # Sección de optimización tradicional
+    st.subheader("Optimización Tradicional")
     
     # Obtener portafolio actual
     with st.spinner("Obteniendo portafolio..."):
