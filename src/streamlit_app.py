@@ -2652,6 +2652,117 @@ class manager:
         return output_obj
 
 
+def mostrar_resumen_portafolio(portafolio, capital_total):
+    """Muestra un resumen del portafolio actual.
+    
+    Args:
+        portafolio: Diccionario con la información del portafolio
+        capital_total: Capital total del portafolio
+    """
+    try:
+        if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
+            st.warning("El portafolio está vacío o no se pudo cargar")
+            return
+        
+        st.markdown("### 📊 Resumen del Portafolio")
+        
+        # Calcular métricas básicas
+        activos = portafolio['activos']
+        total_invertido = sum(a.get('valorizado', 0) for a in activos)
+        rendimiento_total = sum(a.get('ganancia', 0) for a in activos)
+        rendimiento_porcentual = (rendimiento_total / total_invertido * 100) if total_invertido > 0 else 0
+        
+        # Mostrar métricas principales
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Capital Total", f"${capital_total:,.2f}")
+        with col2:
+            st.metric("Invertido", f"${total_invertido:,.2f}")
+        with col3:
+            st.metric("Rendimiento Total", 
+                     f"${rendimiento_total:,.2f}", 
+                     f"{rendimiento_porcentual:.2f}%")
+        
+        # Mostrar tabla de activos
+        st.markdown("### 📋 Activos en Cartera")
+        
+        # Preparar datos para la tabla
+        datos_activos = []
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            datos_activos.append({
+                'Símbolo': titulo.get('simbolo', 'N/A'),
+                'Tipo': titulo.get('tipo', 'N/A'),
+                'Mercado': titulo.get('mercado', 'N/A'),
+                'Cantidad': activo.get('cantidad', 0),
+                'Precio Promedio': activo.get('precioPromedio', 0),
+                'Precio Actual': activo.get('precioActual', 0),
+                'Inversión Total': activo.get('valorizado', 0),
+                'Ganancia $': activo.get('ganancia', 0),
+                'Ganancia %': activo.get('gananciaPorcentual', 0)
+            })
+        
+        # Mostrar tabla con formato
+        if datos_activos:
+            df_activos = pd.DataFrame(datos_activos)
+            
+            # Aplicar formato a las columnas numéricas
+            st.dataframe(
+                df_activos.style.format({
+                    'Precio Promedio': '${:,.2f}',
+                    'Precio Actual': '${:,.2f}',
+                    'Inversión Total': '${:,.2f}',
+                    'Ganancia $': '${:,.2f}',
+                    'Ganancia %': '{:.2f}%'
+                }),
+                use_container_width=True,
+                height=min(400, 50 + len(datos_activos) * 30)  # Altura dinámica
+            )
+            
+            # Mostrar distribución por tipo de activo
+            st.markdown("### 📊 Distribución por Tipo de Activo")
+            
+            # Calcular totales por tipo
+            distribucion = df_activos.groupby('Tipo')['Inversión Total'].sum().reset_index()
+            
+            if not distribucion.empty:
+                # Crear gráfico de torta
+                import plotly.express as px
+                
+                fig = px.pie(
+                    distribucion,
+                    values='Inversión Total',
+                    names='Tipo',
+                    title='Distribución del Portafolio por Tipo de Activo',
+                    hover_data=['Inversión Total'],
+                    labels={'Inversión Total': 'Inversión (USD)'}
+                )
+                
+                # Mostrar gráfico
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar top 5 activos por rendimiento
+            st.markdown("### 🏆 Top 5 Activos por Rentabilidad")
+            
+            top_rentables = df_activos.nlargest(5, 'Ganancia %')
+            st.dataframe(
+                top_rentables[['Símbolo', 'Tipo', 'Ganancia %', 'Ganancia $']]
+                .style.format({
+                    'Ganancia %': '{:.2f}%',
+                    'Ganancia $': '${:,.2f}'
+                }),
+                use_container_width=True
+            )
+            
+        else:
+            st.info("No se encontraron activos para mostrar")
+            
+    except Exception as e:
+        st.error(f"Error al mostrar el resumen del portafolio: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
 def mostrar_resultados_optimizacion(portfolio_result, capital, portfolio_manager):
     """Muestra los resultados de la optimización del portafolio.
     
