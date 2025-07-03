@@ -2257,17 +2257,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         'retorno_esperado_anual': retorno_esperado_anual,
         'pl_esperado_min': pl_esperado_min,
         'pl_esperado_max': pl_esperado_max,
-        'probabilidades': probabilidades,
-        'riesgo_anual': volatilidad_portafolio  # Usamos la volatilidad como proxy de riesgo
+        'pl_total': pl_total,
+        'pl_porcentual_total': pl_porcentual_total
     }
 
-# --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
     datos_activos = []
     valor_total = 0
+    pl_total = 0
     
     for activo in activos:
         try:
@@ -2359,17 +2359,59 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     except (ValueError, TypeError):
                         pass
             
+            # Obtener P&L directamente de la API
+            pl_activo = activo.get('gananciaDinero', 0)
+            pl_porcentual = activo.get('gananciaPorcentaje', 0)
+            
+            # Si no se obtuvo P&L de la API, calcularlo como la diferencia entre valor actual y monto invertido
+            if pl_activo == 0 and 'montoInvertido' in activo and activo['montoInvertido'] is not None:
+                try:
+                    monto_invertido = float(activo['montoInvertido'])
+                    if monto_invertido > 0:
+                        pl_activo = valuacion - monto_invertido
+                        pl_porcentual = (pl_activo / monto_invertido) * 100 if monto_invertido != 0 else 0
+                except (ValueError, TypeError):
+                    pass
+            
             datos_activos.append({
                 'Símbolo': simbolo,
                 'Descripción': descripcion,
                 'Tipo': tipo,
                 'Cantidad': cantidad,
                 'Valuación': valuacion,
+                'P&L': pl_activo,
+                'P&L %': pl_porcentual
             })
             
             valor_total += valuacion
+            pl_total += pl_activo
         except Exception as e:
             continue
+    
+    # Obtener saldos en moneda extranjera
+    try:
+        estado_cuenta = obtener_estado_cuenta(token_portador)
+        if estado_cuenta and 'cuentas' in estado_cuenta:
+            for cuenta in estado_cuenta['cuentas']:
+                if cuenta.get('moneda') == 'USD' and 'saldo' in cuenta:
+                    saldo_usd = float(cuenta['saldo'])
+                    # Obtener cotización MEP o CCL para convertir a ARS
+                    cotizacion_mep = obtener_cotizacion_mep(token_portador, 'AL30', '48hs', '48hs')
+                    if cotizacion_mep and 'precio' in cotizacion_mep:
+                        valor_usd_ars = saldo_usd * float(cotizacion_mep['precio'])
+                        valor_total += valor_usd_ars
+                        # Agregar el saldo USD como un activo más
+                        datos_activos.append({
+                            'Símbolo': 'USD',
+                            'Descripción': 'Efectivo en Dólares',
+                            'Tipo': 'Efectivo',
+                            'Cantidad': saldo_usd,
+                            'Valuación': valor_usd_ars,
+                            'P&L': 0,  # No hay P&L para efectivo
+                            'P&L %': 0
+                        })
+    except Exception as e:
+        st.warning(f"No se pudo obtener el saldo en dólares: {str(e)}")
     
     if datos_activos:
         df_activos = pd.DataFrame(datos_activos)
@@ -2377,12 +2419,25 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
+        # Calcular P&L total como porcentaje del portafolio
+        pl_porcentual_total = (pl_total / (valor_total - pl_total)) * 100 if (valor_total - pl_total) > 0 else 0
+        
         # Información General
         cols = st.columns(4)
         cols[0].metric("Total de Activos", len(datos_activos))
         cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
         cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        
+        # Métricas de P&L
+        cols = st.columns(2)
+        cols[0].metric("Ganancia/Pérdida Total", 
+                      f"${pl_total:+,.2f}", 
+                      f"{pl_porcentual_total:+.2f}%",
+                      delta_color="normal")
+        
+        # Pasar el P&L total a las métricas
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
         if metricas:
             # Métricas de Riesgo
@@ -2480,14 +2535,24 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Tabla de activos
         st.subheader("📋 Detalle de Activos")
-        df_display = df_activos.copy()
-        df_display['Valuación'] = df_display['Valuación'].apply(
-            lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-        )
-        df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
-        df_display = df_display.sort_values('Peso (%)', ascending=False)
-        
-        st.dataframe(df_display, use_container_width=True, height=400)
+        if len(datos_activos) > 0:
+            df_activos = pd.DataFrame(datos_activos)
+            # Formatear columnas numéricas
+            df_activos['Valuación'] = df_activos['Valuación'].apply(lambda x: f"${x:,.2f}")
+            df_activos['P&L'] = df_activos['P&L'].apply(lambda x: f"${x:+,.2f}")
+            df_activos['P&L %'] = df_activos['P&L %'].apply(lambda x: f"{x:+.2f}%")
+            
+            # Ordenar columnas
+            df_activos = df_activos[['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación', 'P&L', 'P&L %']]
+            # Ordenar por valuación descendente
+            df_display = df_display.sort_values('Valuación', ascending=False)
+            
+            # Mostrar tabla
+            st.dataframe(
+                df_display[['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación', 'P&L', 'P&L %', 'Peso (%)']],
+                use_container_width=True,
+                height=400
+            )
         
         # Recomendaciones
         st.subheader("💡 Recomendaciones")
