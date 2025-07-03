@@ -4786,194 +4786,242 @@ def mostrar_analisis_portafolio():
                             st.error(f"Error en el análisis de volatilidad: {str(e)}")
                             st.exception(e)
 
-def main():
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+def inicializar_session_state():
+    """Inicializa las variables de sesión necesarias."""
+    session_vars = {
+        'token_acceso': None,
+        'refresh_token': None,
+        'clientes': [],
+        'cliente_seleccionado': None,
+        'fecha_desde': date.today() - timedelta(days=365),
+        'fecha_hasta': date.today(),
+        'pagina_actual': '🏠 Inicio'
+    }
     
-    # Inicializar session state
-    if 'token_acceso' not in st.session_state:
-        st.session_state.token_acceso = None
-    if 'refresh_token' not in st.session_state:
-        st.session_state.refresh_token = None
-    if 'clientes' not in st.session_state:
-        st.session_state.clientes = []
-    if 'cliente_seleccionado' not in st.session_state:
-        st.session_state.cliente_seleccionado = None
-    if 'fecha_desde' not in st.session_state:
-        st.session_state.fecha_desde = date.today() - timedelta(days=365)
-    if 'fecha_hasta' not in st.session_state:
-        st.session_state.fecha_hasta = date.today()
-    
-    # Barra lateral - Autenticación
+    for key, default_value in session_vars.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
+
+def mostrar_panel_autenticacion():
+    """Muestra el panel de autenticación en la barra lateral."""
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
         
-        if st.session_state.token_acceso is None:
-            with st.form("login_form"):
-                st.subheader("Ingreso a IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-                
-                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
-        else:
-            st.success("✅ Conectado a IOL")
-            st.divider()
+        with st.form("login_form"):
+            st.subheader("Ingreso a IOL")
+            usuario = st.text_input("Usuario", placeholder="su_usuario", key="input_usuario")
+            contraseña = st.text_input("Contraseña", type="password", 
+                                     placeholder="su_contraseña", key="input_contrasena")
             
-            st.subheader("Configuración de Fechas")
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_desde = st.date_input(
-                    "Desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
-                )
-            with col2:
-                fecha_hasta = st.date_input(
-                    "Hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
-            
-            st.session_state.fecha_desde = fecha_desde
-            st.session_state.fecha_hasta = fecha_hasta
-            
-            # Obtener lista de clientes
-            if not st.session_state.clientes and st.session_state.token_acceso:
-                with st.spinner("Cargando clientes..."):
-                    try:
-                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        if clientes:
-                            st.session_state.clientes = clientes
+            if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
+                if usuario and contraseña:
+                    with st.spinner("Conectando..."):
+                        token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                        if token_acceso:
+                            st.session_state.token_acceso = token_acceso
+                            st.session_state.refresh_token = refresh_token
+                            st.success("✅ Conexión exitosa!")
+                            st.rerun()
                         else:
-                            st.warning("No se encontraron clientes")
-                    except Exception as e:
-                        st.error(f"Error al cargar clientes: {str(e)}")
-            
-            clientes = st.session_state.clientes
-            
-            if clientes:
-                st.subheader("Selección de Cliente")
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed",
-                    key="sidebar_cliente_selector"
-                )
-                
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
-                
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
-                    with st.spinner("Actualizando..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista actualizada")
-                        st.rerun()
-            else:
-                st.warning("No se encontraron clientes")
+                            st.error("❌ Error en la autenticación")
+                else:
+                    st.warning("⚠️ Complete todos los campos")
 
-    # Contenido principal
-    try:
-        if st.session_state.token_acceso:
-            st.sidebar.title("Menú Principal")
-            opcion = st.sidebar.radio(
-                "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
-                index=0,
-                key="main_navigation_radio"
+def mostrar_configuracion_usuario():
+    """Muestra la configuración del usuario una vez autenticado."""
+    with st.sidebar:
+        st.success("✅ Conectado a IOL")
+        st.divider()
+        
+        # Configuración de fechas
+        st.subheader("📅 Rango de Análisis")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.fecha_desde = st.date_input(
+                "Desde:",
+                value=st.session_state.fecha_desde,
+                max_value=date.today(),
+                key="fecha_desde_input"
             )
-
-            # Mostrar la página seleccionada
-            if opcion == "🏠 Inicio":
-                st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "📊 Análisis de Portafolio":
-                if st.session_state.cliente_seleccionado:
-                    mostrar_analisis_portafolio()
-                else:
-                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
-                else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
-                mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
-        else:
-            st.info("👆 Ingrese sus credenciales para comenzar")
+        with col2:
+            st.session_state.fecha_hasta = st.date_input(
+                "Hasta:",
+                value=st.session_state.fecha_hasta,
+                max_value=date.today(),
+                key="fecha_hasta_input"
+            )
+        
+        # Cargar lista de clientes si no está cargada
+        if not st.session_state.clientes and st.session_state.token_acceso:
+            with st.spinner("Cargando clientes..."):
+                try:
+                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    if clientes:
+                        st.session_state.clientes = clientes
+                except Exception as e:
+                    st.error(f"Error al cargar clientes: {str(e)}")
+        
+        # Selector de cliente
+        if st.session_state.clientes:
+            st.subheader("👤 Cliente")
+            cliente_ids = [c.get('numeroCliente', c.get('id')) for c in st.session_state.clientes]
+            cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) 
+                             for c in st.session_state.clientes]
             
-            # Panel de bienvenida
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
-                        border-radius: 15px; 
-                        padding: 40px; 
-                        color: white;
-                        text-align: center;
-                        margin: 30px 0;">
-                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
-                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
-                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis Completo</h3>
-                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
-                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>⚖️ Gestión de Riesgo</h3>
-                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-                    </div>
+            cliente_seleccionado = st.selectbox(
+                "Seleccione un cliente:",
+                options=cliente_ids,
+                format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
+                key="cliente_selector"
+            )
+            
+            st.session_state.cliente_seleccionado = next(
+                (c for c in st.session_state.clientes 
+                 if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                None
+            )
+            
+            if st.button("🔄 Actualizar lista de clientes", key="btn_actualizar_clientes"):
+                with st.spinner("Actualizando..."):
+                    st.session_state.clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    st.success("✅ Lista actualizada")
+                    st.rerun()
+        elif st.session_state.token_acceso:
+            st.warning("No se encontraron clientes")
+
+def mostrar_menu_principal():
+    """Muestra el menú principal de navegación."""
+    with st.sidebar:
+        st.title("📋 Menú Principal")
+        menu_opciones = [
+            "🏠 Inicio",
+            "📊 Análisis de Portafolio",
+            "📈 Análisis Técnico",
+            "💰 Tasas de Caución",
+            "👨\u200d💼 Panel del Asesor",
+            "⚙️ Configuración"
+        ]
+        
+        st.session_state.pagina_actual = st.radio(
+            "Navegación:",
+            menu_opciones,
+            index=menu_opciones.index(st.session_state.pagina_actual) 
+            if st.session_state.pagina_actual in menu_opciones else 0,
+            key="menu_principal"
+        )
+
+def mostrar_pagina_principal():
+    """Muestra la página principal con información de bienvenida."""
+    if not st.session_state.token_acceso:
+        st.info("👆 Ingrese sus credenciales para comenzar")
+        
+        # Panel de bienvenida
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
+                    border-radius: 15px; 
+                    padding: 40px; 
+                    color: white;
+                    text-align: center;
+                    margin: 30px 0;">
+            <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
+            <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
+            <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                    <h3>📊 Análisis Completo</h3>
+                    <p>Visualice todos sus activos en un solo lugar con detalle</p>
+                </div>
+                <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                    <h3>📈 Gráficos Interactivos</h3>
+                    <p>Comprenda su portafolio con visualizaciones avanzadas</p>
+                </div>
+                <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                    <h3>⚖️ Gestión de Riesgo</h3>
+                    <p>Identifique concentraciones y optimice su perfil de riesgo</p>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
-            
-            # Características
-            st.subheader("✨ Características Principales")
-            cols = st.columns(3)
-            with cols[0]:
-                st.markdown("""
-                **📊 Análisis Detallado**  
-                - Valuación completa de activos  
-                - Distribución por tipo de instrumento  
-                - Concentración del portafolio  
-                """)
-            with cols[1]:
-                st.markdown("""
-                **📈 Herramientas Profesionales**  
-                - Optimización de portafolio  
-                - Análisis técnico avanzado  
-                - Proyecciones de rendimiento  
-                """)
-            with cols[2]:
-                st.markdown("""
-                **💱 Datos de Mercado**  
-                - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
-                - Estado de cuenta consolidado  
-                """)
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Características
+        st.subheader("✨ Características Principales")
+        cols = st.columns(3)
+        with cols[0]:
+            st.markdown("""
+            **📊 Análisis Detallado**  
+            • Valuación completa de activos  
+            • Distribución por tipo de instrumento  
+            • Concentración del portafolio  
+            """)
+        with cols[1]:
+            st.markdown("""
+            **📈 Herramientas Profesionales**  
+            • Optimización de portafolio  
+            • Análisis técnico avanzado  
+            • Proyecciones de rendimiento  
+            """)
+        with cols[2]:
+            st.markdown("""
+            **💱 Datos de Mercado**  
+            • Cotizaciones MEP en tiempo real  
+            • Tasas de caución actualizadas  
+            • Estado de cuenta consolidado  
+            """)
+    else:
+        st.info("👆 Seleccione una opción del menú para comenzar")
+
+def mostrar_contenido_pagina():
+    """Muestra el contenido correspondiente a la página seleccionada."""
+    if not st.session_state.token_acceso:
+        return
+    
+    if st.session_state.pagina_actual == "🏠 Inicio":
+        mostrar_pagina_principal()
+    
+    elif st.session_state.pagina_actual == "📊 Análisis de Portafolio":
+        if st.session_state.cliente_seleccionado:
+            mostrar_analisis_portafolio()
+        else:
+            st.warning("⚠️ Seleccione un cliente para continuar")
+    
+    elif st.session_state.pagina_actual == "📈 Análisis Técnico":
+        if st.session_state.cliente_seleccionado:
+            mostrar_analisis_tecnico(st.session_state.token_acceso, 
+                                   st.session_state.cliente_seleccionado.get('id'))
+        else:
+            st.warning("⚠️ Seleccione un cliente para continuar")
+    
+    elif st.session_state.pagina_actual == "💰 Tasas de Caución":
+        mostrar_tasas_caucion(st.session_state.token_acceso)
+    
+    elif st.session_state.pagina_actual == "👨\u200d💼 Panel del Asesor":
+        mostrar_movimientos_asesor()
+    
+    elif st.session_state.pagina_actual == "⚙️ Configuración":
+        st.subheader("Configuración")
+        st.write("Opciones de configuración de la aplicación")
+
+def main():
+    """Función principal de la aplicación."""
+    # Configuración de la página
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    
+    # Inicializar estados de sesión
+    inicializar_session_state()
+    
+    # Mostrar autenticación o configuración de usuario
+    if not st.session_state.token_acceso:
+        mostrar_panel_autenticacion()
+    else:
+        mostrar_configuracion_usuario()
+        mostrar_menu_principal()
+    
+    # Mostrar contenido principal
+    try:
+        mostrar_contenido_pagina()
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.exception(e)  # Muestra el stack trace completo para depuración
 
 if __name__ == "__main__":
     main()
