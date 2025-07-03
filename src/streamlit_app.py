@@ -2932,6 +2932,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     # Inicializar variables
     activos_para_optimizacion = []
     activos_filtrados = []
+    modo_optimizacion = None
+    capital_inicial = 100000.0
+    frecuencia_datos = 'Diario'
+    tipos_disponibles = []
     
     # Configuración de columnas
     col1, col2 = st.columns(2)
@@ -3144,39 +3148,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         else:
             activos_filtrados = activos_para_optimizacion
 
-# Mostrar resumen de activos seleccionados
-if 'activos_filtrados' in locals() and activos_filtrados:
-    st.success(f"✅ {len(activos_filtrados)} activos seleccionados para optimización")
-    
-    # Mostrar tabla con los activos seleccionados
-    df_activos = pd.DataFrame([{
-        'Símbolo': f"{a['simbolo']}{'.BA' if 'frecuencia_datos' in locals() and frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else ''}",
-        'Tipo': a.get('tipo', 'N/A'),
-        'Mercado': a.get('mercado', 'N/A'),
-        'Cantidad': a.get('cantidad', 'N/A') if 'modo_optimizacion' in locals() and modo_optimizacion == 'Rebalanceo' else 'N/A',
-        'Precio Actual': f"${a.get('precio_actual', 0):.2f}" if a.get('precio_actual') else 'N/A'
-    } for a in activos_filtrados])
-    
-    st.dataframe(df_activos, use_container_width=True, height=min(400, 50 + len(activos_filtrados) * 30))
-
-# Obtener fechas del session state
-fecha_desde = st.session_state.get('fecha_desde', datetime.now() - timedelta(days=365))
-fecha_hasta = st.session_state.get('fecha_hasta', datetime.now())
-
-# Mostrar información de análisis
-if 'activos_filtrados' in locals():
-    st.info(f"Analizando {len(activos_filtrados)} activos desde {fecha_desde.strftime('%Y-%m-%d')} hasta {fecha_hasta.strftime('%Y-%m-%d')}")
-
-# Botones de acción
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary", key=f"ejecutar_opt_{id_cliente}")
-with col2:
-    ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", key=f"ejecutar_frontier_{id_cliente}")
-with col3:
-    mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos", key=f"mostrar_cauciones_{id_cliente}")
-with col4:
-    comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.", key=f"comparar_opt_{id_cliente}")
+    # Botones de acción
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary", key=f"ejecutar_opt_{id_cliente}")
+    with col2:
+        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", key=f"ejecutar_frontier_{id_cliente}")
+    with col3:
+        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos", key=f"mostrar_cauciones_{id_cliente}")
+    with col4:
+        comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.", key=f"comparar_opt_{id_cliente}")
 
 if ejecutar_optimizacion:
     with st.spinner("Ejecutando optimización..."):
