@@ -2663,6 +2663,65 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
+def mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager):
+    st.markdown("### 📊 Resultados de Optimización")
+    
+    # Mostrar pesos optimizados
+    st.markdown("#### 📊 Pesos Optimizados")
+    if portfolio_result.dataframe_allocation is not None:
+        weights_df = portfolio_result.dataframe_allocation.copy()
+        weights_df['Peso (%)'] = weights_df['weights'] * 100
+        weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+        st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+    
+    # Mostrar métricas del portafolio
+    st.markdown("#### 📈 Métricas del Portafolio")
+    metricas = portfolio_result.get_metrics_dict()
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+        st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+    with col2:
+        st.metric("Skewness", f"{metricas['Skewness']:.4f}")
+        st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+    with col3:
+        st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+        normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
+        st.metric("Normalidad", normalidad)
+    
+    # Mostrar histograma de retornos
+    st.markdown("#### 📊 Histograma de Retornos")
+    fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Mostrar frontera eficiente si se solicitó
+    if show_frontier:
+        st.markdown("#### 📈 Frontera Eficiente")
+        try:
+            frontier, valid_returns, volatilities = manager.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=volatilities, y=valid_returns, mode='lines+markers', name='Frontera Eficiente',
+                line=dict(color='royalblue', width=2)
+            ))
+            fig.update_layout(
+                title="Frontera Eficiente",
+                xaxis_title="Volatilidad Anual",
+                yaxis_title="Retorno Anual",
+                template="plotly_white"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning(f"No se pudo calcular la frontera eficiente: {e}")
+    
+    # Simulación de ejecución
+    st.markdown("---")
+    st.subheader("Simulación de Ejecución Algorítmica")
+    volumen_total = int(capital_inicial // portfolio_result.price if hasattr(portfolio_result, 'price') and portfolio_result.price > 0 else capital_inicial // 100)
+    fig_exec, total_exec, avg_price = simular_ejecucion(volumen_total, scheduling, order_type)
+    st.plotly_chart(fig_exec, use_container_width=True)
+    st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
@@ -2689,6 +2748,67 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             activos_para_optimizacion.append({'simbolo': simbolo,
                                               'mercado': mercado,
                                               'tipo': tipo})
+    
+    # Configuración inicial
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        modo_optimizacion = st.selectbox(
+            "Modo de Optimización:",
+            options=['Rebalanceo', 'Optimización desde Cero'],
+            format_func=lambda x: {
+                'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
+                'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
+            }[x]
+        )
+    
+    with col2:
+        capital_inicial = st.number_input(
+            "Capital Inicial (ARS):",
+            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
+            help="Monto inicial para la optimización. En modo Rebalanceo, se usa el capital actual del portafolio."
+        )
+    
+    # Configuración específica por modo
+    if modo_optimizacion == 'Optimización desde Cero':
+        col3, col4 = st.columns(2)
+        with col3:
+            frecuencia_datos = st.selectbox(
+                "Frecuencia de Datos:",
+                options=['Diario', 'Intradía'],
+                format_func=lambda x: {
+                    'Diario': 'Datos Diarios (IOL)',
+                    'Intradía': 'Datos Intradía (yfinance)'
+                }[x]
+            )
+        
+        with col4:
+            if frecuencia_datos == 'Intradía':
+                st.info("Para acciones y cedears, se agregará automáticamente el sufijo .BA")
+                tipos_disponibles = ['Acciones', 'Cedears']
+            else:
+                tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+            
+            tipo_seleccionado = st.selectbox(
+                "Filtrar por tipo de activo:",
+                options=['Todos'] + tipos_disponibles,
+                key="opt_tipo_activo",
+                format_func=lambda x: "Todos" if x == 'Todos' else x
+            )
+            
+            if tipo_seleccionado != 'Todos':
+                activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+            else:
+                activos_filtrados = activos_para_optimizacion
+    else:  # Rebalanceo
+        activos_filtrados = activos_para_optimizacion
+        frecuencia_datos = 'Diario'
+
+    # Resto de la configuración común
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
+    
+    st.info(f"Analizando {len(activos_filtrados)} activos desde {fecha_desde} hasta {fecha_hasta}")
     
     if not activos_para_optimizacion:
         st.warning("No se encontraron activos con información de mercado válida para optimizar.")
@@ -2865,204 +2985,84 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
-                # --- COMPARACIÓN ACTUAL VS ALEATORIA ---
-                if 'comparar_opt' in locals() and comparar_opt:
-                    # 1. Portafolio actual
-                    universo_actual = activos_para_optimizacion
-                    capital_actual = capital_inicial if capital_inicial else 100000.0
-                    manager_actual = PortfolioManager(universo_actual, token_acceso, fecha_desde, fecha_hasta, capital=capital_actual)
-                    portfolio_result_actual = None
-                    if manager_actual.load_data():
-                        portfolio_result_actual = manager_actual.compute_portfolio(strategy=metodo, target_return=target_return) if metodo == 'markowitz-target' else manager_actual.compute_portfolio(strategy=metodo)
-                    # 2. Portafolio aleatorio (misma cantidad de activos)
-                    st.info("🔀 Selección aleatoria de activos para benchmarking")
-                    cantidad_activos = len(universo_actual)
-                    seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
-                        universo_actual, token_acceso, capital_actual
+                # --- Configuración común ---
+                if modo_optimizacion == 'Rebalanceo':
+                    # Usar datos diarios de IOL y el capital actual del portafolio
+                    activos_para_opt = activos_filtrados
+                    manager = PortfolioManager(
+                        activos_para_opt,
+                        token_acceso,
+                        fecha_desde,
+                        fecha_hasta,
+                        capital=capital_inicial
                     )
-                    if not seleccionados or len(seleccionados) < 2:
-                        st.warning("No se pudieron seleccionar activos aleatorios dentro del capital disponible para comparar.")
-                        return
-                    universo_aleatorio = [a for a in universo_actual if any(
-                        s['simbolo'] == a['simbolo'] and s['mercado'] == a['mercado'] for s in seleccionados
-                    )]
-                    manager_aleatorio = PortfolioManager(universo_aleatorio, token_acceso, fecha_desde, fecha_hasta, capital=capital_actual)
-                    portfolio_result_aleatorio = None
-                    if manager_aleatorio.load_data():
-                        portfolio_result_aleatorio = manager_aleatorio.compute_portfolio(strategy=metodo, target_return=target_return) if metodo == 'markowitz-target' else manager_aleatorio.compute_portfolio(strategy=metodo)
-                    # Mostrar resultados comparados
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("### Portafolio Actual")
-                        if portfolio_result_actual:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            if portfolio_result_actual.dataframe_allocation is not None:
-                                weights_df = portfolio_result_actual.dataframe_allocation.copy()
-                                weights_df['Peso (%)'] = weights_df['weights'] * 100
-                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            st.json(portfolio_result_actual.get_metrics_dict())
-                    with col2:
-                        st.markdown("### Portafolio Aleatorio")
-                        if portfolio_result_aleatorio:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            if portfolio_result_aleatorio.dataframe_allocation is not None:
-                                weights_df = portfolio_result_aleatorio.dataframe_allocation.copy()
-                                weights_df['Peso (%)'] = weights_df['weights'] * 100
-                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            st.json(portfolio_result_aleatorio.get_metrics_dict())
-                    # --- Comparación visual de retornos ---
-                    st.markdown("#### 📊 Comparación de Distribución de Retornos")
-                    import plotly.graph_objects as go
-                    fig_hist = go.Figure()
-                    if portfolio_result_actual is not None:
-                        fig_hist.add_trace(go.Histogram(
-                            x=portfolio_result_actual.returns,
-                            name="Actual",
-                            opacity=0.6,
-                            marker_color="#1f77b4"
-                        ))
-                    if portfolio_result_aleatorio is not None:
-                        fig_hist.add_trace(go.Histogram(
-                            x=portfolio_result_aleatorio.returns,
-                            name="Aleatorio",
-                            opacity=0.6,
-                            marker_color="#ff7f0e"
-                        ))
-                    fig_hist.update_layout(
-                        barmode="overlay",
-                        title="Distribución de Retornos: Actual vs Aleatorio",
-                        xaxis_title="Retorno Diario",
-                        yaxis_title="Frecuencia",
-                        template="plotly_white"
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
-                    # --- Comparación visual de frontera eficiente ---
-                    st.markdown("#### 📈 Comparación de Frontera Eficiente")
-                    try:
-                        fe_actual = None
-                        fe_aleatorio = None
-                        if manager_actual and manager_actual.load_data():
-                            fe_actual, ret_actual, vol_actual = manager_actual.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
-                        if manager_aleatorio and manager_aleatorio.load_data():
-                            fe_aleatorio, ret_aleatorio, vol_aleatorio = manager_aleatorio.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
-                        fig_fe = go.Figure()
-                        if fe_actual is not None:
-                            fig_fe.add_trace(go.Scatter(
-                                x=vol_actual, y=ret_actual, mode='lines', name='Frontera Actual', line=dict(color='#1f77b4')
-                            ))
-                        if fe_aleatorio is not None:
-                            fig_fe.add_trace(go.Scatter(
-                                x=vol_aleatorio, y=ret_aleatorio, mode='lines', name='Frontera Aleatoria', line=dict(color='#ff7f0e')
-                            ))
-                        fig_fe.update_layout(
-                            title="Frontera Eficiente: Actual vs Aleatorio",
-                            xaxis_title="Volatilidad Anual",
-                            yaxis_title="Retorno Anual",
-                            template="plotly_white"
+                    if manager.load_data():
+                        portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
+                        if portfolio_result:
+                            st.success("✅ Optimización de Rebalanceo completada")
+                            mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
+                else:  # Optimización desde Cero
+                    if frecuencia_datos == 'Intradía':
+                        # Usar yfinance para acciones y cedears
+                        import yfinance as yf
+                        activos_yf = []
+                        for activo in activos_filtrados:
+                            tipo = activo.get('tipo')
+                            if tipo in ['Acciones', 'Cedears']:
+                                simbolo = activo.get('simbolo')
+                                if simbolo:
+                                    # Agregar sufijo .BA para acciones y cedears
+                                    activos_yf.append({
+                                        'simbolo': f"{simbolo}.BA",
+                                        'tipo': tipo
+                                    })
+                        if activos_yf:
+                            # Obtener datos intradía
+                            data_yf = yf.download(
+                                [a['simbolo'] for a in activos_yf],
+                                start=fecha_desde,
+                                end=fecha_hasta,
+                                interval="1h"  # Intervalo intradía
+                            )
+                            if not data_yf.empty:
+                                # Convertir datos yfinance a formato compatible
+                                activos_formato = []
+                                for activo in activos_yf:
+                                    simbolo = activo['simbolo']
+                                    precios = data_yf['Close'][simbolo]
+                                    if not precios.empty:
+                                        activos_formato.append({
+                                            'simbolo': simbolo,
+                                            'precios': precios
+                                        })
+                                if activos_formato:
+                                    manager = PortfolioManager(
+                                        activos_formato,
+                                        token_acceso,
+                                        fecha_desde,
+                                        fecha_hasta,
+                                        capital=capital_inicial
+                                    )
+                                    if manager.load_data():
+                                        portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
+                                        if portfolio_result:
+                                            st.success("✅ Optimización Intradía completada")
+                                            mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
+                    else:  # Diario
+                        # Usar datos diarios de IOL
+                        manager = PortfolioManager(
+                            activos_filtrados,
+                            token_acceso,
+                            fecha_desde,
+                            fecha_hasta,
+                            capital=capital_inicial
                         )
-                        st.plotly_chart(fig_fe, use_container_width=True)
-                    except Exception as e:
-                        st.warning(f"No se pudo calcular la frontera eficiente comparada: {e}")
-                    st.info("Comparación completada. Puedes analizar cuál estrategia resulta superior en tu contexto.")
-                    return
-                # --- Selección de universo de activos (modo tradicional) ---
-                if metodo_seleccion == 'aleatoria':
-                    st.info("🔀 Selección aleatoria de activos respetando el capital inicial")
-                    if capital_inicial is None:
-                        st.warning("Debe ingresar el capital inicial para la selección aleatoria.")
-                        return
-                    seleccionados, total_invertido = seleccion_aleatoria_activos_con_capital(
-                        activos_filtrados, token_acceso, capital_inicial
-                    )
-                    if not seleccionados:
-                        st.warning("No se pudieron seleccionar activos aleatorios dentro del capital disponible.")
-                        return
-                    else:
-                        st.success(f"✅ Selección aleatoria completada. Total invertido: {total_invertido:.2f} ARS")
-                        df_sel = pd.DataFrame(seleccionados)
-                        df_sel['Peso (%)'] = (df_sel['precio'] / total_invertido) * 100
-                        st.markdown("#### Activos seleccionados aleatoriamente:")
-                        st.dataframe(df_sel[['simbolo', 'mercado', 'precio', 'Peso (%)']], use_container_width=True)
-                        # Solo optimizar sobre los activos seleccionados aleatoriamente (usando símbolo y mercado)
-                        universo_para_opt = [a for a in activos_filtrados if any(
-                            s['simbolo'] == a['simbolo'] and s['mercado'] == a['mercado'] for s in seleccionados
-                        )]
-                        if not universo_para_opt:
-                            st.warning("No hay activos seleccionados aleatoriamente para optimizar.")
-                            return
-                else:
-                    universo_para_opt = activos_para_optimizacion
+                        if manager.load_data():
+                            portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
+                            if portfolio_result:
+                                st.success("✅ Optimización Diaria completada")
+                                mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
 
-                # --- Optimización sobre el universo seleccionado ---
-                if not universo_para_opt:
-                    st.warning("No hay activos suficientes para optimizar.")
-                    return
-                manager_inst = PortfolioManager(universo_para_opt, token_acceso, fecha_desde, fecha_hasta, capital=capital_inicial)
-                if manager_inst.load_data():
-                    # Elegir método y target_return según selección
-                    if metodo == 'markowitz-target':
-                        max_attempts = 10
-                        attempt = 0
-                        portfolio_result = None
-                        while attempt < max_attempts:
-                            result = manager_inst.compute_portfolio(strategy='markowitz', target_return=target_return)
-                            if result and abs(result.return_annual - target_return) < 0.001:
-                                portfolio_result = result
-                                break
-                            attempt += 1
-                        if not portfolio_result:
-                            st.warning(f"No se logró cumplir el retorno objetivo ({target_return:.2%}) tras {max_attempts} intentos. El resultado más cercano se muestra.")
-                            # Mostrar el mejor resultado aunque no cumpla exactamente
-                            portfolio_result = result
-                    else:
-                        portfolio_result = manager_inst.compute_portfolio(strategy=metodo)
-                    if portfolio_result:
-                        st.success("✅ Optimización completada")
-                        total_invertido = (portfolio_result.weights * capital_inicial).sum()
-                        if total_invertido > capital_inicial + 1e-6:
-                            st.warning(f"La suma de pesos ({total_invertido:.2f}) supera el capital inicial ({capital_inicial:.2f})")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown("#### 📊 Pesos Optimizados")
-                            if portfolio_result.dataframe_allocation is not None:
-                                weights_df = portfolio_result.dataframe_allocation.copy()
-                                weights_df['Peso (%)'] = weights_df['weights'] * 100
-                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
-                        with col2:
-                            st.markdown("#### 📈 Métricas del Portafolio")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                            st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                            st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                            st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                            normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                            st.metric("Normalidad", normalidad)
-                        # Histograma avanzado con Plotly
-                        st.markdown("#### 📊 Histograma de Retornos del Portafolio")
-                        fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
-                        st.plotly_chart(fig, use_container_width=True)
-
-                        # Mostrar frontera eficiente si el usuario lo solicita
-                        if show_frontier:
-                            st.markdown("#### 📈 Frontera Eficiente (Efficient Frontier)")
-                            try:
-                                frontier, valid_returns, volatilities = manager_inst.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
-                                fig_frontier = go.Figure()
-                                fig_frontier.add_trace(go.Scatter(
-                                    x=volatilities, y=valid_returns, mode='lines+markers', name='Frontera Eficiente',
-                                    line=dict(color='royalblue', width=2)
-                                ))
-                                fig_frontier.update_layout(
-                                    title="Frontera Eficiente",
-                                    xaxis_title="Volatilidad Anual",
-                                    yaxis_title="Retorno Anual",
-                                    template="plotly_dark"
-                                )
                                 st.plotly_chart(fig_frontier, use_container_width=True)
                             except Exception as e:
                                 st.warning(f"No se pudo calcular la frontera eficiente: {e}")
