@@ -3268,7 +3268,7 @@ def mostrar_analisis_portafolio():
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
+            mostrar_estado_cuenta(token_acceso, id_cliente)
         else:
             st.warning("No se pudo obtener el estado de cuenta")
     
