@@ -599,225 +599,97 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con la información de todas las cauciones/plazos o None en caso de error
     """
-    url = 'https://api.invertironline.com/api/v2/cauciones'
-    headers = obtener_encabezado_autorizacion(token_portador)
-    response = requests.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        data = response.json()
-        if data:
-            df = pd.DataFrame(data)
-            return df
-        else:
+    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
+    params = {
+        'cotizacionInstrumentoModel.instrumento': 'cauciones',
+        'cotizacionInstrumentoModel.pais': 'argentina'
+    }
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
+                df = pd.DataFrame(data['titulos'])
+                # Incluir TODOS los instrumentos y plazos reportados por la API
+                # Extraer el plazo en días (puede venir como '7 días', '14 días', etc)
+                if 'plazo' in df.columns:
+                    df['plazo_dias'] = df['plazo'].astype(str).str.extract(r'(\d+)').astype(float)
+                else:
+                    df['plazo_dias'] = np.nan
+                # Limpiar la tasa (convertir a float si es necesario)
+                if 'ultimoPrecio' in df.columns:
+                    df['tasa_limpia'] = pd.to_numeric(df['ultimoPrecio'], errors='coerce')
+                else:
+                    df['tasa_limpia'] = np.nan
+                # Si hay columna 'volumen', usarla como monto
+                if 'monto' not in df.columns and 'volumen' in df.columns:
+                    df['monto'] = df['volumen']
+                # Ordenar por plazo si está disponible
+                if 'plazo_dias' in df.columns:
+                    df = df.sort_values('plazo_dias')
+                # Seleccionar columnas útiles, pero mostrar todo lo que venga de la API
+                columnas_utiles = ['simbolo', 'descripcion', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda', 'volumen']
+                columnas_disponibles = [col for col in columnas_utiles if col in df.columns]
+                return df[columnas_disponibles]
+            st.warning("No se encontraron datos de tasas de caución en la respuesta")
             return None
-    else:
-        print(f"Error al obtener tasas de caución: {response.status_code}")
-        print(response.text)
-        return None
-
-
-def obtener_tickers_por_panel(token_portador, paneles, pais):
-    tickers_por_panel = {}
-    tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
-    for panel in paneles:
-        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
-        params = {
-            'cotizacionInstrumentoModel.instrumento': panel,
-            'cotizacionInstrumentoModel.pais': pais.lower()
-        }
-        encabezados = obtener_encabezado_autorizacion(token_portador)
-        respuesta = requests.get(url, headers=encabezados, params=params)
-        if respuesta.status_code == 200:
-            datos = respuesta.json()
-            tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
-            tickers_por_panel[panel] = tickers
-            panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
-            tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
+        elif response.status_code == 401:
+            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
+            return None
         else:
-            print(f'Error en la solicitud para {panel}: {respuesta.status_code}')
-            print(respuesta.text)
-    return tickers_por_panel, tickers_df
-
-
-def obtener_series_historicas_aleatorias_con_capital(
-    tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde,
-    fecha_hasta, ajustada, bearer_token, capital_ars
-):
-    """
-    Selecciona aleatoriamente activos por panel, pero solo descarga series históricas
-    de aquellos cuyo último precio permite comprar al menos 1 unidad con el capital disponible.
-    Si no alcanza, descarta los más caros y reintenta.
-    """
-    series_historicas = pd.DataFrame()
-    precios_ultimos = {}
-    seleccion_final = {}
-
-    for panel in paneles_seleccionados:
-        if panel in tickers_por_panel:
-            tickers = tickers_por_panel[panel]
-            random.shuffle(tickers)
-            seleccionados = []
-            for simbolo in tickers:
-                mercado = 'BCBA'
-                serie = obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token)
-                if serie and isinstance(serie, list) and len(serie) > 0:
-                    df = pd.DataFrame(serie)
-                    # Buscar columna de precio (puede variar según API, aquí se asume 'ultimoPrecio')
-                    col_precio = None
-                    for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
-                        if c in df.columns:
-                            col_precio = c
-                            break
-                    if col_precio is not None:
-                        precio_final = df[col_precio].dropna().iloc[-1]
-                        precios_ultimos[simbolo] = precio_final
-                        seleccionados.append((simbolo, df, precio_final))
-                if len(seleccionados) >= cantidad_activos:
-                    break
-            # Ordenar por precio y filtrar por capital
-            seleccionados.sort(key=lambda x: x[2])
-            seleccionables = []
-            capital_restante = capital_ars
-            for simbolo, df, precio in seleccionados:
-                if precio <= capital_restante:
-                    seleccionables.append((simbolo, df, precio))
-                    capital_restante -= precio
-            # Si no hay suficientes activos asequibles, tomar los que se pueda
-            if len(seleccionables) < 2:
-                print(f"No hay suficientes activos asequibles en el panel {panel} para el capital disponible.")
-            else:
-                for simbolo, df, precio in seleccionables:
-                    df['simbolo'] = simbolo
-                    df['panel'] = panel
-                    series_historicas = pd.concat([series_historicas, df], ignore_index=True)
-                seleccion_final[panel] = [s[0] for s in seleccionables]
-    return series_historicas, seleccion_final
-
-
-def calcular_valorizado_portafolio(series_historicas, seleccion_final):
-    """
-    Calcula la evolución del índice valorizado de cada portafolio (por panel).
-    Devuelve un diccionario: {panel: pd.Series(valor_portafolio)}
-    """
-    portafolios_val = {}
-    for panel, simbolos in seleccion_final.items():
-        if not simbolos:  # Si no hay símbolos, continuar
-            continue
-            
-        df_panel = series_historicas[series_historicas['panel'] == panel].copy()
-        if df_panel.empty:
-            continue
-            
-        # Buscar columna de fecha (puede variar según la API)
-        fecha_col = None
-        for col in ['fecha', 'date', 'fechaHora', 'fechaCotizacion', 'fechaOperacion']:
-            if col in df_panel.columns:
-                fecha_col = col
-                break
-                
-        if fecha_col is None:
-            print(f"No se encontró columna de fecha en los datos del panel {panel}")
-            continue
-            
-        # Buscar columna de precio
-        col_precio = None
-        for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
-            if c in df_panel.columns:
-                col_precio = c
-                break
-                
-        if col_precio is None:
-            print(f"No se encontró columna de precio en los datos del panel {panel}")
-            continue
-            
-        try:
-            # Convertir a datetime si no lo está
-            if not pd.api.types.is_datetime64_any_dtype(df_panel[fecha_col]):
-                df_panel[fecha_col] = pd.to_datetime(df_panel[fecha_col])
-                
-            # Pivotear para tener fechas como índice y columnas por símbolo
-            df_pivot = df_panel.pivot_table(
-                index=fecha_col, 
-                columns='simbolo', 
-                values=col_precio,
-                aggfunc='first'  # Tomar el primer valor si hay duplicados
-            )
-            
-            # Filtrar solo los símbolos que están en la selección final
-            df_pivot = df_pivot[df_pivot.columns.intersection(simbolos)]
-            
-            if df_pivot.empty:
-                print(f"No hay datos válidos para los símbolos del panel {panel}")
-                continue
-                
-            # Calcular valorizado: suma simple (pesos iguales)
-            portafolio_val = df_pivot.sum(axis=1).sort_index()
-            portafolios_val[panel] = portafolio_val
-            
-        except Exception as e:
-            print(f"Error al procesar el panel {panel}: {str(e)}")
-            print(f"Columnas disponibles: {df_panel.columns.tolist()}")
-            print(f"Primeras filas:\n{df_panel.head()}")
-            
-    return portafolios_val
-
-
-def calcular_rsi(series, period=14):
-    """Calcula el RSI de una serie de precios."""
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-
-def calcular_rvi(series, period=14):
-    """
-    Calcula el Relative Volatility Index (RVI) de una serie de precios.
-    El RVI es similar al RSI pero usa la desviación estándar de los cambios de precio.
-    """
-    delta = series.diff()
-    std = delta.rolling(window=period).std()
-    up = std.where(delta > 0, 0)
-    down = std.where(delta < 0, 0).abs()
-    up_mean = up.rolling(window=period).mean()
-    down_mean = down.rolling(window=period).mean()
-    rvi = 100 * up_mean / (up_mean + down_mean)
-    return rvi
+            error_msg = f"Error {response.status_code} al obtener tasas de caución"
+            try:
+                error_data = response.json()
+                error_msg += f": {error_data.get('message', 'Error desconocido')}"
+            except:
+                error_msg += f": {response.text}"
+            st.error(error_msg)
+            return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
+        return None
 
 
 def mostrar_tasas_caucion(token_portador):
     """
     Muestra las tasas de caución en una tabla y gráfico de curva de tasas
     """
-    tasas = obtener_tasas_caucion(token_portador)
-    if tasas is None:
-        st.error("No se pudieron obtener las tasas de caución")
-        return
+    st.subheader("📊 Tasas de Caución")
     
-    # Mostrar tabla de tasas
-    st.subheader("Tasas de Caución")
-    st.dataframe(tasas, use_container_width=True)
-    
-    # Verificar columnas requeridas
-    required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-    missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-    if missing_columns:
-        st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-        return
-    
-    # Mostrar tabla con las tasas
-    st.dataframe(
-        df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                     else ['simbolo', 'plazo', 'ultimoPrecio']]
-        .rename(columns={
-            'simbolo': 'Instrumento',
-            'plazo': 'Plazo',
-            'ultimoPrecio': 'Tasa',
-            'monto': 'Monto (en millones)'
-        }),
-        use_container_width=True,
+    try:
+        with st.spinner('Obteniendo tasas de caución...'):
+            df_cauciones = obtener_tasas_caucion(token_portador)
+            
+            # Verificar si se obtuvieron datos
+            if df_cauciones is None or df_cauciones.empty:
+                st.warning("No se encontraron datos de tasas de caución.")
+                return
+                
+            # Verificar columnas requeridas
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+            if missing_columns:
+                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+                return
+            
+            # Mostrar tabla con las tasas
+            st.dataframe(
+                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                             else ['simbolo', 'plazo', 'ultimoPrecio']]
+                .rename(columns={
+                    'simbolo': 'Instrumento',
+                    'plazo': 'Plazo',
+                    'ultimoPrecio': 'Tasa',
+                    'monto': 'Monto (en millones)'
+                }),
+                use_container_width=True,
                 height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
             )
             
@@ -4797,14 +4669,13 @@ def mostrar_analisis_portafolio():
     st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Optimización",
-        "📉 Análisis de Volatilidad",
-        "📊 Análisis por Paneles"
+        "📉 Análisis de Volatilidad"
     ])
 
     with tab1:
@@ -4832,119 +4703,6 @@ def mostrar_analisis_portafolio():
         
     with tab6:
         st.header("📊 Análisis de Volatilidad")
-
-    with tab7:
-        st.header("📊 Análisis por Paneles")
-        
-        # Obtener tickers por panel
-        paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
-        tickers_por_panel, tickers_df = obtener_tickers_por_panel(token_acceso, paneles, 'Argentina')
-        
-        if tickers_por_panel:
-            st.subheader("Paneles Disponibles")
-            
-            # Selección de paneles y cantidad de activos
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                paneles_seleccionados = st.multiselect(
-                    "Seleccione paneles para analizar:",
-                    options=paneles,
-                    default=['acciones', 'cedears']
-                )
-            with col2:
-                cantidad_activos = st.number_input(
-                    "Cantidad de activos por panel:",
-                    min_value=1,
-                    max_value=10,
-                    value=3,
-                    step=1
-                )
-            with col3:
-                capital_ars = st.number_input(
-                    "Capital disponible (ARS):",
-                    min_value=1000,
-                    max_value=1000000,
-                    value=50000,
-                    step=1000
-                )
-            
-            if st.button("🔍 Analizar Paneles", use_container_width=True):
-                with st.spinner("Realizando análisis..."):
-                    try:
-                        series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
-                            tickers_por_panel, paneles_seleccionados, cantidad_activos,
-                            st.session_state.fecha_desde.strftime('%Y-%m-%d'),
-                            st.session_state.fecha_hasta.strftime('%Y-%m-%d'),
-                            'SinAjustar',
-                            token_acceso,
-                            capital_ars
-                        )
-                        
-                        if not series_historicas.empty:
-                            st.subheader("Resultados del Análisis")
-                            
-                            # Mostrar DataFrame de tickers
-                            st.subheader("DataFrame de Tickers")
-                            st.dataframe(tickers_df, use_container_width=True)
-                            
-                            # Mostrar activos seleccionados
-                            st.subheader("Activos Seleccionados por Panel")
-                            for panel, simbolos in seleccion_final.items():
-                                st.write(f"**{panel.capitalize()}**: {', '.join(simbolos)}")
-                            
-                            # Mostrar series históricas
-                            st.subheader("Series Históricas")
-                            st.dataframe(series_historicas, use_container_width=True)
-                            
-                            # Mostrar gráficos por panel
-                            portafolios_val = calcular_valorizado_portafolio(series_historicas, seleccion_final)
-                            for panel, serie_val in portafolios_val.items():
-                                st.subheader(f"Evolución del Índice Valorizado - {panel}")
-                                fig = go.Figure()
-                                fig.add_trace(go.Scatter(x=serie_val.index, y=serie_val.values, name=f'Índice valorizado {panel}'))
-                                fig.update_layout(
-                                    title=f'Evolución del índice valorizado - {panel}',
-                                    xaxis_title='Fecha',
-                                    yaxis_title='Valor del portafolio',
-                                    template='plotly_dark'
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
-                                
-                                # Calcular y mostrar RSI
-                                rsi = calcular_rsi(serie_val)
-                                fig_rsi = go.Figure()
-                                fig_rsi.add_trace(go.Scatter(x=rsi.index, y=rsi.values, name='RSI'))
-                                fig_rsi.add_hline(y=70, line_dash="dash", line_color="red")
-                                fig_rsi.add_hline(y=30, line_dash="dash", line_color="green")
-                                fig_rsi.update_layout(
-                                    title=f'RSI del índice valorizado - {panel}',
-                                    xaxis_title='Fecha',
-                                    yaxis_title='RSI',
-                                    template='plotly_dark'
-                                )
-                                st.plotly_chart(fig_rsi, use_container_width=True)
-                                
-                                # Calcular y mostrar RVI
-                                rvi = calcular_rvi(serie_val)
-                                fig_rvi = go.Figure()
-                                fig_rvi.add_trace(go.Scatter(x=rvi.index, y=rvi.values, name='RVI'))
-                                fig_rvi.add_hline(y=80, line_dash="dash", line_color="#787B86")
-                                fig_rvi.add_hline(y=20, line_dash="dash", line_color="#787B86")
-                                fig_rvi.update_layout(
-                                    title=f'RVI del índice valorizado - {panel}',
-                                    xaxis_title='Fecha',
-                                    yaxis_title='RVI',
-                                    template='plotly_dark'
-                                )
-                                st.plotly_chart(fig_rvi, use_container_width=True)
-                        else:
-                            st.warning("No se encontraron series históricas válidas para el análisis")
-                            
-                    except Exception as e:
-                        st.error(f"Error en el análisis: {str(e)}")
-                        st.exception(e)
-        else:
-            st.error("No se pudieron obtener los tickers por panel")
         
         # Obtener datos históricos
         portafolio = obtener_portafolio(token_acceso, id_cliente)
