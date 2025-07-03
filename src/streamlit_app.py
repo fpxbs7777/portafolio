@@ -2819,16 +2819,29 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipos_disponibles = ['Acciones', 'Cedears']
             activos_para_optimizacion = [a for a in activos_para_optimizacion 
                                        if a.get('tipo') in tipos_disponibles]
-        else:
-            tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion 
-                                          if a.get('tipo')]))
-        
-        # Selector de tipo de activo
-        if tipos_disponibles:
+            
+            # Para datos intradía, mostrar solo los tipos disponibles
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{frecuencia_datos}",
+                format_func=lambda x: "Todos" if x == 'Todos' else x
+            )
+            
+            if tipo_seleccionado != 'Todos':
+                activos_filtrados = [a for a in activos_para_optimizacion 
+                                   if a.get('tipo') == tipo_seleccionado]
+            else:
+                activos_filtrados = activos_para_optimizacion
+        else:
+            # Para datos diarios IOL, mostrar todos los tipos disponibles
+            tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion 
+                                          if a.get('tipo')]))
+            
+            tipo_seleccionado = st.selectbox(
+                "Filtrar por tipo de activo:",
+                options=['Todos'] + tipos_disponibles,
+                key=f"opt_tipo_activo_{frecuencia_datos}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
