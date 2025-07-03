@@ -3127,6 +3127,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             width="100%",
         )
     except ImportError:
+        st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
+        
+    # Si hay tipos disponibles, mostrar selector de tipo de activo
+    if 'tipos_disponibles' in locals() and tipos_disponibles:
         tipo_seleccionado = st.selectbox(
             "Filtrar por tipo de activo:",
             options=['Todos'] + tipos_disponibles,
@@ -3141,80 +3145,27 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             activos_filtrados = activos_para_optimizacion
 
 # Mostrar resumen de activos seleccionados
-if activos_filtrados:
+if 'activos_filtrados' in locals() and activos_filtrados:
     st.success(f"✅ {len(activos_filtrados)} activos seleccionados para optimización")
     
     # Mostrar tabla con los activos seleccionados
     df_activos = pd.DataFrame([{
-        'Símbolo': f"{a['simbolo']}{'.BA' if frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else ''}",
+        'Símbolo': f"{a['simbolo']}{'.BA' if 'frecuencia_datos' in locals() and frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else ''}",
         'Tipo': a.get('tipo', 'N/A'),
         'Mercado': a.get('mercado', 'N/A'),
-        'Cantidad': a.get('cantidad', 'N/A') if modo_optimizacion == 'Rebalanceo' else 'N/A',
+        'Cantidad': a.get('cantidad', 'N/A') if 'modo_optimizacion' in locals() and modo_optimizacion == 'Rebalanceo' else 'N/A',
         'Precio Actual': f"${a.get('precio_actual', 0):.2f}" if a.get('precio_actual') else 'N/A'
     } for a in activos_filtrados])
     
     st.dataframe(df_activos, use_container_width=True, height=min(400, 50 + len(activos_filtrados) * 30))
 
-# Resto de la configuración común
-fecha_desde = st.session_state.fecha_desde
-fecha_hasta = st.session_state.fecha_hasta
+# Obtener fechas del session state
+fecha_desde = st.session_state.get('fecha_desde', datetime.now() - timedelta(days=365))
+fecha_hasta = st.session_state.get('fecha_hasta', datetime.now())
 
-st.info(f"Analizando {len(activos_filtrados)} activos desde {fecha_desde} hasta {fecha_hasta}")
-
-# Configuración de optimización
-metodos_optimizacion = {
-    'Maximizar Sharpe (Markowitz)': 'max_sharpe',
-    'Mínima Varianza L1': 'min-variance-l1',
-    'Mínima Varianza L2': 'min-variance-l2',
-    'Pesos Iguales': 'equi-weight',
-    'Solo Posiciones Largas': 'long-only',
-    'Markowitz con Retorno Objetivo': 'markowitz-target'
-}
-metodo_ui = st.selectbox(
-    "Método de Optimización de Portafolio:",
-    options=list(metodos_optimizacion.keys()),
-    key=f"opt_metodo_optimizacion_{id_cliente}"
-)
-metodo = metodos_optimizacion[metodo_ui]
-
-# Pedir retorno objetivo solo si corresponde
-target_return = None
-if metodo == 'markowitz-target':
-    target_return = st.number_input(
-        "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
-        min_value=0.01, value=0.10, step=0.01, format="%.4f",
-        help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger.",
-        key=f"target_return_{id_cliente}"
-    )
-
-show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True, key=f"show_frontier_{id_cliente}")
-
-# Configuración de ejecución
-scheduling_methods = {
-    'TWAP (Time-Weighted)': 'twap',
-    'VWAP (Volume-Weighted)': 'vwap'
-}
-scheduling_ui = st.selectbox(
-    "Algoritmo de Scheduling:",
-    options=list(scheduling_methods.keys()),
-    key=f"opt_scheduling_algo_{id_cliente}"
-)
-scheduling = scheduling_methods[scheduling_ui]
-
-order_types = {
-    'Market Order': 'mo',
-    'Limit Order': 'lo',
-    'Peg Order': 'peg',
-    'Float Peg': 'float_peg',
-    'Fill or Kill': 'fok',
-    'Immediate or Cancel': 'ioc'
-}
-order_type_ui = st.selectbox(
-    "Tipo de Orden:",
-    options=list(order_types.keys()),
-    key=f"opt_tipo_orden_{id_cliente}"
-)
-order_type = order_types[order_type_ui]
+# Mostrar información de análisis
+if 'activos_filtrados' in locals():
+    st.info(f"Analizando {len(activos_filtrados)} activos desde {fecha_desde.strftime('%Y-%m-%d')} hasta {fecha_hasta.strftime('%Y-%m-%d')}")
 
 # Botones de acción
 col1, col2, col3, col4 = st.columns(4)
