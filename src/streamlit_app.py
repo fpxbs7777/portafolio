@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 import requests
 import plotly.graph_objects as go
 import pandas as pd
@@ -14,6 +15,126 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+import hashlib
+import time
+from functools import lru_cache, wraps
+import json
+from typing import Dict, Any, Optional, Tuple, List
+
+# Configuración de caché
+def cache_data(ttl=3600, maxsize=128):
+    """Decorador para cachear resultados de funciones con tiempo de vida"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Crear una clave única para los argumentos
+            key = f"{func.__name__}_{hashlib.md5(json.dumps((args, kwargs), sort_keys=True).encode()).hexdigest()}"
+            
+            # Obtener el tiempo actual
+            now = time.time()
+            
+            # Verificar si el resultado está en caché y es reciente
+            if 'cache' not in st.session_state:
+                st.session_state.cache = {}
+                
+            if key in st.session_state.cache:
+                timestamp, result = st.session_state.cache[key]
+                if now - timestamp < ttl:
+                    return result
+            
+            # Si no está en caché o ha expirado, ejecutar la función
+            result = func(*args, **kwargs)
+            st.session_state.cache[key] = (now, result)
+            return result
+        return wrapper
+    return decorator
+
+# Clase para manejar la autenticación persistente
+class AuthManager:
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(AuthManager, cls).__new__(cls)
+            cls._instance._initialize_session()
+        return cls._instance
+    
+    def _initialize_session(self):
+        if 'auth' not in st.session_state:
+            st.session_state.auth = {
+                'logged_in': False,
+                'token': None,
+                'refresh_token': None,
+                'expires_at': None,
+                'user_data': None
+            }
+    
+    def login(self, username: str, password: str) -> bool:
+        """Iniciar sesión y guardar credenciales"""
+        try:
+            token, refresh_token = obtener_tokens(username, password)
+            if token and refresh_token:
+                st.session_state.auth.update({
+                    'logged_in': True,
+                    'token': token,
+                    'refresh_token': refresh_token,
+                    'expires_at': time.time() + 3600,  # 1 hora de expiración
+                    'user_data': {'username': username}
+                })
+                return True
+        except Exception as e:
+            st.error(f"Error al iniciar sesión: {str(e)}")
+        return False
+    
+    def is_logged_in(self) -> bool:
+        """Verificar si el usuario está autenticado"""
+        if not st.session_state.auth['logged_in']:
+            return False
+            
+        # Verificar si el token está a punto de expirar (últimos 5 minutos)
+        if time.time() > st.session_state.auth['expires_at'] - 300:
+            return self._refresh_token()
+            
+        return True
+    
+    def _refresh_token(self) -> bool:
+        """Refrescar el token de acceso"""
+        try:
+            refresh_token = st.session_state.auth.get('refresh_token')
+            if not refresh_token:
+                return False
+                
+            token, new_refresh_token = refrescar_token(refresh_token)
+            if token and new_refresh_token:
+                st.session_state.auth.update({
+                    'token': token,
+                    'refresh_token': new_refresh_token,
+                    'expires_at': time.time() + 3600
+                })
+                return True
+        except Exception as e:
+            st.error(f"Error al refrescar el token: {str(e)}")
+        return False
+    
+    def get_token(self) -> Optional[str]:
+        """Obtener el token de acceso actual"""
+        if self.is_logged_in():
+            return st.session_state.auth['token']
+        return None
+    
+    def logout(self):
+        """Cerrar sesión"""
+        st.session_state.auth = {
+            'logged_in': False,
+            'token': None,
+            'refresh_token': None,
+            'expires_at': None,
+            'user_data': None
+        }
+        st.experimental_rerun()
+
+# Inicializar el gestor de autenticación
+auth_manager = AuthManager()
 
 warnings.filterwarnings('ignore')
 
@@ -413,29 +534,28 @@ def obtener_encabezado_autorizacion(token_portador):
         'Content-Type': 'application/json'
     }
 
+@cache_data(ttl=3500)  # Cachear por casi 1 hora (menos que el tiempo de expiración del token)
 def obtener_tokens(usuario, contraseña):
-    url_login = 'https://api.invertironline.com/token'
-    datos = {
-        'username': usuario,
-        'password': contraseña,
-        'grant_type': 'password'
-    }
+    """Obtener tokens de acceso y refresco con caché"""
     try:
-        respuesta = requests.post(url_login, data=datos, timeout=15)
-        respuesta.raise_for_status()
-        respuesta_json = respuesta.json()
-        return respuesta_json['access_token'], respuesta_json['refresh_token']
-    except requests.exceptions.HTTPError as http_err:
-        st.error(f'Error HTTP al obtener tokens: {http_err}')
-        if respuesta.status_code == 400:
-            st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
-        elif respuesta.status_code == 401:
-            st.warning("No autorizado. Verifique sus credenciales o permisos.")
-        else:
-            st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
-        return None, None
-    except Exception as e:
-        st.error(f'Error inesperado al obtener tokens: {str(e)}')
+        token_url = 'https://api.invertironline.com/token'
+        payload = {
+            'username': usuario,
+            'password': contraseña,
+            'grant_type': 'password'
+        }
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        # Usar una sesión reutilizable
+        with requests.Session() as session:
+            response = session.post(token_url, data=payload, headers=headers, timeout=10)
+            response.raise_for_status()
+            tokens = response.json()
+            return tokens['access_token'], tokens['refresh_token']
+    except requests.exceptions.RequestException as e:
+        st.error(f'Error de conexión: {str(e)}')
         return None, None
 
 def obtener_lista_clientes(token_portador):
@@ -477,17 +597,38 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
         return None
 
+@cache_data(ttl=300)  # Cachear por 5 minutos
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
-    url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
-    encabezados = obtener_encabezado_autorizacion(token_portador)
+    """
+    Obtiene el portafolio del cliente con caché y manejo de errores mejorado.
+    """
     try:
-        respuesta = requests.get(url_portafolio, headers=encabezados)
-        if respuesta.status_code == 200:
-            return respuesta.json()
-        else:
+        if not token_portador:
+            st.warning("Token de acceso no válido. Por favor, inicie sesión nuevamente.")
             return None
+            
+        url = f'https://api.invertironline.com/api/v2/portafolio/{id_cliente}'
+        params = {'pais': pais}
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {token_portador}'
+        }
+        
+        # Usar una sesión reutilizable
+        with requests.Session() as session:
+            response = session.get(url, headers=headers, params=params, timeout=15)
+            response.raise_for_status()
+            return response.json()
+            
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            st.error("Sesión expirada. Por favor, inicie sesión nuevamente.")
+            auth_manager.logout()
+        else:
+            st.error(f"Error al obtener el portafolio: {str(e)}")
+        return None
     except Exception as e:
-        st.error(f'Error al obtener portafolio: {str(e)}')
+        st.error(f"Error inesperado al obtener el portafolio: {str(e)}")
         return None
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
@@ -514,7 +655,6 @@ def obtener_precio_actual(token_portador, mercado, simbolo):
         return None
     except Exception:
         return None
-
 
 def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
     url_cotizacion_mep = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
@@ -656,7 +796,6 @@ def obtener_tasas_caucion(token_portador):
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
 
-
 def mostrar_tasas_caucion(token_portador):
     """
     Muestra las tasas de caución en una tabla y gráfico de curva de tasas
@@ -732,30 +871,6 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
-            continue
-
-    try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
-    except Exception:
-        return None
 
 def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """Devuelve la URL correcta para la serie histórica del símbolo indicado.
