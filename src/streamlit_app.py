@@ -4298,17 +4298,18 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                     st.plotly_chart(fig_frontier, use_container_width=True)
                                 except Exception as e:
                                     st.warning(f"No se pudo calcular la frontera eficiente: {e}")
-                        # Simulación de ejecución
-                        st.markdown("---")
-                        st.subheader("Simulación de Ejecución Algorítmica")
-                        volumen_total = int(capital_inicial // portfolio_result.price if hasattr(portfolio_result, 'price') and portfolio_result.price > 0 else capital_inicial // 100)
-                        fig_exec, total_exec, avg_price = simular_ejecucion(volumen_total, scheduling, order_type)
-                        st.plotly_chart(fig_exec, use_container_width=True)
-                        st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
-                    else:
-                        st.error("❌ Error en la optimización")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
+                                
+                                # Simulación de ejecución
+                                st.markdown("---")
+                                st.subheader("Simulación de Ejecución Algorítmica")
+                                volumen_total = int(capital_inicial // portfolio_result.price if hasattr(portfolio_result, 'price') and portfolio_result.price > 0 else capital_inicial // 100)
+                                fig_exec, total_exec, avg_price = simular_ejecucion(volumen_total, scheduling, order_type)
+                                st.plotly_chart(fig_exec, use_container_width=True)
+                                st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
+                            else:
+                                st.error("❌ Error en la optimización: No se pudo calcular el portafolio")
+                        else:
+                            st.error("❌ No se pudieron cargar los datos históricos")
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
