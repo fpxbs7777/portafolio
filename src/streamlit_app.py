@@ -4859,12 +4859,14 @@ def mostrar_analisis_portafolio():
         st.error("No se ha seleccionado ningún cliente")
         return
         
-    # Inicializar el gestor de portafolio en session_state si no existe
-    if 'portfolio_manager' not in st.session_state:
-        st.session_state.portfolio_manager = None
-
+    # Obtener ID y nombre del cliente
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+    
+    # Inicializar o actualizar el gestor de portafolio cuando cambia el cliente
+    portfolio_manager_key = f'portfolio_manager_{id_cliente}'
+    if portfolio_manager_key not in st.session_state:
+        st.session_state[portfolio_manager_key] = None
 
     st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
@@ -4948,9 +4950,9 @@ def mostrar_analisis_portafolio():
                 if st.button("🔍 Analizar Volatilidad", use_container_width=True):
                     with st.spinner("Realizando análisis de volatilidad..."):
                         try:
-                            # Inicializar el gestor de portafolio si no existe
-                            if st.session_state.portfolio_manager is None:
-                                st.session_state.portfolio_manager = PortfolioManager(
+                            # Inicializar o actualizar el gestor de portafolio para el cliente actual
+                            if st.session_state[portfolio_manager_key] is None or not hasattr(st.session_state[portfolio_manager_key], 'activos'):
+                                st.session_state[portfolio_manager_key] = PortfolioManager(
                                     activos=[{'simbolo': s} for s in simbolos],
                                     token=token_acceso,
                                     fecha_desde=(date.today() - timedelta(days=365)).strftime('%Y-%m-%d'),
@@ -4958,16 +4960,16 @@ def mostrar_analisis_portafolio():
                                 )
                                 
                                 # Cargar datos históricos
-                                if not st.session_state.portfolio_manager.load_data():
+                                if not st.session_state[portfolio_manager_key].load_data():
                                     st.error("Error al cargar datos históricos")
                                     return
                             
                             # Obtener retornos del activo seleccionado
-                            if simbolo_seleccionado in st.session_state.portfolio_manager.returns:
-                                returns = st.session_state.portfolio_manager.returns[simbolo_seleccionado]
+                            if simbolo_seleccionado in st.session_state[portfolio_manager_key].returns:
+                                returns = st.session_state[portfolio_manager_key].returns[simbolo_seleccionado]
                                 
                                 # Realizar análisis de volatilidad
-                                result = st.session_state.portfolio_manager.analyze_volatility(
+                                result = st.session_state[portfolio_manager_key].analyze_volatility(
                                     symbol=simbolo_seleccionado,
                                     returns=returns,
                                     n_simulations=n_simulaciones,
@@ -4976,7 +4978,7 @@ def mostrar_analisis_portafolio():
                                 
                                 if result is not None:
                                     # Mostrar gráficos
-                                    fig = st.session_state.portfolio_manager.plot_volatility_analysis(simbolo_seleccionado)
+                                    fig = st.session_state[portfolio_manager_key].plot_volatility_analysis(simbolo_seleccionado)
                                     if fig is not None:
                                         st.plotly_chart(fig, use_container_width=True)
                             else:
@@ -4984,8 +4986,7 @@ def mostrar_analisis_portafolio():
                                 
                         except Exception as e:
                             st.error(f"Error en el análisis de volatilidad: {str(e)}")
-                            st.exception(e)
-
+                            st.exception(e)  # Mostrar el stack trace completo para depuración
 def main():
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
@@ -5166,12 +5167,12 @@ def main():
                 - Proyecciones de rendimiento  
                 """)
             with cols[2]:
-                st.markdown("""
-                **💱 Datos de Mercado**  
-                - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
-                - Estado de cuenta consolidado  
-                """)
+                    st.markdown("""
+                    **💱 Datos de Mercado**  
+                    - Cotizaciones MEP en tiempo real  
+                    - Tasas de caución actualizadas  
+                    - Estado de cuenta consolidado  
+                    """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
