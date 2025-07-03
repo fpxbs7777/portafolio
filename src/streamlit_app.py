@@ -2268,6 +2268,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     datos_activos = []
     valor_total = 0
     pl_total = 0
+    pl_total = 0
     
     for activo in activos:
         try:
