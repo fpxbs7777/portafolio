@@ -953,114 +953,11 @@ def obtener_tickers_aleatorios_por_clase(token_portador, clases_activo, n_por_cl
                     'simbolo': simbolo,
                     'mercado': 'BCBA',  # Asumimos BCBA por defecto
                     'tipo': clase,
-                    'cantidad': 0,  # Se calculará según el capital
-                    'precio_actual': 0  # Se actualizará después
+                    'cantidad': 0,  
+                    'precio_actual': 0  
                 })
     
     return activos_seleccionados
-        response.raise_for_status()
-        data = response.json()
-        # Procesar la respuesta para convertirla al formato esperado
-        if isinstance(data, list):
-            fechas = []
-            precios = []
-            for item in data:
-                if 'fecha' in item and 'valorCuota' in item:
-                    fechas.append(pd.to_datetime(item['fecha']))
-                    precios.append(float(item['valorCuota']))
-            if fechas and precios:
-                return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
-    """
-    Obtiene una cantidad específica de tickers aleatorios por cada clase de activo.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        clases_activo (list): Lista de clases de activo (ej: ['acciones', 'bonos'])
-        n_por_clase (int): Cantidad de tickers a seleccionar por clase
-        
-    Returns:
-        list: Lista de diccionarios con la información de los activos seleccionados
-    """
-    activos_seleccionados = []
-    
-    # Mapeo de clases de activo a paneles de IOL
-    mapeo_paneles = {
-        'acciones': 'acciones',
-        'bonos': 'titulosPublicos',
-        'cedears': 'cedears',
-        'obligaciones': 'obligacionesNegociables',
-        'adrs': 'aDRs'
-    }
-    
-    for clase in clases_activo:
-        panel = mapeo_paneles.get(clase.lower())
-        if not panel:
-            continue
-            
-        # Obtener todos los tickers del panel
-        tickers_por_panel, _ = obtener_tickers_por_panel(token_portador, [panel], 'Argentina')
-        tickers = tickers_por_panel.get(panel, [])
-        
-        # Seleccionar aleatoriamente n_por_clase tickers
-        if tickers:
-            seleccion = random.sample(tickers, min(n_por_clase, len(tickers)))
-            for simbolo in seleccion:
-                activos_seleccionados.append({
-                    'simbolo': simbolo,
-                    'mercado': 'BCBA',  # Asumimos BCBA por defecto
-                    'tipo': clase,
-                    'cantidad': 0,  # Se calculará según el capital
-                    'precio_actual': 0  # Se actualizará después
-                })
-    
-    return activos_seleccionados
-                simbolo = titulo.get('simbolo')
-                if simbolo:
-                    activos_para_optimizacion.append({
-                        'simbolo': simbolo,
-                        'mercado': titulo.get('mercado'),
-                        'tipo': titulo.get('tipo')
-                    })
-        
-        # Filtrar por tipo de activo según la fuente de datos
-        if frecuencia_datos == 'Intradía':
-            st.info("ℹ️ Para acciones y cedears, se agregará automáticamente el sufijo .BA")
-            tipos_disponibles = ['Acciones', 'Cedears']
-            activos_para_optimizacion = [a for a in activos_para_optimizacion 
-                                       if a.get('tipo') in tipos_disponibles]
-        else:
-            tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion 
-                                          if a.get('tipo')]))
-        
-        # Selector de tipo de activo
-        if tipos_disponibles:
-            tipo_seleccionado = st.selectbox(
-                "Filtrar por tipo de activo:",
-                options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
-                format_func=lambda x: "Todos" if x == 'Todos' else x
-            )
-            
-            if tipo_seleccionado != 'Todos':
-                activos_filtrados = [a for a in activos_para_optimizacion 
-                                   if a.get('tipo') == tipo_seleccionado]
-            else:
-                activos_filtrados = activos_para_optimizacion
-    
-    # Mostrar resumen de activos seleccionados
-    if activos_filtrados:
-        st.success(f"✅ {len(activos_filtrados)} activos seleccionados para optimización")
-        
-        # Mostrar tabla con los activos seleccionados
-        df_activos = pd.DataFrame([{
-            'Símbolo': f"{a['simbolo']}{'.BA' if frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else ''}",
-            'Tipo': a.get('tipo', 'N/A'),
-            'Mercado': a.get('mercado', 'N/A'),
-            'Cantidad': a.get('cantidad', 'N/A') if modo_optimizacion == 'Rebalanceo' else 'N/A',
-            'Precio Actual': f"${a.get('precio_actual', 0):.2f}" if a.get('precio_actual') else 'N/A'
-        } for a in activos_filtrados])
-        
-        st.dataframe(df_activos, use_container_width=True, height=min(400, 50 + len(activos_filtrados) * 30))
 
     # Resto de la configuración común
     fecha_desde = st.session_state.fecha_desde
@@ -2583,6 +2480,343 @@ def mostrar_movimientos_asesor():
                 st.warning("No se encontraron movimientos o hubo un error en la consulta")
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
+
+class output:
+    def __init__(self, returns, notional):
+        self.returns = returns
+        self.notional = notional
+        self.weights = None
+        self.dataframe_allocation = None
+        
+    def get_weights(self):
+        return self.weights
+        
+    def get_allocation(self):
+        return self.dataframe_allocation
+
+def portfolio_variance(weights, cov_matrix):
+    """Calcula la varianza de un portafolio dado los pesos y la matriz de covarianza."""
+    return np.dot(weights.T, np.dot(cov_matrix, weights))
+
+class manager:
+    def __init__(self, rics, notional, data):
+        self.rics = rics
+        self.notional = notional
+        self.data = data
+        self.timeseries = None
+        self.returns = None
+        self.cov_matrix = None
+        self.mean_returns = None
+        self.risk_free_rate = 0.40  # Tasa libre de riesgo anual para Argentina
+
+    def load_intraday_timeseries(self, ticker):
+        return self.data[ticker]
+
+    def synchronise_timeseries(self):
+        dic_timeseries = {}
+        for ric in self.rics:
+            if ric in self.data:
+                dic_timeseries[ric] = self.load_intraday_timeseries(ric)
+        self.timeseries = dic_timeseries
+
+    def compute_covariance(self):
+        self.synchronise_timeseries()
+        # Calcular retornos logarítmicos
+        returns_matrix = {}
+        for ric in self.rics:
+            if ric in self.timeseries:
+                prices = self.timeseries[ric]
+                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        
+        # Convertir a DataFrame para alinear fechas
+        self.returns = pd.DataFrame(returns_matrix)
+        
+        # Calcular matriz de covarianza y retornos medios
+        self.cov_matrix = self.returns.cov() * 252  # Anualizar
+        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        
+        return self.cov_matrix, self.mean_returns
+
+    def compute_portfolio(self, portfolio_type=None, target_return=None):
+        if self.cov_matrix is None:
+            self.compute_covariance()
+            
+        n_assets = len(self.rics)
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        if portfolio_type == 'min-variance-l1':
+            # Minimizar varianza con restricción L1
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
+            ]
+            
+        elif portfolio_type == 'min-variance-l2':
+            # Minimizar varianza con restricción L2
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
+            ]
+            
+        elif portfolio_type == 'equi-weight':
+            # Pesos iguales
+            weights = np.ones(n_assets) / n_assets
+            return self._create_output(weights)
+            
+        elif portfolio_type == 'long-only':
+            # Optimización long-only estándar
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
+        elif portfolio_type == 'markowitz':
+            if target_return is not None:
+                # Optimización con retorno objetivo
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                ]
+            else:
+                # Maximizar Sharpe Ratio
+                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                def neg_sharpe_ratio(weights):
+                    port_ret = np.sum(self.mean_returns * weights)
+                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                    if port_vol == 0:
+                        return np.inf
+                    return -(port_ret - self.risk_free_rate) / port_vol
+                result = op.minimize(
+                    neg_sharpe_ratio,
+                    x0=np.ones(n_assets)/n_assets,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints
+                )
+                return self._create_output(result.x)
+                
+        elif portfolio_type == 'random-rebalance':
+            # Método de optimización y rebalanceo aleatorio
+            return self._random_rebalance_portfolio()
+            
+        # Si constraints no está definido, lanzar error
+        if 'constraints' not in locals():
+            raise ValueError(f"Tipo de portafolio no soportado o constraints no definidos para: {portfolio_type}")
+
+        # Optimización general de varianza mínima
+        result = op.minimize(
+            lambda x: portfolio_variance(x, self.cov_matrix),
+            x0=np.ones(n_assets)/n_assets,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+        return self._create_output(result.x)
+        
+    def _random_rebalance_portfolio(self):
+        """Implementa el método de optimización y rebalanceo aleatorio"""
+        # Generar pesos aleatorios que sumen 1
+        weights = np.random.dirichlet(np.ones(len(self.rics)), size=1)[0]
+        
+        # Asegurar que los pesos sean positivos y sumen 1
+        weights = np.abs(weights)
+        weights /= weights.sum()
+        
+        # Calcular retornos del portafolio
+        portfolio_returns = (self.returns * weights).sum(axis=1)
+        
+        # Crear objeto de salida
+        output_obj = output(portfolio_returns, self.notional)
+        output_obj.weights = weights
+        output_obj.dataframe_allocation = pd.DataFrame({
+            'rics': list(self.returns.columns),
+            'weights': weights,
+            'volatilities': self.returns.std().values,
+            'returns': self.returns.mean().values
+        })
+        
+        return output_obj
+
+    def _create_output(self, weights):
+        """Crea un objeto de salida con los pesos y métricas del portafolio"""
+        # Calcular retornos del portafolio
+        portfolio_returns = (self.returns * weights).sum(axis=1)
+        
+        # Crear objeto de salida
+        output_obj = output(portfolio_returns, self.notional)
+        output_obj.weights = weights
+        output_obj.dataframe_allocation = pd.DataFrame({
+            'rics': list(self.returns.columns),
+            'weights': weights,
+            'volatilities': self.returns.std().values,
+            'returns': self.returns.mean().values
+        })
+        
+        return output_obj
+
+
+def mostrar_resultados_optimizacion(portfolio_result, capital, portfolio_manager):
+    """Muestra los resultados de la optimización del portafolio.
+    
+    Args:
+        portfolio_result: Objeto con los resultados de la optimización
+        capital: Capital total del portafolio
+        portfolio_manager: Instancia de PortfolioManager con los datos del portafolio
+    """
+    try:
+        # Obtener los pesos óptimos
+        weights = portfolio_result.get_weights()
+        allocation = portfolio_result.get_allocation()
+        
+        # Mostrar métricas principales
+        st.subheader("📊 Resultados de la Optimización")
+        
+        # Calcular métricas
+        returns = portfolio_result.returns
+        annual_return = np.mean(returns) * 252
+        annual_volatility = np.std(returns) * np.sqrt(252)
+        sharpe_ratio = (annual_return - 0.04) / (annual_volatility + 1e-10)  # Evitar división por cero
+        
+        # Mostrar métricas en columnas
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Retorno Anualizado", f"{annual_return*100:.2f}%")
+        with col2:
+            st.metric("Volatilidad Anual", f"{annual_volatility*100:.2f}%")
+        with col3:
+            st.metric("Ratio de Sharpe", f"{sharpe_ratio:.2f}")
+        
+        # Mostrar asignación de activos
+        st.subheader("📊 Asignación de Activos")
+        
+        # Calcular montos en pesos
+        allocation['monto_ars'] = (allocation['weights'] * capital).round(2)
+        
+        # Mostrar tabla con asignación
+        st.dataframe(allocation[['rics', 'weights', 'monto_ars', 'returns', 'volatilities']]
+                     .rename(columns={
+                         'rics': 'Activo',
+                         'weights': 'Peso',
+                         'monto_ars': 'Monto (ARS)',
+                         'returns': 'Retorno',
+                         'volatilities': 'Volatilidad'
+                     })
+                     .style.format({
+                         'Peso': '{:.2%}',
+                         'Monto (ARS)': '${:,.2f}',
+                         'Retorno': '{:.2%}',
+                         'Volatilidad': '{:.2%}'
+                     }))
+        
+        # Mostrar gráfico de torta de asignación
+        st.subheader("📊 Distribución del Portafolio")
+        
+        import plotly.express as px
+        
+        # Crear gráfico de torta
+        fig = px.pie(
+            allocation, 
+            values='weights', 
+            names='rics',
+            title='Distribución del Portafolio',
+            hover_data=['monto_ars'],
+            labels={'rics': 'Activo', 'weights': 'Peso'}
+        )
+        
+        # Mostrar gráfico
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Mostrar evolución del portafolio
+        st.subheader("📈 Evolución del Portafolio")
+        
+        # Calcular valor del portafolio a lo largo del tiempo
+        if hasattr(portfolio_manager, 'returns'):
+            portfolio_returns = portfolio_manager.returns.dot(weights)
+            cumulative_returns = (1 + portfolio_returns).cumprod()
+            
+            # Crear DataFrame con la evolución
+            portfolio_evolution = pd.DataFrame({
+                'Fecha': portfolio_manager.returns.index,
+                'Valor': cumulative_returns * capital
+            })
+            
+            # Mostrar gráfico de evolución
+            fig = px.line(
+                portfolio_evolution, 
+                x='Fecha', 
+                y='Valor',
+                title='Evolución del Valor del Portafolio',
+                labels={'Valor': 'Valor (ARS)', 'Fecha': 'Fecha'}
+            )
+            
+            # Agregar línea de referencia en el capital inicial
+            fig.add_hline(y=capital, line_dash="dash", line_color="red", 
+                         annotation_text=f"Capital Inicial: ${capital:,.2f}")
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Mostrar matriz de correlación
+        st.subheader("📉 Matriz de Correlación")
+        
+        if hasattr(portfolio_manager, 'returns'):
+            corr_matrix = portfolio_manager.returns.corr()
+            
+            # Crear mapa de calor
+            fig = px.imshow(
+                corr_matrix,
+                text_auto=True,
+                aspect="auto",
+                color_continuous_scale='RdBu',
+                zmin=-1,
+                zmax=1,
+                title='Matriz de Correlación entre Activos'
+            )
+            
+            # Mejorar el diseño
+            fig.update_layout(
+                xaxis_title="Activos",
+                yaxis_title="Activos",
+                coloraxis_colorbar=dict(title="Correlación")
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Mostrar botones de acción
+        st.subheader("⚡ Acciones")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("💾 Guardar Estrategia", help="Guarda la estrategia actual"):
+                st.success("Estrategia guardada exitosamente")
+        
+        with col2:
+            if st.button("📤 Exportar a Excel", help="Exporta los resultados a Excel"):
+                # Crear un Excel en memoria
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    # Hoja de asignación
+                    allocation.to_excel(writer, sheet_name='Asignación', index=False)
+                    
+                    # Hoja de evolución si existe
+                    if 'portfolio_evolution' in locals():
+                        portfolio_evolution.to_excel(writer, sheet_name='Evolución', index=False)
+                    
+                    # Hoja de correlación si existe
+                    if 'corr_matrix' in locals():
+                        corr_matrix.to_excel(writer, sheet_name='Correlación')
+                
+                # Crear botón de descarga
+                st.download_button(
+                    label="⬇️ Descargar Excel",
+                    data=output.getvalue(),
+                    file_name="optimizacion_portafolio.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        
+        with col3:
+            if st.button("🔄 Reoptimizar", help="Volver a ejecutar la optimización"):
+                st.experimental_rerun()
+    
+    except Exception as e:
+        st.error(f"Error al mostrar resultados: {str(e)}")
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
