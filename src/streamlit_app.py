@@ -2733,19 +2733,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     activos_para_optimizacion = []
     activos_filtrados = []
     
-    # Configuración de columnas
+    # Configuración inicial
     col1, col2 = st.columns(2)
     
     with col1:
         # Selección de modo de optimización
-        modo_optimizacion = st.radio(
+        modo_optimizacion = st.selectbox(
             "Modo de Optimización:",
             options=['Rebalanceo', 'Optimización desde Cero'],
             format_func=lambda x: {
-                'Rebalanceo': 'Rebalanceo de Composición Actual',
-                'Optimización desde Cero': 'Optimización desde Cero'
+                'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
+                'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
             }[x],
-            horizontal=True
+            key="selectbox_modo_optimizacion"
         )
     
     with col2:
@@ -2756,7 +2756,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             max_value=1e9, 
             value=100000.0, 
             step=1000.0,
-            help="Monto inicial para la optimización"
+            help="Monto inicial para la optimización. En modo Rebalanceo, se usa el capital actual del portafolio.",
+            key="input_capital_inicial"
         )
     
     # Configuración específica por modo
