@@ -1998,7 +1998,7 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
+def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252, pl_total=0, pl_porcentual_total=0):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
     
@@ -2258,7 +2258,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         'pl_esperado_min': pl_esperado_min,
         'pl_esperado_max': pl_esperado_max,
         'pl_total': pl_total,
-        'pl_porcentual_total': pl_porcentual_total
+        'pl_porcentual_total': pl_porcentual_total,
+        'probabilidades': probabilidades
     }
 
 def mostrar_resumen_portafolio(portafolio, token_portador):
@@ -2267,7 +2268,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     activos = portafolio.get('activos', [])
     datos_activos = []
     valor_total = 0
-    pl_total = 0
     pl_total = 0
     
     for activo in activos:
@@ -2418,7 +2418,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
         # Calcular P&L total como porcentaje del portafolio
         pl_porcentual_total = (pl_total / (valor_total - pl_total)) * 100 if (valor_total - pl_total) > 0 else 0
@@ -2437,8 +2436,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                       f"{pl_porcentual_total:+.2f}%",
                       delta_color="normal")
         
-        # Pasar el P&L total a las métricas
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
+        # Calcular métricas del portafolio
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador, pl_total=pl_total, pl_porcentual_total=pl_porcentual_total)
         
         if metricas:
             # Métricas de Riesgo
