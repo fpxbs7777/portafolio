@@ -2725,70 +2725,106 @@ def mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager):
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
+    # Obtener portafolio actual
     with st.spinner("Obteniendo portafolio..."):
         portafolio = obtener_portafolio(token_acceso, id_cliente)
     
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
-        return
-    
-    activos_raw = portafolio.get('activos', [])
-    if not activos_raw:
-        st.warning("El portafolio está vacío")
-        return
-    
-    # Extraer símbolos, mercados y tipos de activo
+    # Inicializar variables
     activos_para_optimizacion = []
-    for activo in activos_raw:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo')
-        mercado = titulo.get('mercado')
-        tipo = titulo.get('tipo')
-        if simbolo:
-            activos_para_optimizacion.append({'simbolo': simbolo,
-                                              'mercado': mercado,
-                                              'tipo': tipo})
+    activos_filtrados = []
     
-    # Configuración inicial
+    # Configuración de columnas
     col1, col2 = st.columns(2)
     
     with col1:
-        modo_optimizacion = st.selectbox(
+        # Selección de modo de optimización
+        modo_optimizacion = st.radio(
             "Modo de Optimización:",
             options=['Rebalanceo', 'Optimización desde Cero'],
             format_func=lambda x: {
-                'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
-                'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
-            }[x]
+                'Rebalanceo': 'Rebalanceo de Composición Actual',
+                'Optimización desde Cero': 'Optimización desde Cero'
+            }[x],
+            horizontal=True
         )
     
     with col2:
+        # Input de capital inicial
         capital_inicial = st.number_input(
             "Capital Inicial (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="Monto inicial para la optimización. En modo Rebalanceo, se usa el capital actual del portafolio."
+            min_value=1000.0, 
+            max_value=1e9, 
+            value=100000.0, 
+            step=1000.0,
+            help="Monto inicial para la optimización"
         )
     
     # Configuración específica por modo
-    if modo_optimizacion == 'Optimización desde Cero':
-        col3, col4 = st.columns(2)
-        with col3:
-            frecuencia_datos = st.selectbox(
-                "Frecuencia de Datos:",
-                options=['Diario', 'Intradía'],
-                format_func=lambda x: {
-                    'Diario': 'Datos Diarios (IOL)',
-                    'Intradía': 'Datos Intradía (yfinance)'
-                }[x]
-            )
-        
-        with col4:
-            if frecuencia_datos == 'Intradía':
-                st.info("Para acciones y cedears, se agregará automáticamente el sufijo .BA")
-                tipos_disponibles = ['Acciones', 'Cedears']
-            else:
-                tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+    if modo_optimizacion == 'Rebalanceo':
+        if not portafolio:
+            st.warning("No se pudo obtener el portafolio del cliente")
+            return
             
+        activos_raw = portafolio.get('activos', [])
+        if not activos_raw:
+            st.warning("El portafolio está vacío")
+            return
+            
+        # Extraer símbolos, mercados y tipos de activo
+        for activo in activos_raw:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo')
+            mercado = titulo.get('mercado')
+            tipo = titulo.get('tipo')
+            if simbolo:
+                activos_para_optimizacion.append({
+                    'simbolo': simbolo,
+                    'mercado': mercado,
+                    'tipo': tipo,
+                    'cantidad': activo.get('cantidad', 0),
+                    'precio_actual': activo.get('precioActual', 0)
+                })
+        
+        activos_filtrados = activos_para_optimizacion
+        frecuencia_datos = 'Diario'
+        
+    else:  # Optimización desde Cero
+        # Configuración de frecuencia de datos
+        frecuencia_datos = st.radio(
+            "Fuente de Datos:",
+            options=['Diario', 'Intradía'],
+            format_func=lambda x: {
+                'Diario': 'Datos Diarios (IOL - Todos los activos)',
+                'Intradía': 'Datos Intradía (yfinance - Solo Acciones/Cedears)'
+            }[x],
+            horizontal=True
+        )
+        
+        # Si hay portafolio, usarlo como base para selección
+        if portafolio and 'activos' in portafolio:
+            activos_raw = portafolio.get('activos', [])
+            for activo in activos_raw:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo')
+                if simbolo:
+                    activos_para_optimizacion.append({
+                        'simbolo': simbolo,
+                        'mercado': titulo.get('mercado'),
+                        'tipo': titulo.get('tipo')
+                    })
+        
+        # Filtrar por tipo de activo según la fuente de datos
+        if frecuencia_datos == 'Intradía':
+            st.info("ℹ️ Para acciones y cedears, se agregará automáticamente el sufijo .BA")
+            tipos_disponibles = ['Acciones', 'Cedears']
+            activos_para_optimizacion = [a for a in activos_para_optimizacion 
+                                       if a.get('tipo') in tipos_disponibles]
+        else:
+            tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion 
+                                          if a.get('tipo')]))
+        
+        # Selector de tipo de activo
+        if tipos_disponibles:
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
@@ -2797,12 +2833,25 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             )
             
             if tipo_seleccionado != 'Todos':
-                activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+                activos_filtrados = [a for a in activos_para_optimizacion 
+                                   if a.get('tipo') == tipo_seleccionado]
             else:
                 activos_filtrados = activos_para_optimizacion
-    else:  # Rebalanceo
-        activos_filtrados = activos_para_optimizacion
-        frecuencia_datos = 'Diario'
+    
+    # Mostrar resumen de activos seleccionados
+    if activos_filtrados:
+        st.success(f"✅ {len(activos_filtrados)} activos seleccionados para optimización")
+        
+        # Mostrar tabla con los activos seleccionados
+        df_activos = pd.DataFrame([{
+            'Símbolo': f"{a['simbolo']}{'.BA' if frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else ''}",
+            'Tipo': a.get('tipo', 'N/A'),
+            'Mercado': a.get('mercado', 'N/A'),
+            'Cantidad': a.get('cantidad', 'N/A') if modo_optimizacion == 'Rebalanceo' else 'N/A',
+            'Precio Actual': f"${a.get('precio_actual', 0):.2f}" if a.get('precio_actual') else 'N/A'
+        } for a in activos_filtrados])
+        
+        st.dataframe(df_activos, use_container_width=True, height=min(400, 50 + len(activos_filtrados) * 30))
 
     # Resto de la configuración común
     fecha_desde = st.session_state.fecha_desde
@@ -4095,7 +4144,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         tipo_seleccionado = st.selectbox(
             "Filtrar por tipo de activo:",
             options=['Todos'] + tipos_disponibles,
-            key="opt_tipo_activo",
+            key="opt_tipo_activo_2",
             format_func=lambda x: "Todos" if x == 'Todos' else x
         )
         if tipo_seleccionado != 'Todos':
@@ -4850,6 +4899,7 @@ def main():
                 "Seleccione una opción:",
                 ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
+                key="main_navigation_radio"
             )
 
             # Mostrar la página seleccionada
