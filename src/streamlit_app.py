@@ -2745,7 +2745,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Rebalanceo': 'Rebalanceo de Composición Actual',
                 'Optimización desde Cero': 'Optimización desde Cero'
             }[x],
-            horizontal=True
+            horizontal=True,
+            key="opt_modo_optimizacion_radio"
         )
     
     with col2:
@@ -2756,7 +2757,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             max_value=1e9, 
             value=100000.0, 
             step=1000.0,
-            help="Monto inicial para la optimización"
+            help="Monto inicial para la optimización",
+            key="opt_capital_inicial_input"
         )
     
     # Configuración específica por modo
@@ -2797,7 +2799,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Diario': 'Datos Diarios (IOL - Todos los activos)',
                 'Intradía': 'Datos Intradía (yfinance - Solo Acciones/Cedears)'
             }[x],
-            horizontal=True
+            horizontal=True,
+            key="opt_fuente_datos_radio"
         )
         
         # Si hay portafolio, usarlo como base para selección
@@ -2824,8 +2827,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key=f"opt_tipo_activo_{frecuencia_datos}",
-                format_func=lambda x: "Todos" if x == 'Todos' else x
+                key="opt_tipo_activo_intradia_select",
+                format_func=lambda x: "Todos" if x == 'Todos' else x,
+                help="Para datos intradía solo están disponibles acciones y cedears"
             )
             
             if tipo_seleccionado != 'Todos':
@@ -2838,11 +2842,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion 
                                           if a.get('tipo')]))
             
+            if not tipos_disponibles:
+                st.warning("No se encontraron activos con tipos definidos")
+                return
+                
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key=f"opt_tipo_activo_{frecuencia_datos}",
-                format_func=lambda x: "Todos" if x == 'Todos' else x
+                key="opt_tipo_activo_diario_select",
+                format_func=lambda x: "Todos" if x == 'Todos' else x,
+                help="Seleccione el tipo de activo a incluir en la optimización"
             )
             
             if tipo_seleccionado != 'Todos':
@@ -2852,19 +2861,40 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 activos_filtrados = activos_para_optimizacion
     
     # Mostrar resumen de activos seleccionados
-    if activos_filtrados:
-        st.success(f"✅ {len(activos_filtrados)} activos seleccionados para optimización")
+    if not activos_filtrados:
+        st.warning("No hay activos disponibles para optimizar con los filtros actuales.")
+        if modo_optimizacion == 'Rebalanceo':
+            st.info("Su portafolio no contiene activos o no se pudieron cargar.")
+        else:
+            st.info("No se encontraron activos que coincidan con los criterios de búsqueda.")
+        return
         
-        # Mostrar tabla con los activos seleccionados
-        df_activos = pd.DataFrame([{
-            'Símbolo': f"{a['simbolo']}{'.BA' if frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else ''}",
-            'Tipo': a.get('tipo', 'N/A'),
-            'Mercado': a.get('mercado', 'N/A'),
-            'Cantidad': a.get('cantidad', 'N/A') if modo_optimizacion == 'Rebalanceo' else 'N/A',
-            'Precio Actual': f"${a.get('precio_actual', 0):.2f}" if a.get('precio_actual') else 'N/A'
-        } for a in activos_filtrados])
-        
-        st.dataframe(df_activos, use_container_width=True, height=min(400, 50 + len(activos_filtrados) * 30))
+    st.success(f"✅ {len(activos_filtrados)} activos seleccionados para optimización")
+    
+    # Mostrar tabla con los activos seleccionados
+    df_activos = pd.DataFrame([{
+        'Símbolo': f"{a['simbolo']}{'.BA' if frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else ''}",
+        'Tipo': a.get('tipo', 'N/A'),
+        'Mercado': a.get('mercado', 'N/A'),
+        'Cantidad': a.get('cantidad', 'N/A') if modo_optimizacion == 'Rebalanceo' else 'N/A',
+        'Precio Actual': f"${a.get('precio_actual', 0):.2f}" if a.get('precio_actual') else 'N/A',
+        'Fuente': 'yfinance' if frecuencia_datos == 'Intradía' and a.get('tipo') in ['Acciones', 'Cedears'] else 'IOL'
+    } for a in activos_filtrados])
+    
+    st.dataframe(
+        df_activos, 
+        use_container_width=True, 
+        height=min(400, 50 + len(activos_filtrados) * 30),
+        column_config={
+            'Símbolo': 'Símbolo',
+            'Tipo': 'Tipo de Activo',
+            'Mercado': 'Mercado',
+            'Cantidad': 'Cantidad' if modo_optimizacion == 'Rebalanceo' else None,
+            'Precio Actual': 'Precio Actual',
+            'Fuente': 'Fuente de Datos'
+        },
+        hide_index=True
+    )
 
     # Resto de la configuración común
     fecha_desde = st.session_state.fecha_desde
