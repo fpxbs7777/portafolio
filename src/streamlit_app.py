@@ -1,6 +1,6 @@
 ```python
 import streamlit as st
-from streamlit.runtime.caching import cache_data, cache_resource
+from streamlit.runtime.caching import cache_data, cache_resource, cache_resource_singleton
 import requests
 import plotly.graph_objects as go
 import pandas as pd
@@ -14,9 +14,13 @@ import matplotlib.pyplot as plt
 import yfinance as yf
 import numpy as np
 import json
-from typing import Dict, List, Tuple, Optional, Any
+import hashlib
+from typing import Dict, List, Tuple, Optional, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import os
+from pathlib import Path
+import pickle
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +30,56 @@ logger = logging.getLogger(__name__)
 CACHE_TTL = 3600  # 1 hour in seconds
 HISTORICAL_DATA_DAYS = 365  # Default days for historical data
 MAX_WORKERS = 5  # Max threads for concurrent API calls
+CACHE_DIR = Path("./cache")
+CACHE_DIR.mkdir(exist_ok=True)
+
+# Configure Streamlit
+st.set_page_config(
+    page_title="Portfolio Manager",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Disable warning about st.cache
+st.set_option('deprecation.showfileUploaderEncoding', False)
+
+# Performance optimization
+st.cache_data.clear()
+st.cache_resource.clear()
+
+# Custom cache decorator with persistent storage
+def persistent_cache(ttl: int = 3600, max_entries: int = 100):
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Create a unique key for this function call
+            key = f"{func.__name__}_{hashlib.md5((str(args) + str(kwargs)).encode()).hexdigest()}"
+            cache_file = CACHE_DIR / f"{key}.pkl"
+            
+            # Check if we have a cached result
+            if cache_file.exists():
+                mtime = cache_file.stat().st_mtime
+                if (time.time() - mtime) < ttl:
+                    with open(cache_file, 'rb') as f:
+                        return pickle.load(f)
+            
+            # If not, compute and cache the result
+            result = func(*args, **kwargs)
+            with open(cache_file, 'wb') as f:
+                pickle.dump(result, f)
+            
+            # Clean up old cache files if we have too many
+            cache_files = sorted(CACHE_DIR.glob("*.pkl"), key=os.path.getmtime)
+            for old_file in cache_files[:-max_entries]:
+                try:
+                    old_file.unlink()
+                except:
+                    pass
+                    
+            return result
+        return wrapper
+    return decorator
 
 # ... (rest of the code remains the same)
 
@@ -78,22 +132,62 @@ def obtener_serie_historica_cached(
 
 def inicializar_session_state() -> None:
     """Inicializa las variables de sesión necesarias con valores por defecto."""
-    default_state = {
-        'autenticado': False,
-        'token_acceso': None,
-        'id_cliente': None,
-        'fecha_desde': (datetime.now() - timedelta(days=HISTORICAL_DATA_DAYS)).strftime('%Y-%m-%d'),
-        'fecha_hasta': datetime.now().strftime('%Y-%m-%d'),
-        'ultima_pagina': 'inicio',
-        'credenciales_guardadas': False,
-        'portfolio_data': None,
-        'last_updated': None,
-        'optimization_params': {}
-    }
-    
-    for key, value in default_state.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    # Load saved session if available
+    if 'session_initialized' not in st.session_state:
+        st.session_state.clear()
+        
+        # Try to load from local storage
+        try:
+            if os.path.exists('session_state.pkl'):
+                with open('session_state.pkl', 'rb') as f:
+                    saved_state = pickle.load(f)
+                    st.session_state.update(saved_state)
+                    # Verify token is still valid
+                    if st.session_state.get('autenticado') and st.session_state.get('token_acceso'):
+                        if not verificar_token_valido(st.session_state['token_acceso']):
+                            st.session_state.update({
+                                'autenticado': False,
+                                'token_acceso': None,
+                                'id_cliente': None
+                            })
+        except Exception as e:
+            logger.warning(f"Error loading session: {e}")
+        
+        # Set default values for any missing keys
+        default_state = {
+            'autenticado': False,
+            'token_acceso': None,
+            'id_cliente': None,
+            'fecha_desde': (datetime.now() - timedelta(days=HISTORICAL_DATA_DAYS)).strftime('%Y-%m-%d'),
+            'fecha_hasta': datetime.now().strftime('%Y-%m-%d'),
+            'ultima_pagina': 'inicio',
+            'credenciales_guardadas': False,
+            'portfolio_data': None,
+            'last_updated': None,
+            'optimization_params': {},
+            'cache_buster': 0  # Used to force updates
+        }
+        
+        for key, value in default_state.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+        
+        st.session_state['session_initialized'] = True
+
+    # Save session state periodically
+    if 'last_save' not in st.session_state or (time.time() - st.session_state.get('last_save', 0)) > 300:  # Save every 5 minutes
+        try:
+            with open('session_state.pkl', 'wb') as f:
+                save_state = {
+                    k: v for k, v in st.session_state.items()
+                    if k not in ['_last_runner', '_widget_state', '_session_state', 
+                               '_handles', '_main_dg', '_script_run_ctx', 
+                               'FormSubmitter:login_form-FormSubmitter']
+                }
+                pickle.dump(save_state, f)
+                st.session_state['last_save'] = time.time()
+        except Exception as e:
+            logger.warning(f"Error saving session: {e}")
 
 def mostrar_panel_autenticacion() -> None:
     """Muestra el panel de autenticación en la barra lateral con manejo de sesión persistente."""
@@ -200,80 +294,123 @@ def verificar_token_valido(token: str) -> bool:
     except Exception:
         return False
 
+@persistent_cache(ttl=300)  # Cache for 5 minutes
+def obtener_datos_portafolio(token: str, id_cliente: str) -> Dict:
+    """Obtiene los datos del portafolio con manejo de caché y errores."""
+    try:
+        # Usar una clave única basada en los parámetros
+        cache_key = f"portfolio_{id_cliente}_{st.session_state.get('cache_buster', 0)}"
+        
+        # Verificar caché en memoria primero
+        if cache_key in st.session_state:
+            return st.session_state[cache_key]
+            
+        # Si no está en caché, obtener los datos
+        datos = obtener_portafolio(token, id_cliente)
+        
+        # Guardar en caché
+        st.session_state[cache_key] = datos
+        return datos
+        
+    except Exception as e:
+        logger.error(f"Error al obtener datos del portafolio: {e}")
+        return {}
+
 def main() -> None:
     """Función principal de la aplicación."""
-    # Configuración de la página
-    st.set_page_config(
-        page_title="Portfolio Manager",
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    # Cargar estilos CSS
-    load_css()
-    
     # Inicializar el estado de la sesión
     inicializar_session_state()
     
-    # Mostrar el panel de autenticación
-    mostrar_panel_autenticacion()
+    # Cargar estilos CSS optimizados
+    load_css()
     
-    # Si el usuario no está autenticado, mostrar solo la página de inicio
-    if not st.session_state.autenticado:
+    # Manejar autenticación
+    if not st.session_state.get('autenticado'):
+        mostrar_panel_autenticacion()
         mostrar_pagina_principal()
         return
     
-    # Si el usuario está autenticado, cargar los datos y mostrar la interfaz
-    try:
-        # Usar columnas para mejorar el layout
-        col1, col2 = st.columns([1, 4])
+    # Usar columnas para mejorar el rendimiento de renderizado
+    col1, col2 = st.columns([1, 4], gap="small")
+    
+    # Cargar menú de forma asíncrona
+    with col1:
+        with st.container():
+            mostrar_menu_principal()
+    
+    # Cargar contenido principal con optimización de rendimiento
+    with col2:
+        with st.container():
+            mostrar_contenido_pagina()
+    
+    # Inyectar JavaScript para mejoras de rendimiento
+    st.components.v1.html("""
+    <script>
+    // Optimización de rendimiento
+    document.addEventListener('DOMContentLoaded', () => {
+        // Precargar recursos críticos
+        const preloadLinks = [
+            'https://cdn.plot.ly/plotly-latest.min.js',
+            'https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css'
+        ];
         
-        with col1:
-            with st.spinner("Cargando menú..."):
-                mostrar_menu_principal()
-        
-        with col2:
-            # Usar un contenedor para el contenido principal
-            with st.container():
-                with st.spinner("Cargando contenido..."):
-                    mostrar_contenido_pagina()
-        
-        # Añadir script para mantener viva la sesión y mejorar la experiencia
-        st.components.v1.html("""
-        <script>
-        // Mantener viva la sesión con un ping periódico
-        const keepAlive = () => {
-            fetch(window.location.href, {method: 'HEAD'})
-                .catch(err => console.debug('Keep-alive ping failed:', err));
-        };
-        
-        // Ejecutar cada 4.5 minutos (menos que el timeout del servidor)
-        setInterval(keepAlive, 4.5 * 60 * 1000);
-        
-        // Mejorar la experiencia de carga
-        document.addEventListener('DOMContentLoaded', () => {
-            // Mostrar indicador de carga suave
-            const style = document.createElement('style');
-            style.textContent = `
-                @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(10px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-                .stApp > div {
-                    animation: fadeIn 0.3s ease-out;
-                }
-            `;
-            document.head.appendChild(style);
+        preloadLinks.forEach(href => {
+            const link = document.createElement('link');
+            link.rel = 'preload';
+            link.as = href.endsWith('.js') ? 'script' : 'style';
+            link.href = href;
+            document.head.appendChild(link);
         });
-        </script>
-        """)
         
-    except Exception as e:
-        logger.error(f"Error en la aplicación principal: {str(e)}")
-        st.error("Ocurrió un error inesperado. Por favor, recarga la página e inténtalo de nuevo.")
-        if st.button("Recargar aplicación"):
-            st.experimental_rerun()
+        // Mejorar rendimiento de animaciones
+        if ('IntersectionObserver' in window) {
+            const lazyImages = [].slice.call(document.querySelectorAll('img.lazy'));
+            
+            const imageObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        img.src = img.dataset.src;
+                        img.classList.remove('lazy');
+                        imageObserver.unobserve(img);
+                    }
+                });
+            });
+            
+            lazyImages.forEach(img => imageObserver.observe(img));
+        }
+    });
+    
+    // Mantener viva la sesión de forma eficiente
+    let keepAliveTimeout;
+    const keepAlive = () => {
+        if (document.visibilityState === 'visible') {
+            fetch(window.location.href, {
+                method: 'HEAD',
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            }).catch(console.debug);
+        }
+        keepAliveTimeout = setTimeout(keepAlive, 4.5 * 60 * 1000);
+    };
+    
+    // Iniciar keep-alive cuando la pestaña está activa
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            if (!keepAliveTimeout) keepAlive();
+        } else {
+            clearTimeout(keepAliveTimeout);
+            keepAliveTimeout = null;
+        }
+    });
+    
+    // Iniciar keep-alive inicial
+    keepAlive();
+    </script>
+    """)
 
 if __name__ == "__main__":
     main()
