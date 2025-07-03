@@ -2577,16 +2577,16 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 Su portafolio está bien diversificado.
                 """)
             
-            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
+            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['std_dev_activo'] if metricas['std_dev_activo'] > 0 else 0
             if ratio_riesgo_retorno > 0.5:
                 st.success("""
                 **✅ Buen Balance Riesgo-Retorno**  
-                La relación entre riesgo y retorno es favorable.
+                La relación entre volatilidad y retorno es favorable.
                 """)
             else:
                 st.warning("""
                 **⚠️ Revisar Balance Riesgo-Retorno**  
-                El riesgo podría ser alto en relación al retorno esperado.
+                La volatilidad podría ser alta en relación al retorno esperado.
                 """)
     else:
         st.warning("No se encontraron activos en el portafolio")
