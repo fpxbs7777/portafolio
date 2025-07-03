@@ -2652,12 +2652,66 @@ class manager:
         return output_obj
 
 
+def mostrar_estado_cuenta(token_acceso, id_cliente):
+    """Muestra el estado de cuenta del cliente."""
+    try:
+        st.markdown("### 📝 Estado de Cuenta")
+        
+        with st.spinner("Obteniendo estado de cuenta..."):
+            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+            
+            if not estado_cuenta:
+                st.warning("No se pudo obtener el estado de cuenta")
+                return
+                
+            # Mostrar saldos
+            st.markdown("### 💰 Saldos")
+            
+            if 'cuentas' in estado_cuenta and estado_cuenta['cuentas']:
+                for cuenta in estado_cuenta['cuentas']:
+                    col1, col2 = st.columns([1, 2])
+                    with col1:
+                        st.metric("Saldo Disponible", f"${float(cuenta.get('disponible', 0)):,.2f}")
+                    with col2:
+                        st.metric("Saldo Total", f"${float(cuenta.get('total', 0)):,.2f}")
+            
+            # Mostrar últimas operaciones
+            st.markdown("### 📜 Últimas Operaciones")
+            
+            if 'ultimasOperaciones' in estado_cuenta and estado_cuenta['ultimasOperaciones']:
+                operaciones = []
+                for op in estado_cuenta['ultimasOperaciones']:
+                    operaciones.append({
+                        'Fecha': op.get('fecha', ''),
+                        'Tipo': op.get('tipo', ''),
+                        'Especie': op.get('especie', ''),
+                        'Cantidad': op.get('cantidad', 0),
+                        'Precio': f"${float(op.get('precio', 0)):,.2f}",
+                        'Monto': f"${float(op.get('monto', 0)):,.2f}",
+                        'Estado': op.get('estado', '')
+                    })
+                
+                if operaciones:
+                    st.dataframe(
+                        pd.DataFrame(operaciones),
+                        use_container_width=True,
+                        height=min(400, 50 + len(operaciones) * 30)
+                    )
+                else:
+                    st.info("No hay operaciones recientes para mostrar")
+            else:
+                st.info("No hay información de operaciones disponibles")
+                
+    except Exception as e:
+        st.error(f"Error al obtener el estado de cuenta: {str(e)}")
+
+
 def mostrar_resumen_portafolio(portafolio, capital_total):
     """Muestra un resumen del portafolio actual.
     
     Args:
         portafolio: Diccionario con la información del portafolio
-        capital_total: Capital total del portafolio
+        capital_total: Capital total del portafolio (puede ser string o número)
     """
     try:
         if not portafolio or 'activos' not in portafolio or not portafolio['activos']:
@@ -2666,16 +2720,30 @@ def mostrar_resumen_portafolio(portafolio, capital_total):
         
         st.markdown("### 📊 Resumen del Portafolio")
         
+        # Asegurarse de que capital_total sea un número
+        try:
+            capital_total_num = float(capital_total) if capital_total is not None else 0
+        except (ValueError, TypeError):
+            capital_total_num = 0
+        
         # Calcular métricas básicas
         activos = portafolio['activos']
-        total_invertido = sum(a.get('valorizado', 0) for a in activos)
-        rendimiento_total = sum(a.get('ganancia', 0) for a in activos)
+        
+        # Función segura para convertir a float
+        def safe_float(value, default=0.0):
+            try:
+                return float(value) if value is not None else default
+            except (ValueError, TypeError):
+                return default
+        
+        total_invertido = sum(safe_float(a.get('valorizado', 0)) for a in activos)
+        rendimiento_total = sum(safe_float(a.get('ganancia', 0)) for a in activos)
         rendimiento_porcentual = (rendimiento_total / total_invertido * 100) if total_invertido > 0 else 0
         
         # Mostrar métricas principales
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Capital Total", f"${capital_total:,.2f}")
+            st.metric("Capital Total", f"${capital_total_num:,.2f}")
         with col2:
             st.metric("Invertido", f"${total_invertido:,.2f}")
         with col3:
