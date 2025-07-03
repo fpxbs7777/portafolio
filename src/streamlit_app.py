@@ -2545,11 +2545,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             # Ordenar columnas
             df_activos = df_activos[['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación', 'P&L', 'P&L %']]
             # Ordenar por valuación descendente
-            df_display = df_display.sort_values('Valuación', ascending=False)
+            df_activos = df_activos.sort_values('Valuación', ascending=False)
+            
+            # Calcular pesos
+            df_activos['Peso (%)'] = (df_activos['Valuación'].str.replace('$', '').str.replace(',', '').astype(float) / valor_total) * 100
+            df_activos['Peso (%)'] = df_activos['Peso (%)'].apply(lambda x: f"{x:.2f}%")
             
             # Mostrar tabla
             st.dataframe(
-                df_display[['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación', 'P&L', 'P&L %', 'Peso (%)']],
+                df_activos[['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación', 'P&L', 'P&L %', 'Peso (%)']],
                 use_container_width=True,
                 height=400
             )
