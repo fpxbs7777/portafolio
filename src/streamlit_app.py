@@ -4294,9 +4294,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 st.success("✅ Optimización Diaria completada")
                                 mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
 
-                                st.plotly_chart(fig_frontier, use_container_width=True)
-                            except Exception as e:
-                                st.warning(f"No se pudo calcular la frontera eficiente: {e}")
+                                try:
+                                    st.plotly_chart(fig_frontier, use_container_width=True)
+                                except Exception as e:
+                                    st.warning(f"No se pudo calcular la frontera eficiente: {e}")
                         # Simulación de ejecución
                         st.markdown("---")
                         st.subheader("Simulación de Ejecución Algorítmica")
