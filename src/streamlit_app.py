@@ -799,25 +799,25 @@ def mostrar_tasas_caucion(token_portador):
     # Mostrar tabla de tasas
     st.subheader("Tasas de Caución")
     st.dataframe(tasas, use_container_width=True)
-                
-            # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-            if missing_columns:
-                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-                return
-            
-            # Mostrar tabla con las tasas
-            st.dataframe(
-                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                             else ['simbolo', 'plazo', 'ultimoPrecio']]
-                .rename(columns={
-                    'simbolo': 'Instrumento',
-                    'plazo': 'Plazo',
-                    'ultimoPrecio': 'Tasa',
-                    'monto': 'Monto (en millones)'
-                }),
-                use_container_width=True,
+    
+    # Verificar columnas requeridas
+    required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+    missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+    if missing_columns:
+        st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+        return
+    
+    # Mostrar tabla con las tasas
+    st.dataframe(
+        df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                     else ['simbolo', 'plazo', 'ultimoPrecio']]
+        .rename(columns={
+            'simbolo': 'Instrumento',
+            'plazo': 'Plazo',
+            'ultimoPrecio': 'Tasa',
+            'monto': 'Monto (en millones)'
+        }),
+        use_container_width=True,
                 height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
             )
             
