@@ -1873,9 +1873,14 @@ class PortfolioManager:
                 self.manager.compute_covariance()
                 
             # Calcular cartera según estrategia
-            if strategy in ['max_sharpe', 'min_vol']:
+            if strategy == 'max_sharpe':
                 portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type=strategy,
+                    portfolio_type='markowitz',
+                    target_return=target_return
+                )
+            elif strategy == 'min_vol':
+                portfolio_output = self.manager.compute_portfolio(
+                    portfolio_type='min-variance-l1',
                     target_return=target_return
                 )
                 
