@@ -1250,7 +1250,7 @@ class manager:
             # Optimización long-only estándar
             constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
             
-        elif portfolio_type == 'markowitz-target':
+        elif portfolio_type == 'markowitz':
             if target_return is not None:
                 # Optimización con retorno objetivo
                 constraints = [
@@ -1274,11 +1274,7 @@ class manager:
                     constraints=constraints
                 )
                 return self._create_output(result.x)
-                
-        elif portfolio_type == 'random-rebalance':
-            # Método de optimización y rebalanceo aleatorio
-            return self._random_rebalance_portfolio()
-            
+
         # Si constraints no está definido, lanzar error
         if 'constraints' not in locals():
             raise ValueError(f"Tipo de portafolio no soportado o constraints no definidos para: {portfolio_type}")
@@ -1292,113 +1288,6 @@ class manager:
             constraints=constraints
         )
         return self._create_output(result.x)
-        
-    def _random_rebalance_portfolio(self):
-        """
-        Implementa el método de optimización y rebalanceo aleatorio.
-        
-        Returns:
-            output: Objeto output con los pesos aleatorios y métricas asociadas
-        """
-        try:
-            # Verificar que hay datos de retornos disponibles
-            if self.returns is None or len(self.returns) == 0:
-                self.compute_covariance()
-                
-            n_assets = len(self.rics)
-            
-            # 1. Generar pesos aleatorios usando distribución de Dirichlet
-            # que garantiza que sumen 1 y estén entre 0 y 1
-            weights = np.random.dirichlet(np.ones(n_assets) * 0.9, size=1)[0]
-            
-            # 2. Asegurar que los pesos sean positivos y sumen 1
-            weights = np.maximum(weights, 0)  # Asegurar no negativos
-            weights = weights / np.sum(weights)  # Normalizar a suma 1
-            
-            # 3. Validar que los pesos sean válidos
-            if not np.all(np.isfinite(weights)) or abs(weights.sum() - 1.0) > 1e-10:
-                raise ValueError("Error en la generación de pesos aleatorios")
-            
-            # 4. Calcular métricas del portafolio
-            portfolio_returns = (self.returns * weights).sum(axis=1)
-            
-            # 5. Crear objeto de salida
-            output_obj = output(portfolio_returns, self.notional)
-            output_obj.weights = weights
-            
-            # 6. Calcular métricas adicionales
-            volatilities = self.returns.std() * np.sqrt(252)  # Anualizado
-            returns_anual = self.returns.mean() * 252  # Anualizado
-            
-            output_obj.dataframe_allocation = pd.DataFrame({
-                'Símbolo': self.rics,
-                'Peso (%)': weights * 100,
-                'Retorno Anual (%)': returns_anual * 100,
-                'Volatilidad Anual (%)': volatilities * 100,
-                'Ratio Sharpe': (returns_anual - self.risk_free_rate) / (volatilities + 1e-10)
-            }).sort_values('Peso (%)', ascending=False)
-            
-            # 7. Redondear valores para mejor presentación
-            output_obj.dataframe_allocation = output_obj.dataframe_allocation.round({
-                'Peso (%)': 2,
-                'Retorno Anual (%)': 2,
-                'Volatilidad Anual (%)': 2,
-                'Ratio Sharpe': 3
-            })
-            
-            return output_obj
-            
-        except Exception as e:
-            # En caso de error, retornar un portafolio equi-ponderado
-            st.error(f"Error en rebalanceo aleatorio: {str(e)}")
-            n = len(self.rics)
-            weights = np.ones(n) / n
-            portfolio_returns = (self.returns * weights).sum(axis=1)
-            output_obj = output(portfolio_returns, self.notional)
-            output_obj.weights = weights
-            output_obj.dataframe_allocation = pd.DataFrame({
-                'Símbolo': self.rics,
-                'Peso (%)': [100/n] * n,
-                'Retorno Anual (%)': (self.returns.mean() * 252 * 100).round(2),
-                'Volatilidad Anual (%)': (self.returns.std() * np.sqrt(252) * 100).round(2)
-            })
-            return output_obj
-
-    def _create_output(self, weights):
-        """
-        Crea un objeto de salida con los pesos dados.
-        
-        Args:
-            weights: Array de pesos del portafolio
-            
-        Returns:
-            output: Objeto output con los pesos y métricas
-        """
-        portfolio_returns = (self.returns * weights).sum(axis=1)
-        output_obj = output(portfolio_returns, self.notional)
-        output_obj.weights = weights
-        
-        # Calcular métricas adicionales
-        volatilities = self.returns.std() * np.sqrt(252)  # Anualizado
-        returns_anual = self.returns.mean() * 252  # Anualizado
-        
-        output_obj.dataframe_allocation = pd.DataFrame({
-            'Símbolo': self.rics,
-            'Peso (%)': weights * 100,
-            'Retorno Anual (%)': returns_anual * 100,
-            'Volatilidad Anual (%)': volatilities * 100,
-            'Ratio Sharpe': (returns_anual - self.risk_free_rate) / (volatilities + 1e-10)
-        }).sort_values('Peso (%)', ascending=False)
-        
-        # Redondear valores para mejor presentación
-        output_obj.dataframe_allocation = output_obj.dataframe_allocation.round({
-            'Peso (%)': 2,
-            'Retorno Anual (%)': 2,
-            'Volatilidad Anual (%)': 2,
-            'Ratio Sharpe': 3
-        })
-        
-        return output_obj
 
 class output:
     def __init__(self, returns, notional):
@@ -2977,18 +2866,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         'Mínima Varianza L2': 'min-variance-l2',
         'Pesos Iguales': 'equi-weight',
         'Solo Posiciones Largas': 'long-only',
-        'Markowitz con Retorno Objetivo': 'markowitz-target',
-        'Rebalanceo Aleatorio': 'random-rebalance'  # Nueva opción añadida
+        'Markowitz con Retorno Objetivo': 'markowitz-target'
     }
-    # Use a counter to ensure unique key
-    if 'optimization_counter' not in st.session_state:
-        st.session_state.optimization_counter = 0
-    st.session_state.optimization_counter += 1
-    
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key=f"opt_metodo_optimizacion_{st.session_state.optimization_counter}"
+        key="opt_metodo_optimizacion"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
