@@ -4976,7 +4976,7 @@ def main():
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
                     label_visibility="collapsed",
-                    key=get_widget_id(id_cliente, 'sidebar_cliente_selector')
+                    key=get_widget_id(cliente_seleccionado, 'sidebar_cliente_selector')
                 )
                 
                 st.session_state.cliente_seleccionado = next(
