@@ -2872,12 +2872,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         'Markowitz con Retorno Objetivo': 'markowitz-target'
     }
     
-    # Usar un identificador único basado en la línea de código para la clave
+    # Usar un contador basado en el id_cliente para claves únicas
+    if f'widget_counter_{id_cliente}' not in st.session_state:
+        st.session_state[f'widget_counter_{id_cliente}'] = 0
+    
+    # Incrementar el contador para este widget
+    st.session_state[f'widget_counter_{id_cliente}'] += 1
+    widget_id = f"{id_cliente}_{st.session_state[f'widget_counter_{id_cliente}']}"
+    
+    # Widget con clave única
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key=f"opt_metodo_optimizacion_{id_cliente}",
-        index=0  # Establecer un valor predeterminado
+        key=f"opt_metodo_optimizacion_{widget_id}",
+        index=0
     )
     metodo = metodos_optimizacion[metodo_ui]
 
