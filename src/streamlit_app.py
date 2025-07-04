@@ -2723,16 +2723,44 @@ def mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager):
     st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
 
 def get_widget_id(id_cliente, widget_name):
-    """Generate a unique widget ID using a counter."""
-    counter_key = f'widget_counter_{id_cliente}'
-    if counter_key not in st.session_state:
-        st.session_state[counter_key] = {}
+    """
+    Generate a unique widget ID using a counter.
     
-    if widget_name not in st.session_state[counter_key]:
-        st.session_state[counter_key][widget_name] = 0
-    
-    st.session_state[counter_key][widget_name] += 1
-    return f"{widget_name}_{id_cliente}_{st.session_state[counter_key][widget_name]}"
+    Args:
+        id_cliente: Unique identifier for the client/session
+        widget_name: String identifier for the widget type (must be hashable)
+        
+    Returns:
+        str: A unique key for the widget
+    """
+    try:
+        # Ensure widget_name is a string
+        if not isinstance(widget_name, str):
+            widget_name = str(widget_name)
+            
+        # Initialize session state if needed
+        counter_key = f'widget_counter_{id_cliente}'
+        if counter_key not in st.session_state:
+            st.session_state[counter_key] = {}
+        
+        # Initialize counter for this widget type if needed
+        if not isinstance(st.session_state[counter_key], dict):
+            st.session_state[counter_key] = {}
+            
+        if widget_name not in st.session_state[counter_key]:
+            st.session_state[counter_key][widget_name] = 0
+        
+        # Increment and return the unique key
+        st.session_state[counter_key][widget_name] += 1
+        widget_id = f"{widget_name}_{id_cliente}_{st.session_state[counter_key][widget_name]}"
+        return widget_id
+        
+    except Exception as e:
+        # Fallback to a simple unique ID if something goes wrong
+        import uuid
+        fallback_id = f"widget_{id_cliente}_{uuid.uuid4().hex[:8]}"
+        print(f"Error generating widget ID: {e}. Using fallback ID: {fallback_id}")
+        return fallback_id
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
