@@ -1156,27 +1156,51 @@ def get_historical_data_for_optimization(token_portador, activos, fecha_desde, f
     """
     datos_historicos = {}
     
+    # Asegurarse de que activos sea una lista
+    if not isinstance(activos, (list, tuple)):
+        st.error(f"Error: Se esperaba una lista de activos, se obtuvo: {type(activos)}")
+        return datos_historicos
+    
     with st.spinner('Obteniendo datos históricos...'):
-        for activo in activos:
-            simbolo = activo.get('simbolo')
-            mercado = activo.get('mercado')
+        for i, activo in enumerate(activos):
+            try:
+                # Verificar si el activo es un diccionario
+                if not isinstance(activo, dict):
+                    st.warning(f"El activo en la posición {i} no es un diccionario: {activo}")
+                    continue
+                    
+                simbolo = activo.get('simbolo')
+                mercado = activo.get('mercado')
 
-            if not simbolo or not mercado:
-                st.warning(f"Activo inválido, se omite: {activo}")
+                if not simbolo or not mercado:
+                    st.warning(f"Activo inválido, se omite (faltan símbolo o mercado): {activo}")
+                    continue
+                    
+                # Asegurarse de que mercado sea un string
+                if not isinstance(mercado, str):
+                    mercado = str(mercado)
+                    
+                st.info(f"Obteniendo datos para {simbolo} en {mercado}...")
+
+                df = obtener_serie_historica_iol(
+                    token_portador,
+                    mercado.upper(),
+                    simbolo,
+                    fecha_desde,
+                    fecha_hasta
+                )
+                
+                if df is not None and not df.empty:
+                    datos_historicos[simbolo] = df
+                    st.success(f"✓ Datos obtenidos para {simbolo}")
+                else:
+                    st.warning(f"No se pudieron obtener datos para {simbolo} en el mercado {mercado}")
+                    
+            except Exception as e:
+                st.error(f"Error al procesar el activo {activo}: {str(e)}")
+                import traceback
+                st.error(f"Detalles del error: {traceback.format_exc()}")
                 continue
-
-            df = obtener_serie_historica_iol(
-                token_portador,
-                mercado.upper(),
-                simbolo,
-                fecha_desde,
-                fecha_hasta
-            )
-            
-            if df is not None and not df.empty:
-                datos_historicos[simbolo] = df
-            else:
-                st.warning(f"No se pudieron obtener datos para {simbolo} en el mercado {mercado}")
                 
     return datos_historicos if datos_historicos else None
 
@@ -2722,6 +2746,46 @@ def mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager):
     st.plotly_chart(fig_exec, use_container_width=True)
     st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
 
+def get_widget_id(id_cliente, widget_name):
+    """
+    Generate a unique widget ID using a counter.
+    
+    Args:
+        id_cliente: Unique identifier for the client/session
+        widget_name: String identifier for the widget type (must be hashable)
+        
+    Returns:
+        str: A unique key for the widget
+    """
+    try:
+        # Ensure widget_name is a string
+        if not isinstance(widget_name, str):
+            widget_name = str(widget_name)
+            
+        # Initialize session state if needed
+        counter_key = f'widget_counter_{id_cliente}'
+        if counter_key not in st.session_state:
+            st.session_state[counter_key] = {}
+        
+        # Initialize counter for this widget type if needed
+        if not isinstance(st.session_state[counter_key], dict):
+            st.session_state[counter_key] = {}
+            
+        if widget_name not in st.session_state[counter_key]:
+            st.session_state[counter_key][widget_name] = 0
+        
+        # Increment and return the unique key
+        st.session_state[counter_key][widget_name] += 1
+        widget_id = f"{widget_name}_{id_cliente}_{st.session_state[counter_key][widget_name]}"
+        return widget_id
+        
+    except Exception as e:
+        # Fallback to a simple unique ID if something goes wrong
+        import uuid
+        fallback_id = f"widget_{id_cliente}_{uuid.uuid4().hex[:8]}"
+        print(f"Error generating widget ID: {e}. Using fallback ID: {fallback_id}")
+        return fallback_id
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
@@ -2745,7 +2809,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Rebalanceo': 'Rebalanceo de Composición Actual',
                 'Optimización desde Cero': 'Optimización desde Cero'
             }[x],
-            horizontal=True
+            horizontal=True,
+            key=f"modo_optimizacion_radio_{id_cliente}"
         )
     
     with col2:
@@ -2756,7 +2821,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             max_value=1e9, 
             value=100000.0, 
             step=1000.0,
-            help="Monto inicial para la optimización"
+            help="Monto inicial para la optimización",
+            key=f"capital_inicial_input_{id_cliente}"
         )
     
     # Configuración específica por modo
@@ -2797,7 +2863,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Diario': 'Datos Diarios (IOL - Todos los activos)',
                 'Intradía': 'Datos Intradía (yfinance - Solo Acciones/Cedears)'
             }[x],
-            horizontal=True
+            horizontal=True,
+            key=f"frecuencia_datos_radio_{id_cliente}"
         )
         
         # Si hay portafolio, usarlo como base para selección
@@ -2828,7 +2895,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=get_widget_id(id_cliente, 'opt_tipo_activo'),
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -2868,10 +2935,268 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         'Solo Posiciones Largas': 'long-only',
         'Markowitz con Retorno Objetivo': 'markowitz-target'
     }
+    
+    # Widget con clave única usando el helper function
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=get_widget_id(id_cliente, 'opt_metodo_optimizacion'),
+        index=0
+    )
+    metodo = metodos_optimizacion[metodo_ui]
+
+    # Pedir retorno objetivo solo si corresponde
+    target_return = None
+    if metodo == 'markowitz-target':
+        target_return = st.number_input(
+            "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
+            min_value=0.01, value=0.10, step=0.01, format="%.4f",
+            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger.",
+            key=get_widget_id(id_cliente, 'target_return_input')
+        )
+
+    show_frontier = st.checkbox(
+        "Mostrar Frontera Eficiente", 
+        value=True,
+        key=get_widget_id(id_cliente, 'show_frontier')
+    )
+
+    # Configuración de ejecución
+    scheduling_methods = {
+        'TWAP (Time-Weighted)': 'twap',
+        'VWAP (Volume-Weighted)': 'vwap'
+    }
+    scheduling_ui = st.selectbox(
+        "Algoritmo de Scheduling:",
+        options=list(scheduling_methods.keys()),
+        key=get_widget_id(id_cliente, 'opt_scheduling_algo')
+    )
+    scheduling = scheduling_methods[scheduling_ui]
+
+    order_types = {
+        'Market Order': 'mo',
+        'Limit Order': 'lo',
+        'Peg Order': 'peg',
+        'Float Peg': 'float_peg',
+        'Fill or Kill': 'fok',
+        'Immediate or Cancel': 'ioc'
+    }
+    order_type_ui = st.selectbox(
+        "Tipo de Orden:",
+        options=list(order_types.keys()),
+        key=get_widget_id(id_cliente, 'opt_tipo_orden')
+    )
+    order_type = order_types[order_type_ui]
+
+    # Widget TradingView
+    try:
+        from streamlit_tradingview_ta import TradingViewWidget
+        st.subheader("Gráfico interactivo TradingView")
+        TradingViewWidget(
+            symbol="NASDAQ:AAPL",  # Cambia por símbolo seleccionado
+            interval="D",
+            theme="dark",
+            studies=["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
+            height=600,
+            width="100%",
+            key=f"tradingview_widget_{id_cliente}"  # Añadir clave única
+        )
+    except ImportError:
+        st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
+
+    # Botones de acción - Solo se define una vez
+    if 'botones_definidos' not in st.session_state:
+        st.session_state.botones_definidos = True
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            ejecutar_optimizacion = st.button(
+                "🚀 Ejecutar Optimización", 
+                type="primary",
+                key=f"ejecutar_optimizacion_{id_cliente}"
+            )
+        with col2:
+            ejecutar_frontier = st.button(
+                "📈 Calcular Frontera Eficiente",
+                key=f"ejecutar_frontier_{id_cliente}"
+            )
+        with col3:
+            mostrar_cauciones = st.button(
+                "💸 Ver Cauciones Todos los Plazos",
+                key=f"mostrar_cauciones_{id_cliente}"
+            )
+        with col4:
+            comparar_opt = st.checkbox(
+                "Comparar Actual vs Aleatoria", 
+                value=False, 
+                help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.",
+                key=f"comparar_opt_{id_cliente}"
+            )
+    else:
+        # Si los botones ya se definieron, solo obtenemos sus valores
+        ejecutar_optimizacion = st.session_state.get(f"ejecutar_optimizacion_{id_cliente}", False)
+        ejecutar_frontier = st.session_state.get(f"ejecutar_frontier_{id_cliente}", False)
+        mostrar_cauciones = st.session_state.get(f"mostrar_cauciones_{id_cliente}", False)
+        comparar_opt = st.session_state.get(f"comparar_opt_{id_cliente}", False)
+
+    # Ejecución de optimización
+    if ejecutar_optimizacion:
+        with st.spinner("Ejecutando optimización..."):
+            try:
+                # Configuración común para ambos modos
+                if modo_optimizacion == 'Rebalanceo':
+                    # Usar datos diarios de IOL y el capital actual del portafolio
+                    activos_para_opt = activos_filtrados
+                    manager = PortfolioManager(
+                        activos_para_opt,
+                        token_acceso,
+                        fecha_desde,
+                        fecha_hasta,
+                        capital=capital_inicial
+                    )
+                    if manager.load_data():
+                        portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
+                        if portfolio_result:
+                            st.success("✅ Optimización de Rebalanceo completada")
+                            mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
+                else:  # Optimización desde Cero
+                    if frecuencia_datos == 'Intradía':
+                        # Usar yfinance para acciones y cedears
+                        import yfinance as yf
+                        activos_yf = []
+                        for activo in activos_filtrados:
+                            tipo = activo.get('tipo')
+                            if tipo in ['Acciones', 'Cedears']:
+                                simbolo = activo.get('simbolo')
+                                if simbolo:
+                                    # Agregar sufijo .BA para acciones y cedears
+                                    activos_yf.append({
+                                        'simbolo': f"{simbolo}.BA",
+                                        'tipo': tipo
+                                    })
+                        if activos_yf:
+                            # Obtener datos intradía
+                            data_yf = yf.download(
+                                [a['simbolo'] for a in activos_yf],
+                                start=fecha_desde,
+                                end=fecha_hasta,
+                                interval="1h"  # Intervalo intradía
+                            )
+                            if not data_yf.empty:
+                                # Convertir datos yfinance a formato compatible
+                                activos_formato = []
+                                for activo in activos_yf:
+                                    simbolo = activo['simbolo']
+                                    precios = data_yf['Close'][simbolo]
+                                    if not precios.empty:
+                                        activos_formato.append({
+                                            'simbolo': simbolo,
+                                            'precios': precios
+                                        })
+                                if activos_formato:
+                                    manager = PortfolioManager(
+                                        activos_formato,
+                                        token_acceso,
+                                        fecha_desde,
+                                        fecha_hasta,
+                                        capital=capital_inicial
+                                    )
+                                    if manager.load_data():
+                                        portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
+                                        if portfolio_result:
+                                            st.success("✅ Optimización Intradía completada")
+                                            mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
+                    else:  # Diario
+                        # Usar datos diarios de IOL
+                        manager = PortfolioManager(
+                            activos_filtrados,
+                            token_acceso,
+                            fecha_desde,
+                            fecha_hasta,
+                            capital=capital_inicial
+                        )
+                        if manager.load_data():
+                            portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
+                            if portfolio_result:
+                                st.success("✅ Optimización Diaria completada")
+                                mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
+
+            except Exception as e:
+                st.error(f"Error en la optimización: {str(e)}")
+    
+    # Configuración inicial
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        modo_optimizacion = st.selectbox(
+            "Modo de Optimización:",
+            options=['Rebalanceo', 'Optimización desde Cero'],
+            format_func=lambda x: {
+                'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
+                'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
+            }[x]
+        )
+    
+    with col2:
+        capital_inicial = st.number_input(
+            "Capital Inicial (ARS):",
+            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
+            help="Monto inicial para la optimización. En modo Rebalanceo, se usa el capital actual del portafolio."
+        )
+    
+    # Configuración específica por modo
+    if modo_optimizacion == 'Optimización desde Cero':
+        col3, col4 = st.columns(2)
+        with col3:
+            frecuencia_datos = st.selectbox(
+                "Frecuencia de Datos:",
+                options=['Diario', 'Intradía'],
+                format_func=lambda x: {
+                    'Diario': 'Datos Diarios (IOL)',
+                    'Intradía': 'Datos Intradía (yfinance)'
+                }[x]
+            )
+        
+        with col4:
+            if frecuencia_datos == 'Intradía':
+                st.info("Para acciones y cedears, se agregará automáticamente el sufijo .BA")
+                tipos_disponibles = ['Acciones', 'Cedears']
+            else:
+                tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
+            
+            tipo_seleccionado = st.selectbox(
+                "Filtrar por tipo de activo:",
+                options=['Todos'] + tipos_disponibles,
+                key=f"opt_tipo_activo_{id_cliente}",
+                format_func=lambda x: "Todos" if x == 'Todos' else x
+            )
+            
+            if tipo_seleccionado != 'Todos':
+                activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
+            else:
+                activos_filtrados = activos_para_optimizacion
+    else:  # Rebalanceo
+        activos_filtrados = activos_para_optimizacion
+        frecuencia_datos = 'Diario'
+
+    # Resto de la configuración común
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
+    
+    st.info(f"Analizando {len(activos_filtrados)} activos desde {fecha_desde} hasta {fecha_hasta}")
+    
+    # Configuración de optimización
+    metodos_optimizacion = {
+        'Maximizar Sharpe (Markowitz)': 'max_sharpe',
+        'Mínima Varianza L1': 'min-variance-l1',
+        'Mínima Varianza L2': 'min-variance-l2',
+        'Pesos Iguales': 'equi-weight',
+        'Solo Posiciones Largas': 'long-only',
+        'Markowitz con Retorno Objetivo': 'markowitz-target'
+    }
+    metodo_ui = st.selectbox(
+        "Método de Optimización de Portafolio:",
+        options=list(metodos_optimizacion.keys()),
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -2894,7 +3219,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -2909,7 +3234,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -3067,7 +3392,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3097,7 +3422,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -3120,7 +3445,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -3135,7 +3460,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -3293,7 +3618,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3323,7 +3648,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -3346,7 +3671,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -3361,233 +3686,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
-    )
-    order_type = order_types[order_type_ui]
-
-    # Widget TradingView
-    try:
-        from streamlit_tradingview_ta import TradingViewWidget
-        st.subheader("Gráfico interactivo TradingView")
-        TradingViewWidget(
-            symbol="NASDAQ:AAPL",  # Cambia por símbolo seleccionado
-            interval="D",
-            theme="dark",
-            studies=["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
-            height=600,
-            width="100%",
-        )
-    except ImportError:
-        st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
-
-    # Botones de acción
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
-    with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-    with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
-    with col4:
-        comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.")
-
-    # Ejecución de optimización
-    if ejecutar_optimizacion:
-        with st.spinner("Ejecutando optimización..."):
-            try:
-                # Configuración común para ambos modos
-                if modo_optimizacion == 'Rebalanceo':
-                    # Usar datos diarios de IOL y el capital actual del portafolio
-                    activos_para_opt = activos_filtrados
-                    manager = PortfolioManager(
-                        activos_para_opt,
-                        token_acceso,
-                        fecha_desde,
-                        fecha_hasta,
-                        capital=capital_inicial
-                    )
-                    if manager.load_data():
-                        portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
-                        if portfolio_result:
-                            st.success("✅ Optimización de Rebalanceo completada")
-                            mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
-                else:  # Optimización desde Cero
-                    if frecuencia_datos == 'Intradía':
-                        # Usar yfinance para acciones y cedears
-                        import yfinance as yf
-                        activos_yf = []
-                        for activo in activos_filtrados:
-                            tipo = activo.get('tipo')
-                            if tipo in ['Acciones', 'Cedears']:
-                                simbolo = activo.get('simbolo')
-                                if simbolo:
-                                    # Agregar sufijo .BA para acciones y cedears
-                                    activos_yf.append({
-                                        'simbolo': f"{simbolo}.BA",
-                                        'tipo': tipo
-                                    })
-                        if activos_yf:
-                            # Obtener datos intradía
-                            data_yf = yf.download(
-                                [a['simbolo'] for a in activos_yf],
-                                start=fecha_desde,
-                                end=fecha_hasta,
-                                interval="1h"  # Intervalo intradía
-                            )
-                            if not data_yf.empty:
-                                # Convertir datos yfinance a formato compatible
-                                activos_formato = []
-                                for activo in activos_yf:
-                                    simbolo = activo['simbolo']
-                                    precios = data_yf['Close'][simbolo]
-                                    if not precios.empty:
-                                        activos_formato.append({
-                                            'simbolo': simbolo,
-                                            'precios': precios
-                                        })
-                                if activos_formato:
-                                    manager = PortfolioManager(
-                                        activos_formato,
-                                        token_acceso,
-                                        fecha_desde,
-                                        fecha_hasta,
-                                        capital=capital_inicial
-                                    )
-                                    if manager.load_data():
-                                        portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
-                                        if portfolio_result:
-                                            st.success("✅ Optimización Intradía completada")
-                                            mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
-                    else:  # Diario
-                        # Usar datos diarios de IOL
-                        manager = PortfolioManager(
-                            activos_filtrados,
-                            token_acceso,
-                            fecha_desde,
-                            fecha_hasta,
-                            capital=capital_inicial
-                        )
-                        if manager.load_data():
-                            portfolio_result = manager.compute_portfolio(strategy=metodo, target_return=target_return)
-                            if portfolio_result:
-                                st.success("✅ Optimización Diaria completada")
-                                mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager)
-
-            except Exception as e:
-                st.error(f"Error en la optimización: {str(e)}")
-    
-    # Configuración inicial
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        modo_optimizacion = st.selectbox(
-            "Modo de Optimización:",
-            options=['Rebalanceo', 'Optimización desde Cero'],
-            format_func=lambda x: {
-                'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
-                'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
-            }[x]
-        )
-    
-    with col2:
-        capital_inicial = st.number_input(
-            "Capital Inicial (ARS):",
-            min_value=1000.0, max_value=1e9, value=100000.0, step=1000.0,
-            help="Monto inicial para la optimización. En modo Rebalanceo, se usa el capital actual del portafolio."
-        )
-    
-    # Configuración específica por modo
-    if modo_optimizacion == 'Optimización desde Cero':
-        col3, col4 = st.columns(2)
-        with col3:
-            frecuencia_datos = st.selectbox(
-                "Frecuencia de Datos:",
-                options=['Diario', 'Intradía'],
-                format_func=lambda x: {
-                    'Diario': 'Datos Diarios (IOL)',
-                    'Intradía': 'Datos Intradía (yfinance)'
-                }[x]
-            )
-        
-        with col4:
-            if frecuencia_datos == 'Intradía':
-                st.info("Para acciones y cedears, se agregará automáticamente el sufijo .BA")
-                tipos_disponibles = ['Acciones', 'Cedears']
-            else:
-                tipos_disponibles = sorted(set([a['tipo'] for a in activos_para_optimizacion if a.get('tipo')]))
-            
-            tipo_seleccionado = st.selectbox(
-                "Filtrar por tipo de activo:",
-                options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
-                format_func=lambda x: "Todos" if x == 'Todos' else x
-            )
-            
-            if tipo_seleccionado != 'Todos':
-                activos_filtrados = [a for a in activos_para_optimizacion if a.get('tipo') == tipo_seleccionado]
-            else:
-                activos_filtrados = activos_para_optimizacion
-    else:  # Rebalanceo
-        activos_filtrados = activos_para_optimizacion
-        frecuencia_datos = 'Diario'
-
-    # Resto de la configuración común
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
-    
-    st.info(f"Analizando {len(activos_filtrados)} activos desde {fecha_desde} hasta {fecha_hasta}")
-    
-    # Configuración de optimización
-    metodos_optimizacion = {
-        'Maximizar Sharpe (Markowitz)': 'max_sharpe',
-        'Mínima Varianza L1': 'min-variance-l1',
-        'Mínima Varianza L2': 'min-variance-l2',
-        'Pesos Iguales': 'equi-weight',
-        'Solo Posiciones Largas': 'long-only',
-        'Markowitz con Retorno Objetivo': 'markowitz-target'
-    }
-    metodo_ui = st.selectbox(
-        "Método de Optimización de Portafolio:",
-        options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
-    )
-    metodo = metodos_optimizacion[metodo_ui]
-
-    # Pedir retorno objetivo solo si corresponde
-    target_return = None
-    if metodo == 'markowitz-target':
-        target_return = st.number_input(
-            "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
-            min_value=0.01, value=0.10, step=0.01, format="%.4f",
-            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
-        )
-
-    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
-
-    # Configuración de ejecución
-    scheduling_methods = {
-        'TWAP (Time-Weighted)': 'twap',
-        'VWAP (Volume-Weighted)': 'vwap'
-    }
-    scheduling_ui = st.selectbox(
-        "Algoritmo de Scheduling:",
-        options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
-    )
-    scheduling = scheduling_methods[scheduling_ui]
-
-    order_types = {
-        'Market Order': 'mo',
-        'Limit Order': 'lo',
-        'Peg Order': 'peg',
-        'Float Peg': 'float_peg',
-        'Fill or Kill': 'fok',
-        'Immediate or Cancel': 'ioc'
-    }
-    order_type_ui = st.selectbox(
-        "Tipo de Orden:",
-        options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -3795,7 +3894,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3829,7 +3928,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -3852,7 +3951,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -3867,7 +3966,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -4072,7 +4171,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -4174,7 +4273,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -4197,7 +4296,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -4212,7 +4311,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -4503,7 +4602,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        key=get_widget_id(id_cliente, 'analisis_tecnico_select')
     )
     
     if simbolo_seleccionado:
@@ -4601,12 +4701,14 @@ def mostrar_movimientos_asesor():
             tipo_fecha = st.selectbox(
                 "Tipo de fecha",
                 ["fechaOperacion", "fechaLiquidacion"],
-                index=0
+                index=0,
+                key=get_widget_id(id_cliente, 'tipo_fecha_select')
             )
             estado = st.selectbox(
                 "Estado",
                 ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
+                index=0,
+                key=get_widget_id(id_cliente, 'estado_select')
             )
         with col2:
             tipo_operacion = st.text_input("Tipo de operación")
