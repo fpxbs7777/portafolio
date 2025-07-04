@@ -2973,18 +2973,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 break
         return seleccionados, total_invertido
     
-    # Configuración de selección de universo y optimización
-    col_sel, col1, col2, col3 = st.columns(4)
-
-    with col_sel:
-        metodo_seleccion = st.selectbox(
-            "Método de Selección de Activos:",
-            options=['actual', 'aleatoria'],
-            format_func=lambda x: {
-                'actual': 'Portafolio actual',
-                'aleatoria': 'Selección aleatoria'
-            }[x]
-        )
+    # Configuración de selección de universo
+    metodo_seleccion = st.selectbox(
+        "Método de Selección de Activos:",
+        options=['actual', 'aleatoria'],
+        format_func=lambda x: {
+            'actual': 'Portafolio actual',
+            'aleatoria': 'Selección aleatoria'
+        }[x]
+    )
 
     # Mostrar input de capital y filtro de tipo de activo solo si corresponde
     if metodo_seleccion == 'aleatoria':
@@ -3036,7 +3033,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
         )
 
-    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    # La frontera eficiente se mostrará automáticamente con los resultados
 
     # --- Scheduling y tipo de orden ---
     scheduling_methods = {
@@ -3087,30 +3084,17 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     except ImportError:
         st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     with col1:
         ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
-    with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
-    with col4:
         comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.")
 
-    def obtener_cotizaciones_cauciones(bearer_token):
-        import requests
-        import pandas as pd
-        url = "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
-        # ... (resto del código de la función)
-        fig = go.Figure()
-        # ... (resto del código de la función)
-        fig.update_layout(
-            yaxis=dict(title="Volumen"),
-            yaxis2=dict(title="Precio", overlaying="y", side="right"),
-            legend=dict(orientation="h")
-        )
-        return fig, total_ejecutado, precio_promedio
 
+
+    # Mostrar la frontera eficiente automáticamente con los resultados
+    mostrar_frontier = True
+    
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
             try:
@@ -3296,8 +3280,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         fig = portfolio_result.plot_histogram_streamlit("Distribución de Retornos del Portafolio")
                         st.plotly_chart(fig, use_container_width=True)
 
-                        # Mostrar frontera eficiente si el usuario lo solicita
-                        if show_frontier:
+                        # Mostrar frontera eficiente automáticamente
+                        if mostrar_frontier:
                             st.markdown("#### 📈 Frontera Eficiente (Efficient Frontier)")
                             try:
                                 frontier, valid_returns, volatilities = manager_inst.compute_efficient_frontier(target_return=target_return if target_return else 0.08)
