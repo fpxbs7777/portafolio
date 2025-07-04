@@ -4971,14 +4971,22 @@ def main():
                 cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
                 cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
                 
+                # Use a static initial key and then switch to a unique key based on selected client
+                if 'sidebar_cliente_selector_key' not in st.session_state:
+                    st.session_state.sidebar_cliente_selector_key = "sidebar_cliente_selector_initial"
+                
+                # Update the key if a client is selected
+                if st.session_state.cliente_seleccionado:
+                    cliente_id = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id', ''))
+                    st.session_state.sidebar_cliente_selector_key = get_widget_id(cliente_id, 'sidebar_cliente_selector')
+                
                 cliente_seleccionado = st.selectbox(
                     "Seleccione un cliente:",
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
                     label_visibility="collapsed",
-                    key=get_widget_id(cliente_seleccionado, 'sidebar_cliente_selector')
+                    key=st.session_state.sidebar_cliente_selector_key
                 )
-                
                 st.session_state.cliente_seleccionado = next(
                     (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
                     None
