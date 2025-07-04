@@ -1220,6 +1220,39 @@ class manager:
         
         return self.cov_matrix, self.mean_returns
 
+    def _create_output(self, weights):
+        """
+        Crea un objeto de salida con los pesos optimizados
+        
+        Args:
+            weights: Array de pesos del portafolio
+            
+        Returns:
+            output: Objeto output con la cartera optimizada
+        """
+        # Normalizar pesos para que sumen 1
+        weights = np.array(weights)
+        weights = weights / np.sum(weights)
+        
+        # Calcular retornos del portafolio
+        portfolio_returns = (self.returns * weights).sum(axis=1)
+        
+        # Crear objeto de salida
+        port_output = output(portfolio_returns, self.notional)
+        
+        # Agregar pesos al objeto de salida
+        port_output.weights = weights
+        
+        # Crear DataFrame con la asignación de activos
+        port_output.dataframe_allocation = pd.DataFrame({
+            'rics': self.returns.columns,
+            'weights': weights,
+            'returns': self.mean_returns.values,
+            'volatilities': np.sqrt(np.diag(self.cov_matrix))
+        })
+        
+        return port_output
+
     def compute_portfolio(self, portfolio_type=None, target_return=None):
         if self.cov_matrix is None:
             self.compute_covariance()
