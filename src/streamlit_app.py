@@ -1923,10 +1923,40 @@ class PortfolioManager:
                 
             # Calcular cartera según estrategia
             if strategy == 'max_sharpe':
-                portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type='markowitz',
-                    target_return=target_return
-                )
+                portfolio_output = None
+                try:
+                    portfolio_output = self.manager.compute_portfolio(
+                        portfolio_type='markowitz',
+                        target_return=target_return
+                    )
+                except Exception as e:
+                    st.warning(f"Error en optimización max_sharpe: {str(e)}")
+                    
+                # Si falla, intentar con min_vol como respaldo
+                if portfolio_output is None:
+                    st.warning("No se pudo calcular la cartera de máximo ratio de Sharpe. Intentando con cartera de mínima volatilidad...")
+                    try:
+                        portfolio_output = self.manager.compute_portfolio(
+                            portfolio_type='min-variance-l1',
+                            target_return=target_return
+                        )
+                    except Exception as e:
+                        st.warning(f"Error en optimización min_vol: {str(e)}")
+                
+                # Si aún falla, usar equi-weight como último recurso
+                if portfolio_output is None:
+                    st.warning("Usando estrategia equi-weight como respaldo")
+                    n_assets = len(self.returns.columns)
+                    weights = np.array([1/n_assets] * n_assets)
+                    portfolio_returns = (self.returns * weights).sum(axis=1)
+                    portfolio_output = output(portfolio_returns, self.notional)
+                    portfolio_output.weights = weights
+                    portfolio_output.dataframe_allocation = pd.DataFrame({
+                        'rics': list(self.returns.columns),
+                        'weights': weights,
+                        'volatilities': self.returns.std().values,
+                        'returns': self.returns.mean().values
+                    })
             elif strategy == 'min_vol':
                 portfolio_output = self.manager.compute_portfolio(
                     portfolio_type='min-variance-l1',
@@ -2697,23 +2727,6 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
-    
-    with st.expander("🏦 Tasas de Caución", expanded=True):
-        if st.button("🔄 Actualizar Tasas"):
-            with st.spinner("Consultando tasas de caución..."):
-                tasas_caucion = obtener_tasas_caucion(token_acceso)
-            
-            if tasas_caucion is not None and not tasas_caucion.empty:
-                df_tasas = pd.DataFrame(tasas_caucion)
-                columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
-                columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
-                
-                if columnas_disponibles:
-                    st.dataframe(df_tasas[columnas_disponibles].head(10))
-                else:
-                    st.dataframe(df_tasas.head(10))
-            else:
-                st.error("❌ No se pudieron obtener las tasas de caución")
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
