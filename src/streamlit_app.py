@@ -2652,6 +2652,90 @@ class manager:
         return output_obj
 
 
+def mostrar_cotizaciones_mercado(token_acceso):
+    """Muestra las cotizaciones de mercado de los principales activos."""
+    try:
+        st.markdown("### 💱 Cotizaciones de Mercado")
+        
+        # Lista de activos principales a mostrar
+        activos_principales = [
+            {"simbolo": "GGAL", "nombre": "Grupo Financiero Galicia"},
+            {"simbolo": "YPFD", "nombre": "YPF"},
+            {"simbolo": "MELI", "nombre": "MercadoLibre"},
+            {"simbolo": "PAMP", "nombre": "Pampa Energía"},
+            {"simbolo": "BMA", "nombre": "Banco Macro"},
+            {"simbolo": "CEPU", "nombre": "Central Puerto"},
+            {"simbolo": "TGS", "nombre": "Transportadora de Gas del Sur"},
+            {"simbolo": "COME", "nombre": "Sociedad Comercial del Plata"},
+            {"simbolo": "TXAR", "nombre": "Ternium Argentina"},
+            {"simbolo": "VALO", "nombre": "Banco Valores"}
+        ]
+        
+        # Mostrar cotizaciones en tiempo real
+        st.markdown("#### 📊 Cotizaciones en Tiempo Real")
+        
+        # Crear columnas para mostrar las cotizaciones en un grid
+        cols = st.columns(2)
+        
+        for i, activo in enumerate(activos_principales):
+            with cols[i % 2]:
+                with st.expander(f"{activo['simbolo']} - {activo['nombre']}", expanded=False):
+                    try:
+                        # Obtener datos de yfinance
+                        ticker = yf.Ticker(f"{activo['simbolo']}.BA")
+                        hist = ticker.history(period="1d", interval="1m")
+                        
+                        if not hist.empty:
+                            ultimo_precio = hist['Close'].iloc[-1]
+                            precio_anterior = hist['Close'].iloc[0] if len(hist) > 1 else ultimo_precio
+                            variacion = ((ultimo_precio - precio_anterior) / precio_anterior) * 100
+                            
+                            # Mostrar métrica con color según la variación
+                            st.metric(
+                                label=f"{activo['nombre']} ({activo['simbolo']})",
+                                value=f"${ultimo_precio:,.2f}",
+                                delta=f"{variacion:,.2f}%"
+                            )
+                            
+                            # Mostrar mini gráfico
+                            fig = go.Figure(go.Scatter(
+                                x=hist.index,
+                                y=hist['Close'],
+                                line=dict(color='#4CAF50' if variacion >= 0 else '#f44336'),
+                                name=activo['simbolo']
+                            ))
+                            
+                            fig.update_layout(
+                                height=150,
+                                margin=dict(l=0, r=0, t=0, b=0),
+                                showlegend=False,
+                                xaxis_showgrid=False,
+                                yaxis_showgrid=False,
+                                xaxis_showticklabels=False,
+                                yaxis_showticklabels=False,
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                paper_bgcolor='rgba(0,0,0,0)'
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                        else:
+                            st.warning(f"No hay datos disponibles para {activo['simbolo']}")
+                            
+                    except Exception as e:
+                        st.error(f"Error al obtener datos de {activo['simbolo']}: {str(e)}")
+        
+        # Agregar información adicional
+        st.markdown("""
+        <div style="margin-top: 20px; padding: 10px; background-color: rgba(76, 175, 80, 0.1); border-radius: 5px;">
+            <p>ℹ️ Las cotizaciones se actualizan cada minuto. Los datos pueden tener un retraso de hasta 15 minutos.</p>
+            <p>📌 Haga clic en cada activo para ver más detalles y el gráfico de variación del día.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    except Exception as e:
+        st.error(f"Error al cargar las cotizaciones: {str(e)}")
+
+
 def mostrar_estado_cuenta(token_acceso, id_cliente):
     """Muestra el estado de cuenta del cliente."""
     try:
