@@ -1931,8 +1931,6 @@ class PortfolioManager:
                         'returns': self.returns.mean().values
                     })
                 
-                return portfolio_output
-                
             elif strategy == 'equi-weight':
                 n_assets = len(self.returns.columns)
                 weights = np.array([1/n_assets] * n_assets)
