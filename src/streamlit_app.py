@@ -2934,13 +2934,28 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     # Botones de acción
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
+        ejecutar_optimizacion = st.button(
+            "🚀 Ejecutar Optimización", 
+            type="primary",
+            key=f"ejecutar_optimizacion_{id_cliente}"
+        )
     with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+        ejecutar_frontier = st.button(
+            "📈 Calcular Frontera Eficiente",
+            key=f"ejecutar_frontier_{id_cliente}"
+        )
     with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
+        mostrar_cauciones = st.button(
+            "💸 Ver Cauciones Todos los Plazos",
+            key=f"mostrar_cauciones_{id_cliente}"
+        )
     with col4:
-        comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.")
+        comparar_opt = st.checkbox(
+            "Comparar Actual vs Aleatoria", 
+            value=False, 
+            help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.",
+            key=f"comparar_opt_{id_cliente}"
+        )
 
     # Ejecución de optimización
     if ejecutar_optimizacion:
