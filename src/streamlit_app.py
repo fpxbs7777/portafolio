@@ -1313,13 +1313,29 @@ class manager:
             raise ValueError(f"Tipo de portafolio no soportado o constraints no definidos para: {portfolio_type}")
 
         # Optimización general de varianza mínima
-        result = op.minimize(
-            lambda x: portfolio_variance(x, self.cov_matrix),
-            x0=np.ones(n_assets)/n_assets,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
+        try:
+            result = op.minimize(
+                lambda x: portfolio_variance(x, self.cov_matrix),
+                x0=np.ones(n_assets)/n_assets,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+            
+            # Verificar si la optimización fue exitosa
+            if result.success:
+                return self._create_output(result.x)
+            else:
+                st.warning(f"La optimización no convergió: {result.message}")
+                # Devolver cartera de pesos iguales como respaldo
+                weights = np.ones(n_assets) / n_assets
+                return self._create_output(weights)
+                
+        except Exception as e:
+            st.error(f"Error en la optimización: {str(e)}")
+            # Devolver cartera de pesos iguales como último recurso
+            weights = np.ones(n_assets) / n_assets
+            return self._create_output(weights)
         return self._create_output(result.x)
 
 class output:
