@@ -4821,7 +4821,7 @@ def mostrar_analisis_portafolio():
                 simbolo_seleccionado = st.selectbox(
                     "Seleccione un activo para analizar:",
                     options=simbolos,
-                    key="vol_asset_selector"
+                    key=get_widget_id(id_cliente, 'vol_asset_selector')
                 )
                 
                 # Configuración del análisis
@@ -4976,7 +4976,7 @@ def main():
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
                     label_visibility="collapsed",
-                    key="sidebar_cliente_selector"
+                    key=get_widget_id(id_cliente, 'sidebar_cliente_selector')
                 )
                 
                 st.session_state.cliente_seleccionado = next(
