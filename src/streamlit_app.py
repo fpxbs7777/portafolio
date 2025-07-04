@@ -1156,27 +1156,51 @@ def get_historical_data_for_optimization(token_portador, activos, fecha_desde, f
     """
     datos_historicos = {}
     
+    # Asegurarse de que activos sea una lista
+    if not isinstance(activos, (list, tuple)):
+        st.error(f"Error: Se esperaba una lista de activos, se obtuvo: {type(activos)}")
+        return datos_historicos
+    
     with st.spinner('Obteniendo datos históricos...'):
-        for activo in activos:
-            simbolo = activo.get('simbolo')
-            mercado = activo.get('mercado')
+        for i, activo in enumerate(activos):
+            try:
+                # Verificar si el activo es un diccionario
+                if not isinstance(activo, dict):
+                    st.warning(f"El activo en la posición {i} no es un diccionario: {activo}")
+                    continue
+                    
+                simbolo = activo.get('simbolo')
+                mercado = activo.get('mercado')
 
-            if not simbolo or not mercado:
-                st.warning(f"Activo inválido, se omite: {activo}")
+                if not simbolo or not mercado:
+                    st.warning(f"Activo inválido, se omite (faltan símbolo o mercado): {activo}")
+                    continue
+                    
+                # Asegurarse de que mercado sea un string
+                if not isinstance(mercado, str):
+                    mercado = str(mercado)
+                    
+                st.info(f"Obteniendo datos para {simbolo} en {mercado}...")
+
+                df = obtener_serie_historica_iol(
+                    token_portador,
+                    mercado.upper(),
+                    simbolo,
+                    fecha_desde,
+                    fecha_hasta
+                )
+                
+                if df is not None and not df.empty:
+                    datos_historicos[simbolo] = df
+                    st.success(f"✓ Datos obtenidos para {simbolo}")
+                else:
+                    st.warning(f"No se pudieron obtener datos para {simbolo} en el mercado {mercado}")
+                    
+            except Exception as e:
+                st.error(f"Error al procesar el activo {activo}: {str(e)}")
+                import traceback
+                st.error(f"Detalles del error: {traceback.format_exc()}")
                 continue
-
-            df = obtener_serie_historica_iol(
-                token_portador,
-                mercado.upper(),
-                simbolo,
-                fecha_desde,
-                fecha_hasta
-            )
-            
-            if df is not None and not df.empty:
-                datos_historicos[simbolo] = df
-            else:
-                st.warning(f"No se pudieron obtener datos para {simbolo} en el mercado {mercado}")
                 
     return datos_historicos if datos_historicos else None
 
