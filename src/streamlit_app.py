@@ -2745,7 +2745,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Rebalanceo': 'Rebalanceo de Composición Actual',
                 'Optimización desde Cero': 'Optimización desde Cero'
             }[x],
-            horizontal=True
+            horizontal=True,
+            key=f"modo_optimizacion_radio_{id_cliente}"
         )
     
     with col2:
@@ -2756,7 +2757,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             max_value=1e9, 
             value=100000.0, 
             step=1000.0,
-            help="Monto inicial para la optimización"
+            help="Monto inicial para la optimización",
+            key=f"capital_inicial_input_{id_cliente}"
         )
     
     # Configuración específica por modo
@@ -2797,7 +2799,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Diario': 'Datos Diarios (IOL - Todos los activos)',
                 'Intradía': 'Datos Intradía (yfinance - Solo Acciones/Cedears)'
             }[x],
-            horizontal=True
+            horizontal=True,
+            key=f"frecuencia_datos_radio_{id_cliente}"
         )
         
         # Si hay portafolio, usarlo como base para selección
