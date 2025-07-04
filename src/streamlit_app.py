@@ -1203,22 +1203,86 @@ class manager:
         self.timeseries = dic_timeseries
 
     def compute_covariance(self):
-        self.synchronise_timeseries()
-        # Calcular retornos logarítmicos
-        returns_matrix = {}
-        for ric in self.rics:
-            if ric in self.timeseries:
-                prices = self.timeseries[ric]
-                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        """
+        Calcula la matriz de covarianza y retornos medios para los activos cargados.
         
-        # Convertir a DataFrame para alinear fechas
-        self.returns = pd.DataFrame(returns_matrix)
-        
-        # Calcular matriz de covarianza y retornos medios
-        self.cov_matrix = self.returns.cov() * 252  # Anualizar
-        self.mean_returns = self.returns.mean() * 252  # Anualizar
-        
-        return self.cov_matrix, self.mean_returns
+        Returns:
+            tuple: (cov_matrix, mean_returns) o (None, None) en caso de error
+        """
+        try:
+            st.write("🔄 Sincronizando series temporales...")
+            self.synchronise_timeseries()
+            
+            if not self.timeseries:
+                st.error("❌ No hay series temporales disponibles para calcular covarianza")
+                return None, None
+                
+            # Calcular retornos logarítmicos
+            st.write("📈 Calculando retornos logarítmicos...")
+            returns_matrix = {}
+            valid_rics = []
+            
+            for ric in self.rics:
+                if ric in self.timeseries:
+                    prices = self.timeseries[ric]
+                    if len(prices) < 2:
+                        st.warning(f"⚠️ No hay suficientes datos para {ric} (se requieren al menos 2 puntos)")
+                        continue
+                        
+                    # Calcular retornos logarítmicos
+                    returns = np.log(prices / prices.shift(1)).dropna()
+                    
+                    # Verificar que los retornos sean válidos
+                    if len(returns) == 0 or not np.isfinite(returns).all():
+                        st.warning(f"⚠️ Retornos inválidos para {ric}")
+                        continue
+                        
+                    returns_matrix[ric] = returns
+                    valid_rics.append(ric)
+            
+            if not returns_matrix:
+                st.error("❌ No hay retornos válidos para calcular la matriz de covarianza")
+                return None, None
+                
+            # Convertir a DataFrame para alinear fechas
+            self.returns = pd.DataFrame(returns_matrix)
+            
+            # Verificar que haya suficientes datos
+            if len(self.returns) < 2:
+                st.error("❌ No hay suficientes datos para calcular la matriz de covarianza")
+                return None, None
+                
+            st.write(f"✅ Retornos calculados para {len(valid_rics)} activos")
+            
+            try:
+                # Calcular matriz de covarianza y retornos medios (anualizados)
+                st.write("🧮 Calculando matriz de covarianza...")
+                self.cov_matrix = self.returns.cov() * 252  # Anualizar
+                
+                # Verificar que la matriz de covarianza sea definida positiva
+                try:
+                    np.linalg.cholesky(self.cov_matrix + 1e-10 * np.eye(len(self.cov_matrix)))
+                except np.linalg.LinAlgError:
+                    st.warning("⚠️ La matriz de covarianza no es definida positiva. Aplicando regularización...")
+                    # Aplicar regularización para hacer la matriz definida positiva
+                    min_eig = np.min(np.real(np.linalg.eigvals(self.cov_matrix)))
+                    if min_eig < 0:
+                        self.cov_matrix += (np.eye(len(self.cov_matrix)) * (abs(min_eig) + 1e-6))
+                
+                self.mean_returns = self.returns.mean() * 252  # Anualizar
+                
+                st.success("✅ Matriz de covarianza calculada exitosamente")
+                return self.cov_matrix, self.mean_returns
+                
+            except Exception as e:
+                st.error(f"❌ Error al calcular la matriz de covarianza: {str(e)}")
+                st.exception(e)
+                return None, None
+                
+        except Exception as e:
+            st.error(f"❌ Error inesperado en compute_covariance: {str(e)}")
+            st.exception(e)
+            return None, None
 
     def _create_output(self, weights):
         """
@@ -1254,88 +1318,173 @@ class manager:
         return port_output
 
     def compute_portfolio(self, portfolio_type=None, target_return=None):
-        if self.cov_matrix is None:
-            self.compute_covariance()
-            
-        n_assets = len(self.rics)
-        bounds = tuple((0, 1) for _ in range(n_assets))
+        """
+        Calcula la cartera óptima según el tipo especificado.
         
-        if portfolio_type == 'min-variance-l1':
-            # Minimizar varianza con restricción L1
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
-            ]
+        Args:
+            portfolio_type (str): Tipo de cartera ('min-variance-l1', 'min-variance-l2', 
+                                'equi-weight', 'long-only', 'markowitz')
+            target_return (float, optional): Retorno objetivo para la optimización
             
-        elif portfolio_type == 'min-variance-l2':
-            # Minimizar varianza con restricción L2
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
-            ]
+        Returns:
+            output: Objeto output con la cartera optimizada o None en caso de error
+        """
+        try:
+            st.write(f"🔍 Iniciando optimización de cartera: {portfolio_type or 'default'}")
             
-        elif portfolio_type == 'equi-weight':
-            # Pesos iguales
-            weights = np.ones(n_assets) / n_assets
-            return self._create_output(weights)
+            # Calcular matriz de covarianza si no está disponible
+            if self.cov_matrix is None or self.mean_returns is None:
+                st.write("📊 Calculando matriz de covarianza...")
+                cov_result = self.compute_covariance()
+                if cov_result[0] is None or cov_result[1] is None:
+                    st.error("❌ No se pudo calcular la matriz de covarianza")
+                    return None
             
-        elif portfolio_type == 'long-only':
-            # Optimización long-only estándar
-            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            n_assets = len(self.rics)
+            if n_assets == 0:
+                st.error("❌ No hay activos disponibles para la optimización")
+                return None
+                
+            # Verificar que tenemos retornos medios para todos los activos
+            if len(self.mean_returns) != n_assets:
+                st.error(f"❌ Número de retornos medios ({len(self.mean_returns)}) no coincide con el número de activos ({n_assets})")
+                return None
             
-        elif portfolio_type == 'markowitz':
-            if target_return is not None:
-                # Optimización con retorno objetivo
+            # Configurar restricciones comunes
+            bounds = tuple((0, 1) for _ in range(n_assets))
+            constraints = []
+            
+            # Configurar según el tipo de cartera
+            if portfolio_type == 'min-variance-l1':
+                st.write("🎯 Estrategia: Mínima Varianza con restricción L1")
                 constraints = [
                     {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
+                    {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
                 ]
-            else:
-                # Maximizar Sharpe Ratio
-                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-                def neg_sharpe_ratio(weights):
-                    port_ret = np.sum(self.mean_returns * weights)
-                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-                    if port_vol == 0:
-                        return np.inf
-                    return -(port_ret - self.risk_free_rate) / port_vol
+                
+            elif portfolio_type == 'min-variance-l2':
+                st.write("🎯 Estrategia: Mínima Varianza con restricción L2")
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
+                ]
+                
+            elif portfolio_type == 'equi-weight':
+                st.write("⚖️ Estrategia: Pesos Iguales")
+                weights = np.ones(n_assets) / n_assets
+                return self._create_output(weights)
+                
+            elif portfolio_type == 'long-only':
+                st.write("📈 Estrategia: Solo Posiciones Largas")
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'ineq', 'fun': lambda x: x}  # x >= 0 para cada peso
+                ]
+                
+            elif portfolio_type == 'markowitz':
+                if target_return is not None:
+                    st.write(f"🎯 Estrategia: Markowitz con retorno objetivo {target_return:.2%}")
+                    constraints = [
+                        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                        {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return},
+                        {'type': 'ineq', 'fun': lambda x: x}  # x >= 0 para cada peso
+                    ]
+                else:
+                    st.write("📊 Estrategia: Máximo Ratio de Sharpe (Markowitz)")
+                    constraints = [
+                        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                        {'type': 'ineq', 'fun': lambda x: x}  # x >= 0 para cada peso
+                    ]
+                    
+                    # Función objetivo: Minimizar el negativo del Ratio de Sharpe
+                    def neg_sharpe_ratio(weights):
+                        try:
+                            port_ret = np.sum(self.mean_returns * weights)
+                            port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+                            
+                            if port_vol < 1e-10:  # Evitar división por cero
+                                return np.inf
+                                
+                            sharpe = port_ret / port_vol
+                            return -sharpe  # Minimizar el negativo del Sharpe
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error en la función objetivo: {str(e)}")
+                            return np.inf
+                    
+                    result = op.minimize(
+                        neg_sharpe_ratio,
+                        x0=np.ones(n_assets)/n_assets,
+                        method='SLSQP',
+                        bounds=bounds,
+                        constraints=constraints
+                    )
+                    
+                    if result.success:
+                        return self._create_output(result.x)
+                    else:
+                        st.warning(f"La optimización no convergió: {result.message}")
+                        # Devolver cartera de pesos iguales como respaldo
+                        weights = np.ones(n_assets) / n_assets
+                        return self._create_output(weights)
+                        
+            # Si constraints no está definido, lanzar error
+            if 'constraints' not in locals():
+                raise ValueError(f"Tipo de portafolio no soportado o constraints no definidos para: {portfolio_type}")
+
+            # Optimización general de varianza mínima
+            try:
                 result = op.minimize(
-                    neg_sharpe_ratio,
+                    lambda x: portfolio_variance(x, self.cov_matrix),
                     x0=np.ones(n_assets)/n_assets,
                     method='SLSQP',
                     bounds=bounds,
-                    constraints=constraints
+                    constraints=constraints,
+                    options={'maxiter': 1000, 'ftol': 1e-8, 'disp': False}
                 )
-                return self._create_output(result.x)
-
-        # Si constraints no está definido, lanzar error
-        if 'constraints' not in locals():
-            raise ValueError(f"Tipo de portafolio no soportado o constraints no definidos para: {portfolio_type}")
-
-        # Optimización general de varianza mínima
-        try:
-            result = op.minimize(
-                lambda x: portfolio_variance(x, self.cov_matrix),
-                x0=np.ones(n_assets)/n_assets,
-                method='SLSQP',
-                bounds=bounds,
-                constraints=constraints
-            )
-            
-            # Verificar si la optimización fue exitosa
-            if result.success:
-                return self._create_output(result.x)
-            else:
-                st.warning(f"La optimización no convergió: {result.message}")
-                # Devolver cartera de pesos iguales como respaldo
+                
+                if result.success:
+                    st.success(f"✅ Optimización exitosa después de {result.nit} iteraciones")
+                    return self._create_output(result.x)
+                else:
+                    st.warning(f"⚠️ La optimización no convergió: {result.message}")
+                    # Intentar con un método diferente como respaldo
+                    st.write("🔄 Intentando con método COBYLA...")
+                    try:
+                        result = op.minimize(
+                            lambda x: portfolio_variance(x, self.cov_matrix),
+                            x0=np.ones(n_assets)/n_assets,
+                            method='COBYLA',
+                            constraints=constraints,
+                            options={'maxiter': 2000}
+                        )
+                        if result.success:
+                            st.success(f"✅ Optimización exitosa después de {result.nit} iteraciones")
+                            return self._create_output(result.x)
+                    except Exception as fallback_error:
+                        st.error(f"❌ Error en optimización COBYLA: {str(fallback_error)}")
+                    
+                    # Devolver cartera de pesos iguales como último recurso
+                    st.warning("⚠️ Usando estrategia de pesos iguales como respaldo")
+                    weights = np.ones(n_assets) / n_assets
+                    return self._create_output(weights)
+                    
+            except Exception as e:
+                st.error(f"❌ Error en la optimización: {str(e)}")
+                st.exception(e)
+                # Devolver cartera de pesos iguales como último recurso
+                st.warning("⚠️ Usando estrategia de pesos iguales como último recurso")
                 weights = np.ones(n_assets) / n_assets
                 return self._create_output(weights)
                 
         except Exception as e:
-            st.error(f"Error en la optimización: {str(e)}")
+            st.error(f"❌ Error inesperado en compute_portfolio: {str(e)}")
+            st.exception(e)
             # Devolver cartera de pesos iguales como último recurso
-            weights = np.ones(n_assets) / n_assets
-            return self._create_output(weights)
+            if 'n_assets' in locals() and n_assets > 0:
+                weights = np.ones(n_assets) / n_assets
+                return self._create_output(weights)
+            return None
         return self._create_output(result.x)
 
 class output:
@@ -1904,107 +2053,142 @@ class PortfolioManager:
         Returns:
             output: Objeto output con la cartera optimizada o None en caso de error
         """
+        st.write("🔍 Iniciando cálculo de cartera...")
+        
+        # Validar datos de entrada
         if not self.data_loaded or self.returns is None or self.returns.empty:
-            st.error("No hay datos de retornos disponibles")
+            error_msg = "❌ Error: No hay datos de retornos disponibles"
+            st.error(error_msg)
             return None
             
         try:
+            st.write("📊 Inicializando manager de cartera...")
+            st.write(f"📊 Activos disponibles: {', '.join(self.returns.columns.tolist())}")
+            
             # Inicializar el manager si no existe
             if not hasattr(self, 'manager') or not self.manager:
-                self.manager = manager(
-                    rics=self.returns.columns.tolist(),
-                    notional=self.notional,
-                    data=self.prices.to_dict('series')
-                )
-                
-                # Cargar datos y calcular covarianzas
-                self.manager.returns = self.returns
-                self.manager.compute_covariance()
-                
-            # Calcular cartera según estrategia
-            if strategy == 'max_sharpe':
-                portfolio_output = None
+                st.write("🔧 Creando nueva instancia del manager...")
                 try:
-                    portfolio_output = self.manager.compute_portfolio(
-                        portfolio_type='markowitz',
-                        target_return=target_return
+                    self.manager = manager(
+                        rics=self.returns.columns.tolist(),
+                        notional=self.notional,
+                        data=self.prices.to_dict('series')
                     )
-                except Exception as e:
-                    st.warning(f"Error en optimización max_sharpe: {str(e)}")
                     
-                # Si falla, intentar con min_vol como respaldo
-                if portfolio_output is None:
-                    st.warning("No se pudo calcular la cartera de máximo ratio de Sharpe. Intentando con cartera de mínima volatilidad...")
-                    try:
-                        portfolio_output = self.manager.compute_portfolio(
-                            portfolio_type='min-variance-l1',
-                            target_return=target_return
-                        )
-                    except Exception as e:
-                        st.warning(f"Error en optimización min_vol: {str(e)}")
-                
-                # Si aún falla, usar equi-weight como último recurso
-                if portfolio_output is None:
-                    st.warning("Usando estrategia equi-weight como respaldo")
-                    n_assets = len(self.returns.columns)
-                    weights = np.array([1/n_assets] * n_assets)
-                    portfolio_returns = (self.returns * weights).sum(axis=1)
-                    portfolio_output = output(portfolio_returns, self.notional)
-                    portfolio_output.weights = weights
-                    portfolio_output.dataframe_allocation = pd.DataFrame({
-                        'rics': list(self.returns.columns),
-                        'weights': weights,
-                        'volatilities': self.returns.std().values,
-                        'returns': self.returns.mean().values
-                    })
-            elif strategy == 'min_vol':
-                portfolio_output = self.manager.compute_portfolio(
-                    portfolio_type='min-variance-l1',
-                    target_return=target_return
-                )
-                
-                if portfolio_output is None:
-                    st.warning("No se pudo calcular la cartera óptima. Usando estrategia equi-weight.")
-                    n_assets = len(self.returns.columns)
-                    weights = np.array([1/n_assets] * n_assets)
-                    portfolio_returns = (self.returns * weights).sum(axis=1)
-                    portfolio_output = output(portfolio_returns, self.notional)
-                    portfolio_output.weights = weights
-                    portfolio_output.dataframe_allocation = pd.DataFrame({
-                        'rics': list(self.returns.columns),
-                        'weights': weights,
-                        'volatilities': self.returns.std().values,
-                        'returns': self.returns.mean().values
-                    })
-                
-            elif strategy == 'equi-weight':
-                n_assets = len(self.returns.columns)
-                weights = np.array([1/n_assets] * n_assets)
-                portfolio_returns = (self.returns * weights).sum(axis=1)
-                portfolio_output = output(portfolio_returns, self.notional)
-                portfolio_output.weights = weights
-                portfolio_output.dataframe_allocation = pd.DataFrame({
-                    'rics': list(self.returns.columns),
-                    'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
-                })
-                return portfolio_output
-                
-            else:
-                st.error(f"Estrategia no soportada: {strategy}")
+                    # Cargar datos y calcular covarianzas
+                    st.write("📈 Calculando covarianzas...")
+                    self.manager.returns = self.returns
+                    cov_matrix, mean_returns = self.manager.compute_covariance()
+                    
+                    if cov_matrix is None or mean_returns is None:
+                        st.error("❌ No se pudo calcular la matriz de covarianza o retornos medios")
+                        return None
+                        
+                    if np.isnan(cov_matrix).any() or np.isnan(mean_returns).any():
+                        st.warning("⚠️ Advertencia: La matriz de covarianza o retornos medios contiene valores NaN")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error al inicializar el manager: {str(e)}")
+                    st.exception(e)
+                    return None
+            
+            # Verificar que tenemos datos válidos
+            if not hasattr(self.manager, 'cov_matrix') or self.manager.cov_matrix is None:
+                st.error("❌ Error: No se pudo calcular la matriz de covarianza")
                 return None
                 
+            if np.isnan(self.manager.cov_matrix).any():
+                st.warning("⚠️ Advertencia: La matriz de covarianza contiene valores NaN")
+                
+            st.success("✅ Datos de entrada validados correctamente")
+            
+            # Definir estrategias a intentar en orden de preferencia
+            strategies = []
+            
+            if strategy == 'max_sharpe':
+                strategies = [
+                    ('markowitz', target_return, "Máximo Ratio de Sharpe"),
+                    ('markowitz', 0.10, "Máximo Ratio de Sharpe (10% objetivo)"),
+                    ('markowitz', 0.05, "Máximo Ratio de Sharpe (5% objetivo)"),
+                    ('min-variance-l1', None, "Mínima Varianza L1"),
+                    ('min-variance-l2', None, "Mínima Varianza L2"),
+                    ('long-only', None, "Solo Posiciones Largas")
+                ]
+            elif strategy == 'min_vol':
+                strategies = [
+                    ('min-variance-l1', None, "Mínima Varianza L1"),
+                    ('min-variance-l2', None, "Mínima Varianza L2"),
+                    ('long-only', None, "Solo Posiciones Largas")
+                ]
+            else:  # equi-weight
+                strategies = [('equi-weight', None, "Pesos Iguales")]
+            
+            # Intentar cada estrategia hasta que una funcione
+            portfolio_output = None
+            last_error = None
+            
+            for portfolio_type, ret, desc in strategies:
+                try:
+                    st.write(f"🔄 Intentando estrategia: {desc}")
+                    
+                    # Manejar el caso especial de equi-weight
+                    if portfolio_type == 'equi-weight':
+                        n_assets = len(self.returns.columns)
+                        if n_assets == 0:
+                            raise ValueError("No hay activos disponibles")
+                            
+                        weights = np.array([1.0/n_assets] * n_assets)
+                        portfolio_returns = (self.returns * weights).sum(axis=1)
+                        
+                        # Validar que los retornos sean finitos
+                        if not np.isfinite(portfolio_returns).all():
+                            raise ValueError("Los retornos del portafolio contienen valores no finitos")
+                            
+                        portfolio_output = output(portfolio_returns, self.notional)
+                        portfolio_output.weights = weights
+                        
+                        # Crear DataFrame de asignación
+                        df_allocation = pd.DataFrame({
+                            'rics': list(self.returns.columns),
+                            'weights': weights,
+                            'volatilities': self.returns.std().values,
+                            'returns': self.returns.mean().values
+                        })
+                        
+                        # Validar DataFrame de asignación
+                        if df_allocation.isnull().values.any():
+                            st.warning("⚠️ Advertencia: El DataFrame de asignación contiene valores nulos")
+                            
+                        portfolio_output.dataframe_allocation = df_allocation
+                        st.success(f"✅ {desc} creado exitosamente")
+                        return portfolio_output
+                    else:
+                        # Para otras estrategias, usar el método del manager
+                        portfolio_output = self.manager.compute_portfolio(
+                            portfolio_type=portfolio_type,
+                            target_return=ret if ret is not None else target_return
+                        )
+                        
+                        if portfolio_output is not None:
+                            st.success(f"✅ Optimización exitosa con {desc}")
+                            return portfolio_output
+                            
+                except Exception as e:
+                    last_error = str(e)
+                    st.warning(f"⚠️ La estrategia {desc} falló: {last_error}")
+                    continue
+            
+            # Si llegamos aquí, todas las estrategias fallaron
+            st.error("❌ No se pudo calcular la cartera con ninguna estrategia")
+            if last_error:
+                st.error(f"Último error: {last_error}")
+                
+            return None
+            
         except Exception as e:
-            st.error(f"Error al calcular la cartera: {str(e)}")
+            st.error(f"❌ Error inesperado en compute_portfolio: {str(e)}")
             st.exception(e)
             return None
-    
-    def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
-        """Computa la frontera eficiente"""
-        if not self.data_loaded or not hasattr(self, 'prices') or self.prices is None:
-            st.error("No hay datos de precios disponibles")
-            return None, None, None
         
         try:
             portfolios, returns, volatilities = compute_efficient_frontier(
