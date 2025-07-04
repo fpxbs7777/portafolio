@@ -1,13 +1,14 @@
+import os
 import streamlit as st
 import requests
 import plotly.graph_objects as go
 import pandas as pd
-from plotly.subplots import make_subplots
-from arch import arch_model
-from scipy.stats import norm
-import matplotlib.pyplot as plt
-import yfinance as yf
 import numpy as np
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import logging
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta, date
 import scipy.optimize as op
 from scipy import stats
@@ -640,15 +641,6 @@ def obtener_tasas_caucion(token_portador):
         elif response.status_code == 401:
             st.error("Error de autenticación. Por favor, verifique su token de acceso.")
             return None
-        else:
-            error_msg = f"Error {response.status_code} al obtener tasas de caución"
-            try:
-                error_data = response.json()
-                error_msg += f": {error_data.get('message', 'Error desconocido')}"
-            except:
-                error_msg += f": {response.text}"
-            st.error(error_msg)
-            return None
     except requests.exceptions.RequestException as e:
         st.error(f"Error de conexión: {str(e)}")
         return None
@@ -917,10 +909,10 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
-    Obtiene la serie histórica de precios para un activo específico desde la API de InvertirOnline.
+    Obtiene la serie histórica de precios para un activo específico usando el cliente InvertironlineAPI.
     
     Args:
-        token_portador (str): Token de autenticación de la API
+        token_portador (str): Token de autenticación (mantenido para compatibilidad)
         mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
         simbolo (str): Símbolo del activo
         fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
@@ -931,109 +923,38 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
     try:
-        print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
+        # Usar el cliente InvertironlineAPI
+        df = iol_client.get_historical_data(
+            symbol=simbolo,
+            market=mercado,
+            start_date=fecha_desde,
+            end_date=fecha_hasta,
+            adjusted=ajustada
+        )
         
-        # Endpoint para FCIs (manejo especial)
-        if mercado.upper() == 'FCI':
-            print("Es un FCI, usando función específica")
-            return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-        
-        # Construir URL según el tipo de activo y mercado
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
-        
-        headers = {
-            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
-            'Accept': 'application/json'
-        }
-        
-        # Realizar la solicitud
-        response = requests.get(url, headers={
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }, timeout=30)
-        
-        # Verificar el estado de la respuesta
-        print(f"Estado de la respuesta: {response.status_code}")
-        response.raise_for_status()
-        
-        # Procesar la respuesta
-        data = response.json()
-        print(f"Tipo de datos recibidos: {type(data)}")
-        
-        # Procesar la respuesta según el formato esperado
-        if isinstance(data, list):
-            print(f"Se recibió una lista con {len(data)} elementos")
-            if data:
-                print(f"Primer elemento: {data[0]}")
-                
-            # Formato estándar para series históricas
-            fechas = []
-            precios = []
+        if df is None or df.empty:
+            logger.warning(f"No se encontraron datos para {simbolo} en {mercado}")
+            return None
             
-            for item in data:
-                try:
-                    # Manejar diferentes formatos de fecha
-                    fecha_str = item.get('fecha') or item.get('fechaHora')
-                    if not fecha_str:
-                        print(f"  - Item sin fecha: {item}")
-                        continue
-                        
-                    # Manejar diferentes formatos de precio
-                    precio = item.get('ultimoPrecio') or item.get('precioCierre') or item.get('precio')
-                    if precio is None:
-                        print(f"  - Item sin precio: {item}")
-                        continue
-                        
-                    # Convertir fecha
-                    try:
-                        fecha = parse_datetime_flexible(fecha_str)
-                        if pd.isna(fecha):
-                            print(f"  - Fecha inválida: {fecha_str}")
-                            continue
-                            
-                        precio_float = float(precio)
-                        if precio_float <= 0:
-                            print(f"  - Precio inválido: {precio}")
-                            continue
-                            
-                        fechas.append(fecha)
-                        precios.append(precio_float)
-                        
-                    except (ValueError, TypeError) as e:
-                        print(f"  - Error al convertir datos: {e}")
-                        continue
-                        
-                except Exception as e:
-                    print(f"  - Error inesperado al procesar item: {e}")
-                    continue
-            
-            if fechas and precios:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                print(f"Datos procesados: {len(df)} registros válidos")
-                return df
-            else:
-                print("No se encontraron datos válidos en la respuesta")
-                return None
-                
-        elif isinstance(data, dict):
-            print(f"Se recibió un diccionario: {data.keys()}")
-            # Para respuestas que son un solo valor (ej: MEP)
-            precio = data.get('ultimoPrecio') or data.get('precioCierre') or data.get('precio')
-            if precio is not None:
-                print(f"Datos de un solo punto: precio={precio}")
-                return pd.DataFrame({
-                    'fecha': [pd.Timestamp.now(tz='UTC')],
-                    'precio': [float(precio)]
-                })
-            else:
-                print("No se encontró precio en la respuesta")
-        else:
-            print(f"Tipo de respuesta no manejado: {type(data)}")
-            
-        print(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
+        # Asegurarse de que tenemos la columna de precio
+        if 'ultimoPrecio' in df.columns:
+            df = df.rename(columns={'ultimoPrecio': 'precio'})
+        elif 'cierre' in df.columns:
+            df = df.rename(columns={'cierre': 'precio'})
+        
+        # Seleccionar columnas relevantes
+        df = df[['precio']].reset_index()
+        
+        # Ordenar por fecha
+        df = df.sort_values('fecha')
+        
+        # Eliminar filas con precios faltantes
+        df = df.dropna(subset=['precio'])
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error al obtener datos históricos para {simbolo} en {mercado}: {str(e)}")
         return None
         
     except requests.exceptions.RequestException as e:
