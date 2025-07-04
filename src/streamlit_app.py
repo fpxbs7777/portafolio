@@ -2722,6 +2722,18 @@ def mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager):
     st.plotly_chart(fig_exec, use_container_width=True)
     st.info(f"**Volumen Total Ejecutado:** {total_exec}\n\n**Precio Promedio de Ejecución:** {avg_price:.2f}")
 
+def get_widget_id(id_cliente, widget_name):
+    """Generate a unique widget ID using a counter."""
+    counter_key = f'widget_counter_{id_cliente}'
+    if counter_key not in st.session_state:
+        st.session_state[counter_key] = {}
+    
+    if widget_name not in st.session_state[counter_key]:
+        st.session_state[counter_key][widget_name] = 0
+    
+    st.session_state[counter_key][widget_name] += 1
+    return f"{widget_name}_{id_cliente}_{st.session_state[counter_key][widget_name]}"
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
@@ -2872,19 +2884,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         'Markowitz con Retorno Objetivo': 'markowitz-target'
     }
     
-    # Usar un contador basado en el id_cliente para claves únicas
-    if f'widget_counter_{id_cliente}' not in st.session_state:
-        st.session_state[f'widget_counter_{id_cliente}'] = 0
-    
-    # Incrementar el contador para este widget
-    st.session_state[f'widget_counter_{id_cliente}'] += 1
-    widget_id = f"{id_cliente}_{st.session_state[f'widget_counter_{id_cliente}']}"
-    
-    # Widget con clave única
+    # Widget con clave única usando el helper function
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key=f"opt_metodo_optimizacion_{widget_id}",
+        key=get_widget_id(id_cliente, 'opt_metodo_optimizacion'),
         index=0
     )
     metodo = metodos_optimizacion[metodo_ui]
@@ -2896,13 +2900,13 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
             min_value=0.01, value=0.10, step=0.01, format="%.4f",
             help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger.",
-            key=f"target_return_input_{id_cliente}"
+            key=get_widget_id(id_cliente, 'target_return_input')
         )
 
     show_frontier = st.checkbox(
         "Mostrar Frontera Eficiente", 
         value=True,
-        key=f"show_frontier_{id_cliente}"
+        key=get_widget_id(id_cliente, 'show_frontier')
     )
 
     # Configuración de ejecución
@@ -2913,7 +2917,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key=f"opt_scheduling_algo_{id_cliente}"
+        key=get_widget_id(id_cliente, 'opt_scheduling_algo')
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -2928,7 +2932,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key=f"opt_tipo_orden_{id_cliente}"
+        key=get_widget_id(id_cliente, 'opt_tipo_orden')
     )
     order_type = order_types[order_type_ui]
 
