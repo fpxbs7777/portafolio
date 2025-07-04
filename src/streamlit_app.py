@@ -2980,10 +2980,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         'Markowitz con Retorno Objetivo': 'markowitz-target',
         'Rebalanceo Aleatorio': 'random-rebalance'  # Nueva opción añadida
     }
+    # Use a counter to ensure unique key
+    if 'optimization_counter' not in st.session_state:
+        st.session_state.optimization_counter = 0
+    st.session_state.optimization_counter += 1
+    
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{st.session_state.optimization_counter}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
