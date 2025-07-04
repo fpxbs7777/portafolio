@@ -2828,7 +2828,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -2871,7 +2871,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -2894,7 +2894,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -2909,7 +2909,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -3067,7 +3067,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3097,7 +3097,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -3120,7 +3120,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -3135,7 +3135,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -3293,7 +3293,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3323,7 +3323,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -3346,7 +3346,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -3361,7 +3361,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -3519,7 +3519,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3549,7 +3549,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -3572,7 +3572,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -3587,7 +3587,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -3795,7 +3795,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3829,7 +3829,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -3852,7 +3852,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -3867,7 +3867,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
@@ -4072,7 +4072,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key=f"opt_tipo_activo_{id_cliente}",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -4174,7 +4174,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key="opt_metodo_optimizacion"
+        key=f"opt_metodo_optimizacion_{id_cliente}"
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -4197,7 +4197,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     scheduling_ui = st.selectbox(
         "Algoritmo de Scheduling:",
         options=list(scheduling_methods.keys()),
-        key="opt_scheduling_algo"
+        key=f"opt_scheduling_algo_{id_cliente}"
     )
     scheduling = scheduling_methods[scheduling_ui]
 
@@ -4212,7 +4212,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key=f"opt_tipo_orden_{id_cliente}"
     )
     order_type = order_types[order_type_ui]
 
