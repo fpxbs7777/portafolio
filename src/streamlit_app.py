@@ -2871,10 +2871,13 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         'Solo Posiciones Largas': 'long-only',
         'Markowitz con Retorno Objetivo': 'markowitz-target'
     }
+    
+    # Usar un identificador único basado en la línea de código para la clave
     metodo_ui = st.selectbox(
         "Método de Optimización de Portafolio:",
         options=list(metodos_optimizacion.keys()),
-        key=f"opt_metodo_optimizacion_{id_cliente}"
+        key=f"opt_metodo_optimizacion_{id_cliente}",
+        index=0  # Establecer un valor predeterminado
     )
     metodo = metodos_optimizacion[metodo_ui]
 
@@ -2884,10 +2887,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         target_return = st.number_input(
             "Retorno Objetivo (anual, decimal, ej: 0.15 para 15%):",
             min_value=0.01, value=0.10, step=0.01, format="%.4f",
-            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
+            help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger.",
+            key=f"target_return_input_{id_cliente}"
         )
 
-    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    show_frontier = st.checkbox(
+        "Mostrar Frontera Eficiente", 
+        value=True,
+        key=f"show_frontier_{id_cliente}"
+    )
 
     # Configuración de ejecución
     scheduling_methods = {
@@ -2927,35 +2935,44 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             studies=["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
             height=600,
             width="100%",
+            key=f"tradingview_widget_{id_cliente}"  # Añadir clave única
         )
     except ImportError:
         st.info("Instala 'streamlit-tradingview-widget' para habilitar el gráfico TradingView.")
 
-    # Botones de acción
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        ejecutar_optimizacion = st.button(
-            "🚀 Ejecutar Optimización", 
-            type="primary",
-            key=f"ejecutar_optimizacion_{id_cliente}"
-        )
-    with col2:
-        ejecutar_frontier = st.button(
-            "📈 Calcular Frontera Eficiente",
-            key=f"ejecutar_frontier_{id_cliente}"
-        )
-    with col3:
-        mostrar_cauciones = st.button(
-            "💸 Ver Cauciones Todos los Plazos",
-            key=f"mostrar_cauciones_{id_cliente}"
-        )
-    with col4:
-        comparar_opt = st.checkbox(
-            "Comparar Actual vs Aleatoria", 
-            value=False, 
-            help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.",
-            key=f"comparar_opt_{id_cliente}"
-        )
+    # Botones de acción - Solo se define una vez
+    if 'botones_definidos' not in st.session_state:
+        st.session_state.botones_definidos = True
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            ejecutar_optimizacion = st.button(
+                "🚀 Ejecutar Optimización", 
+                type="primary",
+                key=f"ejecutar_optimizacion_{id_cliente}"
+            )
+        with col2:
+            ejecutar_frontier = st.button(
+                "📈 Calcular Frontera Eficiente",
+                key=f"ejecutar_frontier_{id_cliente}"
+            )
+        with col3:
+            mostrar_cauciones = st.button(
+                "💸 Ver Cauciones Todos los Plazos",
+                key=f"mostrar_cauciones_{id_cliente}"
+            )
+        with col4:
+            comparar_opt = st.checkbox(
+                "Comparar Actual vs Aleatoria", 
+                value=False, 
+                help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.",
+                key=f"comparar_opt_{id_cliente}"
+            )
+    else:
+        # Si los botones ya se definieron, solo obtenemos sus valores
+        ejecutar_optimizacion = st.session_state.get(f"ejecutar_optimizacion_{id_cliente}", False)
+        ejecutar_frontier = st.session_state.get(f"ejecutar_frontier_{id_cliente}", False)
+        mostrar_cauciones = st.session_state.get(f"mostrar_cauciones_{id_cliente}", False)
+        comparar_opt = st.session_state.get(f"comparar_opt_{id_cliente}", False)
 
     # Ejecución de optimización
     if ejecutar_optimizacion:
