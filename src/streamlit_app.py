@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 from plotly.subplots import make_subplots
 from arch import arch_model
-from scipy.stats import norm
+from scipy.stats import norm, pearsonr
 import matplotlib.pyplot as plt
 import yfinance as yf
 import numpy as np
@@ -14,6 +14,7 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+from typing import Dict, List, Tuple, Optional
 
 warnings.filterwarnings('ignore')
 
@@ -3695,6 +3696,426 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+class IntermarketAnalyzer:
+    """
+    Clase para realizar análisis intermercado de diferentes clases de activos.
+    Incluye análisis de bonos, acciones, commodities y divisas con foco en el mercado argentino.
+    """
+    
+    def __init__(self):
+        # Definición de instrumentos de mercado
+        self.instruments = {
+            'bonds': {
+                'US10Y': '^TNX',        # Rendimiento del bono del Tesoro a 10 años
+                'EMBI+': 'EMB',         # ETF de bonos emergentes
+                'AL30': 'AL30.BA',      # Bono argentino en pesos
+                'GD30': 'GD30.BA',      # Bono argentino en dólares
+            },
+            'equities': {
+                'S&P500': '^GSPC',
+                'MERVAL': '^MERV',
+                'EEM': 'EEM',           # MSCI Emerging Markets
+                'BMA': 'BMA.BA',        # Banco Macro
+            },
+            'commodities': {
+                'Gold': 'GC=F',
+                'Oil': 'CL=F',
+                'Soybeans': 'ZS=F',
+                'Corn': 'ZC=F',
+                'Copper': 'HG=F',
+            },
+            'currencies': {
+                'DXY': 'DX-Y.NYB',      # Índice dólar
+                'USDARS': 'ARS=X',      # Peso argentino
+                'EURUSD': 'EURUSD=X',
+                'GBPUSD': 'GBPUSD=X',
+            }
+        }
+        self.data = {}
+        self.correlations = {}
+        self.risk_free_rate = 0.40  # Tasa libre de riesgo para Argentina
+    
+    def fetch_data(self, period: str = '2y') -> None:
+        """
+        Obtiene datos de mercado para todos los instrumentos definidos.
+        
+        Args:
+            period: Período de tiempo para los datos históricos (ej: '1y', '2y', '5y')
+        """
+        st.info("Obteniendo datos de mercado...")
+        
+        try:
+            # Combinar todos los tickers
+            all_tickers = []
+            for category in self.instruments.values():
+                all_tickers.extend(category.values())
+            
+            # Descargar datos
+            data = yf.download(
+                tickers=all_tickers,
+                period=period,
+                interval='1d',
+                group_by='ticker',
+                progress=False
+            )
+            
+            # Almacenar datos por categoría
+            for category, tickers in self.instruments.items():
+                self.data[category] = {}
+                for name, ticker in tickers.items():
+                    try:
+                        if ticker in data.columns.levels[0]:
+                            df = data[ticker].copy()
+                            df = df.rename(columns={
+                                'Open': 'open',
+                                'High': 'high',
+                                'Low': 'low',
+                                'Close': 'close',
+                                'Volume': 'volume',
+                                'Adj Close': 'adj_close'
+                            })
+                            df['returns'] = df['close'].pct_change()
+                            self.data[category][name] = df
+                    except Exception as e:
+                        st.warning(f"No se pudo cargar {name} ({ticker}): {str(e)}")
+            
+            st.success("Datos de mercado cargados exitosamente")
+            self._calculate_correlations()
+            
+        except Exception as e:
+            st.error(f"Error al obtener datos: {str(e)}")
+    
+    def _calculate_correlations(self, window: int = 60) -> None:
+        """
+        Calcula correlaciones móviles entre diferentes clases de activos.
+        
+        Args:
+            window: Ventana de tiempo para el cálculo de correlaciones móviles
+        """
+        st.info("Calculando correlaciones intermercado...")
+        
+        try:
+            # Crear un DataFrame con los retornos de todos los activos
+            returns_data = {}
+            for category, assets in self.data.items():
+                for asset, df in assets.items():
+                    if 'returns' in df.columns:
+                        returns_data[f"{category}_{asset}"] = df['returns']
+            
+            returns_df = pd.DataFrame(returns_data)
+            returns_df = returns_df.dropna()
+            
+            # Calcular correlaciones móviles
+            self.correlations = returns_df.rolling(window=window).corr()
+            
+        except Exception as e:
+            st.error(f"Error al calcular correlaciones: {str(e)}")
+    
+    def plot_correlations(self, asset1: str, asset2: str) -> None:
+        """
+        Muestra un gráfico de la correlación móvil entre dos activos.
+        
+        Args:
+            asset1: Primer activo (formato: 'categoria_activo')
+            asset2: Segundo activo (formato: 'categoria_activo')
+        """
+        if not self.correlations.empty:
+            try:
+                # Extraer la serie de correlación
+                corr_series = self.correlations[(asset1, asset2)]
+                
+                # Crear gráfico
+                fig = go.Figure()
+                
+                # Línea de correlación
+                fig.add_trace(go.Scatter(
+                    x=corr_series.index,
+                    y=corr_series.values,
+                    mode='lines',
+                    name=f'Correlación {asset1} vs {asset2}',
+                    line=dict(color='#4CAF50', width=2)
+                ))
+                
+                # Línea de correlación cero
+                fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                
+                # Actualizar diseño
+                fig.update_layout(
+                    title=f'Correlación móvil ({self.correlations.index.levshapes[0].size} días) entre {asset1} y {asset2}',
+                    xaxis_title='Fecha',
+                    yaxis_title='Coeficiente de correlación',
+                    showlegend=True,
+                    template='plotly_dark',
+                    height=500
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"Error al graficar correlaciones: {str(e)}")
+    
+    def analyze_market_phase(self) -> Dict[str, str]:
+        """
+        Analiza la fase actual del ciclo de mercado basado en el análisis intermercado.
+        
+        Returns:
+            Dict con la fase del mercado y recomendaciones
+        """
+        analysis = {
+            'phase': 'Indeterminada',
+            'description': 'No se pudo determinar la fase del mercado',
+            'recommendation': 'Mantener posiciones defensivas'
+        }
+        
+        try:
+            # Obtener datos necesarios para el análisis
+            bonds_up = self._get_trend('bonds', 'US10Y', 'up')
+            stocks_up = self._get_trend('equities', 'S&P500', 'up')
+            commodities_up = self._get_trend('commodities', 'Oil', 'up')
+            
+            # Determinar la fase del mercado
+            if bonds_up and not stocks_up and not commodities_up:
+                analysis['phase'] = 'Recuperación temprana'
+                analysis['description'] = 'Bonos en alza, acciones y commodities estables'
+                analysis['recommendation'] = 'Aumentar exposición a acciones cíclicas y bonos corporativos'
+            elif not bonds_up and stocks_up and commodities_up:
+                analysis['phase'] = 'Expansión'
+                analysis['description'] = 'Acciones y commodities en alza, bonos a la baja'
+                analysis['recommendation'] = 'Mantener exposición a acciones y commodities'
+            elif bonds_up and stocks_up and not commodities_up:
+                analysis['phase'] = 'Desaceleración'
+                analysis['description'] = 'Bonos en alza, acciones volátiles, commodities a la baja'
+                analysis['recommendation'] = 'Rotar a sectores defensivos y bonos de corto plazo'
+            elif bonds_up and not stocks_up and not commodities_up:
+                analysis['phase'] = 'Recesión'
+                analysis['description'] = 'Bonos en alza, acciones y commodities a la baja'
+                analysis['recommendation'] = 'Aumentar efectivo y bonos de alta calidad, reducir riesgo'
+            
+            return analysis
+            
+        except Exception as e:
+            st.error(f"Error en el análisis de fase de mercado: {str(e)}")
+            return analysis
+    
+    def _get_trend(self, category: str, asset: str, direction: str, window: int = 20) -> bool:
+        """
+        Determina si un activo tiene tendencia alcista o bajista.
+        
+        Args:
+            category: Categoría del activo (ej: 'bonds', 'equities')
+            asset: Nombre del activo
+            direction: Dirección a verificar ('up' o 'down')
+            window: Ventana de tiempo para el análisis de tendencia
+            
+        Returns:
+            bool: True si la tendencia coincide con la dirección especificada
+        """
+        try:
+            df = self.data.get(category, {}).get(asset)
+            if df is None or 'close' not in df.columns:
+                return False
+                
+            # Calcular media móvil
+            ma = df['close'].rolling(window=window).mean()
+            
+            # Determinar tendencia
+            if direction == 'up':
+                return df['close'].iloc[-1] > ma.iloc[-1]
+            else:
+                return df['close'].iloc[-1] < ma.iloc[-1]
+                
+        except Exception:
+            return False
+
+def mostrar_analisis_intermercado():
+    """Muestra el análisis intermercado en la interfaz de Streamlit."""
+    st.title("Análisis Intermercado")
+    
+    # Inicializar analizador
+    if 'intermarket_analyzer' not in st.session_state:
+        st.session_state.intermarket_analyzer = IntermarketAnalyzer()
+    
+    analyzer = st.session_state.intermarket_analyzer
+    
+    # Selector de período
+    period = st.sidebar.selectbox(
+        "Período de análisis",
+        ['6m', '1y', '2y', '5y', '10y'],
+        index=1
+    )
+    
+    # Botón para cargar/actualizar datos
+    if st.sidebar.button("Cargar Datos de Mercado"):
+        with st.spinner("Obteniendo datos de mercado..."):
+            analyzer.fetch_data(period=period)
+    
+    if not analyzer.data:
+        st.warning("Por favor, cargue los datos de mercado para comenzar el análisis.")
+        return
+    
+    # Mostrar resumen del mercado
+    st.header("Resumen del Mercado")
+    
+    # Análisis de fase de mercado
+    st.subheader("Fase del Ciclo Económico")
+    phase_analysis = analyzer.analyze_market_phase()
+    
+    # Mostrar tarjeta con la fase actual
+    phase_colors = {
+        'Recuperación temprana': 'success',
+        'Expansión': 'primary',
+        'Desaceleración': 'warning',
+        'Recesión': 'error',
+        'Indeterminada': 'secondary'
+    }
+    
+    st.markdown(f"""
+    <div style="background-color: #1e293b; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+        <h3 style="color: #f8f9fa; margin-top: 0;">Fase Actual: <span style="color: #4CAF50;">{phase_analysis['phase']}</span></h3>
+        <p style="color: #cbd5e1;">{phase_analysis['description']}</p>
+        <p style="color: #f8f9fa; font-weight: bold;">Recomendación: {phase_analysis['recommendation']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sección de correlaciones
+    st.header("Análisis de Correlaciones")
+    
+    # Selectores de activos para comparar
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        category1 = st.selectbox(
+            "Categoría 1",
+            list(analyzer.instruments.keys()),
+            key='cat1'
+        )
+        asset1 = st.selectbox(
+            "Activo 1",
+            list(analyzer.instruments[category1].keys()),
+            key='asset1'
+        )
+    
+    with col2:
+        category2 = st.selectbox(
+            "Categoría 2",
+            list(analyzer.instruments.keys()),
+            key='cat2'
+        )
+        asset2 = st.selectbox(
+            "Activo 2",
+            list(analyzer.instruments[category2].keys()),
+            key='asset2'
+        )
+    
+    # Mostrar gráfico de correlación
+    if st.button("Mostrar Correlación"):
+        full_asset1 = f"{category1}_{asset1}"
+        full_asset2 = f"{category2}_{asset2}"
+        
+        if full_asset1 == full_asset2:
+            st.warning("Por favor seleccione activos diferentes para comparar.")
+        else:
+            analyzer.plot_correlations(full_asset1, full_asset2)
+    
+    # Sección de análisis por categoría
+    st.header("Análisis por Categoría")
+    
+    # Pestañas para cada categoría
+    tabs = st.tabs(["Bonos", "Acciones", "Commodities", "Divisas"])
+    
+    with tabs[0]:  # Bonos
+        st.subheader("Análisis de Bonos")
+        # Agregar análisis específico de bonos
+        if 'bonds' in analyzer.data:
+            st.write("Rendimientos actuales:")
+            for bond, df in analyzer.data['bonds'].items():
+                if not df.empty and 'close' in df.columns:
+                    last_close = df['close'].iloc[-1]
+                    prev_close = df['close'].iloc[-2] if len(df) > 1 else last_close
+                    change_pct = ((last_close / prev_close) - 1) * 100
+                    
+                    color = "green" if change_pct >= 0 else "red"
+                    st.metric(
+                        label=bond,
+                        value=f"{last_close:.2f}",
+                        delta=f"{change_pct:.2f}%",
+                        delta_color="normal"
+                    )
+    
+    with tabs[1]:  # Acciones
+        st.subheader("Análisis de Acciones")
+        # Agregar análisis específico de acciones
+        if 'equities' in analyzer.data:
+            st.write("Rendimientos actuales:")
+            for equity, df in analyzer.data['equities'].items():
+                if not df.empty and 'close' in df.columns:
+                    last_close = df['close'].iloc[-1]
+                    prev_close = df['close'].iloc[-2] if len(df) > 1 else last_close
+                    change_pct = ((last_close / prev_close) - 1) * 100
+                    
+                    color = "green" if change_pct >= 0 else "red"
+                    st.metric(
+                        label=equity,
+                        value=f"{last_close:.2f}",
+                        delta=f"{change_pct:.2f}%",
+                        delta_color="normal"
+                    )
+    
+    with tabs[2]:  # Commodities
+        st.subheader("Análisis de Commodities")
+        # Agregar análisis específico de commodities
+        if 'commodities' in analyzer.data:
+            st.write("Precios actuales:")
+            for commodity, df in analyzer.data['commodities'].items():
+                if not df.empty and 'close' in df.columns:
+                    last_close = df['close'].iloc[-1]
+                    prev_close = df['close'].iloc[-2] if len(df) > 1 else last_close
+                    change_pct = ((last_close / prev_close) - 1) * 100
+                    
+                    color = "green" if change_pct >= 0 else "red"
+                    st.metric(
+                        label=commodity,
+                        value=f"{last_close:.2f}",
+                        delta=f"{change_pct:.2f}%",
+                        delta_color="normal"
+                    )
+    
+    with tabs[3]:  # Divisas
+        st.subheader("Análisis de Divisas")
+        # Agregar análisis específico de divisas
+        if 'currencies' in analyzer.data:
+            st.write("Tipos de cambio actuales:")
+            for currency, df in analyzer.data['currencies'].items():
+                if not df.empty and 'close' in df.columns:
+                    last_close = df['close'].iloc[-1]
+                    prev_close = df['close'].iloc[-2] if len(df) > 1 else last_close
+                    change_pct = ((last_close / prev_close) - 1) * 100
+                    
+                    color = "green" if change_pct >= 0 else "red"
+                    st.metric(
+                        label=currency,
+                        value=f"{last_close:.4f}",
+                        delta=f"{change_pct:.2f}%",
+                        delta_color="inverse" if currency != 'DXY' else "normal"
+                    )
+
+# Agregar la función al menú principal
+def main():
+    # ... (código existente del menú principal)
+    
+    # Agregar opción de análisis intermercado al menú
+    menu = st.sidebar.selectbox(
+        "Menú Principal",
+        ["Inicio", "Portafolio", "Optimización", "Análisis Técnico", "Análisis Intermercado", "Movimientos", "Tasas de Caución"]
+    )
+    
+    # ... (código existente de las otras opciones del menú)
+    
+    if menu == "Análisis Intermercado":
+        mostrar_analisis_intermercado()
+    
+    # ... (resto del código existente)
 
 if __name__ == "__main__":
     main()
