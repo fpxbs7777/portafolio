@@ -122,6 +122,33 @@ def obtener_cotizacion_detalle(token_acceso, simbolo, mercado='BCBA'):
         print(f"Error al obtener detalle de cotización para {simbolo}: {str(e)}")
         return None
 
+def obtener_tasas_caucion_iol(token_acceso, mercado='argentina'):
+    """
+    Obtiene las tasas de caución reales desde la API de IOL.
+    Devuelve una lista de dicts con plazo y tasa.
+    """
+    try:
+        url = f"https://api.invertironline.com/api/v2/Cotizaciones/cauciones/{mercado}/Todos"
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {token_acceso}'
+        }
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        cauciones = []
+        for t in data.get('titulos', []):
+            cauciones.append({
+                "plazo": t.get("plazo"),
+                "tasa": t.get("tasa"),
+                "ultimoPrecio": t.get("ultimoPrecio"),
+                "simbolo": t.get("simbolo")
+            })
+        return cauciones
+    except Exception as e:
+        print(f"Error al obtener tasas de caución: {str(e)}")
+        return []
+
 def obtener_resumen_rueda():
     """
     Obtiene y resume datos reales del mercado usando la API de IOL y scraping del BCRA.
@@ -191,9 +218,22 @@ def obtener_resumen_rueda():
             variacion = ((ccl['valor'] - (gd30["apertura"] / 100)) / (gd30["apertura"] / 100)) * 100
             ccl['variacion'] = round(variacion, 2)
 
-        # Caución (scraping BCRA)
-        tasa_caucion = tasa_monetaria_na if tasa_monetaria_na else "No disponible"
-        plazo_caucion = "7 días"
+        # Caución (real desde IOL)
+        cauciones = obtener_tasas_caucion_iol(token_acceso)
+        if cauciones:
+            # Tomar el plazo más operado (mayor volumen o el de 7 días si existe)
+            caucion_7d = next((c for c in cauciones if c.get("plazo") == 7), None)
+            caucion_principal = caucion_7d if caucion_7d else (cauciones[0] if cauciones else None)
+            tasa_caucion = caucion_principal["tasa"] if caucion_principal else "No disponible"
+            plazo_caucion = f'{caucion_principal["plazo"]} días' if caucion_principal else "No disponible"
+            # Para el gráfico, armar listas reales
+            plazos_caucion = [c["plazo"] for c in cauciones if c.get("plazo") is not None]
+            tasas_caucion = [c["tasa"] for c in cauciones if c.get("tasa") is not None]
+        else:
+            tasa_caucion = "No disponible"
+            plazo_caucion = "No disponible"
+            plazos_caucion = []
+            tasas_caucion = []
 
         # Resumen de bajas y subas del MERVAL (no disponible por API pública)
         bajas = ["No disponible por API pública"]
@@ -237,7 +277,9 @@ def obtener_resumen_rueda():
             },
             "caucion": {
                 "plazo": plazo_caucion,
-                "tasa": tasa_caucion
+                "tasa": tasa_caucion,
+                "plazos_lista": plazos_caucion,
+                "tasas_lista": tasas_caucion
             },
             "inflacion": {
                 "mensual": inflacion_mensual,
@@ -373,26 +415,48 @@ def mostrar_resumen_rueda():
     # Sección 7: Caución
     st.subheader(f"📌 Caución a {mostrar_valor(resumen['caucion']['plazo'], formato='{}', nd='No disponible')}: {mostrar_valor(resumen['caucion']['tasa'], formato='{}%', nd='No disponible')}")
     
-    # Gráfico de tasas de caución (simulado)
-    plazos = [1, 7, 14, 30, 60]
-    tasas = [25.5, 28.8, 27.2, 26.5, 25.8]
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=plazos, 
-        y=tasas,
-        mode='lines+markers',
-        name='Tasas',
-        line=dict(color='#4CAF50', width=3),
-        marker=dict(size=10, color='#2E7D32')
-    ))
-    fig.update_layout(
-        title='Curva de Tasas de Caución',
-        xaxis_title='Plazo (días)',
-        yaxis_title='Tasa (%)',
-        template='plotly_dark',
-        height=300
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # Gráfico de tasas de caución (reales si existen)
+    plazos = resumen["caucion"].get("plazos_lista", [])
+    tasas = resumen["caucion"].get("tasas_lista", [])
+    if plazos and tasas and len(plazos) == len(tasas):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=plazos, 
+            y=tasas,
+            mode='lines+markers',
+            name='Tasas',
+            line=dict(color='#4CAF50', width=3),
+            marker=dict(size=10, color='#2E7D32')
+        ))
+        fig.update_layout(
+            title='Curva de Tasas de Caución',
+            xaxis_title='Plazo (días)',
+            yaxis_title='Tasa (%)',
+            template='plotly_dark',
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        # fallback simulado si no hay datos reales
+        plazos = [1, 7, 14, 30, 60]
+        tasas = [25.5, 28.8, 27.2, 26.5, 25.8]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=plazos, 
+            y=tasas,
+            mode='lines+markers',
+            name='Tasas',
+            line=dict(color='#4CAF50', width=3),
+            marker=dict(size=10, color='#2E7D32')
+        ))
+        fig.update_layout(
+            title='Curva de Tasas de Caución',
+            xaxis_title='Plazo (días)',
+            yaxis_title='Tasa (%)',
+            template='plotly_dark',
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
 # ... (código existente previo a la función main)
 
