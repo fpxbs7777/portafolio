@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 from plotly.subplots import make_subplots
 from arch import arch_model
@@ -4651,6 +4652,214 @@ def mostrar_movimientos_asesor():
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
+def generar_grafico_rueda(datos):
+    """
+    Genera un gráfico de rueda con los datos de cotizaciones.
+    
+    Args:
+        datos (dict): Diccionario con los datos de cotizaciones
+        
+    Returns:
+        go.Figure: Figura de Plotly con el gráfico de rueda
+    """
+    # Crear lista de valores para la rueda
+    valores = []
+    etiquetas = []
+    colores = [
+        '#1f77b4',  # Azul
+        '#ff7f0e',  # Naranja
+        '#2ca02c',  # Verde
+        '#d62728',  # Rojo
+        '#9467bd',  # Morado
+        '#8c564b',  # Marrón
+        '#e377c2',  # Rosa
+        '#7f7f7f',  # Gris
+        '#bcbd22',  # Oliva
+        '#17becf'   # Celeste
+    ]
+    
+    # Mapeo de tipos de dólar a mostrar
+    tipos_dolar = {
+        'MEP': 'Dólar MEP',
+        'CCL': 'Dólar CCL',
+        'Blue': 'Dólar Blue',
+        'Oficial': 'Dólar Oficial',
+        'Tarjeta': 'Dólar Tarjeta',
+        'Mayorista': 'Dólar Mayorista',
+        'Canje': 'Dólar Canje'
+    }
+    
+    # Procesar cada tipo de dólar
+    for i, (tipo, nombre) in enumerate(tipos_dolar.items()):
+        if tipo in datos and 'valor' in datos[tipo] and datos[tipo]['valor'] is not None:
+            try:
+                valor = float(datos[tipo]['valor'])
+                variacion = datos[tipo].get('variacion', 0)
+                if isinstance(variacion, str):
+                    variacion = float(variacion.replace('%', ''))
+                
+                etiqueta = f"{nombre}<br>${valor:,.2f}"
+                if variacion is not None:
+                    etiqueta += f"<br>{variacion:+.2f}%"
+                
+                valores.append(valor)
+                etiquetas.append(etiqueta)
+            except (ValueError, TypeError):
+                continue
+    
+    # Si no hay datos, mostrar mensaje
+    if not valores:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No hay datos disponibles",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=20)
+        )
+        fig.update_layout(
+            title="Rueda de Cotizaciones",
+            showlegend=False,
+            margin=dict(t=50, b=0, l=0, r=0)
+        )
+        return fig
+    
+    # Crear el gráfico de rueda
+    fig = go.Figure()
+    
+    # Añadir el gráfico de torta
+    fig.add_trace(go.Pie(
+        labels=etiquetas,
+        values=valores,
+        hole=0.5,
+        marker_colors=colores[:len(valores)],
+        textinfo='label',
+        hoverinfo='label+value',
+        textposition='inside',
+        textfont_size=14,
+        rotation=90
+    ))
+    
+    # Actualizar el diseño
+    fig.update_layout(
+        title={
+            'text': 'Rueda de Cotizaciones',
+            'y':0.95,
+            'x':0.5,
+            'xanchor': 'center',
+            'yanchor': 'top',
+            'font': {'size': 20}
+        },
+        legend={
+            'orientation': 'h',
+            'y': -0.1,
+            'x': 0.5,
+            'xanchor': 'center'
+        },
+        margin=dict(t=50, b=0, l=0, r=0),
+        height=500
+    )
+    
+    return fig
+
+def mostrar_resumen_rueda(token_acceso):
+    """
+    Muestra un resumen de rueda con datos reales y cotizaciones.
+    """
+    st.header("📊 Resumen de Rueda")
+    
+    # Obtener cotizaciones y tasas
+    with st.spinner('Obteniendo datos de cotizaciones...'):
+        cotizaciones = obtener_dolares_financieros_completo(token_acceso)
+        tasa_monetaria = obtener_variables_bcra().get("tasa_monetaria_na", {}).get("valor")
+    
+    # Mostrar el gráfico de rueda
+    st.subheader("Vista General de Cotizaciones")
+    fig_rueda = generar_grafico_rueda(cotizaciones)
+    st.plotly_chart(fig_rueda, use_container_width=True)
+    
+    # Crear métricas principales
+    st.subheader("Principales Indicadores")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(
+            "Dólar MEP",
+            f"${cotizaciones.get('MEP', {}).get('valor', 'N/A')}",
+            delta=f"{cotizaciones.get('MEP', {}).get('variacion', 'N/A')}%" if cotizaciones.get('MEP', {}).get('variacion') else None,
+            delta_color="normal"
+        )
+    with col2:
+        st.metric(
+            "Dólar CCL",
+            f"${cotizaciones.get('CCL', {}).get('valor', 'N/A')}",
+            delta=f"{cotizaciones.get('CCL', {}).get('variacion', 'N/A')}%" if cotizaciones.get('CCL', {}).get('variacion') else None,
+            delta_color="normal"
+        )
+    with col3:
+        st.metric(
+            "Dólar Blue",
+            f"${cotizaciones.get('Blue', {}).get('valor', 'N/A')}",
+            delta=f"{cotizaciones.get('Blue', {}).get('variacion', 'N/A')}%" if cotizaciones.get('Blue', {}).get('variacion') else None,
+            delta_color="normal"
+        )
+    with col4:
+        st.metric(
+            "Tasa Monetaria",
+            f"{tasa_monetaria}%" if tasa_monetaria else "N/A",
+            delta_color="normal"
+        )
+    
+    # Mostrar tasas de caución
+    with st.expander("📈 Ver Tasas de Caución", expanded=True):
+        with st.spinner('Obteniendo tasas de caución...'):
+            tasa_caucion = obtener_tasas_caucion(token_acceso)
+        
+        if tasa_caucion is not None and not tasa_caucion.empty:
+            # Formatear la columna de tasa como porcentaje
+            tasa_caucion_display = tasa_caucion.copy()
+            if 'tasa' in tasa_caucion_display.columns:
+                tasa_caucion_display['tasa'] = tasa_caucion_display['tasa'].apply(lambda x: f"{x:.2f}%")
+            
+            # Mostrar la tabla con estilos
+            st.dataframe(
+                tasa_caucion_display,
+                column_config={
+                    'plazo': st.column_config.TextColumn('Plazo'),
+                    'tasa': st.column_config.TextColumn('Tasa'),
+                    'ultimoPrecio': st.column_config.NumberColumn('Último Precio', format='%.2f'),
+                    'simbolo': st.column_config.TextColumn('Símbolo')
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            # Mostrar gráfico de curvas de tasas
+            if not tasa_caucion.empty and 'plazo' in tasa_caucion.columns and 'tasa' in tasa_caucion.columns:
+                fig_tasas = px.line(
+                    tasa_caucion, 
+                    x='plazo', 
+                    y='tasa', 
+                    title='Curva de Tasas de Caución',
+                    markers=True,
+                    labels={'plazo': 'Plazo', 'tasa': 'Tasa (%)'}
+                )
+                fig_tasas.update_traces(line_color='#4CAF50', line_width=2.5)
+                fig_tasas.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_color='#f8f9fa',
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=True, gridcolor='#2d3748'),
+                    margin=dict(l=0, r=0, t=40, b=0)
+                )
+                st.plotly_chart(fig_tasas, use_container_width=True)
+        else:
+            st.warning("No se pudieron obtener las tasas de caución")
+    
+    # Mostrar cotizaciones del mercado
+    st.subheader("Cotizaciones del Mercado")
+    mostrar_cotizaciones_mercado(token_acceso)
+
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
@@ -4895,29 +5104,33 @@ def main():
     try:
         if st.session_state.token_acceso:
             st.sidebar.title("Menú Principal")
-            opcion = st.sidebar.radio(
-                "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
-                index=0,
-                key="main_navigation_radio"
+            menu = st.sidebar.selectbox(
+                "Seleccionar vista:",
+                ["Estado de Cuenta", "Portafolio", "Optimización", "Análisis Técnico", "Resumen de Rueda", "Movimientos"]
             )
 
             # Mostrar la página seleccionada
-            if opcion == "🏠 Inicio":
-                st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "📊 Análisis de Portafolio":
+            if menu == "Resumen de Rueda":
+                mostrar_resumen_rueda(st.session_state.token_acceso)
+            elif menu == "Movimientos":
+                mostrar_movimientos_asesor()
+            elif menu == "Estado de Cuenta":
+                st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif menu == "Portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
+            elif menu == "Optimización":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_optimizacion_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id')))
                 else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
-                mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif menu == "Análisis Técnico":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_tecnico(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id')))
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
