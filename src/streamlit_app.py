@@ -1681,6 +1681,8 @@ def mostrar_resultados_optimizacion(portfolio_result, capital_inicial, manager):
                 marker=dict(size=6)
             ))
 
+
+
             fig.update_layout(
                 title='Frontera Eficiente',
                 xaxis_title='Volatilidad Anual',
