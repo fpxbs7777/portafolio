@@ -15,37 +15,64 @@ def obtener_variables_bcra():
     url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables.asp"
     variables = {}
     try:
-        response = requests.get(url, verify=False, timeout=10)
+        # Realizar la solicitud HTTP deshabilitando la verificación SSL
+        response = requests.get(url, verify=False, timeout=15)
         if response.status_code == 200:
+            # Parsear el contenido HTML
             soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Buscar filas relevantes en las tablas
             rows = soup.find_all('tr')
             for row in rows:
                 columns = row.find_all('td')
-                if len(columns) == 3:
+                if len(columns) == 3:  # Verificar que la fila tenga 3 columnas
                     variable = columns[0].get_text(strip=True)
                     fecha = columns[1].get_text(strip=True)
                     valor = columns[2].get_text(strip=True)
+                    
                     # Normalización de nombres para acceso sencillo
-                    nombre = variable.lower()
-                    if "reservas internacionales" in nombre:
+                    nombre_lower = variable.lower()
+                    
+                    # Mejorar la detección de variables clave
+                    if "reservas internacionales" in nombre_lower:
                         key = "reservas_internacionales"
-                    elif "tipo de cambio mayorista" in nombre:
+                    elif "tipo de cambio mayorista" in nombre_lower and "comunicación a 3500" in nombre_lower:
                         key = "dolar_mayorista"
-                    elif "tipo de cambio minorista" in nombre:
+                    elif "tipo de cambio minorista" in nombre_lower and "comunicación b 9791" in nombre_lower:
                         key = "dolar_minorista"
-                    elif "tasa de política monetaria" in nombre and "n.a." in nombre:
+                    elif "tasa de política monetaria" in nombre_lower and "n.a." in nombre_lower:
                         key = "tasa_monetaria_na"
-                    elif "tasa de política monetaria" in nombre and "e.a." in nombre:
+                    elif "tasa de política monetaria" in nombre_lower and "e.a." in nombre_lower:
                         key = "tasa_monetaria_ea"
-                    elif "inflación mensual" in nombre:
+                    elif "inflación mensual" in nombre_lower:
                         key = "inflacion_mensual"
-                    elif "inflación interanual" in nombre:
+                    elif "inflación interanual" in nombre_lower:
                         key = "inflacion_interanual"
-                    elif "cer | base" in nombre:
+                    elif "cer" in nombre_lower and "base" in nombre_lower:
                         key = "cer"
+                    elif "base monetaria" in nombre_lower and "total" in nombre_lower:
+                        key = "base_monetaria"
+                    elif "circulación monetaria" in nombre_lower:
+                        key = "circulacion_monetaria"
+                    elif "uva" in nombre_lower:
+                        key = "uva"
+                    elif "uvi" in nombre_lower:
+                        key = "uvi"
+                    elif "icl" in nombre_lower:
+                        key = "icl"
+                    elif "tamar" in nombre_lower and "bancos privados" in nombre_lower and "n.a." in nombre_lower:
+                        key = "tamar_na"
+                    elif "badlar" in nombre_lower and "bancos privados" in nombre_lower and "n.a." in nombre_lower:
+                        key = "badlar_na"
                     else:
-                        key = variable  # fallback
-                    variables[key] = {"fecha": fecha, "valor": valor, "nombre_original": variable}
+                        # Usar el nombre original como fallback, limpiando caracteres especiales
+                        key = variable.replace(" ", "_").replace("(", "").replace(")", "").replace(",", "").lower()
+                    
+                    variables[key] = {
+                        "fecha": fecha, 
+                        "valor": valor, 
+                        "nombre_original": variable
+                    }
         else:
             print(f"Error al acceder a la página del BCRA: {response.status_code}")
     except Exception as e:
@@ -62,9 +89,16 @@ def obtener_reservas_bcra():
     if reservas:
         valor = reservas["valor"]
         fecha = reservas["fecha"]
+        # Formatear el valor para mostrar millones de USD
+        try:
+            valor_numerico = float(valor.replace(".", "").replace(",", "."))
+            valor_formateado = f"USD {valor_numerico:,.0f}M"
+        except:
+            valor_formateado = f"USD {valor}M"
+        
         return {
             "titulo": f"Reservas BCRA ({fecha})",
-            "valor": valor,
+            "valor": valor_formateado,
             "delta": None
         }
     else:
@@ -187,10 +221,13 @@ def obtener_resumen_rueda():
     token_acceso = st.session_state.token_acceso
 
     try:
+        # Obtener datos reales del BCRA primero
+        variables_bcra = obtener_variables_bcra()
+        
         # Reservas BCRA reales
         reservas = obtener_reservas_bcra()
 
-        # Datos reales de instrumentos principales
+        # Datos reales de instrumentos principales desde IOL
         gd30 = obtener_cotizacion_detalle(token_acceso, 'GD30', 'BCBA')
         al30 = obtener_cotizacion_detalle(token_acceso, 'AL30', 'BCBA')
         gd35 = obtener_cotizacion_detalle(token_acceso, 'GD35', 'BCBA')
@@ -198,23 +235,33 @@ def obtener_resumen_rueda():
         merval = obtener_cotizacion_detalle(token_acceso, 'MERVAL', 'BCBA')
         dolar_mayorista_iol = obtener_cotizacion_detalle(token_acceso, 'DOLAR', 'BCBA')
 
-        # Datos BCRA adicionales
-        variables_bcra = obtener_variables_bcra()
+        # Extraer datos del BCRA con mejor formato
         dolar_mayorista_bcra = variables_bcra.get("dolar_mayorista", {}).get("valor", None)
+        dolar_minorista_bcra = variables_bcra.get("dolar_minorista", {}).get("valor", None)
         inflacion_mensual = variables_bcra.get("inflacion_mensual", {}).get("valor", None)
         inflacion_interanual = variables_bcra.get("inflacion_interanual", {}).get("valor", None)
         tasa_monetaria_na = variables_bcra.get("tasa_monetaria_na", {}).get("valor", None)
+        tasa_monetaria_ea = variables_bcra.get("tasa_monetaria_ea", {}).get("valor", None)
         cer = variables_bcra.get("cer", {}).get("valor", None)
+        base_monetaria = variables_bcra.get("base_monetaria", {}).get("valor", None)
+        
+        # Formatear el dólar mayorista del BCRA
+        dolar_mayorista_valor = None
+        if dolar_mayorista_bcra:
+            try:
+                dolar_mayorista_valor = float(dolar_mayorista_bcra.replace(".", "").replace(",", "."))
+            except:
+                dolar_mayorista_valor = dolar_mayorista_bcra
 
         # MEP y CCL reales (usando precios de bonos)
         mep = {"valor": None, "variacion": None}
         ccl = {"valor": None, "variacion": None}
         if al30 and al30["ultimoPrecio"] and al30["apertura"]:
-            mep['valor'] = al30["ultimoPrecio"] / 100
+            mep['valor'] = round(al30["ultimoPrecio"] / 100, 2)
             variacion = ((mep['valor'] - (al30["apertura"] / 100)) / (al30["apertura"] / 100)) * 100
             mep['variacion'] = round(variacion, 2)
         if gd30 and gd30["ultimoPrecio"] and gd30["apertura"]:
-            ccl['valor'] = gd30["ultimoPrecio"] / 100
+            ccl['valor'] = round(gd30["ultimoPrecio"] / 100, 2)
             variacion = ((ccl['valor'] - (gd30["apertura"] / 100)) / (gd30["apertura"] / 100)) * 100
             ccl['variacion'] = round(variacion, 2)
 
@@ -235,18 +282,30 @@ def obtener_resumen_rueda():
             plazos_caucion = []
             tasas_caucion = []
 
+        # Volumen operado del Merval
+        volumen_operado = "No disponible"
+        if merval and merval.get('volumenNominal'):
+            try:
+                volumen_millones = merval['volumenNominal'] / 1e6
+                volumen_operado = f"USD {volumen_millones:.1f}M"
+            except:
+                volumen_operado = f"USD {merval['volumenNominal']}"
         # Resumen de bajas y subas del MERVAL (no disponible por API pública)
-        bajas = ["No disponible por API pública"]
-        subas = ["No disponible por API pública"]
+        bajas = ["Datos no disponibles por API pública"]
+        subas = ["Datos no disponibles por API pública"]
 
         return {
             "reservas": reservas,
             "dolar_mayorista": {
-                # Prioriza el valor de la API de IOL, si no hay, usa el BCRA
-                "valor": dolar_mayorista_iol["ultimoPrecio"] if dolar_mayorista_iol and dolar_mayorista_iol["ultimoPrecio"] else dolar_mayorista_bcra,
+                # Prioriza el valor del BCRA, que es más oficial
+                "valor": dolar_mayorista_valor if dolar_mayorista_valor else (dolar_mayorista_iol["ultimoPrecio"] if dolar_mayorista_iol and dolar_mayorista_iol["ultimoPrecio"] else "No disponible"),
                 "variacion": dolar_mayorista_iol["variacion"] if dolar_mayorista_iol else None
             },
-            "volumen_operado": f"USD {merval['volumenNominal']/1e6:.1f}M" if merval and merval.get('volumenNominal') else "No disponible",
+            "dolar_minorista": {
+                "valor": dolar_minorista_bcra,
+                "fecha": variables_bcra.get("dolar_minorista", {}).get("fecha", None)
+            },
+            "volumen_operado": volumen_operado,
             "dolares_financieros": {
                 "MEP": mep,
                 "CCL": ccl,
@@ -263,17 +322,17 @@ def obtener_resumen_rueda():
                 "GD38D": gd38["variacion"] if gd38 else None
             },
             "riesgo_pais": {
-                "valor": variables_bcra.get("Riesgo País EMBI+ Argentina", {}).get("valor", "No disponible"),
+                "valor": "No disponible por API pública",
                 "delta": None
             },
             "bonos_cer": {
-                "corto_plazo": [f"CER: {cer}" if cer else "No disponible por API pública"],
-                "largo_plazo": ["No disponible por API pública"]
+                "corto_plazo": [f"CER: {cer}" if cer else "Datos del BCRA"],
+                "largo_plazo": ["Consultar IOL para datos detallados"]
             },
-            "letras": ["No disponible por API pública"],
+            "letras": ["Consultar IOL para datos actualizados"],
             "dolar_linked": {
-                "futuros": "No disponible por API pública",
-                "bonos": ["No disponible por API pública"]
+                "futuros": "Consultar IOL para cotizaciones",
+                "bonos": ["Consultar IOL para datos específicos"]
             },
             "caucion": {
                 "plazo": plazo_caucion,
@@ -284,28 +343,64 @@ def obtener_resumen_rueda():
             "inflacion": {
                 "mensual": inflacion_mensual,
                 "interanual": inflacion_interanual
+            },
+            "tasas_bcra": {
+                "politica_monetaria_na": tasa_monetaria_na,
+                "politica_monetaria_ea": tasa_monetaria_ea
+            },
+            "variables_monetarias": {
+                "base_monetaria": base_monetaria,
+                "cer": cer,
+                "uva": variables_bcra.get("uva", {}).get("valor", None),
+                "uvi": variables_bcra.get("uvi", {}).get("valor", None),
+                "icl": variables_bcra.get("icl", {}).get("valor", None)
             }
         }
     except Exception as e:
         st.error(f"Error al obtener datos de mercado: {str(e)}")
-        # Retornar estructura vacía en caso de error
-        return {
-            "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
-            "dolar_mayorista": {"valor": 0, "variacion": 0},
-            "volumen_operado": "Error",
-            "dolares_financieros": {
-                "MEP": {"valor": 0, "variacion": 0},
-                "CCL": {"valor": 0, "variacion": 0},
-                "Canje": {"valor": 0, "variacion": None}
-            },
-            "merval": {"valor": 0, "bajas": ["Error"], "subas": ["Error"]},
-            "deuda_soberana": {"AL30D": 0, "GD35D": 0, "GD38D": 0},
-            "riesgo_pais": {"valor": 0, "delta": 0},
-            "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
-            "letras": ["Error"],
-            "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
-            "caucion": {"plazo": "Error", "tasa": 0}
-        }
+        # Retornar estructura con datos del BCRA si falla IOL
+        try:
+            variables_bcra = obtener_variables_bcra()
+            reservas_fallback = obtener_reservas_bcra()
+            return {
+                "reservas": reservas_fallback,
+                "dolar_mayorista": {
+                    "valor": variables_bcra.get("dolar_mayorista", {}).get("valor", "Error al cargar"),
+                    "variacion": None
+                },
+                "volumen_operado": "Error de conexión IOL",
+                "dolares_financieros": {
+                    "MEP": {"valor": "Sin datos IOL", "variacion": None},
+                    "CCL": {"valor": "Sin datos IOL", "variacion": None},
+                    "Canje": {"valor": 0, "variacion": None}
+                },
+                "merval": {"valor": "Sin datos IOL", "bajas": ["Error de conexión"], "subas": ["Error de conexión"]},
+                "deuda_soberana": {"AL30D": "Sin datos", "GD35D": "Sin datos", "GD38D": "Sin datos"},
+                "riesgo_pais": {"valor": "Sin datos", "delta": None},
+                "bonos_cer": {"corto_plazo": [f"CER BCRA: {variables_bcra.get('cer', {}).get('valor', 'No disponible')}"], "largo_plazo": ["Error de conexión"]},
+                "letras": ["Error de conexión"],
+                "dolar_linked": {"futuros": "Error de conexión", "bonos": ["Error de conexión"]},
+                "caucion": {"plazo": "Error de conexión", "tasa": "Sin datos"}
+            }
+        except:
+            # Fallback completo en caso de error total
+            return {
+                "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
+                "dolar_mayorista": {"valor": "Error", "variacion": None},
+                "volumen_operado": "Error",
+                "dolares_financieros": {
+                    "MEP": {"valor": "Error", "variacion": None},
+                    "CCL": {"valor": "Error", "variacion": None},
+                    "Canje": {"valor": "Error", "variacion": None}
+                },
+                "merval": {"valor": "Error", "bajas": ["Error"], "subas": ["Error"]},
+                "deuda_soberana": {"AL30D": "Error", "GD35D": "Error", "GD38D": "Error"},
+                "riesgo_pais": {"valor": "Error", "delta": None},
+                "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
+                "letras": ["Error"],
+                "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
+                "caucion": {"plazo": "Error", "tasa": "Error"}
+            }
 
 def mostrar_resumen_rueda():
     """Muestra el resumen de la rueda del día con validación de datos reales."""
