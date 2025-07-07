@@ -353,6 +353,9 @@ def obtener_mep_iol(token_acceso, simbolo="AL30"):
         # La respuesta es directamente el valor del MEP
         mep_valor = response.json()
         
+        # Debug: mostrar respuesta
+        print(f"MEP Response para {simbolo}: {mep_valor}")
+        
         return {
             "valor": round(float(mep_valor), 2),
             "simbolo": simbolo,
@@ -368,32 +371,38 @@ def obtener_ccl_desde_acciones_iol(token_acceso):
     Calcula CCL usando acciones argentinas y sus ADRs desde IOL.
     """
     try:
-        # Pares de acciones argentinas y sus ADRs
+        # Pares de acciones argentinas y sus ADRs con ratios correctos
         pares_ccl = [
-            {"local": "GGAL", "adr": "GGAL", "ratio": 10},  # Galicia
-            {"local": "YPF", "adr": "YPF", "ratio": 1},     # YPF
-            {"local": "PAM", "adr": "PAM", "ratio": 25},    # Pampa Energía
-            {"local": "BMA", "adr": "BMA", "ratio": 10},    # Banco Macro
-            {"local": "SUPV", "adr": "SUPV", "ratio": 5}   # Supervielle
+            {"local": "GGAL", "adr": "GGAL", "ratio": 1},     # Galicia 1:1
+            {"local": "YPF", "adr": "YPF", "ratio": 1},       # YPF 1:1
+            {"local": "PAM", "adr": "PAM", "ratio": 0.04},    # Pampa 25:1 (1/25)
+            {"local": "BMA", "adr": "BMA", "ratio": 0.1},     # Banco Macro 10:1
+            {"local": "SUPV", "adr": "SUPV", "ratio": 0.2}   # Supervielle 5:1
         ]
         
         ccl_valores = []
         
         for par in pares_ccl:
             try:
-                # Obtener cotización local (en pesos)
+                # Obtener cotización local (en pesos) desde BCBA
                 accion_local = obtener_cotizacion_detalle(token_acceso, par["local"], 'BCBA')
                 
-                # Obtener cotización ADR (en USD) - usar mercado NYSE
-                adr_data = obtener_cotizacion_detalle(token_acceso, par["adr"], 'NYSE')
+                # Para ADRs, intentar primero NYSE, luego NASDAQ
+                adr_data = None
+                for mercado in ['NYSE', 'NASDAQ']:
+                    adr_data = obtener_cotizacion_detalle(token_acceso, par["adr"], mercado)
+                    if adr_data and adr_data.get("ultimoPrecio"):
+                        break
                 
                 if accion_local and adr_data and accion_local.get("ultimoPrecio") and adr_data.get("ultimoPrecio"):
                     precio_local = accion_local["ultimoPrecio"]
                     precio_adr_usd = adr_data["ultimoPrecio"]
                     ratio = par["ratio"]
                     
-                    # Calcular CCL implícito
-                    ccl_implicito = (precio_local / precio_adr_usd) * ratio
+                    # Calcular CCL implícito: precio_local / (precio_adr * ratio)
+                    ccl_implicito = precio_local / (precio_adr_usd / ratio)
+                    
+                    print(f"CCL {par['local']}: Local=${precio_local}, ADR=${precio_adr_usd}, Ratio={ratio}, CCL=${ccl_implicito:.2f}")
                     
                     ccl_valores.append({
                         "valor": ccl_implicito,
@@ -411,6 +420,8 @@ def obtener_ccl_desde_acciones_iol(token_acceso):
             # Promediar los valores de CCL obtenidos
             ccl_promedio = sum(item["valor"] for item in ccl_valores) / len(ccl_valores)
             
+            print(f"CCL promedio calculado: ${ccl_promedio:.2f} desde {len(ccl_valores)} instrumentos")
+            
             return {
                 "valor": round(ccl_promedio, 2),
                 "cantidad_instrumentos": len(ccl_valores),
@@ -422,6 +433,67 @@ def obtener_ccl_desde_acciones_iol(token_acceso):
         
     except Exception as e:
         print(f"Error al calcular CCL desde acciones: {str(e)}")
+        return None
+
+def calcular_mep_desde_bonos_iol(token_acceso):
+    """
+    Calcula MEP usando bonos soberanos desde IOL (método alternativo más preciso).
+    """
+    try:
+        # Bonos para calcular MEP
+        bonos_mep = [
+            {"simbolo": "AL30", "mercado_local": "BCBA", "mercado_ext": "NYSE"},
+            {"simbolo": "AL35", "mercado_local": "BCBA", "mercado_ext": "NYSE"}, 
+            {"simbolo": "GD30", "mercado_local": "BCBA", "mercado_ext": "NYSE"}
+        ]
+        
+        mep_valores = []
+        
+        for bono in bonos_mep:
+            try:
+                # Obtener precio en pesos (mercado local)
+                bono_local = obtener_cotizacion_detalle(token_acceso, bono["simbolo"], bono["mercado_local"])
+                
+                # Obtener precio en USD (mercado externo)
+                bono_ext = obtener_cotizacion_detalle(token_acceso, bono["simbolo"], bono["mercado_ext"])
+                
+                if bono_local and bono_ext and bono_local.get("ultimoPrecio") and bono_ext.get("ultimoPrecio"):
+                    precio_local = bono_local["ultimoPrecio"]
+                    precio_usd = bono_ext["ultimoPrecio"]
+                    
+                    # MEP = precio_local / precio_usd (asumiendo paridad 1:1 en bonos)
+                    mep_valor = precio_local / precio_usd
+                    
+                    print(f"MEP {bono['simbolo']}: Local=${precio_local}, USD=${precio_usd}, MEP=${mep_valor:.2f}")
+                    
+                    mep_valores.append({
+                        "valor": mep_valor,
+                        "simbolo": bono["simbolo"],
+                        "precio_local": precio_local,
+                        "precio_usd": precio_usd
+                    })
+                    
+            except Exception as e:
+                print(f"Error al procesar bono {bono['simbolo']}: {str(e)}")
+                continue
+        
+        if mep_valores:
+            # Promediar los valores MEP
+            mep_promedio = sum(item["valor"] for item in mep_valores) / len(mep_valores)
+            
+            print(f"MEP promedio calculado: ${mep_promedio:.2f} desde {len(mep_valores)} bonos")
+            
+            return {
+                "valor": round(mep_promedio, 2),
+                "cantidad_instrumentos": len(mep_valores),
+                "detalle": mep_valores,
+                "fuente": "IOL Bonos (Calculado)"
+            }
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error al calcular MEP desde bonos: {str(e)}")
         return None
 
 def obtener_mep_ccl_iol_completo(token_acceso):
@@ -440,15 +512,26 @@ def obtener_mep_ccl_iol_completo(token_acceso):
         
         for bono in bonos_mep:
             mep_data = obtener_mep_iol(token_acceso, bono)
-            if mep_data and mep_data.get("valor"):
+            if mep_data and mep_data.get("valor") and mep_data["valor"] > 0:
                 resultados["MEP"]["valor"] = mep_data["valor"]
                 resultados["MEP"]["fuente"] = f"IOL MEP ({bono})"
+                print(f"MEP obtenido exitosamente: ${mep_data['valor']}")
                 break
                 
     except Exception as e:
         print(f"Error al obtener MEP directo: {str(e)}")
     
-    # 2. Calcular CCL desde acciones/ADRs
+    # 2. Si no se obtuvo MEP del endpoint, calcular desde bonos
+    if not resultados["MEP"]["valor"]:
+        try:
+            mep_bonos = calcular_mep_desde_bonos_iol(token_acceso)
+            if mep_bonos and mep_bonos.get("valor"):
+                resultados["MEP"]["valor"] = mep_bonos["valor"]
+                resultados["MEP"]["fuente"] = f"IOL Bonos ({mep_bonos['cantidad_instrumentos']} instrumentos)"
+        except Exception as e:
+            print(f"Error al calcular MEP desde bonos: {str(e)}")
+    
+    # 3. Calcular CCL desde acciones/ADRs
     try:
         ccl_data = obtener_ccl_desde_acciones_iol(token_acceso)
         if ccl_data and ccl_data.get("valor"):
@@ -458,50 +541,70 @@ def obtener_mep_ccl_iol_completo(token_acceso):
     except Exception as e:
         print(f"Error al calcular CCL: {str(e)}")
     
-    # 3. Si no obtuvimos MEP, calcular desde bonos tradicional
+    # 4. Si no obtuvimos MEP, usar método estimativo simple
     if not resultados["MEP"]["valor"]:
         try:
             al30 = obtener_cotizacion_detalle(token_acceso, 'AL30', 'BCBA')
             if al30 and al30.get("ultimoPrecio"):
-                # Asumir paridad aproximada o usar precio directo si está en rango de dólar
-                if al30["ultimoPrecio"] > 100:
-                    mep_valor = al30["ultimoPrecio"] / 100
-                else:
-                    mep_valor = al30["ultimoPrecio"]
+                # Usar precio AL30 como referencia (ajustar según corresponda)
+                precio_al30 = al30["ultimoPrecio"]
                 
-                resultados["MEP"]["valor"] = round(mep_valor, 2)
+                # Si el precio es muy alto, dividir por 100 (podría estar en centavos)
+                if precio_al30 > 2000:
+                    mep_estimado = precio_al30 / 100
+                elif precio_al30 > 200:
+                    mep_estimado = precio_al30 / 10
+                else:
+                    mep_estimado = precio_al30
+                
+                resultados["MEP"]["valor"] = round(mep_estimado, 2)
                 resultados["MEP"]["fuente"] = "IOL AL30 (estimado)"
                 
                 # Calcular variación si tenemos apertura
                 if al30.get("apertura"):
-                    apertura = al30["apertura"] / 100 if al30["apertura"] > 100 else al30["apertura"]
-                    variacion = ((mep_valor - apertura) / apertura) * 100
+                    apertura = al30["apertura"]
+                    if apertura > 2000:
+                        apertura = apertura / 100
+                    elif apertura > 200:
+                        apertura = apertura / 10
+                        
+                    variacion = ((mep_estimado - apertura) / apertura) * 100
                     resultados["MEP"]["variacion"] = round(variacion, 2)
                     
         except Exception as e:
-            print(f"Error al calcular MEP desde bonos: {str(e)}")
+            print(f"Error al calcular MEP estimado: {str(e)}")
     
-    # 4. Si no obtuvimos CCL, intentar con GD30
+    # 5. Si no obtuvimos CCL, usar método estimativo con GD30
     if not resultados["CCL"]["valor"]:
         try:
             gd30 = obtener_cotizacion_detalle(token_acceso, 'GD30', 'BCBA')
             if gd30 and gd30.get("ultimoPrecio"):
-                if gd30["ultimoPrecio"] > 100:
-                    ccl_valor = gd30["ultimoPrecio"] / 100
-                else:
-                    ccl_valor = gd30["ultimoPrecio"]
+                precio_gd30 = gd30["ultimoPrecio"]
                 
-                resultados["CCL"]["valor"] = round(ccl_valor, 2)
+                # Ajustar precio similar al MEP
+                if precio_gd30 > 2000:
+                    ccl_estimado = precio_gd30 / 100
+                elif precio_gd30 > 200:
+                    ccl_estimado = precio_gd30 / 10
+                else:
+                    ccl_estimado = precio_gd30
+                
+                resultados["CCL"]["valor"] = round(ccl_estimado, 2)
                 resultados["CCL"]["fuente"] = "IOL GD30 (estimado)"
                 
                 # Calcular variación
                 if gd30.get("apertura"):
-                    apertura = gd30["apertura"] / 100 if gd30["apertura"] > 100 else gd30["apertura"]
-                    variacion = ((ccl_valor - apertura) / apertura) * 100
+                    apertura = gd30["apertura"]
+                    if apertura > 2000:
+                        apertura = apertura / 100
+                    elif apertura > 200:
+                        apertura = apertura / 10
+                        
+                    variacion = ((ccl_estimado - apertura) / apertura) * 100
                     resultados["CCL"]["variacion"] = round(variacion, 2)
                     
         except Exception as e:
-            print(f"Error al calcular CCL desde bonos: {str(e)}")
+            print(f"Error al calcular CCL estimado: {str(e)}")
     
     return resultados
 
