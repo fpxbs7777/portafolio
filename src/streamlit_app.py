@@ -1619,7 +1619,8 @@ def main():
                 fecha_hasta = st.date_input(
                     "Hasta:",
                     value=st.session_state.fecha_hasta,
-                    max_value=date.today                )
+                    max_value=date.today()  # <-- corregido, antes era date.today
+                )
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
 
