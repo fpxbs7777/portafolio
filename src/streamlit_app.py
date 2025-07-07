@@ -7,6 +7,316 @@ import urllib3
 import yfinance as yf
 import pandas as pd
 import json
+import time
+import re
+from typing import Dict, Optional
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+class DolarScraper:
+    def __init__(self):
+        self.url = "https://dolarhoy.com"
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        self.last_update = None
+        self.rates = {}
+
+    def fetch_data(self):
+        try:
+            print("\n🔍 Obteniendo datos desde dolarhoy.com...")
+            session = requests.Session()
+            session.headers.update(self.headers)
+            
+            # Add cache buster to prevent cached responses
+            url = f"{self.url}?t={int(time.time())}"
+            
+            response = session.get(url, timeout=10)
+            response.raise_for_status()
+            
+            # Verify we got the actual content and not an error page
+            if 'dolar' not in response.text.lower():
+                raise Exception("No se pudo obtener la página de cotizaciones")
+                
+            return response.text
+            
+        except requests.RequestException as e:
+            print(f"\n❌ Error al conectar con dolarhoy.com: {e}")
+            print("Intente verificar su conexión a internet o intente nuevamente más tarde.")
+            return None
+        except Exception as e:
+            print(f"\n❌ Error inesperado: {str(e)}")
+            return None
+
+    def clean_text(self, text: str) -> str:
+        """Clean and normalize text by removing extra whitespace and newlines."""
+        if not text:
+            return ''
+        return ' '.join(text.strip().split())
+
+    def parse_data(self, html_content: str) -> Optional[Dict]:
+        """Parse the HTML content to extract exchange rates."""
+        if not html_content:
+            return None
+
+        soup = BeautifulSoup(html_content, 'html.parser')
+        rates = {}
+        
+        # Find all currency containers
+        containers = soup.find_all('div', class_='tile is-child')
+        
+        for container in containers:
+            try:
+                # Extract title
+                title_elem = container.find('a', class_='titleText')
+                if not title_elem:
+                    title_elem = container.find('div', class_='title')
+                    if title_elem:
+                        title_elem = title_elem.find('a', class_='titleText')
+                
+                if not title_elem:
+                    continue
+                    
+                title = self.clean_text(title_elem.text)
+                if not any(d in title for d in ['Dólar', 'Contado']):
+                    continue
+                
+                values = {}
+                
+                # Extract buy price
+                buy_elem = container.find('div', class_='compra')
+                if buy_elem:
+                    buy_val = buy_elem.find('div', class_='val')
+                    if buy_val:
+                        values['compra'] = self.clean_text(buy_val.text)
+                
+                # Extract sell price
+                sell_elem = container.find('div', class_='venta')
+                if sell_elem:
+                    sell_val = sell_elem.find('div', class_='val')
+                    if sell_val:
+                        values['venta'] = self.clean_text(sell_val.text)
+                    else:
+                        # Some elements might have the value directly in the venta div
+                        sell_text = sell_elem.get_text()
+                        if '$' in sell_text:
+                            values['venta'] = self.clean_text(sell_text)
+                
+                # Extract variation - handle both direct text and nested elements
+                var_elem = container.find('div', class_='var-porcentaje')
+                if var_elem:
+                    # First try to find a direct text node with percentage
+                    var_text = ''.join([str(t) for t in var_elem.contents if isinstance(t, str)]).strip()
+                    # Clean any XML/HTML artifacts
+                    var_text = re.sub(r'<[^>]+>', '', var_text)  # Remove any HTML tags
+                    var_text = re.sub(r'&[^;]+;', '', var_text)  # Remove HTML entities
+                    var_text = var_text.strip()
+                    
+                    # If we found a percentage, use it
+                    if '%' in var_text:
+                        values['variacion'] = var_text
+                    # Otherwise try to find a number with percentage
+                    else:
+                        match = re.search(r'([-+]?\d*\.?\d+%?)', var_text)
+                        if match:
+                            values['variacion'] = match.group(1)
+                
+                if values:
+                    rates[title] = values
+                
+                # Update timestamp
+                update_elem = container.find('div', class_='tile update')
+                if not update_elem:
+                    update_elem = container.find('div', class_='update')
+                if update_elem:
+                    self.last_update = self.clean_text(
+                        update_elem.text.replace('Actualizado por última vez:', '')
+                    )
+                
+            except Exception as e:
+                print(f"Error al procesar elemento: {str(e)}")
+                continue
+        
+        # If we didn't find rates in the main containers, try alternative approach
+        if not rates:
+            return self._parse_alternative_structure(soup)
+        
+        self.rates = rates
+        return rates
+    
+    def _parse_alternative_structure(self, soup) -> Dict:
+        """Alternative parsing method if the main method fails."""
+        rates = {}
+        
+        # Look for all currency blocks
+        currency_blocks = soup.find_all('div', class_='tile is-child')
+        
+        for block in currency_blocks:
+            try:
+                # Get the title
+                title_elem = block.find('a', class_='titleText')
+                if not title_elem:
+                    title_elem = block.find('div', class_='title')
+                    if title_elem:
+                        title_elem = title_elem.find('a')
+                
+                if not title_elem:
+                    continue
+                
+                title = self.clean_text(title_elem.text)
+                if not any(d in title for d in ['Dólar', 'Contado']):
+                    continue
+                
+                values = {}
+                
+                # Extract prices
+                for price_type in ['compra', 'venta']:
+                    price_div = block.find('div', class_=price_type)
+                    if price_div:
+                        val = price_div.find('div', class_='val')
+                        if val:
+                            values[price_type] = self.clean_text(val.text)
+                
+                # Extract variation with better handling
+                var_div = block.find('div', class_='var-porcentaje')
+                if var_div:
+                    # Get all text content, including from nested elements
+                    var_text = ''.join([str(t) for t in var_div.contents if isinstance(t, str)])
+                    # Clean up the text
+                    var_text = re.sub(r'<[^>]+>', '', var_text)  # Remove any HTML tags
+                    var_text = re.sub(r'&[^;]+;', '', var_text)  # Remove HTML entities
+                    var_text = var_text.strip()
+                    
+                    # Find percentage value
+                    match = re.search(r'([-+]?\d*\.?\d+%?)', var_text)
+                    if match:
+                        values['variacion'] = match.group(1)
+                    elif '%' in var_text:
+                        values['variacion'] = var_text
+                
+                if values:
+                    rates[title] = values
+                
+                # Update timestamp if found
+                update_div = block.find('div', class_='tile update')
+                if update_div:
+                    self.last_update = self.clean_text(
+                        update_div.text.replace('Actualizado por última vez:', '')
+                    )
+                
+            except Exception as e:
+                print(f"Error en método alternativo: {str(e)}")
+                continue
+        
+        self.rates = rates
+        return rates
+
+    def get_rates(self):
+        html_content = self.fetch_data()
+        if html_content:
+            return self.parse_data(html_content)
+        return None
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """Convert the scraped rates to a pandas DataFrame."""
+        if not self.rates:
+            self.get_rates()
+        
+        data = []
+        for currency, values in self.rates.items():
+            row = {'Moneda': currency}
+            
+            # Ensure all expected columns exist
+            for col in ['compra', 'venta', 'variacion']:
+                row[col] = values.get(col, 'N/A')
+            
+            # Clean up the values
+            for key in ['compra', 'venta']:
+                if key in row and row[key] != 'N/A':
+                    # Remove currency symbols and clean up
+                    row[key] = row[key].replace('$', '').replace(',', '.').strip()
+                    # Try to convert to float if it's a valid number
+                    try:
+                        row[key] = float(row[key])
+                    except (ValueError, TypeError):
+                        pass
+            
+            data.append(row)
+        
+        # Create DataFrame with consistent column order
+        columns = ['Moneda', 'compra', 'venta', 'variacion']
+        df = pd.DataFrame(data, columns=columns)
+        
+        return df
+
+def obtener_dolares_dolarhoy():
+    """
+    Obtiene cotizaciones de dólar desde dolarhoy.com usando scraping.
+    """
+    try:
+        scraper = DolarScraper()
+        rates = scraper.get_rates()
+        
+        if rates:
+            # Normalizar los nombres para compatibilidad
+            resultados = {}
+            
+            for nombre, datos in rates.items():
+                # Extraer valores y limpiarlos
+                compra = datos.get('compra', 'N/A')
+                venta = datos.get('venta', 'N/A')
+                variacion = datos.get('variacion', 'N/A')
+                
+                # Limpiar valores numéricos
+                try:
+                    if compra != 'N/A':
+                        compra = float(str(compra).replace('$', '').replace(',', '.').strip())
+                    if venta != 'N/A':
+                        venta = float(str(venta).replace('$', '').replace(',', '.').strip())
+                except (ValueError, TypeError):
+                    pass
+                
+                # Mapear a nombres estándar
+                key = None
+                nombre_lower = nombre.lower()
+                
+                if 'oficial' in nombre_lower:
+                    key = 'oficial'
+                elif 'blue' in nombre_lower or 'paralelo' in nombre_lower:
+                    key = 'blue'
+                elif 'mep' in nombre_lower or 'bolsa' in nombre_lower:
+                    key = 'mep'
+                elif 'contado con liquidación' in nombre_lower or 'ccl' in nombre_lower:
+                    key = 'ccl'
+                elif 'mayorista' in nombre_lower:
+                    key = 'mayorista'
+                elif 'tarjeta' in nombre_lower or 'turista' in nombre_lower:
+                    key = 'tarjeta'
+                
+                if key:
+                    resultados[key] = {
+                        'compra': compra,
+                        'venta': venta,
+                        'variacion': variacion,
+                        'fechaActualizacion': scraper.last_update
+                    }
+            
+            return resultados
+            
+    except Exception as e:
+        print(f"Error al obtener datos de dolarhoy.com: {str(e)}")
+        return {}
+    
+    return {}
+
+import streamlit as st
+import plotly.graph_objects as go
+from datetime import datetime, date, timedelta
+import requests
+from bs4 import BeautifulSoup
+import urllib3
+import yfinance as yf
+import pandas as pd
+import json
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def obtener_variables_bcra():
@@ -611,7 +921,7 @@ def obtener_mep_ccl_iol_completo(token_acceso):
 def obtener_dolares_financieros_completo(token_acceso=None):
     """
     Obtiene cotizaciones de dólares financieros desde múltiples fuentes.
-    Combina datos de IOL, APIs públicas y yfinance.
+    Combina datos de IOL, APIs públicas, dolarhoy.com y yfinance.
     """
     resultados = {
         "MEP": {"valor": None, "variacion": None, "fuente": None},
@@ -631,11 +941,34 @@ def obtener_dolares_financieros_completo(token_acceso=None):
         except Exception as e:
             print(f"Error con métodos IOL específicos: {str(e)}")
     
-    # 2. Intentar obtener desde API pública (como fallback o complemento)
+    # 2. Intentar obtener desde dolarhoy.com
+    try:
+        cotizaciones_dolarhoy = obtener_dolares_dolarhoy()
+        if cotizaciones_dolarhoy:
+            # Solo usar dolarhoy si no tenemos datos de IOL o como complemento
+            if not resultados["MEP"]["valor"] and "mep" in cotizaciones_dolarhoy and cotizaciones_dolarhoy["mep"].get("venta"):
+                resultados["MEP"]["valor"] = float(cotizaciones_dolarhoy["mep"]["venta"])
+                resultados["MEP"]["fuente"] = "DolarHoy.com"
+            
+            if not resultados["CCL"]["valor"] and "ccl" in cotizaciones_dolarhoy and cotizaciones_dolarhoy["ccl"].get("venta"):
+                resultados["CCL"]["valor"] = float(cotizaciones_dolarhoy["ccl"]["venta"])
+                resultados["CCL"]["fuente"] = "DolarHoy.com"
+            
+            if "blue" in cotizaciones_dolarhoy and cotizaciones_dolarhoy["blue"].get("venta"):
+                resultados["Blue"]["valor"] = float(cotizaciones_dolarhoy["blue"]["venta"])
+                resultados["Blue"]["fuente"] = "DolarHoy.com"
+            
+            if not resultados["Canje"]["valor"] and "tarjeta" in cotizaciones_dolarhoy and cotizaciones_dolarhoy["tarjeta"].get("venta"):
+                resultados["Canje"]["valor"] = float(cotizaciones_dolarhoy["tarjeta"]["venta"])
+                resultados["Canje"]["fuente"] = "DolarHoy.com"
+    except Exception as e:
+        print(f"Error con dolarhoy.com: {str(e)}")
+    
+    # 3. Intentar obtener desde API pública (como fallback adicional)
     try:
         cotizaciones_api = obtener_dolar_api_publica()
         if cotizaciones_api:
-            # Solo usar API pública si no tenemos datos de IOL
+            # Solo usar API pública si no tenemos datos de IOL o dolarhoy
             if not resultados["MEP"]["valor"] and "mep" in cotizaciones_api and cotizaciones_api["mep"].get("venta"):
                 resultados["MEP"]["valor"] = float(cotizaciones_api["mep"]["venta"])
                 resultados["MEP"]["fuente"] = "API Pública"
@@ -644,22 +977,23 @@ def obtener_dolares_financieros_completo(token_acceso=None):
                 resultados["CCL"]["valor"] = float(cotizaciones_api["ccl"]["venta"])
                 resultados["CCL"]["fuente"] = "API Pública"
             
-            if "blue" in cotizaciones_api and cotizaciones_api["blue"].get("venta"):
+            if not resultados["Blue"]["valor"] and "blue" in cotizaciones_api and cotizaciones_api["blue"].get("venta"):
                 resultados["Blue"]["valor"] = float(cotizaciones_api["blue"]["venta"])
                 resultados["Blue"]["fuente"] = "API Pública"
     except Exception as e:
         print(f"Error con API pública: {str(e)}")
     
-    # 3. Obtener dólar canje
-    try:
-        canje_data = obtener_dolar_canje()
-        if canje_data and canje_data.get("valor"):
-            resultados["Canje"]["valor"] = float(canje_data["valor"])
-            resultados["Canje"]["fuente"] = "API Pública"
-    except Exception as e:
-        print(f"Error al obtener dólar canje: {str(e)}")
+    # 4. Obtener dólar canje si aún no lo tenemos
+    if not resultados["Canje"]["valor"]:
+        try:
+            canje_data = obtener_dolar_canje()
+            if canje_data and canje_data.get("valor"):
+                resultados["Canje"]["valor"] = float(canje_data["valor"])
+                resultados["Canje"]["fuente"] = "API Pública (Calculado)"
+        except Exception as e:
+            print(f"Error al obtener dólar canje: {str(e)}")
     
-    # 4. Si aún falta MEP o CCL, intentar desde yfinance
+    # 5. Si aún falta MEP o CCL, intentar desde yfinance
     if not resultados["MEP"]["valor"] or not resultados["CCL"]["valor"]:
         try:
             bonos_data = obtener_bonos_yfinance()
@@ -682,427 +1016,62 @@ def obtener_dolares_financieros_completo(token_acceso=None):
     
     return resultados
 
-def obtener_resumen_rueda():
-    """
-    Obtiene y resume datos reales del mercado usando la API de IOL y scraping del BCRA.
-    Incluye reservas, dólar mayorista, inflación, tasas, etc.
-    """
-    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-        # Incluso sin autenticación, podemos obtener algunos datos públicos
-        try:
-            variables_bcra = obtener_variables_bcra()
-            reservas = obtener_reservas_bcra()
-            dolares_financieros = obtener_dolares_financieros_completo()
-            
-            return {
-                "reservas": reservas,
-                "dolar_mayorista": {
-                    "valor": variables_bcra.get("dolar_mayorista", {}).get("valor", "No disponible"),
-                    "variacion": None
-                },
-                "volumen_operado": "Requiere autenticación IOL",
-                "dolares_financieros": {
-                    "MEP": dolares_financieros["MEP"],
-                    "CCL": dolares_financieros["CCL"],
-                    "Canje": dolares_financieros["Canje"],
-                    "Blue": dolares_financieros["Blue"]
-                },
-                "merval": {"valor": "Requiere autenticación", "bajas": [], "subas": []},
-                "deuda_soberana": {
-                    "AL30D": "Requiere autenticación",
-                    "GD35D": "Requiere autenticación", 
-                    "GD38D": "Requiere autenticación"
-                },
-                "riesgo_pais": {"valor": "No disponible por API pública", "delta": None},
-                "bonos_cer": {
-                    "corto_plazo": [f"CER: {variables_bcra.get('cer', {}).get('valor', 'No disponible')}"],
-                    "largo_plazo": ["Requiere autenticación IOL"]
-                },
-                "letras": ["Requiere autenticación IOL"],
-                "dolar_linked": {
-                    "futuros": "Requiere autenticación IOL",
-                    "bonos": ["Requiere autenticación IOL"]
-                },
-                "caucion": {"plazo": "Requiere autenticación", "tasa": "Requiere autenticación"}
-            }
-        except Exception as e:
-            st.warning(f"Error al obtener datos públicos: {str(e)}")
-            return {
-                "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
-                "dolar_mayorista": {"valor": "Error", "variacion": None},
-                "volumen_operado": "Error",
-                "dolares_financieros": {
-                    "MEP": {"valor": "Error", "variacion": None, "fuente": None},
-                    "CCL": {"valor": "Error", "variacion": None, "fuente": None},
-                    "Canje": {"valor": "Error", "variacion": None, "fuente": None}
-                },
-                "merval": {"valor": "Error", "bajas": ["Error"], "subas": ["Error"]},
-                "deuda_soberana": {"AL30D": "Error", "GD35D": "Error", "GD38D": "Error"},
-                "riesgo_pais": {"valor": "Error", "delta": None},
-                "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
-                "letras": ["Error"],
-                "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
-                "caucion": {"plazo": "Error", "tasa": "Error"}
-            }
-    
-    token_acceso = st.session_state.token_acceso
+def mostrar_analisis_portafolio():
+    """Función placeholder para análisis de portafolio"""
+    st.subheader("📊 Análisis de Portafolio")
+    st.info("Esta funcionalidad estará disponible próximamente. Requiere implementación completa de análisis de posiciones.")
 
+def mostrar_tasas_caucion(token_acceso):
+    """Función para mostrar tasas de caución"""
+    st.subheader("💰 Tasas de Caución")
+    
     try:
-        # Obtener datos reales del BCRA primero
-        variables_bcra = obtener_variables_bcra()
-        
-        # Reservas BCRA reales
-        reservas = obtener_reservas_bcra()
-
-        # Obtener dólares financieros usando métodos mejorados de IOL
-        dolares_financieros = obtener_dolares_financieros_completo(token_acceso)
-
-        # Datos reales de instrumentos principales desde IOL
-        gd30 = obtener_cotizacion_detalle(token_acceso, 'GD30', 'BCBA')
-        al30 = obtener_cotizacion_detalle(token_acceso, 'AL30', 'BCBA')
-        gd35 = obtener_cotizacion_detalle(token_acceso, 'GD35', 'BCBA')
-        gd38 = obtener_cotizacion_detalle(token_acceso, 'GD38', 'BCBA')
-        merval = obtener_cotizacion_detalle(token_acceso, 'MERVAL', 'BCBA')
-        dolar_mayorista_iol = obtener_cotizacion_detalle(token_acceso, 'DOLAR', 'BCBA')
-
-        # Extraer datos del BCRA con mejor formato
-        dolar_mayorista_bcra = variables_bcra.get("dolar_mayorista", {}).get("valor", None)
-        dolar_minorista_bcra = variables_bcra.get("dolar_minorista", {}).get("valor", None)
-        inflacion_mensual = variables_bcra.get("inflacion_mensual", {}).get("valor", None)
-        inflacion_interanual = variables_bcra.get("inflacion_interanual", {}).get("valor", None)
-        tasa_monetaria_na = variables_bcra.get("tasa_monetaria_na", {}).get("valor", None)
-        tasa_monetaria_ea = variables_bcra.get("tasa_monetaria_ea", {}).get("valor", None)
-        cer = variables_bcra.get("cer", {}).get("valor", None)
-        base_monetaria = variables_bcra.get("base_monetaria", {}).get("valor", None)
-        
-        # Formatear el dólar mayorista del BCRA
-        dolar_mayorista_valor = None
-        if dolar_mayorista_bcra:
-            try:
-                dolar_mayorista_valor = float(dolar_mayorista_bcra.replace(".", "").replace(",", "."))
-            except:
-                dolar_mayorista_valor = dolar_mayorista_bcra
-
-        # Los dólares financieros ya vienen calculados con los métodos mejorados
-        # No necesitamos el cálculo manual anterior
-
-        # Caución (real desde IOL)
         cauciones = obtener_tasas_caucion_iol(token_acceso)
+        
         if cauciones:
-            # Tomar el plazo más operado (mayor volumen o el de 7 días si existe)
-            caucion_7d = next((c for c in cauciones if c.get("plazo") == 7), None)
-            caucion_principal = caucion_7d if caucion_7d else (cauciones[0] if cauciones else None)
-            tasa_caucion = caucion_principal["tasa"] if caucion_principal else "No disponible"
-            plazo_caucion = f'{caucion_principal["plazo"]} días' if caucion_principal else "No disponible"
-            # Para el gráfico, armar listas reales
-            plazos_caucion = [c["plazo"] for c in cauciones if c.get("plazo") is not None]
-            tasas_caucion = [c["tasa"] for c in cauciones if c.get("tasa") is not None]
+            st.success(f"✅ Se encontraron {len(cauciones)} tasas de caución")
+            
+            # Crear DataFrame para mostrar
+            df_cauciones = pd.DataFrame(cauciones)
+            
+            # Mostrar tabla
+            st.dataframe(df_cauciones, use_container_width=True)
+            
+            # Gráfico de tasas por plazo
+            if len(cauciones) > 1:
+                plazos = [c["plazo"] for c in cauciones if c.get("plazo")]
+                tasas = [c["tasa"] for c in cauciones if c.get("tasa")]
+                
+                if plazos and tasas:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=plazos,
+                        y=tasas,
+                        mode='lines+markers',
+                        name='Tasas de Caución',
+                        line=dict(color='#1f77b4', width=3),
+                        marker=dict(size=8)
+                    ))
+                    
+                    fig.update_layout(
+                        title='Curva de Tasas de Caución',
+                        xaxis_title='Plazo (días)',
+                        yaxis_title='Tasa (%)',
+                        template='plotly_white',
+                        height=400
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
         else:
-            tasa_caucion = "No disponible"
-            plazo_caucion = "No disponible"
-            plazos_caucion = []
-            tasas_caucion = []
-
-        # Volumen operado del Merval
-        volumen_operado = "No disponible"
-        if merval and merval.get('volumenNominal'):
-            try:
-                volumen_millones = merval['volumenNominal'] / 1e6
-                volumen_operado = f"USD {volumen_millones:.1f}M"
-            except:
-                volumen_operado = f"USD {merval['volumenNominal']}"
-        # Resumen de bajas y subas del MERVAL (no disponible por API pública)
-        bajas = ["Datos no disponibles por API pública"]
-        subas = ["Datos no disponibles por API pública"]
-
-        return {
-            "reservas": reservas,
-            "dolar_mayorista": {
-                # Prioriza el valor del BCRA, que es más oficial
-                "valor": dolar_mayorista_valor if dolar_mayorista_valor else (dolar_mayorista_iol["ultimoPrecio"] if dolar_mayorista_iol and dolar_mayorista_iol["ultimoPrecio"] else "No disponible"),
-                "variacion": dolar_mayorista_iol["variacion"] if dolar_mayorista_iol else None
-            },
-            "dolar_minorista": {
-                "valor": dolar_minorista_bcra,
-                "fecha": variables_bcra.get("dolar_minorista", {}).get("fecha", None)
-            },
-            "volumen_operado": volumen_operado,
-            "dolares_financieros": dolares_financieros,
-            "merval": {
-                "valor": merval["variacion"] if merval else None,
-                "bajas": bajas,
-                "subas": subas
-            },
-            "deuda_soberana": {
-                "AL30D": al30["variacion"] if al30 else None,
-                "GD35D": gd35["variacion"] if gd35 else None,
-                "GD38D": gd38["variacion"] if gd38 else None
-            },
-            "riesgo_pais": {
-                "valor": "No disponible por API pública",
-                "delta": None
-            },
-            "bonos_cer": {
-                "corto_plazo": [f"CER: {cer}" if cer else "Datos del BCRA"],
-                "largo_plazo": ["Consultar IOL para datos detallados"]
-            },
-            "letras": ["Consultar IOL para datos actualizados"],
-            "dolar_linked": {
-                "futuros": "Consultar IOL para cotizaciones",
-                "bonos": ["Consultar IOL para datos específicos"]
-            },
-            "caucion": {
-                "plazo": plazo_caucion,
-                "tasa": tasa_caucion,
-                "plazos_lista": plazos_caucion,
-                "tasas_lista": tasas_caucion
-            },
-            "inflacion": {
-                "mensual": inflacion_mensual,
-                "interanual": inflacion_interanual
-            },
-            "tasas_bcra": {
-                "politica_monetaria_na": tasa_monetaria_na,
-                "politica_monetaria_ea": tasa_monetaria_ea
-            },
-            "variables_monetarias": {
-                "base_monetaria": base_monetaria,
-                "cer": cer,
-                "uva": variables_bcra.get("uva", {}).get("valor", None),
-                "uvi": variables_bcra.get("uvi", {}).get("valor", None),
-                "icl": variables_bcra.get("icl", {}).get("valor", None)
-            }
-        }
+            st.warning("No se encontraron tasas de caución disponibles")
+            
     except Exception as e:
-        st.error(f"Error al obtener datos de mercado: {str(e)}")
-        # Retornar estructura con datos del BCRA si falla IOL
-        try:
-            variables_bcra = obtener_variables_bcra()
-            reservas_fallback = obtener_reservas_bcra()
-            return {
-                "reservas": reservas_fallback,
-                "dolar_mayorista": {
-                    "valor": variables_bcra.get("dolar_mayorista", {}).get("valor", "Error al cargar"),
-                    "variacion": None
-                },
-                "volumen_operado": "Error de conexión IOL",
-                "dolares_financieros": {
-                    "MEP": {"valor": "Sin datos IOL", "variacion": None},
-                    "CCL": {"valor": "Sin datos IOL", "variacion": None},
-                    "Canje": {"valor": 0, "variacion": None}
-                },
-                "merval": {"valor": "Sin datos IOL", "bajas": ["Error de conexión"], "subas": ["Error de conexión"]},
-                "deuda_soberana": {"AL30D": "Sin datos", "GD35D": "Sin datos", "GD38D": "Sin datos"},
-                "riesgo_pais": {"valor": "Sin datos", "delta": None},
-                "bonos_cer": {"corto_plazo": [f"CER BCRA: {variables_bcra.get('cer', {}).get('valor', 'No disponible')}"], "largo_plazo": ["Error de conexión"]},
-                "letras": ["Error de conexión"],
-                "dolar_linked": {"futuros": "Error de conexión", "bonos": ["Error de conexión"]},
-                "caucion": {"plazo": "Error de conexión", "tasa": "Sin datos"}
-            }
-        except:
-            # Fallback completo en caso de error total
-            return {
-                "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
-                "dolar_mayorista": {"valor": "Error", "variacion": None},
-                "volumen_operado": "Error",
-                "dolares_financieros": {
-                    "MEP": {"valor": "Error", "variacion": None},
-                    "CCL": {"valor": "Error", "variacion": None},
-                    "Canje": {"valor": "Error", "variacion": None}
-                },
-                "merval": {"valor": "Error", "bajas": ["Error"], "subas": ["Error"]},
-                "deuda_soberana": {"AL30D": "Error", "GD35D": "Error", "GD38D": "Error"},
-                "riesgo_pais": {"valor": "Error", "delta": None},
-                "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
-                "letras": ["Error"],
-                "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
-                "caucion": {"plazo": "Error", "tasa": "Error"}
-            }
+        st.error(f"Error al obtener tasas de caución: {str(e)}")
 
-def mostrar_resumen_rueda():
-    """Muestra el resumen de la rueda del día con validación de datos reales."""
-    st.markdown("## 🔔 Resumen de la Rueda del Día")
-    st.caption(f"Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-    
-    resumen = obtener_resumen_rueda()
-    
-    # Utilidad para mostrar "No disponible" si el valor es 0, None o vacío
-    def mostrar_valor(valor, formato="${:,.2f}", nd="No disponible"):
-        if valor is None or (isinstance(valor, (int, float)) and valor == 0):
-            return nd
-        if isinstance(valor, (int, float)):
-            return formato.format(valor)
-        return valor
-
-    # Sección 1: Reservas y Dólar
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(
-            label=resumen["reservas"]["titulo"],
-            value=mostrar_valor(resumen["reservas"]["valor"], formato="{}", nd="No disponible"),
-            delta=resumen["reservas"]["delta"]
-        )
-    with col2:
-        st.metric(
-            label="Dólar Mayorista (A3500)",
-            value=mostrar_valor(resumen['dolar_mayorista']['valor']),
-            delta=f"{resumen['dolar_mayorista']['variacion']}%" if resumen['dolar_mayorista']['variacion'] not in [None, 0] else None
-        )
-    with col3:
-        st.metric(
-            label="Volumen Operado A3",
-            value=mostrar_valor(resumen["volumen_operado"], formato="{}", nd="No disponible"),
-            delta=None
-        )
-    st.divider()
-    
-    # Sección 2: Dólares Financieros (mejorada con indicadores de precisión)
-    st.subheader("💸 Dólares Financieros")
-    cols = st.columns(4)
-    
-    dolares = resumen['dolares_financieros']
-    
-    with cols[0]:
-        mep_valor = mostrar_valor(dolares['MEP']['valor'])
-        mep_delta = f"{dolares['MEP']['variacion']}%" if dolares['MEP']['variacion'] not in [None, 0] else None
-        st.metric("MEP", mep_valor, mep_delta)
-        if dolares['MEP']['fuente']:
-            # Indicador de calidad de la fuente
-            if "IOL MEP" in dolares['MEP']['fuente']:
-                st.caption(f"🎯 {dolares['MEP']['fuente']} (Preciso)")
-            elif "IOL" in dolares['MEP']['fuente']:
-                st.caption(f"📊 {dolares['MEP']['fuente']} (Estimado)")
-            else:
-                st.caption(f"📡 {dolares['MEP']['fuente']}")
-    
-    with cols[1]:
-        ccl_valor = mostrar_valor(dolares['CCL']['valor'])
-        ccl_delta = f"{dolares['CCL']['variacion']}%" if dolares['CCL']['variacion'] not in [None, 0] else None
-        st.metric("CCL", ccl_valor, ccl_delta)
-        if dolares['CCL']['fuente']:
-            if "IOL CCL" in dolares['CCL']['fuente']:
-                st.caption(f"🎯 {dolares['CCL']['fuente']} (Preciso)")
-            elif "IOL" in dolares['CCL']['fuente']:
-                st.caption(f"📊 {dolares['CCL']['fuente']} (Estimado)")
-            else:
-                st.caption(f"📡 {dolares['CCL']['fuente']}")
-    
-    with cols[2]:
-        canje_valor = mostrar_valor(dolares['Canje']['valor'])
-        st.metric("Canje/Tarjeta", canje_valor, None)
-        if dolares['Canje']['fuente']:
-            st.caption(f"📡 {dolares['Canje']['fuente']}")
-    
-    with cols[3]:
-        blue_valor = mostrar_valor(dolares.get('Blue', {}).get('valor'))
-        st.metric("Blue", blue_valor, None)
-        if dolares.get('Blue', {}).get('fuente'):
-            st.caption(f"📡 {dolares['Blue']['fuente']}")
-    
-    st.caption("🔹 Prioridad: IOL API específico → IOL estimado → APIs públicas → Yahoo Finance")
-    st.divider()
-    
-    # Sección 3: Merval
-    st.subheader(f"📉 S&P Merval: {mostrar_valor(resumen['merval']['valor'], formato='{}%', nd='No disponible')}")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Principales bajas:**")
-        for baja in resumen["merval"]["bajas"]:
-            st.markdown(f"- {baja}")
-    with col2:
-        st.markdown("**Principales subas:**")
-        for suba in resumen["merval"]["subas"]:
-            st.markdown(f"- {suba}")
-    st.divider()
-    
-    # Sección 4: Deuda Soberana
-    st.subheader("💵 Deuda Soberana en USD (Hard Dollar)")
-    cols = st.columns(4)
-    with cols[0]:
-        st.metric("AL30D", mostrar_valor(resumen['deuda_soberana']['AL30D'], formato="{}%", nd="No disponible"))
-    with cols[1]:
-        st.metric("GD35D", mostrar_valor(resumen['deuda_soberana']['GD35D'], formato="{}%", nd="No disponible"))
-    with cols[2]:
-        st.metric("GD38D", mostrar_valor(resumen['deuda_soberana']['GD38D'], formato="{}%", nd="No disponible"))
-    with cols[3]:
-        st.metric("Riesgo País", mostrar_valor(resumen['riesgo_pais']['valor'], formato="{}", nd="No disponible"), 
-                 f"{resumen['riesgo_pais']['delta']} puntos" if resumen['riesgo_pais']['delta'] else None)
-    st.divider()
-    
-    # Sección 5: Bonos CER
-    st.subheader("📊 Bonos CER")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Corto plazo en alza:**")
-        for bono in resumen["bonos_cer"]["corto_plazo"]:
-            st.markdown(f"- {bono}")
-    with col2:
-        st.markdown("**Largo plazo en baja:**")
-        for bono in resumen["bonos_cer"]["largo_plazo"]:
-            st.markdown(f"- {bono}")
-    st.divider()
-    
-    # Sección 6: Letras y Dólar Linked
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("📄 Letras")
-        for letra in resumen["letras"]:
-            st.markdown(f"- {letra}")
-    with col2:
-        st.subheader("🔄 Dólar Linked")
-        st.markdown(f"▫️ Futuros suben entre {mostrar_valor(resumen['dolar_linked']['futuros'], formato='{}', nd='No disponible')}")
-        st.markdown("▫️ Bonos:")
-        for bono in resumen["dolar_linked"]["bonos"]:
-            st.markdown(f"  - {bono}")
-    st.divider()
-    
-    # Sección 7: Caución
-    st.subheader(f"📌 Caución a {mostrar_valor(resumen['caucion']['plazo'], formato='{}', nd='No disponible')}: {mostrar_valor(resumen['caucion']['tasa'], formato='{}%', nd='No disponible')}")
-    
-    # Gráfico de tasas de caución (reales si existen)
-    plazos = resumen["caucion"].get("plazos_lista", [])
-    tasas = resumen["caucion"].get("tasas_lista", [])
-    if plazos and tasas and len(plazos) == len(tasas):
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=plazos, 
-            y=tasas,
-            mode='lines+markers',
-            name='Tasas',
-            line=dict(color='#4CAF50', width=3),
-            marker=dict(size=10, color='#2E7D32')
-        ))
-        fig.update_layout(
-            title='Curva de Tasas de Caución',
-            xaxis_title='Plazo (días)',
-            yaxis_title='Tasa (%)',
-            template='plotly_dark',
-            height=300
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        # fallback simulado si no hay datos reales
-        plazos = [1, 7, 14, 30, 60]
-        tasas = [25.5, 28.8, 27.2, 26.5, 25.8]
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=plazos, 
-            y=tasas,
-            mode='lines+markers',
-            name='Tasas',
-            line=dict(color='#4CAF50', width=3),
-            marker=dict(size=10, color='#2E7D32')
-        ))
-        fig.update_layout(
-            title='Curva de Tasas de Caución',
-            xaxis_title='Plazo (días)',
-            yaxis_title='Tasa (%)',
-            template='plotly_dark',
-            height=300
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-# ... (código existente previo a la función main)
+def mostrar_movimientos_asesor():
+    """Función placeholder para panel del asesor"""
+    st.subheader("👨‍💼 Panel del Asesor")
+    st.info("Esta funcionalidad estará disponible próximamente. Requiere implementación de análisis de movimientos y reportes.")
 
 def obtener_tokens(usuario, contraseña):
     """
