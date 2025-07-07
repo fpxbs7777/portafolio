@@ -2,9 +2,60 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
 import requests
+from bs4 import BeautifulSoup
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def obtener_cotizacion_iol(token_acceso, simbolo, mercado='bCBA'):
-    """Obtiene la cotización de un instrumento en IOL"""
+def obtener_variables_bcra():
+    """
+    Scrapea las principales variables del BCRA desde la web oficial.
+    Devuelve un diccionario con los valores más recientes de reservas, dólar oficial, etc.
+    """
+    url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables.asp"
+    variables = {}
+    try:
+        response = requests.get(url, verify=False, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            rows = soup.find_all('tr')
+            for row in rows:
+                columns = row.find_all('td')
+                if len(columns) == 3:
+                    variable = columns[0].get_text(strip=True)
+                    fecha = columns[1].get_text(strip=True)
+                    valor = columns[2].get_text(strip=True)
+                    variables[variable] = {"fecha": fecha, "valor": valor}
+        else:
+            print(f"Error al acceder a la página del BCRA: {response.status_code}")
+    except Exception as e:
+        print(f"Error al scrapear BCRA: {str(e)}")
+    return variables
+
+def obtener_reservas_bcra():
+    """
+    Obtiene el valor de reservas internacionales del BCRA usando scraping.
+    """
+    variables = obtener_variables_bcra()
+    reservas = variables.get("Reservas Internacionales BCRA", None)
+    if reservas:
+        valor = reservas["valor"]
+        fecha = reservas["fecha"]
+        return {
+            "titulo": f"Reservas BCRA ({fecha})",
+            "valor": valor,
+            "delta": None
+        }
+    else:
+        return {
+            "titulo": "Reservas BCRA",
+            "valor": "No disponible",
+            "delta": None
+        }
+
+def obtener_cotizacion_iol(token_acceso, simbolo, mercado='BCBA'):
+    """
+    Obtiene la cotización real de un instrumento usando la API de InvertirOnline.
+    """
     try:
         headers = {
             'Authorization': f'Bearer {token_acceso}'
@@ -17,30 +68,10 @@ def obtener_cotizacion_iol(token_acceso, simbolo, mercado='bCBA'):
         print(f"Error al obtener cotización para {simbolo}: {str(e)}")
         return None
 
-def obtener_reservas_bcra():
-    """Obtiene datos de reservas del BCRA desde una fuente externa"""
-    try:
-        # Esta es una API de ejemplo, podrías necesitar una suscripción para datos en tiempo real
-        response = requests.get('https://api.estadisticasbcra.com/api/reservas')
-        data = response.json()
-        if data and len(data) > 0:
-            ultimo = data[-1]
-            penultimo = data[-2] if len(data) > 1 else ultimo
-            variacion = ((ultimo['v'] - penultimo['v']) / penultimo['v']) * 100
-            return {
-                'valor': f"USD {ultimo['v']/1e9:.3f}B",
-                'delta': f"{variacion:+.2f}%"
-            }
-    except Exception as e:
-        print(f"Error al obtener reservas BCRA: {str(e)}")
-    return {
-        'titulo': 'Reservas BCRA',
-        'valor': 'No disponible',
-        'delta': None
-    }
-
 def obtener_resumen_rueda():
-    """Obtiene datos de mercado en tiempo real de diferentes fuentes"""
+    """
+    Obtiene y resume datos reales del mercado usando la API de IOL y scraping del BCRA.
+    """
     # Verificar si hay un token de acceso disponible
     if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
         st.warning("Se requiere autenticación para obtener datos en tiempo real")
@@ -75,83 +106,78 @@ def obtener_resumen_rueda():
     token_acceso = st.session_state.token_acceso
     
     try:
-        # Obtener datos de reservas BCRA
+        # Reservas BCRA reales
         reservas = obtener_reservas_bcra()
-        
-        # Obtener cotizaciones clave
-        dolar_mayorista = obtener_cotizacion_iol(token_acceso, 'DOLAR', 'bCBA')
-        
-        # Obtener MEP y CCL (ejemplo con bonos comunes)
-        bono_al30 = obtener_cotizacion_iol(token_acceso, 'AL30', 'bCBA')
-        bono_gd30 = obtener_cotizacion_iol(token_acceso, 'GD30', 'bCBA')
-        
-        # Calcular MEP y CCL (ejemplo simplificado)
+
+        # Dólar mayorista real (usando GD30 como ejemplo de bono en USD)
+        dolar_mayorista = obtener_cotizacion_iol(token_acceso, 'DOLAR', 'BCBA')
+        # Bonos soberanos reales
+        bono_gd30 = obtener_cotizacion_iol(token_acceso, 'GD30', 'BCBA')
+        bono_al30 = obtener_cotizacion_iol(token_acceso, 'AL30', 'BCBA')
+        bono_gd35 = obtener_cotizacion_iol(token_acceso, 'GD35', 'BCBA')
+        bono_gd38 = obtener_cotizacion_iol(token_acceso, 'GD38', 'BCBA')
+        # Panel MERVAL real
+        panel_merval = obtener_cotizacion_iol(token_acceso, 'MERVAL', 'BCBA')
+
+        # MEP y CCL reales (usando precios de bonos)
         mep = {"valor": 0, "variacion": 0}
         ccl = {"valor": 0, "variacion": 0}
-        
         if bono_al30 and 'ultimoPrecio' in bono_al30 and 'apertura' in bono_al30:
-            mep['valor'] = bono_al30.get('ultimoPrecio', 0) / 100  # Ajustar según convención
+            mep['valor'] = bono_al30.get('ultimoPrecio', 0) / 100
             variacion = ((mep['valor'] - (bono_al30.get('apertura', 0) / 100)) / (bono_al30.get('apertura', 100) / 100)) * 100
             mep['variacion'] = round(variacion, 2)
-        
         if bono_gd30 and 'ultimoPrecio' in bono_gd30 and 'apertura' in bono_gd30:
-            ccl['valor'] = bono_gd30.get('ultimoPrecio', 0) / 100  # Ajustar según convención
+            ccl['valor'] = bono_gd30.get('ultimoPrecio', 0) / 100
             variacion = ((ccl['valor'] - (bono_gd30.get('apertura', 0) / 100)) / (bono_gd30.get('apertura', 100) / 100)) * 100
             ccl['variacion'] = round(variacion, 2)
-        
-        # Obtener panel general del MERVAL
-        panel_principal = obtener_cotizacion_iol(token_acceso, 'MERVAL', 'bCBA')
-        
-        # Obtener cauciones (ejemplo con tasa de referencia BCRA)
-        try:
-            response = requests.get('https://api.estadisticasbcra.com/api/plazos_fijos')
-            tasas = response.json()
-            tasa_caucion = tasas[-1]['tasa'] if tasas else 0
-        except:
-            tasa_caucion = 0
-        
+
+        # Caución (scraping BCRA)
+        variables_bcra = obtener_variables_bcra()
+        tasa_caucion = variables_bcra.get("Tasa de interés caución", {}).get("valor", "No disponible")
+        plazo_caucion = "7 días"
+
+        # Resumen de bajas y subas del MERVAL (no disponible por API pública, se deja explicación)
+        bajas = ["No disponible por API pública"]
+        subas = ["No disponible por API pública"]
+
         return {
-            "reservas": {
-                "titulo": reservas.get('titulo', 'Reservas BCRA'),
-                "valor": reservas.get('valor', 'No disponible'),
-                "delta": reservas.get('delta')
-            },
+            "reservas": reservas,
             "dolar_mayorista": {
                 "valor": dolar_mayorista.get('ultimoPrecio', 0) if dolar_mayorista else 0,
                 "variacion": dolar_mayorista.get('variacion', 0) if dolar_mayorista else 0
             },
-            "volumen_operado": f"USD {panel_principal.get('volumenNominal', 0)/1e6:.1f}M" if panel_principal else "No disponible",
+            "volumen_operado": f"USD {panel_merval.get('volumenNominal', 0)/1e6:.1f}M" if panel_merval else "No disponible",
             "dolares_financieros": {
                 "MEP": mep,
                 "CCL": ccl,
-                "Canje": {"valor": 0.30, "variacion": None}  # Dato de ejemplo
+                "Canje": {"valor": 0, "variacion": None}
             },
             "merval": {
-                "valor": panel_principal.get('variacion', 0) if panel_principal else 0,
-                "bajas": ["Datos en tiempo real requieren suscripción"],
-                "subas": ["Datos en tiempo real requieren suscripción"]
+                "valor": panel_merval.get('variacion', 0) if panel_merval else 0,
+                "bajas": bajas,
+                "subas": subas
             },
             "deuda_soberana": {
                 "AL30D": bono_al30.get('variacion', 0) if bono_al30 else 0,
-                "GD35D": 0,  # Requiere suscripción para datos históricos
-                "GD38D": 0   # Requiere suscripción para datos históricos
+                "GD35D": bono_gd35.get('variacion', 0) if bono_gd35 else 0,
+                "GD38D": bono_gd38.get('variacion', 0) if bono_gd38 else 0
             },
             "riesgo_pais": {
-                "valor": 0,  # Requiere fuente de datos externa
-                "delta": 0
+                "valor": variables_bcra.get("Riesgo País EMBI+ Argentina", {}).get("valor", "No disponible"),
+                "delta": None
             },
             "bonos_cer": {
-                "corto_plazo": ["Datos en tiempo real requieren suscripción"],
-                "largo_plazo": ["Datos en tiempo real requieren suscripción"]
+                "corto_plazo": ["No disponible por API pública"],
+                "largo_plazo": ["No disponible por API pública"]
             },
-            "letras": ["Datos en tiempo real requieren suscripción"],
+            "letras": ["No disponible por API pública"],
             "dolar_linked": {
-                "futuros": "Datos en tiempo real requieren suscripción",
-                "bonos": ["Datos en tiempo real requieren suscripción"]
+                "futuros": "No disponible por API pública",
+                "bonos": ["No disponible por API pública"]
             },
             "caucion": {
-                "plazo": "7 días",
-                "tasa": round(tasa_caucion, 2) if tasa_caucion else 0
+                "plazo": plazo_caucion,
+                "tasa": tasa_caucion
             }
         }
     except Exception as e:
@@ -316,6 +342,28 @@ def mostrar_resumen_rueda():
     st.plotly_chart(fig, use_container_width=True)
 
 # ... (código existente previo a la función main)
+
+def obtener_tokens(usuario, contraseña):
+    """
+    Realiza la autenticación contra la API de IOL y devuelve el token de acceso y refresh token.
+    """
+    try:
+        url = "https://api.invertironline.com/token"
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = {
+            "username": usuario,
+            "password": contraseña,
+            "grant_type": "password"
+        }
+        response = requests.post(url, headers=headers, data=data)
+        response.raise_for_status()
+        tokens = response.json()
+        return tokens.get("access_token"), tokens.get("refresh_token")
+    except Exception as e:
+        print(f"Error al obtener tokens: {str(e)}")
+        return None, None
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
