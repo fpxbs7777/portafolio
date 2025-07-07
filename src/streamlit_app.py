@@ -4,6 +4,9 @@ from datetime import datetime, date, timedelta
 import requests
 from bs4 import BeautifulSoup
 import urllib3
+import yfinance as yf
+import pandas as pd
+import json
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def obtener_variables_bcra():
@@ -183,40 +186,461 @@ def obtener_tasas_caucion_iol(token_acceso, mercado='argentina'):
         print(f"Error al obtener tasas de caución: {str(e)}")
         return []
 
+def obtener_cotizacion_ambito():
+    """
+    Obtiene cotizaciones de dólares desde la API pública de Ámbito Financiero.
+    """
+    try:
+        url = "https://mercados.ambito.com/dolar/informal/variacion"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "blue": {
+                    "compra": data.get("compra"),
+                    "venta": data.get("venta"),
+                    "variacion": data.get("variacion")
+                }
+            }
+    except Exception as e:
+        print(f"Error al obtener cotización de Ámbito: {str(e)}")
+        return None
+
+def obtener_dolar_api_publica():
+    """
+    Obtiene cotizaciones de dólares desde la API pública dolarapi.com
+    """
+    try:
+        # Múltiples endpoints para diferentes tipos de dólar
+        urls = {
+            "oficial": "https://api.dolarapi.com/v1/dolares/oficial",
+            "blue": "https://api.dolarapi.com/v1/dolares/blue", 
+            "mep": "https://api.dolarapi.com/v1/dolares/bolsa",
+            "ccl": "https://api.dolarapi.com/v1/dolares/contadoconliqui",
+            "mayorista": "https://api.dolarapi.com/v1/dolares/mayorista"
+        }
+        
+        resultados = {}
+        for tipo, url in urls.items():
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    resultados[tipo] = {
+                        "compra": data.get("compra"),
+                        "venta": data.get("venta"),
+                        "fechaActualizacion": data.get("fechaActualizacion")
+                    }
+            except Exception as e:
+                print(f"Error al obtener {tipo}: {str(e)}")
+                continue
+        
+        return resultados
+    except Exception as e:
+        print(f"Error al obtener cotizaciones de API pública: {str(e)}")
+        return {}
+
+def obtener_bonos_yfinance():
+    """
+    Obtiene precios de bonos argentinos desde Yahoo Finance para calcular MEP y CCL.
+    """
+    try:
+        # Símbolos de bonos argentinos en diferentes mercados
+        simbolos_bonos = {
+            "AL30": {"local": "AL30.BA", "nyse": "GGAL"},  # AL30 y ADR
+            "GD30": {"local": "GD30.BA", "nyse": "GD30"},
+            "AL35": {"local": "AL35.BA", "nyse": "AL35"}
+        }
+        
+        resultados = {}
+        for bono, simbolos in simbolos_bonos.items():
+            try:
+                # Obtener precio local (en pesos)
+                ticker_local = yf.Ticker(simbolos["local"])
+                hist_local = ticker_local.history(period="1d")
+                
+                if not hist_local.empty:
+                    precio_local = hist_local['Close'].iloc[-1]
+                    
+                    # Obtener precio en USD (si existe)
+                    try:
+                        ticker_usd = yf.Ticker(simbolos["nyse"])
+                        hist_usd = ticker_usd.history(period="1d")
+                        if not hist_usd.empty:
+                            precio_usd = hist_usd['Close'].iloc[-1]
+                            
+                            # Calcular MEP/CCL implícito
+                            if precio_usd > 0:
+                                dolar_implicito = precio_local / precio_usd
+                                resultados[bono] = {
+                                    "precio_local": precio_local,
+                                    "precio_usd": precio_usd,
+                                    "dolar_implicito": dolar_implicito
+                                }
+                    except:
+                        # Si no hay precio en USD, solo guardar precio local
+                        resultados[bono] = {
+                            "precio_local": precio_local,
+                            "precio_usd": None,
+                            "dolar_implicito": None
+                        }
+            except Exception as e:
+                print(f"Error al obtener {bono}: {str(e)}")
+                continue
+        
+        return resultados
+    except Exception as e:
+        print(f"Error al obtener bonos de yfinance: {str(e)}")
+        return {}
+
+def obtener_dolar_canje():
+    """
+    Obtiene información sobre el dólar canje desde fuentes públicas.
+    """
+    try:
+        # API alternativa para dólar canje/tarjeta
+        url = "https://api.dolarapi.com/v1/dolares/tarjeta"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "valor": data.get("venta"),
+                "compra": data.get("compra"),
+                "fecha": data.get("fechaActualizacion")
+            }
+    except Exception as e:
+        print(f"Error al obtener dólar canje: {str(e)}")
+        
+    # Fallback: calcular aproximadamente como oficial + impuestos
+    try:
+        oficial_data = obtener_dolar_api_publica().get("oficial", {})
+        if oficial_data.get("venta"):
+            valor_oficial = float(oficial_data["venta"])
+            # Dólar tarjeta/canje aproximado: oficial + 75% impuestos
+            valor_canje = valor_oficial * 1.75
+            return {
+                "valor": round(valor_canje, 2),
+                "compra": None,
+                "fecha": oficial_data.get("fechaActualizacion")
+            }
+    except:
+        pass
+    
+    return None
+
+def obtener_mep_iol(token_acceso, simbolo="AL30"):
+    """
+    Obtiene la cotización MEP usando el endpoint específico de IOL.
+    """
+    try:
+        headers = {
+            'Authorization': f'Bearer {token_acceso}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        url = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
+        
+        # Parámetros para el cálculo MEP
+        data = {
+            "simbolo": simbolo,
+            "idPlazoOperatoriaCompra": 0,  # T+0
+            "idPlazoOperatoriaVenta": 1    # T+1
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        
+        # La respuesta es directamente el valor del MEP
+        mep_valor = response.json()
+        
+        return {
+            "valor": round(float(mep_valor), 2),
+            "simbolo": simbolo,
+            "fuente": "IOL API MEP"
+        }
+        
+    except Exception as e:
+        print(f"Error al obtener MEP de IOL para {simbolo}: {str(e)}")
+        return None
+
+def obtener_ccl_desde_acciones_iol(token_acceso):
+    """
+    Calcula CCL usando acciones argentinas y sus ADRs desde IOL.
+    """
+    try:
+        # Pares de acciones argentinas y sus ADRs
+        pares_ccl = [
+            {"local": "GGAL", "adr": "GGAL", "ratio": 10},  # Galicia
+            {"local": "YPF", "adr": "YPF", "ratio": 1},     # YPF
+            {"local": "PAM", "adr": "PAM", "ratio": 25},    # Pampa Energía
+            {"local": "BMA", "adr": "BMA", "ratio": 10},    # Banco Macro
+            {"local": "SUPV", "adr": "SUPV", "ratio": 5}   # Supervielle
+        ]
+        
+        ccl_valores = []
+        
+        for par in pares_ccl:
+            try:
+                # Obtener cotización local (en pesos)
+                accion_local = obtener_cotizacion_detalle(token_acceso, par["local"], 'BCBA')
+                
+                # Obtener cotización ADR (en USD) - usar mercado NYSE
+                adr_data = obtener_cotizacion_detalle(token_acceso, par["adr"], 'NYSE')
+                
+                if accion_local and adr_data and accion_local.get("ultimoPrecio") and adr_data.get("ultimoPrecio"):
+                    precio_local = accion_local["ultimoPrecio"]
+                    precio_adr_usd = adr_data["ultimoPrecio"]
+                    ratio = par["ratio"]
+                    
+                    # Calcular CCL implícito
+                    ccl_implicito = (precio_local / precio_adr_usd) * ratio
+                    
+                    ccl_valores.append({
+                        "valor": ccl_implicito,
+                        "simbolo": par["local"],
+                        "precio_local": precio_local,
+                        "precio_adr": precio_adr_usd,
+                        "ratio": ratio
+                    })
+                    
+            except Exception as e:
+                print(f"Error al procesar {par['local']}: {str(e)}")
+                continue
+        
+        if ccl_valores:
+            # Promediar los valores de CCL obtenidos
+            ccl_promedio = sum(item["valor"] for item in ccl_valores) / len(ccl_valores)
+            
+            return {
+                "valor": round(ccl_promedio, 2),
+                "cantidad_instrumentos": len(ccl_valores),
+                "detalle": ccl_valores,
+                "fuente": "IOL API (Acciones/ADRs)"
+            }
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error al calcular CCL desde acciones: {str(e)}")
+        return None
+
+def obtener_mep_ccl_iol_completo(token_acceso):
+    """
+    Obtiene MEP y CCL usando múltiples métodos de la API de IOL.
+    """
+    resultados = {
+        "MEP": {"valor": None, "variacion": None, "fuente": None},
+        "CCL": {"valor": None, "variacion": None, "fuente": None}
+    }
+    
+    # 1. Intentar obtener MEP usando endpoint específico
+    try:
+        # Probar con diferentes bonos para MEP
+        bonos_mep = ["AL30", "AL35", "GD30"]
+        
+        for bono in bonos_mep:
+            mep_data = obtener_mep_iol(token_acceso, bono)
+            if mep_data and mep_data.get("valor"):
+                resultados["MEP"]["valor"] = mep_data["valor"]
+                resultados["MEP"]["fuente"] = f"IOL MEP ({bono})"
+                break
+                
+    except Exception as e:
+        print(f"Error al obtener MEP directo: {str(e)}")
+    
+    # 2. Calcular CCL desde acciones/ADRs
+    try:
+        ccl_data = obtener_ccl_desde_acciones_iol(token_acceso)
+        if ccl_data and ccl_data.get("valor"):
+            resultados["CCL"]["valor"] = ccl_data["valor"]
+            resultados["CCL"]["fuente"] = f"IOL CCL ({ccl_data['cantidad_instrumentos']} instrumentos)"
+            
+    except Exception as e:
+        print(f"Error al calcular CCL: {str(e)}")
+    
+    # 3. Si no obtuvimos MEP, calcular desde bonos tradicional
+    if not resultados["MEP"]["valor"]:
+        try:
+            al30 = obtener_cotizacion_detalle(token_acceso, 'AL30', 'BCBA')
+            if al30 and al30.get("ultimoPrecio"):
+                # Asumir paridad aproximada o usar precio directo si está en rango de dólar
+                if al30["ultimoPrecio"] > 100:
+                    mep_valor = al30["ultimoPrecio"] / 100
+                else:
+                    mep_valor = al30["ultimoPrecio"]
+                
+                resultados["MEP"]["valor"] = round(mep_valor, 2)
+                resultados["MEP"]["fuente"] = "IOL AL30 (estimado)"
+                
+                # Calcular variación si tenemos apertura
+                if al30.get("apertura"):
+                    apertura = al30["apertura"] / 100 if al30["apertura"] > 100 else al30["apertura"]
+                    variacion = ((mep_valor - apertura) / apertura) * 100
+                    resultados["MEP"]["variacion"] = round(variacion, 2)
+                    
+        except Exception as e:
+            print(f"Error al calcular MEP desde bonos: {str(e)}")
+    
+    # 4. Si no obtuvimos CCL, intentar con GD30
+    if not resultados["CCL"]["valor"]:
+        try:
+            gd30 = obtener_cotizacion_detalle(token_acceso, 'GD30', 'BCBA')
+            if gd30 and gd30.get("ultimoPrecio"):
+                if gd30["ultimoPrecio"] > 100:
+                    ccl_valor = gd30["ultimoPrecio"] / 100
+                else:
+                    ccl_valor = gd30["ultimoPrecio"]
+                
+                resultados["CCL"]["valor"] = round(ccl_valor, 2)
+                resultados["CCL"]["fuente"] = "IOL GD30 (estimado)"
+                
+                # Calcular variación
+                if gd30.get("apertura"):
+                    apertura = gd30["apertura"] / 100 if gd30["apertura"] > 100 else gd30["apertura"]
+                    variacion = ((ccl_valor - apertura) / apertura) * 100
+                    resultados["CCL"]["variacion"] = round(variacion, 2)
+                    
+        except Exception as e:
+            print(f"Error al calcular CCL desde bonos: {str(e)}")
+    
+    return resultados
+
+def obtener_dolares_financieros_completo(token_acceso=None):
+    """
+    Obtiene cotizaciones de dólares financieros desde múltiples fuentes.
+    Combina datos de IOL, APIs públicas y yfinance.
+    """
+    resultados = {
+        "MEP": {"valor": None, "variacion": None, "fuente": None},
+        "CCL": {"valor": None, "variacion": None, "fuente": None},
+        "Canje": {"valor": None, "variacion": None, "fuente": None},
+        "Blue": {"valor": None, "variacion": None, "fuente": None}
+    }
+    
+    # 1. Si tenemos token IOL, usar primero los métodos específicos de IOL
+    if token_acceso:
+        try:
+            mep_ccl_iol = obtener_mep_ccl_iol_completo(token_acceso)
+            if mep_ccl_iol["MEP"]["valor"]:
+                resultados["MEP"] = mep_ccl_iol["MEP"]
+            if mep_ccl_iol["CCL"]["valor"]:
+                resultados["CCL"] = mep_ccl_iol["CCL"]
+        except Exception as e:
+            print(f"Error con métodos IOL específicos: {str(e)}")
+    
+    # 2. Intentar obtener desde API pública (como fallback o complemento)
+    try:
+        cotizaciones_api = obtener_dolar_api_publica()
+        if cotizaciones_api:
+            # Solo usar API pública si no tenemos datos de IOL
+            if not resultados["MEP"]["valor"] and "mep" in cotizaciones_api and cotizaciones_api["mep"].get("venta"):
+                resultados["MEP"]["valor"] = float(cotizaciones_api["mep"]["venta"])
+                resultados["MEP"]["fuente"] = "API Pública"
+            
+            if not resultados["CCL"]["valor"] and "ccl" in cotizaciones_api and cotizaciones_api["ccl"].get("venta"):
+                resultados["CCL"]["valor"] = float(cotizaciones_api["ccl"]["venta"])
+                resultados["CCL"]["fuente"] = "API Pública"
+            
+            if "blue" in cotizaciones_api and cotizaciones_api["blue"].get("venta"):
+                resultados["Blue"]["valor"] = float(cotizaciones_api["blue"]["venta"])
+                resultados["Blue"]["fuente"] = "API Pública"
+    except Exception as e:
+        print(f"Error con API pública: {str(e)}")
+    
+    # 3. Obtener dólar canje
+    try:
+        canje_data = obtener_dolar_canje()
+        if canje_data and canje_data.get("valor"):
+            resultados["Canje"]["valor"] = float(canje_data["valor"])
+            resultados["Canje"]["fuente"] = "API Pública"
+    except Exception as e:
+        print(f"Error al obtener dólar canje: {str(e)}")
+    
+    # 4. Si aún falta MEP o CCL, intentar desde yfinance
+    if not resultados["MEP"]["valor"] or not resultados["CCL"]["valor"]:
+        try:
+            bonos_data = obtener_bonos_yfinance()
+            
+            # Calcular MEP desde AL30 si está disponible
+            if not resultados["MEP"]["valor"] and "AL30" in bonos_data:
+                al30_data = bonos_data["AL30"]
+                if al30_data.get("dolar_implicito"):
+                    resultados["MEP"]["valor"] = round(al30_data["dolar_implicito"], 2)
+                    resultados["MEP"]["fuente"] = "Yahoo Finance (AL30)"
+            
+            # Calcular CCL desde GD30 si está disponible
+            if not resultados["CCL"]["valor"] and "GD30" in bonos_data:
+                gd30_data = bonos_data["GD30"]
+                if gd30_data.get("dolar_implicito"):
+                    resultados["CCL"]["valor"] = round(gd30_data["dolar_implicito"], 2)
+                    resultados["CCL"]["fuente"] = "Yahoo Finance (GD30)"
+        except Exception as e:
+            print(f"Error con yfinance: {str(e)}")
+    
+    return resultados
+
 def obtener_resumen_rueda():
     """
     Obtiene y resume datos reales del mercado usando la API de IOL y scraping del BCRA.
     Incluye reservas, dólar mayorista, inflación, tasas, etc.
     """
     if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-        st.warning("Se requiere autenticación para obtener datos en tiempo real")
-        return {
-            "reservas": {"titulo": "Autenticación requerida", "valor": "Inicie sesión", "delta": None},
-            "dolar_mayorista": {"valor": 0, "variacion": 0},
-            "volumen_operado": "No disponible",
-            "dolares_financieros": {
-                "MEP": {"valor": 0, "variacion": 0},
-                "CCL": {"valor": 0, "variacion": 0},
-                "Canje": {"valor": 0, "variacion": None}
-            },
-            "merval": {"valor": 0, "bajas": [], "subas": []},
-            "deuda_soberana": {
-                "AL30D": 0,
-                "GD35D": 0,
-                "GD38D": 0
-            },
-            "riesgo_pais": {"valor": 0, "delta": 0},
-            "bonos_cer": {
-                "corto_plazo": [],
-                "largo_plazo": []
-            },
-            "letras": [],
-            "dolar_linked": {
-                "futuros": "No disponible",
-                "bonos": []
-            },
-            "caucion": {"plazo": "No disponible", "tasa": 0}
-        }
+        # Incluso sin autenticación, podemos obtener algunos datos públicos
+        try:
+            variables_bcra = obtener_variables_bcra()
+            reservas = obtener_reservas_bcra()
+            dolares_financieros = obtener_dolares_financieros_completo()
+            
+            return {
+                "reservas": reservas,
+                "dolar_mayorista": {
+                    "valor": variables_bcra.get("dolar_mayorista", {}).get("valor", "No disponible"),
+                    "variacion": None
+                },
+                "volumen_operado": "Requiere autenticación IOL",
+                "dolares_financieros": {
+                    "MEP": dolares_financieros["MEP"],
+                    "CCL": dolares_financieros["CCL"],
+                    "Canje": dolares_financieros["Canje"],
+                    "Blue": dolares_financieros["Blue"]
+                },
+                "merval": {"valor": "Requiere autenticación", "bajas": [], "subas": []},
+                "deuda_soberana": {
+                    "AL30D": "Requiere autenticación",
+                    "GD35D": "Requiere autenticación", 
+                    "GD38D": "Requiere autenticación"
+                },
+                "riesgo_pais": {"valor": "No disponible por API pública", "delta": None},
+                "bonos_cer": {
+                    "corto_plazo": [f"CER: {variables_bcra.get('cer', {}).get('valor', 'No disponible')}"],
+                    "largo_plazo": ["Requiere autenticación IOL"]
+                },
+                "letras": ["Requiere autenticación IOL"],
+                "dolar_linked": {
+                    "futuros": "Requiere autenticación IOL",
+                    "bonos": ["Requiere autenticación IOL"]
+                },
+                "caucion": {"plazo": "Requiere autenticación", "tasa": "Requiere autenticación"}
+            }
+        except Exception as e:
+            st.warning(f"Error al obtener datos públicos: {str(e)}")
+            return {
+                "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
+                "dolar_mayorista": {"valor": "Error", "variacion": None},
+                "volumen_operado": "Error",
+                "dolares_financieros": {
+                    "MEP": {"valor": "Error", "variacion": None, "fuente": None},
+                    "CCL": {"valor": "Error", "variacion": None, "fuente": None},
+                    "Canje": {"valor": "Error", "variacion": None, "fuente": None}
+                },
+                "merval": {"valor": "Error", "bajas": ["Error"], "subas": ["Error"]},
+                "deuda_soberana": {"AL30D": "Error", "GD35D": "Error", "GD38D": "Error"},
+                "riesgo_pais": {"valor": "Error", "delta": None},
+                "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
+                "letras": ["Error"],
+                "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
+                "caucion": {"plazo": "Error", "tasa": "Error"}
+            }
     
     token_acceso = st.session_state.token_acceso
 
@@ -226,6 +650,9 @@ def obtener_resumen_rueda():
         
         # Reservas BCRA reales
         reservas = obtener_reservas_bcra()
+
+        # Obtener dólares financieros usando métodos mejorados de IOL
+        dolares_financieros = obtener_dolares_financieros_completo(token_acceso)
 
         # Datos reales de instrumentos principales desde IOL
         gd30 = obtener_cotizacion_detalle(token_acceso, 'GD30', 'BCBA')
@@ -253,17 +680,8 @@ def obtener_resumen_rueda():
             except:
                 dolar_mayorista_valor = dolar_mayorista_bcra
 
-        # MEP y CCL reales (usando precios de bonos)
-        mep = {"valor": None, "variacion": None}
-        ccl = {"valor": None, "variacion": None}
-        if al30 and al30["ultimoPrecio"] and al30["apertura"]:
-            mep['valor'] = round(al30["ultimoPrecio"] / 100, 2)
-            variacion = ((mep['valor'] - (al30["apertura"] / 100)) / (al30["apertura"] / 100)) * 100
-            mep['variacion'] = round(variacion, 2)
-        if gd30 and gd30["ultimoPrecio"] and gd30["apertura"]:
-            ccl['valor'] = round(gd30["ultimoPrecio"] / 100, 2)
-            variacion = ((ccl['valor'] - (gd30["apertura"] / 100)) / (gd30["apertura"] / 100)) * 100
-            ccl['variacion'] = round(variacion, 2)
+        # Los dólares financieros ya vienen calculados con los métodos mejorados
+        # No necesitamos el cálculo manual anterior
 
         # Caución (real desde IOL)
         cauciones = obtener_tasas_caucion_iol(token_acceso)
@@ -306,11 +724,7 @@ def obtener_resumen_rueda():
                 "fecha": variables_bcra.get("dolar_minorista", {}).get("fecha", None)
             },
             "volumen_operado": volumen_operado,
-            "dolares_financieros": {
-                "MEP": mep,
-                "CCL": ccl,
-                "Canje": {"valor": 0, "variacion": None}
-            },
+            "dolares_financieros": dolares_financieros,
             "merval": {
                 "valor": merval["variacion"] if merval else None,
                 "bajas": bajas,
@@ -439,18 +853,50 @@ def mostrar_resumen_rueda():
         )
     st.divider()
     
-    # Sección 2: Dólares Financieros
+    # Sección 2: Dólares Financieros (mejorada con indicadores de precisión)
     st.subheader("💸 Dólares Financieros")
-    cols = st.columns(3)
+    cols = st.columns(4)
+    
+    dolares = resumen['dolares_financieros']
+    
     with cols[0]:
-        st.metric("MEP", mostrar_valor(resumen['dolares_financieros']['MEP']['valor']), 
-                 f"{resumen['dolares_financieros']['MEP']['variacion']}%" if resumen['dolares_financieros']['MEP']['variacion'] not in [None, 0] else None)
+        mep_valor = mostrar_valor(dolares['MEP']['valor'])
+        mep_delta = f"{dolares['MEP']['variacion']}%" if dolares['MEP']['variacion'] not in [None, 0] else None
+        st.metric("MEP", mep_valor, mep_delta)
+        if dolares['MEP']['fuente']:
+            # Indicador de calidad de la fuente
+            if "IOL MEP" in dolares['MEP']['fuente']:
+                st.caption(f"🎯 {dolares['MEP']['fuente']} (Preciso)")
+            elif "IOL" in dolares['MEP']['fuente']:
+                st.caption(f"📊 {dolares['MEP']['fuente']} (Estimado)")
+            else:
+                st.caption(f"📡 {dolares['MEP']['fuente']}")
+    
     with cols[1]:
-        st.metric("CCL", mostrar_valor(resumen['dolares_financieros']['CCL']['valor']), 
-                 f"{resumen['dolares_financieros']['CCL']['variacion']}%" if resumen['dolares_financieros']['CCL']['variacion'] not in [None, 0] else None)
+        ccl_valor = mostrar_valor(dolares['CCL']['valor'])
+        ccl_delta = f"{dolares['CCL']['variacion']}%" if dolares['CCL']['variacion'] not in [None, 0] else None
+        st.metric("CCL", ccl_valor, ccl_delta)
+        if dolares['CCL']['fuente']:
+            if "IOL CCL" in dolares['CCL']['fuente']:
+                st.caption(f"🎯 {dolares['CCL']['fuente']} (Preciso)")
+            elif "IOL" in dolares['CCL']['fuente']:
+                st.caption(f"📊 {dolares['CCL']['fuente']} (Estimado)")
+            else:
+                st.caption(f"📡 {dolares['CCL']['fuente']}")
+    
     with cols[2]:
-        st.metric("Canje", mostrar_valor(resumen['dolares_financieros']['Canje']['valor'], formato="{}%", nd="No disponible"), None)
-    st.caption("🔹 Suba tras el fallo de la jueza Preska")
+        canje_valor = mostrar_valor(dolares['Canje']['valor'])
+        st.metric("Canje/Tarjeta", canje_valor, None)
+        if dolares['Canje']['fuente']:
+            st.caption(f"📡 {dolares['Canje']['fuente']}")
+    
+    with cols[3]:
+        blue_valor = mostrar_valor(dolares.get('Blue', {}).get('valor'))
+        st.metric("Blue", blue_valor, None)
+        if dolares.get('Blue', {}).get('fuente'):
+            st.caption(f"📡 {dolares['Blue']['fuente']}")
+    
+    st.caption("🔹 Prioridad: IOL API específico → IOL estimado → APIs públicas → Yahoo Finance")
     st.divider()
     
     # Sección 3: Merval
