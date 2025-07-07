@@ -10,6 +10,7 @@ def obtener_variables_bcra():
     """
     Scrapea las principales variables del BCRA desde la web oficial.
     Devuelve un diccionario con los valores más recientes de reservas, dólar oficial, etc.
+    Los nombres de variables se normalizan para facilitar el acceso.
     """
     url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables.asp"
     variables = {}
@@ -24,7 +25,27 @@ def obtener_variables_bcra():
                     variable = columns[0].get_text(strip=True)
                     fecha = columns[1].get_text(strip=True)
                     valor = columns[2].get_text(strip=True)
-                    variables[variable] = {"fecha": fecha, "valor": valor}
+                    # Normalización de nombres para acceso sencillo
+                    nombre = variable.lower()
+                    if "reservas internacionales" in nombre:
+                        key = "reservas_internacionales"
+                    elif "tipo de cambio mayorista" in nombre:
+                        key = "dolar_mayorista"
+                    elif "tipo de cambio minorista" in nombre:
+                        key = "dolar_minorista"
+                    elif "tasa de política monetaria" in nombre and "n.a." in nombre:
+                        key = "tasa_monetaria_na"
+                    elif "tasa de política monetaria" in nombre and "e.a." in nombre:
+                        key = "tasa_monetaria_ea"
+                    elif "inflación mensual" in nombre:
+                        key = "inflacion_mensual"
+                    elif "inflación interanual" in nombre:
+                        key = "inflacion_interanual"
+                    elif "cer | base" in nombre:
+                        key = "cer"
+                    else:
+                        key = variable  # fallback
+                    variables[key] = {"fecha": fecha, "valor": valor, "nombre_original": variable}
         else:
             print(f"Error al acceder a la página del BCRA: {response.status_code}")
     except Exception as e:
@@ -36,7 +57,8 @@ def obtener_reservas_bcra():
     Obtiene el valor de reservas internacionales del BCRA usando scraping.
     """
     variables = obtener_variables_bcra()
-    reservas = variables.get("Reservas Internacionales BCRA", None)
+    # Buscar por clave normalizada
+    reservas = variables.get("reservas_internacionales", None)
     if reservas:
         valor = reservas["valor"]
         fecha = reservas["fecha"]
@@ -68,11 +90,43 @@ def obtener_cotizacion_iol(token_acceso, simbolo, mercado='BCBA'):
         print(f"Error al obtener cotización para {simbolo}: {str(e)}")
         return None
 
+def obtener_cotizacion_detalle(token_acceso, simbolo, mercado='BCBA'):
+    """
+    Obtiene el detalle de la cotización real de un instrumento usando la API de InvertirOnline.
+    Devuelve un diccionario con los datos principales del instrumento.
+    """
+    try:
+        headers = {
+            'Authorization': f'Bearer {token_acceso}'
+        }
+        url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle'
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        # Extraemos los campos principales del ejemplo de la documentación
+        return {
+            "simbolo": simbolo,
+            "ultimoPrecio": data.get("ultimoPrecio"),
+            "variacion": data.get("variacion"),
+            "apertura": data.get("apertura"),
+            "maximo": data.get("maximo"),
+            "minimo": data.get("minimo"),
+            "fechaHora": data.get("fechaHora"),
+            "tendencia": data.get("tendencia"),
+            "cierreAnterior": data.get("cierreAnterior"),
+            "montoOperado": data.get("montoOperado"),
+            "volumenNominal": data.get("volumenNominal"),
+            "precioPromedio": data.get("precioPromedio")
+        }
+    except Exception as e:
+        print(f"Error al obtener detalle de cotización para {simbolo}: {str(e)}")
+        return None
+
 def obtener_resumen_rueda():
     """
     Obtiene y resume datos reales del mercado usando la API de IOL y scraping del BCRA.
+    Incluye reservas, dólar mayorista, inflación, tasas, etc.
     """
-    # Verificar si hay un token de acceso disponible
     if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
         st.warning("Se requiere autenticación para obtener datos en tiempo real")
         return {
@@ -104,70 +158,76 @@ def obtener_resumen_rueda():
         }
     
     token_acceso = st.session_state.token_acceso
-    
+
     try:
         # Reservas BCRA reales
         reservas = obtener_reservas_bcra()
 
-        # Dólar mayorista real (usando GD30 como ejemplo de bono en USD)
-        dolar_mayorista = obtener_cotizacion_iol(token_acceso, 'DOLAR', 'BCBA')
-        # Bonos soberanos reales
-        bono_gd30 = obtener_cotizacion_iol(token_acceso, 'GD30', 'BCBA')
-        bono_al30 = obtener_cotizacion_iol(token_acceso, 'AL30', 'BCBA')
-        bono_gd35 = obtener_cotizacion_iol(token_acceso, 'GD35', 'BCBA')
-        bono_gd38 = obtener_cotizacion_iol(token_acceso, 'GD38', 'BCBA')
-        # Panel MERVAL real
-        panel_merval = obtener_cotizacion_iol(token_acceso, 'MERVAL', 'BCBA')
+        # Datos reales de instrumentos principales
+        gd30 = obtener_cotizacion_detalle(token_acceso, 'GD30', 'BCBA')
+        al30 = obtener_cotizacion_detalle(token_acceso, 'AL30', 'BCBA')
+        gd35 = obtener_cotizacion_detalle(token_acceso, 'GD35', 'BCBA')
+        gd38 = obtener_cotizacion_detalle(token_acceso, 'GD38', 'BCBA')
+        merval = obtener_cotizacion_detalle(token_acceso, 'MERVAL', 'BCBA')
+        dolar_mayorista_iol = obtener_cotizacion_detalle(token_acceso, 'DOLAR', 'BCBA')
+
+        # Datos BCRA adicionales
+        variables_bcra = obtener_variables_bcra()
+        dolar_mayorista_bcra = variables_bcra.get("dolar_mayorista", {}).get("valor", None)
+        inflacion_mensual = variables_bcra.get("inflacion_mensual", {}).get("valor", None)
+        inflacion_interanual = variables_bcra.get("inflacion_interanual", {}).get("valor", None)
+        tasa_monetaria_na = variables_bcra.get("tasa_monetaria_na", {}).get("valor", None)
+        cer = variables_bcra.get("cer", {}).get("valor", None)
 
         # MEP y CCL reales (usando precios de bonos)
-        mep = {"valor": 0, "variacion": 0}
-        ccl = {"valor": 0, "variacion": 0}
-        if bono_al30 and 'ultimoPrecio' in bono_al30 and 'apertura' in bono_al30:
-            mep['valor'] = bono_al30.get('ultimoPrecio', 0) / 100
-            variacion = ((mep['valor'] - (bono_al30.get('apertura', 0) / 100)) / (bono_al30.get('apertura', 100) / 100)) * 100
+        mep = {"valor": None, "variacion": None}
+        ccl = {"valor": None, "variacion": None}
+        if al30 and al30["ultimoPrecio"] and al30["apertura"]:
+            mep['valor'] = al30["ultimoPrecio"] / 100
+            variacion = ((mep['valor'] - (al30["apertura"] / 100)) / (al30["apertura"] / 100)) * 100
             mep['variacion'] = round(variacion, 2)
-        if bono_gd30 and 'ultimoPrecio' in bono_gd30 and 'apertura' in bono_gd30:
-            ccl['valor'] = bono_gd30.get('ultimoPrecio', 0) / 100
-            variacion = ((ccl['valor'] - (bono_gd30.get('apertura', 0) / 100)) / (bono_gd30.get('apertura', 100) / 100)) * 100
+        if gd30 and gd30["ultimoPrecio"] and gd30["apertura"]:
+            ccl['valor'] = gd30["ultimoPrecio"] / 100
+            variacion = ((ccl['valor'] - (gd30["apertura"] / 100)) / (gd30["apertura"] / 100)) * 100
             ccl['variacion'] = round(variacion, 2)
 
         # Caución (scraping BCRA)
-        variables_bcra = obtener_variables_bcra()
-        tasa_caucion = variables_bcra.get("Tasa de interés caución", {}).get("valor", "No disponible")
+        tasa_caucion = tasa_monetaria_na if tasa_monetaria_na else "No disponible"
         plazo_caucion = "7 días"
 
-        # Resumen de bajas y subas del MERVAL (no disponible por API pública, se deja explicación)
+        # Resumen de bajas y subas del MERVAL (no disponible por API pública)
         bajas = ["No disponible por API pública"]
         subas = ["No disponible por API pública"]
 
         return {
             "reservas": reservas,
             "dolar_mayorista": {
-                "valor": dolar_mayorista.get('ultimoPrecio', 0) if dolar_mayorista else 0,
-                "variacion": dolar_mayorista.get('variacion', 0) if dolar_mayorista else 0
+                # Prioriza el valor de la API de IOL, si no hay, usa el BCRA
+                "valor": dolar_mayorista_iol["ultimoPrecio"] if dolar_mayorista_iol and dolar_mayorista_iol["ultimoPrecio"] else dolar_mayorista_bcra,
+                "variacion": dolar_mayorista_iol["variacion"] if dolar_mayorista_iol else None
             },
-            "volumen_operado": f"USD {panel_merval.get('volumenNominal', 0)/1e6:.1f}M" if panel_merval else "No disponible",
+            "volumen_operado": f"USD {merval['volumenNominal']/1e6:.1f}M" if merval and merval.get('volumenNominal') else "No disponible",
             "dolares_financieros": {
                 "MEP": mep,
                 "CCL": ccl,
                 "Canje": {"valor": 0, "variacion": None}
             },
             "merval": {
-                "valor": panel_merval.get('variacion', 0) if panel_merval else 0,
+                "valor": merval["variacion"] if merval else None,
                 "bajas": bajas,
                 "subas": subas
             },
             "deuda_soberana": {
-                "AL30D": bono_al30.get('variacion', 0) if bono_al30 else 0,
-                "GD35D": bono_gd35.get('variacion', 0) if bono_gd35 else 0,
-                "GD38D": bono_gd38.get('variacion', 0) if bono_gd38 else 0
+                "AL30D": al30["variacion"] if al30 else None,
+                "GD35D": gd35["variacion"] if gd35 else None,
+                "GD38D": gd38["variacion"] if gd38 else None
             },
             "riesgo_pais": {
                 "valor": variables_bcra.get("Riesgo País EMBI+ Argentina", {}).get("valor", "No disponible"),
                 "delta": None
             },
             "bonos_cer": {
-                "corto_plazo": ["No disponible por API pública"],
+                "corto_plazo": [f"CER: {cer}" if cer else "No disponible por API pública"],
                 "largo_plazo": ["No disponible por API pública"]
             },
             "letras": ["No disponible por API pública"],
@@ -178,6 +238,10 @@ def obtener_resumen_rueda():
             "caucion": {
                 "plazo": plazo_caucion,
                 "tasa": tasa_caucion
+            },
+            "inflacion": {
+                "mensual": inflacion_mensual,
+                "interanual": inflacion_interanual
             }
         }
     except Exception as e:
@@ -202,85 +266,81 @@ def obtener_resumen_rueda():
         }
 
 def mostrar_resumen_rueda():
-    """Muestra el resumen de la rueda del día"""
+    """Muestra el resumen de la rueda del día con validación de datos reales."""
     st.markdown("## 🔔 Resumen de la Rueda del Día")
     st.caption(f"Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     
-    # Obtener datos del resumen
     resumen = obtener_resumen_rueda()
     
+    # Utilidad para mostrar "No disponible" si el valor es 0, None o vacío
+    def mostrar_valor(valor, formato="${:,.2f}", nd="No disponible"):
+        if valor is None or (isinstance(valor, (int, float)) and valor == 0):
+            return nd
+        if isinstance(valor, (int, float)):
+            return formato.format(valor)
+        return valor
+
     # Sección 1: Reservas y Dólar
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(
             label=resumen["reservas"]["titulo"],
-            value=resumen["reservas"]["valor"],
+            value=mostrar_valor(resumen["reservas"]["valor"], formato="{}", nd="No disponible"),
             delta=resumen["reservas"]["delta"]
         )
-    
     with col2:
         st.metric(
             label="Dólar Mayorista (A3500)",
-            value=f"${resumen['dolar_mayorista']['valor']:,.2f}",
-            delta=f"{resumen['dolar_mayorista']['variacion']}%"
+            value=mostrar_valor(resumen['dolar_mayorista']['valor']),
+            delta=f"{resumen['dolar_mayorista']['variacion']}%" if resumen['dolar_mayorista']['variacion'] not in [None, 0] else None
         )
-    
     with col3:
         st.metric(
             label="Volumen Operado A3",
-            value=resumen["volumen_operado"],
+            value=mostrar_valor(resumen["volumen_operado"], formato="{}", nd="No disponible"),
             delta=None
         )
-    
     st.divider()
     
     # Sección 2: Dólares Financieros
     st.subheader("💸 Dólares Financieros")
     cols = st.columns(3)
     with cols[0]:
-        st.metric("MEP", f"${resumen['dolares_financieros']['MEP']['valor']:,.2f}", 
-                 f"{resumen['dolares_financieros']['MEP']['variacion']}%")
-    
+        st.metric("MEP", mostrar_valor(resumen['dolares_financieros']['MEP']['valor']), 
+                 f"{resumen['dolares_financieros']['MEP']['variacion']}%" if resumen['dolares_financieros']['MEP']['variacion'] not in [None, 0] else None)
     with cols[1]:
-        st.metric("CCL", f"${resumen['dolares_financieros']['CCL']['valor']:,.2f}", 
-                 f"{resumen['dolares_financieros']['CCL']['variacion']}%")
-    
+        st.metric("CCL", mostrar_valor(resumen['dolares_financieros']['CCL']['valor']), 
+                 f"{resumen['dolares_financieros']['CCL']['variacion']}%" if resumen['dolares_financieros']['CCL']['variacion'] not in [None, 0] else None)
     with cols[2]:
-        st.metric("Canje", f"{resumen['dolares_financieros']['Canje']['valor']}%", 
-                 None)
-    
+        st.metric("Canje", mostrar_valor(resumen['dolares_financieros']['Canje']['valor'], formato="{}%", nd="No disponible"), None)
     st.caption("🔹 Suba tras el fallo de la jueza Preska")
     st.divider()
     
     # Sección 3: Merval
-    st.subheader(f"📉 S&P Merval: {resumen['merval']['valor']}%")
-    
+    st.subheader(f"📉 S&P Merval: {mostrar_valor(resumen['merval']['valor'], formato='{}%', nd='No disponible')}")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**Principales bajas:**")
         for baja in resumen["merval"]["bajas"]:
             st.markdown(f"- {baja}")
-    
     with col2:
         st.markdown("**Principales subas:**")
         for suba in resumen["merval"]["subas"]:
             st.markdown(f"- {suba}")
-    
     st.divider()
     
     # Sección 4: Deuda Soberana
     st.subheader("💵 Deuda Soberana en USD (Hard Dollar)")
     cols = st.columns(4)
     with cols[0]:
-        st.metric("AL30D", f"{resumen['deuda_soberana']['AL30D']}%")
+        st.metric("AL30D", mostrar_valor(resumen['deuda_soberana']['AL30D'], formato="{}%", nd="No disponible"))
     with cols[1]:
-        st.metric("GD35D", f"{resumen['deuda_soberana']['GD35D']}%")
+        st.metric("GD35D", mostrar_valor(resumen['deuda_soberana']['GD35D'], formato="{}%", nd="No disponible"))
     with cols[2]:
-        st.metric("GD38D", f"{resumen['deuda_soberana']['GD38D']}%")
+        st.metric("GD38D", mostrar_valor(resumen['deuda_soberana']['GD38D'], formato="{}%", nd="No disponible"))
     with cols[3]:
-        st.metric("Riesgo País", resumen['riesgo_pais']['valor'], 
-                 f"{resumen['riesgo_pais']['delta']} puntos")
-    
+        st.metric("Riesgo País", mostrar_valor(resumen['riesgo_pais']['valor'], formato="{}", nd="No disponible"), 
+                 f"{resumen['riesgo_pais']['delta']} puntos" if resumen['riesgo_pais']['delta'] else None)
     st.divider()
     
     # Sección 5: Bonos CER
@@ -290,12 +350,10 @@ def mostrar_resumen_rueda():
         st.markdown("**Corto plazo en alza:**")
         for bono in resumen["bonos_cer"]["corto_plazo"]:
             st.markdown(f"- {bono}")
-    
     with col2:
         st.markdown("**Largo plazo en baja:**")
         for bono in resumen["bonos_cer"]["largo_plazo"]:
             st.markdown(f"- {bono}")
-    
     st.divider()
     
     # Sección 6: Letras y Dólar Linked
@@ -304,23 +362,20 @@ def mostrar_resumen_rueda():
         st.subheader("📄 Letras")
         for letra in resumen["letras"]:
             st.markdown(f"- {letra}")
-    
     with col2:
         st.subheader("🔄 Dólar Linked")
-        st.markdown(f"▫️ Futuros suben entre {resumen['dolar_linked']['futuros']}")
+        st.markdown(f"▫️ Futuros suben entre {mostrar_valor(resumen['dolar_linked']['futuros'], formato='{}', nd='No disponible')}")
         st.markdown("▫️ Bonos:")
         for bono in resumen["dolar_linked"]["bonos"]:
             st.markdown(f"  - {bono}")
-    
     st.divider()
     
     # Sección 7: Caución
-    st.subheader(f"📌 Caución a {resumen['caucion']['plazo']}: {resumen['caucion']['tasa']}%")
+    st.subheader(f"📌 Caución a {mostrar_valor(resumen['caucion']['plazo'], formato='{}', nd='No disponible')}: {mostrar_valor(resumen['caucion']['tasa'], formato='{}%', nd='No disponible')}")
     
     # Gráfico de tasas de caución (simulado)
     plazos = [1, 7, 14, 30, 60]
     tasas = [25.5, 28.8, 27.2, 26.5, 25.8]
-    
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=plazos, 
@@ -330,7 +385,6 @@ def mostrar_resumen_rueda():
         line=dict(color='#4CAF50', width=3),
         marker=dict(size=10, color='#2E7D32')
     ))
-    
     fig.update_layout(
         title='Curva de Tasas de Caución',
         xaxis_title='Plazo (días)',
@@ -338,7 +392,6 @@ def mostrar_resumen_rueda():
         template='plotly_dark',
         height=300
     )
-    
     st.plotly_chart(fig, use_container_width=True)
 
 # ... (código existente previo a la función main)
@@ -364,6 +417,30 @@ def obtener_tokens(usuario, contraseña):
     except Exception as e:
         print(f"Error al obtener tokens: {str(e)}")
         return None, None
+
+def obtener_lista_clientes(token_acceso):
+    """
+    Obtiene la lista de clientes asociados al usuario autenticado en IOL.
+    """
+    try:
+        headers = {
+            'Authorization': f'Bearer {token_acceso}'
+        }
+        url = "https://api.invertironline.com/api/v2/estadocuenta"
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        # Si la API devuelve una lista de cuentas, adaptamos el formato
+        if isinstance(data, list):
+            return data
+        # Si devuelve un solo cliente, lo envolvemos en una lista
+        elif isinstance(data, dict):
+            return [data]
+        else:
+            return []
+    except Exception as e:
+        print(f"Error al obtener lista de clientes: {str(e)}")
+        return []
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
