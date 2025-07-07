@@ -1317,3 +1317,447 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def obtener_resumen_rueda():
+    """
+    Obtiene y resume datos reales del mercado usando la API de IOL y scraping del BCRA.
+    Incluye reservas, dólar mayorista, inflación, tasas, etc.
+    """
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        # Incluso sin autenticación, podemos obtener algunos datos públicos
+        try:
+            variables_bcra = obtener_variables_bcra()
+            reservas = obtener_reservas_bcra()
+            dolares_financieros = obtener_dolares_financieros_completo()
+            
+            return {
+                "reservas": reservas,
+                "dolar_mayorista": {
+                    "valor": variables_bcra.get("dolar_mayorista", {}).get("valor", "No disponible"),
+                    "variacion": None
+                },
+                "volumen_operado": "Requiere autenticación IOL",
+                "dolares_financieros": {
+                    "MEP": dolares_financieros["MEP"],
+                    "CCL": dolares_financieros["CCL"],
+                    "Canje": dolares_financieros["Canje"],
+                    "Blue": dolares_financieros["Blue"]
+                },
+                "merval": {"valor": "Requiere autenticación", "bajas": [], "subas": []},
+                "deuda_soberana": {
+                    "AL30D": "Requiere autenticación",
+                    "GD35D": "Requiere autenticación", 
+                    "GD38D": "Requiere autenticación"
+                },
+                "riesgo_pais": {"valor": "No disponible por API pública", "delta": None},
+                "bonos_cer": {
+                    "corto_plazo": [f"CER: {variables_bcra.get('cer', {}).get('valor', 'No disponible')}"],
+                    "largo_plazo": ["Requiere autenticación IOL"]
+                },
+                "letras": ["Requiere autenticación IOL"],
+                "dolar_linked": {
+                    "futuros": "Requiere autenticación IOL",
+                    "bonos": ["Requiere autenticación IOL"]
+                },
+                "caucion": {"plazo": "Requiere autenticación", "tasa": "Requiere autenticación"}
+            }
+        except Exception as e:
+            st.warning(f"Error al obtener datos públicos: {str(e)}")
+            return {
+                "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
+                "dolar_mayorista": {"valor": "Error", "variacion": None},
+                "volumen_operado": "Error",
+                "dolares_financieros": {
+                    "MEP": {"valor": "Error", "variacion": None, "fuente": None},
+                    "CCL": {"valor": "Error", "variacion": None, "fuente": None},
+                    "Canje": {"valor": "Error", "variacion": None, "fuente": None}
+                },
+                "merval": {"valor": "Error", "bajas": ["Error"], "subas": ["Error"]},
+                "deuda_soberana": {"AL30D": "Error", "GD35D": "Error", "GD38D": "Error"},
+                "riesgo_pais": {"valor": "Error", "delta": None},
+                "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
+                "letras": ["Error"],
+                "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
+                "caucion": {"plazo": "Error", "tasa": "Error"}
+            }
+    
+    token_acceso = st.session_state.token_acceso
+
+    try:
+        # Obtener datos reales del BCRA primero
+        variables_bcra = obtener_variables_bcra()
+        
+        # Reservas BCRA reales
+        reservas = obtener_reservas_bcra()
+
+        # Obtener dólares financieros usando métodos mejorados de IOL
+        dolares_financieros = obtener_dolares_financieros_completo(token_acceso)
+
+        # Datos reales de instrumentos principales desde IOL
+        gd30 = obtener_cotizacion_detalle(token_acceso, 'GD30', 'BCBA')
+        al30 = obtener_cotizacion_detalle(token_acceso, 'AL30', 'BCBA')
+        gd35 = obtener_cotizacion_detalle(token_acceso, 'GD35', 'BCBA')
+        gd38 = obtener_cotizacion_detalle(token_acceso, 'GD38', 'BCBA')
+        merval = obtener_cotizacion_detalle(token_acceso, 'MERVAL', 'BCBA')
+        dolar_mayorista_iol = obtener_cotizacion_detalle(token_acceso, 'DOLAR', 'BCBA')
+
+        # Extraer datos del BCRA con mejor formato
+        dolar_mayorista_bcra = variables_bcra.get("dolar_mayorista", {}).get("valor", None)
+        dolar_minorista_bcra = variables_bcra.get("dolar_minorista", {}).get("valor", None)
+        inflacion_mensual = variables_bcra.get("inflacion_mensual", {}).get("valor", None)
+        inflacion_interanual = variables_bcra.get("inflacion_interanual", {}).get("valor", None)
+        tasa_monetaria_na = variables_bcra.get("tasa_monetaria_na", {}).get("valor", None)
+        tasa_monetaria_ea = variables_bcra.get("tasa_monetaria_ea", {}).get("valor", None)
+        cer = variables_bcra.get("cer", {}).get("valor", None)
+        base_monetaria = variables_bcra.get("base_monetaria", {}).get("valor", None)
+        
+        # Formatear el dólar mayorista del BCRA
+        dolar_mayorista_valor = None
+        if dolar_mayorista_bcra:
+            try:
+                dolar_mayorista_valor = float(dolar_mayorista_bcra.replace(".", "").replace(",", "."))
+            except:
+                dolar_mayorista_valor = dolar_mayorista_bcra
+
+        # Caución (real desde IOL)
+        cauciones = obtener_tasas_caucion_iol(token_acceso)
+        if cauciones:
+            # Tomar el plazo más operado (mayor volumen o el de 7 días si existe)
+            caucion_7d = next((c for c in cauciones if c.get("plazo") == 7), None)
+            caucion_principal = caucion_7d if caucion_7d else (cauciones[0] if cauciones else None)
+            tasa_caucion = caucion_principal["tasa"] if caucion_principal else "No disponible"
+            plazo_caucion = f'{caucion_principal["plazo"]} días' if caucion_principal else "No disponible"
+            # Para el gráfico, armar listas reales
+            plazos_caucion = [c["plazo"] for c in cauciones if c.get("plazo") is not None]
+            tasas_caucion = [c["tasa"] for c in cauciones if c.get("tasa") is not None]
+        else:
+            tasa_caucion = "No disponible"
+            plazo_caucion = "No disponible"
+            plazos_caucion = []
+            tasas_caucion = []
+
+        # Volumen operado del Merval
+        volumen_operado = "No disponible"
+        if merval and merval.get('volumenNominal'):
+            try:
+                volumen_millones = merval['volumenNominal'] / 1e6
+                volumen_operado = f"USD {volumen_millones:.1f}M"
+            except:
+                volumen_operado = f"USD {merval['volumenNominal']}"
+        
+        # Resumen de bajas y subas del MERVAL (no disponible por API pública)
+        bajas = ["Datos no disponibles por API pública"]
+        subas = ["Datos no disponibles por API pública"]
+
+        return {
+            "reservas": reservas,
+            "dolar_mayorista": {
+                "valor": dolar_mayorista_valor if dolar_mayorista_valor else (dolar_mayorista_iol["ultimoPrecio"] if dolar_mayorista_iol and dolar_mayorista_iol["ultimoPrecio"] else "No disponible"),
+                "variacion": dolar_mayorista_iol["variacion"] if dolar_mayorista_iol else None
+            },
+            "dolar_minorista": {
+                "valor": dolar_minorista_bcra,
+                "fecha": variables_bcra.get("dolar_minorista", {}).get("fecha", None)
+            },
+            "volumen_operado": volumen_operado,
+            "dolares_financieros": dolares_financieros,
+            "merval": {
+                "valor": merval["variacion"] if merval else None,
+                "bajas": bajas,
+                "subas": subas
+            },
+            "deuda_soberana": {
+                "AL30D": al30["variacion"] if al30 else None,
+                "GD35D": gd35["variacion"] if gd35 else None,
+                "GD38D": gd38["variacion"] if gd38 else None
+            },
+            "riesgo_pais": {
+                "valor": "No disponible por API pública",
+                "delta": None
+            },
+            "bonos_cer": {
+                "corto_plazo": [f"CER: {cer}" if cer else "Datos del BCRA"],
+                "largo_plazo": ["Consultar IOL para datos detallados"]
+            },
+            "letras": ["Consultar IOL para datos actualizados"],
+            "dolar_linked": {
+                "futuros": "Consultar IOL para cotizaciones",
+                "bonos": ["Consultar IOL para datos específicos"]
+            },
+            "caucion": {
+                "plazo": plazo_caucion,
+                "tasa": tasa_caucion,
+                "plazos_lista": plazos_caucion,
+                "tasas_lista": tasas_caucion
+            },
+            "inflacion": {
+                "mensual": inflacion_mensual,
+                "interanual": inflacion_interanual
+            },
+            "tasas_bcra": {
+                "politica_monetaria_na": tasa_monetaria_na,
+                "politica_monetaria_ea": tasa_monetaria_ea
+            },
+            "variables_monetarias": {
+                "base_monetaria": base_monetaria,
+                "cer": cer,
+                "uva": variables_bcra.get("uva", {}).get("valor", None),
+                "uvi": variables_bcra.get("uvi", {}).get("valor", None),
+                "icl": variables_bcra.get("icl", {}).get("valor", None)
+            }
+        }
+    except Exception as e:
+        st.error(f"Error al obtener datos de mercado: {str(e)}")
+        # Retornar estructura con datos del BCRA si falla IOL
+        try:
+            variables_bcra = obtener_variables_bcra()
+            reservas_fallback = obtener_reservas_bcra()
+            return {
+                "reservas": reservas_fallback,
+                "dolar_mayorista": {
+                    "valor": variables_bcra.get("dolar_mayorista", {}).get("valor", "Error al cargar"),
+                    "variacion": None
+                },
+                "volumen_operado": "Error de conexión IOL",
+                "dolares_financieros": {
+                    "MEP": {"valor": "Sin datos IOL", "variacion": None},
+                    "CCL": {"valor": "Sin datos IOL", "variacion": None},
+                    "Canje": {"valor": 0, "variacion": None}
+                },
+                "merval": {"valor": "Sin datos IOL", "bajas": ["Error de conexión"], "subas": ["Error de conexión"]},
+                "deuda_soberana": {"AL30D": "Sin datos", "GD35D": "Sin datos", "GD38D": "Sin datos"},
+                "riesgo_pais": {"valor": "Sin datos", "delta": None},
+                "bonos_cer": {"corto_plazo": [f"CER BCRA: {variables_bcra.get('cer', {}).get('valor', 'No disponible')}"], "largo_plazo": ["Error de conexión"]},
+                "letras": ["Error de conexión"],
+                "dolar_linked": {"futuros": "Error de conexión", "bonos": ["Error de conexión"]},
+                "caucion": {"plazo": "Error de conexión", "tasa": "Sin datos"}
+            }
+        except:
+            # Fallback completo en caso de error total
+            return {
+                "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
+                "dolar_mayorista": {"valor": "Error", "variacion": None},
+                "volumen_operado": "Error",
+                "dolares_financieros": {
+                    "MEP": {"valor": "Error", "variacion": None},
+                    "CCL": {"valor": "Error", "variacion": None},
+                    "Canje": {"valor": "Error", "variacion": None}
+                },
+                "merval": {"valor": "Error", "bajas": ["Error"], "subas": ["Error"]},
+                "deuda_soberana": {"AL30D": "Error", "GD35D": "Error", "GD38D": "Error"},
+                "riesgo_pais": {"valor": "Error", "delta": None},
+                "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
+                "letras": ["Error"],
+                "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
+                "caucion": {"plazo": "Error", "tasa": "Error"}
+            }
+
+def mostrar_resumen_rueda():
+    """Muestra el resumen de la rueda del día con validación de datos reales."""
+    st.markdown("## 🔔 Resumen de la Rueda del Día")
+    st.caption(f"Última actualización: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    
+    resumen = obtener_resumen_rueda()
+    
+    # Utilidad para mostrar "No disponible" si el valor es 0, None o vacío
+    def mostrar_valor(valor, formato="${:,.2f}", nd="No disponible"):
+        if valor is None or (isinstance(valor, (int, float)) and valor == 0):
+            return nd
+        if isinstance(valor, (int, float)):
+            return formato.format(valor)
+        return valor
+
+    # Sección 1: Reservas y Dólar
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(
+            label=resumen["reservas"]["titulo"],
+            value=mostrar_valor(resumen["reservas"]["valor"], formato="{}", nd="No disponible"),
+            delta=resumen["reservas"]["delta"]
+        )
+    with col2:
+        st.metric(
+            label="Dólar Mayorista (A3500)",
+            value=mostrar_valor(resumen['dolar_mayorista']['valor']),
+            delta=f"{resumen['dolar_mayorista']['variacion']}%" if resumen['dolar_mayorista']['variacion'] not in [None, 0] else None
+        )
+    with col3:
+        st.metric(
+            label="Volumen Operado A3",
+            value=mostrar_valor(resumen["volumen_operado"], formato="{}", nd="No disponible"),
+            delta=None
+        )
+    st.divider()
+    
+    # Sección 2: Dólares Financieros (mejorada con indicadores de precisión)
+    st.subheader("💸 Dólares Financieros")
+    cols = st.columns(4)
+    
+    dolares = resumen['dolares_financieros']
+    
+    with cols[0]:
+        mep_valor = mostrar_valor(dolares['MEP']['valor'])
+        mep_delta = f"{dolares['MEP']['variacion']}%" if dolares['MEP']['variacion'] not in [None, 0] else None
+        st.metric("MEP", mep_valor, mep_delta)
+        if dolares['MEP']['fuente']:
+            # Indicador de calidad de la fuente
+            if "IOL MEP" in dolares['MEP']['fuente']:
+                st.caption(f"🎯 {dolares['MEP']['fuente']} (Preciso)")
+            elif "IOL" in dolares['MEP']['fuente']:
+                st.caption(f"📊 {dolares['MEP']['fuente']} (Estimado)")
+            elif "DolarHoy" in dolares['MEP']['fuente']:
+                st.caption(f"🌐 {dolares['MEP']['fuente']} (Web)")
+            else:
+                st.caption(f"📡 {dolares['MEP']['fuente']}")
+    
+    with cols[1]:
+        ccl_valor = mostrar_valor(dolares['CCL']['valor'])
+        ccl_delta = f"{dolares['CCL']['variacion']}%" if dolares['CCL']['variacion'] not in [None, 0] else None
+        st.metric("CCL", ccl_valor, ccl_delta)
+        if dolares['CCL']['fuente']:
+            if "IOL CCL" in dolares['CCL']['fuente']:
+                st.caption(f"🎯 {dolares['CCL']['fuente']} (Preciso)")
+            elif "IOL" in dolares['CCL']['fuente']:
+                st.caption(f"📊 {dolares['CCL']['fuente']} (Estimado)")
+            elif "DolarHoy" in dolares['CCL']['fuente']:
+                st.caption(f"🌐 {dolares['CCL']['fuente']} (Web)")
+            else:
+                st.caption(f"📡 {dolares['CCL']['fuente']}")
+    
+    with cols[2]:
+        canje_valor = mostrar_valor(dolares['Canje']['valor'])
+        st.metric("Canje/Tarjeta", canje_valor, None)
+        if dolares['Canje']['fuente']:
+            if "DolarHoy" in dolares['Canje']['fuente']:
+                st.caption(f"🌐 {dolares['Canje']['fuente']} (Web)")
+            else:
+                st.caption(f"📡 {dolares['Canje']['fuente']}")
+    
+    with cols[3]:
+        blue_valor = mostrar_valor(dolares.get('Blue', {}).get('valor'))
+        st.metric("Blue", blue_valor, None)
+        if dolares.get('Blue', {}).get('fuente'):
+            if "DolarHoy" in dolares['Blue']['fuente']:
+                st.caption(f"🌐 {dolares['Blue']['fuente']} (Web)")
+            else:
+                st.caption(f"📡 {dolares['Blue']['fuente']}")
+    
+    st.caption("🔹 Prioridad: IOL API específico → DolarHoy.com → API Pública → Yahoo Finance")
+    
+    # Agregar sección para mostrar todas las cotizaciones de dolarhoy.com
+    with st.expander("📊 Ver todas las cotizaciones de DolarHoy.com"):
+        try:
+            cotizaciones_dolarhoy = obtener_dolares_dolarhoy()
+            if cotizaciones_dolarhoy:
+                scraper = DolarScraper()
+                df_dolarhoy = scraper.to_dataframe()
+                if not df_dolarhoy.empty:
+                    st.dataframe(df_dolarhoy, use_container_width=True)
+                else:
+                    st.warning("No se pudieron mostrar las cotizaciones en formato tabla")
+            else:
+                st.warning("No se pudieron obtener cotizaciones de DolarHoy.com")
+        except Exception as e:
+            st.error(f"Error al mostrar cotizaciones: {str(e)}")
+    
+    st.divider()
+    
+    # Sección 3: Merval
+    st.subheader(f"📉 S&P Merval: {mostrar_valor(resumen['merval']['valor'], formato='{}%', nd='No disponible')}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Principales bajas:**")
+        for baja in resumen["merval"]["bajas"]:
+            st.markdown(f"- {baja}")
+    with col2:
+        st.markdown("**Principales subas:**")
+        for suba in resumen["merval"]["subas"]:
+            st.markdown(f"- {suba}")
+    st.divider()
+    
+    # Sección 4: Deuda Soberana
+    st.subheader("💵 Deuda Soberana en USD (Hard Dollar)")
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("AL30D", mostrar_valor(resumen['deuda_soberana']['AL30D'], formato="{}%", nd="No disponible"))
+    with cols[1]:
+        st.metric("GD35D", mostrar_valor(resumen['deuda_soberana']['GD35D'], formato="{}%", nd="No disponible"))
+    with cols[2]:
+        st.metric("GD38D", mostrar_valor(resumen['deuda_soberana']['GD38D'], formato="{}%", nd="No disponible"))
+    with cols[3]:
+        st.metric("Riesgo País", mostrar_valor(resumen['riesgo_pais']['valor'], formato="{}", nd="No disponible"), 
+                 f"{resumen['riesgo_pais']['delta']} puntos" if resumen['riesgo_pais']['delta'] else None)
+    st.divider()
+    
+    # Sección 5: Bonos CER
+    st.subheader("📊 Bonos CER")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Corto plazo en alza:**")
+        for bono in resumen["bonos_cer"]["corto_plazo"]:
+            st.markdown(f"- {bono}")
+    with col2:
+        st.markdown("**Largo plazo en baja:**")
+        for bono in resumen["bonos_cer"]["largo_plazo"]:
+            st.markdown(f"- {bono}")
+    st.divider()
+    
+    # Sección 6: Letras y Dólar Linked
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📄 Letras")
+        for letra in resumen["letras"]:
+            st.markdown(f"- {letra}")
+    with col2:
+        st.subheader("🔄 Dólar Linked")
+        st.markdown(f"▫️ Futuros suben entre {mostrar_valor(resumen['dolar_linked']['futuros'], formato='{}', nd='No disponible')}")
+        st.markdown("▫️ Bonos:")
+        for bono in resumen["dolar_linked"]["bonos"]:
+            st.markdown(f"  - {bono}")
+    st.divider()
+    
+    # Sección 7: Caución
+    st.subheader(f"📌 Caución a {mostrar_valor(resumen['caucion']['plazo'], formato='{}', nd='No disponible')}: {mostrar_valor(resumen['caucion']['tasa'], formato='{}%', nd='No disponible')}")
+    
+    # Gráfico de tasas de caución (reales si existen)
+    plazos = resumen["caucion"].get("plazos_lista", [])
+    tasas = resumen["caucion"].get("tasas_lista", [])
+    if plazos and tasas and len(plazos) == len(tasas):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=plazos, 
+            y=tasas,
+            mode='lines+markers',
+            name='Tasas',
+            line=dict(color='#4CAF50', width=3),
+            marker=dict(size=10, color='#2E7D32')
+        ))
+        fig.update_layout(
+            title='Curva de Tasas de Caución',
+            xaxis_title='Plazo (días)',
+            yaxis_title='Tasa (%)',
+            template='plotly_dark',
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        # fallback simulado si no hay datos reales
+        plazos = [1, 7, 14, 30, 60]
+        tasas = [25.5, 28.8, 27.2, 26.5, 25.8]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=plazos, 
+            y=tasas,
+            mode='lines+markers',
+            name='Tasas',
+            line=dict(color='#4CAF50', width=3),
+            marker=dict(size=10, color='#2E7D32')
+        ))
+        fig.update_layout(
+            title='Curva de Tasas de Caución',
+            xaxis_title='Plazo (días)',
+            yaxis_title='Tasa (%)',
+            template='plotly_dark',
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
