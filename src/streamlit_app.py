@@ -1,38 +1,179 @@
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
+import requests
+
+def obtener_cotizacion_iol(token_acceso, simbolo, mercado='bCBA'):
+    """Obtiene la cotización de un instrumento en IOL"""
+    try:
+        headers = {
+            'Authorization': f'Bearer {token_acceso}'
+        }
+        url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle'
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Error al obtener cotización para {simbolo}: {str(e)}")
+        return None
+
+def obtener_reservas_bcra():
+    """Obtiene datos de reservas del BCRA desde una fuente externa"""
+    try:
+        # Esta es una API de ejemplo, podrías necesitar una suscripción para datos en tiempo real
+        response = requests.get('https://api.estadisticasbcra.com/api/reservas')
+        data = response.json()
+        if data and len(data) > 0:
+            ultimo = data[-1]
+            penultimo = data[-2] if len(data) > 1 else ultimo
+            variacion = ((ultimo['v'] - penultimo['v']) / penultimo['v']) * 100
+            return {
+                'valor': f"USD {ultimo['v']/1e9:.3f}B",
+                'delta': f"{variacion:+.2f}%"
+            }
+    except Exception as e:
+        print(f"Error al obtener reservas BCRA: {str(e)}")
+    return {
+        'titulo': 'Reservas BCRA',
+        'valor': 'No disponible',
+        'delta': None
+    }
 
 def obtener_resumen_rueda():
-    """Simula la obtención de datos de resumen del mercado (ejemplo)"""
-    # En una implementación real, esto se conectaría a una API de datos de mercado
-    return {
-        "reservas": {"titulo": "BCRA: Termina junio con caída mensual", "valor": "USD 39.951M", "delta": "-1.502M"},
-        "dolar_mayorista": {"valor": 1194.08, "variacion": 0.36},
-        "volumen_operado": "USD 611M",
-        "dolares_financieros": {
-            "MEP": {"valor": 1208.30, "variacion": 1.10},
-            "CCL": {"valor": 1211.83, "variacion": 1.07},
-            "Canje": {"valor": 0.30, "variacion": None}
-        },
-        "merval": {"valor": -2.27, "bajas": ["METR -5.34%", "YPFD -4.98%", "COME -4.82%"],
-                  "subas": ["ALUA +1.69%", "TECO2 +0.94%", "CRES +0.38%"]},
-        "deuda_soberana": {
-            "AL30D": -0.94,
-            "GD35D": -0.78,
-            "GD38D": -0.99
-        },
-        "riesgo_pais": {"valor": 714, "delta": +29},
-        "bonos_cer": {
-            "corto_plazo": ["TX25 +1.37%", "TZX26 +0.19%", "TZXM6 +0.46%"],
-            "largo_plazo": ["TZX27 -0.25%", "TX28 -1.27%", "TZX28 -0.36%"]
-        },
-        "letras": ["S31L5 +0.06%", "S12S5 +0.30%", "S10N5 +0.12%"],
-        "dolar_linked": {
-            "futuros": "0.34% a 1.55%",
-            "bonos": ["TZVD5 +2.50%", "TZV26 +1.75%"]
-        },
-        "caucion": {"plazo": "7 días", "tasa": 28.80}
-    }
+    """Obtiene datos de mercado en tiempo real de diferentes fuentes"""
+    # Verificar si hay un token de acceso disponible
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.warning("Se requiere autenticación para obtener datos en tiempo real")
+        return {
+            "reservas": {"titulo": "Autenticación requerida", "valor": "Inicie sesión", "delta": None},
+            "dolar_mayorista": {"valor": 0, "variacion": 0},
+            "volumen_operado": "No disponible",
+            "dolares_financieros": {
+                "MEP": {"valor": 0, "variacion": 0},
+                "CCL": {"valor": 0, "variacion": 0},
+                "Canje": {"valor": 0, "variacion": None}
+            },
+            "merval": {"valor": 0, "bajas": [], "subas": []},
+            "deuda_soberana": {
+                "AL30D": 0,
+                "GD35D": 0,
+                "GD38D": 0
+            },
+            "riesgo_pais": {"valor": 0, "delta": 0},
+            "bonos_cer": {
+                "corto_plazo": [],
+                "largo_plazo": []
+            },
+            "letras": [],
+            "dolar_linked": {
+                "futuros": "No disponible",
+                "bonos": []
+            },
+            "caucion": {"plazo": "No disponible", "tasa": 0}
+        }
+    
+    token_acceso = st.session_state.token_acceso
+    
+    try:
+        # Obtener datos de reservas BCRA
+        reservas = obtener_reservas_bcra()
+        
+        # Obtener cotizaciones clave
+        dolar_mayorista = obtener_cotizacion_iol(token_acceso, 'DOLAR', 'bCBA')
+        
+        # Obtener MEP y CCL (ejemplo con bonos comunes)
+        bono_al30 = obtener_cotizacion_iol(token_acceso, 'AL30', 'bCBA')
+        bono_gd30 = obtener_cotizacion_iol(token_acceso, 'GD30', 'bCBA')
+        
+        # Calcular MEP y CCL (ejemplo simplificado)
+        mep = {"valor": 0, "variacion": 0}
+        ccl = {"valor": 0, "variacion": 0}
+        
+        if bono_al30 and 'ultimoPrecio' in bono_al30 and 'apertura' in bono_al30:
+            mep['valor'] = bono_al30.get('ultimoPrecio', 0) / 100  # Ajustar según convención
+            variacion = ((mep['valor'] - (bono_al30.get('apertura', 0) / 100)) / (bono_al30.get('apertura', 100) / 100)) * 100
+            mep['variacion'] = round(variacion, 2)
+        
+        if bono_gd30 and 'ultimoPrecio' in bono_gd30 and 'apertura' in bono_gd30:
+            ccl['valor'] = bono_gd30.get('ultimoPrecio', 0) / 100  # Ajustar según convención
+            variacion = ((ccl['valor'] - (bono_gd30.get('apertura', 0) / 100)) / (bono_gd30.get('apertura', 100) / 100)) * 100
+            ccl['variacion'] = round(variacion, 2)
+        
+        # Obtener panel general del MERVAL
+        panel_principal = obtener_cotizacion_iol(token_acceso, 'MERVAL', 'bCBA')
+        
+        # Obtener cauciones (ejemplo con tasa de referencia BCRA)
+        try:
+            response = requests.get('https://api.estadisticasbcra.com/api/plazos_fijos')
+            tasas = response.json()
+            tasa_caucion = tasas[-1]['tasa'] if tasas else 0
+        except:
+            tasa_caucion = 0
+        
+        return {
+            "reservas": {
+                "titulo": reservas.get('titulo', 'Reservas BCRA'),
+                "valor": reservas.get('valor', 'No disponible'),
+                "delta": reservas.get('delta')
+            },
+            "dolar_mayorista": {
+                "valor": dolar_mayorista.get('ultimoPrecio', 0) if dolar_mayorista else 0,
+                "variacion": dolar_mayorista.get('variacion', 0) if dolar_mayorista else 0
+            },
+            "volumen_operado": f"USD {panel_principal.get('volumenNominal', 0)/1e6:.1f}M" if panel_principal else "No disponible",
+            "dolares_financieros": {
+                "MEP": mep,
+                "CCL": ccl,
+                "Canje": {"valor": 0.30, "variacion": None}  # Dato de ejemplo
+            },
+            "merval": {
+                "valor": panel_principal.get('variacion', 0) if panel_principal else 0,
+                "bajas": ["Datos en tiempo real requieren suscripción"],
+                "subas": ["Datos en tiempo real requieren suscripción"]
+            },
+            "deuda_soberana": {
+                "AL30D": bono_al30.get('variacion', 0) if bono_al30 else 0,
+                "GD35D": 0,  # Requiere suscripción para datos históricos
+                "GD38D": 0   # Requiere suscripción para datos históricos
+            },
+            "riesgo_pais": {
+                "valor": 0,  # Requiere fuente de datos externa
+                "delta": 0
+            },
+            "bonos_cer": {
+                "corto_plazo": ["Datos en tiempo real requieren suscripción"],
+                "largo_plazo": ["Datos en tiempo real requieren suscripción"]
+            },
+            "letras": ["Datos en tiempo real requieren suscripción"],
+            "dolar_linked": {
+                "futuros": "Datos en tiempo real requieren suscripción",
+                "bonos": ["Datos en tiempo real requieren suscripción"]
+            },
+            "caucion": {
+                "plazo": "7 días",
+                "tasa": round(tasa_caucion, 2) if tasa_caucion else 0
+            }
+        }
+    except Exception as e:
+        st.error(f"Error al obtener datos de mercado: {str(e)}")
+        # Retornar estructura vacía en caso de error
+        return {
+            "reservas": {"titulo": "Error", "valor": "Error al cargar", "delta": None},
+            "dolar_mayorista": {"valor": 0, "variacion": 0},
+            "volumen_operado": "Error",
+            "dolares_financieros": {
+                "MEP": {"valor": 0, "variacion": 0},
+                "CCL": {"valor": 0, "variacion": 0},
+                "Canje": {"valor": 0, "variacion": None}
+            },
+            "merval": {"valor": 0, "bajas": ["Error"], "subas": ["Error"]},
+            "deuda_soberana": {"AL30D": 0, "GD35D": 0, "GD38D": 0},
+            "riesgo_pais": {"valor": 0, "delta": 0},
+            "bonos_cer": {"corto_plazo": ["Error"], "largo_plazo": ["Error"]},
+            "letras": ["Error"],
+            "dolar_linked": {"futuros": "Error", "bonos": ["Error"]},
+            "caucion": {"plazo": "Error", "tasa": 0}
+        }
 
 def mostrar_resumen_rueda():
     """Muestra el resumen de la rueda del día"""
