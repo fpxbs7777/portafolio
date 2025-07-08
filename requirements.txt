@@ -20,3 +20,4 @@ tradingview
 SHDA==0.0.4rc4
 yfinance
 google-generativeai
+tensorflow
