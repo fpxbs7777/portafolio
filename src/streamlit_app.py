@@ -14,6 +14,80 @@ from scipy import stats
 import random
 import warnings
 import streamlit.components.v1 as components
+import google.generativeai as genai
+import os
+from typing import List, Dict, Any
+
+# Configure the Gemini API
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    st.warning("⚠️ GEMINI_API_KEY no está configurada. La generación de informes con IA estará deshabilitada.")
+else:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+class AIReportGenerator:
+    def __init__(self, model_name: str = 'gemini-1.5-pro'):
+        self.model = genai.GenerativeModel(model_name) if GEMINI_API_KEY else None
+    
+    def format_data_for_prompt(self, data: List[Dict[str, Any]]) -> str:
+        """Formatea los datos históricos para el prompt."""
+        if not data:
+            return "No hay datos disponibles"
+            
+        if len(data) <= 10:
+            return "\n".join(f"{d['fecha']}: {d['valor']:.2f}" for d in data)
+            
+        first_five = "\n".join(f"{d['fecha']}: {d['valor']:.2f}" for d in data[:5])
+        last_five = "\n".join(f"{d['fecha']}: {d['valor']:.2f}" for d in data[-5:])
+        return f"{first_five}\n...\n{last_five}"
+    
+    async def generate_report(self, variable_name: str, historical_data: List[Dict[str, Any]]) -> str:
+        """
+        Genera un informe con IA para la variable y datos históricos proporcionados.
+        
+        Args:
+            variable_name: Nombre de la variable económica
+            historical_data: Lista de diccionarios con 'fecha' y 'valor'
+            
+        Returns:
+            str: Informe generado en formato markdown
+        """
+        if not GEMINI_API_KEY:
+            return "La generación de informes con IA está deshabilitada. Por favor, configure la variable de entorno GEMINI_API_KEY."
+            
+        if not historical_data:
+            return "No hay datos suficientes para generar un informe."
+
+        try:
+            start_date = historical_data[0]['fecha']
+            end_date = historical_data[-1]['fecha']
+            data_sample = self.format_data_for_prompt(historical_data)
+
+            prompt = f"""
+            Actúa como un analista financiero experto para el Banco Central de la República Argentina.
+            Tu tarea es analizar los datos históricos de la siguiente variable económica y generar un informe conciso y claro en español.
+
+            **Variable a Analizar:** {variable_name}
+            **Período de Datos:** Desde {start_date} hasta {end_date}
+            
+            **Muestra de Datos (Fecha: Valor):**
+            {data_sample}
+
+            **Estructura del Informe:**
+            1.  **Título:** Un título claro y descriptivo.
+            2.  **Resumen de la Tendencia:** Describe en 1-2 frases la tendencia general observada en el período.
+            3.  **Observaciones Clave:** En 2-3 puntos, destaca los movimientos o hitos más importantes.
+            4.  **Conclusión:** Ofrece una breve conclusión sobre la situación actual de la variable.
+
+            Por favor, genera el informe siguiendo esta estructura. Sé profesional y objetivo en tu análisis.
+            """
+
+            response = await self.model.generate_content_async(prompt)
+            return response.text
+            
+        except Exception as e:
+            print(f"Error generando informe con IA: {str(e)}")
+            return f"Error al generar el informe: {str(e)}"
 
 warnings.filterwarnings('ignore')
 
@@ -4897,7 +4971,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "🤖 Análisis con IA", "👨\u200d💼 Panel del Asesor"),
                 index=0,
                 key="main_navigation_radio"
             )
@@ -4915,23 +4989,129 @@ def main():
                     mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para ver las tasas de caución")
+            elif opcion == "🤖 Análisis con IA":
+                st.header("🤖 Análisis Avanzado con IA")
+                st.markdown("""
+                Utiliza inteligencia artificial para obtener análisis detallados de tus inversiones.
+                """)
+                
+                # Sección de análisis de activo individual
+                with st.expander("📈 Análisis de Activo Individual", expanded=True):
+                    st.subheader("Análisis de Activo")
+                    
+                    # Obtener lista de activos del portafolio
+                    activos = []
+                    if st.session_state.cliente_seleccionado and 'portafolio' in st.session_state:
+                        for activo in st.session_state.portafolio.get('activos', []):
+                            if 'titulo' in activo and 'simbolo' in activo['titulo']:
+                                activos.append({
+                                    'simbolo': activo['titulo']['simbolo'],
+                                    'nombre': activo['titulo'].get('descripcion', activo['titulo']['simbolo'])
+                                })
+                    
+                    if activos:
+                        simbolo_seleccionado = st.selectbox(
+                            "Seleccione un activo para analizar:",
+                            options=[a['simbolo'] for a in activos],
+                            format_func=lambda x: next((a['nombre'] for a in activos if a['simbolo'] == x), x)
+                        )
+                        
+                        # Obtener datos históricos para el activo seleccionado
+                        if st.button("🔍 Generar Análisis con IA", use_container_width=True):
+                            with st.spinner("Generando análisis con IA..."):
+                                try:
+                                    # Obtener datos históricos (último año)
+                                    fecha_desde = (date.today() - timedelta(days=365)).strftime('%Y-%m-%d')
+                                    fecha_hasta = date.today().strftime('%Y-%m-%d')
+                                    
+                                    # Obtener el mercado del activo seleccionado
+                                    activo = next((a for a in st.session_state.portafolio.get('activos', []) 
+                                                 if 'titulo' in a and a['titulo'].get('simbolo') == simbolo_seleccionado), None)
+                                    
+                                    if activo:
+                                        mercado = activo['titulo'].get('mercado', 'BCBA')
+                                        
+                                        # Obtener datos históricos
+                                        df_historico = obtener_serie_historica_iol(
+                                            st.session_state.token_acceso,
+                                            mercado=mercado,
+                                            simbolo=simbolo_seleccionado,
+                                            fecha_desde=fecha_desde,
+                                            fecha_hasta=fecha_hasta
+                                        )
+                                        
+                                        if df_historico is not None and not df_historico.empty:
+                                            # Preparar datos para el informe
+                                            datos_historicos = [
+                                                {'fecha': str(row['fecha']), 'valor': row['precio']}
+                                                for _, row in df_historico.iterrows()
+                                            ]
+                                            
+                                            # Generar informe con IA
+                                            report_generator = AIReportGenerator()
+                                            nombre_activo = next((a['nombre'] for a in activos if a['simbolo'] == simbolo_seleccionado), simbolo_seleccionado)
+                                            
+                                            # Usar asyncio para manejar la llamada asíncrona
+                                            import asyncio
+                                            
+                                            async def generar_informe():
+                                                return await report_generator.generate_report(
+                                                    f"{nombre_activo} ({simbolo_seleccionado})",
+                                                    datos_historicos
+                                                )
+                                            
+                                            # Ejecutar la función asíncrona
+                                            loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(loop)
+                                            try:
+                                                informe = loop.run_until_complete(generar_informe())
+                                                st.markdown("---")
+                                                st.markdown("## 📝 Informe de Análisis con IA")
+                                                st.markdown(informe)
+                                                
+                                                # Botón para copiar el informe
+                                                st.download_button(
+                                                    label="💾 Descargar Informe",
+                                                    data=informe,
+                                                    file_name=f"analisis_ia_{simbolo_seleccionado}_{fecha_hasta}.md",
+                                                    mime="text/markdown"
+                                                )
+                                            except Exception as e:
+                                                st.error(f"Error al generar el informe: {str(e)}")
+                                            finally:
+                                                loop.close()
+                                        else:
+                                            st.warning("No se encontraron datos históricos para este activo")
+                                    else:
+                                        st.warning("No se pudo determinar el mercado del activo seleccionado")
+                                        
+                                except Exception as e:
+                                    st.error(f"Error al generar el análisis: {str(e)}")
+                        else:
+                            st.info("No hay activos disponibles para analizar. Por favor, cargue un portafolio primero.")
+                    
+                    # Sección de análisis de portafolio completo
+                    with st.expander("📊 Análisis de Portafolio", expanded=False):
+                        st.subheader("Análisis de Portafolio con IA")
+                        st.info("Próximamente: Análisis completo de su portafolio utilizando inteligencia artificial.")
+                
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
+            st.info("👆 Seleccione una opción del menú para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
-            # Panel de bienvenida
-            st.markdown("""
+            # Sección de bienvenida
+            st.markdown('''
             <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
                         border-radius: 15px; 
                         padding: 40px; 
                         color: white;
-                        text-align: center;
-                        margin: 30px 0;">
-                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
-                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
-                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                        margin: 20px 0;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                <h2 style="color: white; margin-top: 0;">Bienvenido a IOL Portfolio Analyzer</h2>
+                <p>Una herramienta avanzada para el análisis de carteras de inversión en Invertir Online.</p>
+                <div style="display: flex; justify-content: space-between; margin-top: 30px;">
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
                         <h3>📊 Análisis Completo</h3>
                         <p>Visualice todos sus activos en un solo lugar con detalle</p>
@@ -4946,7 +5126,7 @@ def main():
                     </div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            ''', unsafe_allow_html=True)
             
             # Características
             st.subheader("✨ Características Principales")
