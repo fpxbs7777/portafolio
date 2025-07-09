@@ -2806,7 +2806,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key="opt_tipo_activo_1",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -2887,7 +2887,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key="opt_tipo_orden_1"
     )
     order_type = order_types[order_type_ui]
 
@@ -3012,7 +3012,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format_func=lambda x: {
                 'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
                 'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
-            }[x]
+            }[x],
+            key="modo_optimizacion_1"
         )
     
     with col2:
@@ -3032,7 +3033,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 format_func=lambda x: {
                     'Diario': 'Datos Diarios (IOL)',
                     'Intradía': 'Datos Intradía (yfinance)'
-                }[x]
+                }[x],
+                key="frecuencia_datos_1"
             )
         
         with col4:
@@ -3045,7 +3047,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key="opt_tipo_activo_1",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3238,7 +3240,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format_func=lambda x: {
                 'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
                 'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
-            }[x]
+            }[x],
+            key="modo_optimizacion_2"
         )
     
     with col2:
@@ -3258,7 +3261,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 format_func=lambda x: {
                     'Diario': 'Datos Diarios (IOL)',
                     'Intradía': 'Datos Intradía (yfinance)'
-                }[x]
+                }[x],
+                key="frecuencia_datos_2"
             )
         
         with col4:
@@ -3271,7 +3275,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key="opt_tipo_activo_2",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
@@ -3464,7 +3468,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             format_func=lambda x: {
                 'Rebalanceo': 'Rebalanceo (Datos Diarios IOL)',
                 'Optimización desde Cero': 'Optimización desde Cero (Intradía y Diario)'
-            }[x]
+            }[x],
+            key="modo_optimizacion_2"
         )
     
     with col2:
@@ -3484,7 +3489,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 format_func=lambda x: {
                     'Diario': 'Datos Diarios (IOL)',
                     'Intradía': 'Datos Intradía (yfinance)'
-                }[x]
+                }[x],
+                key="frecuencia_datos_2"
             )
         
         with col4:
@@ -3497,7 +3503,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             tipo_seleccionado = st.selectbox(
                 "Filtrar por tipo de activo:",
                 options=['Todos'] + tipos_disponibles,
-                key="opt_tipo_activo",
+                key="opt_tipo_activo_2",
                 format_func=lambda x: "Todos" if x == 'Todos' else x
             )
             
