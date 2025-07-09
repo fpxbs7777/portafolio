@@ -9,5 +9,5 @@ google-generativeai
 markdown2
 scikit-learn
 yfinance
-stable-baselines3
+stable-baselines
 torch
