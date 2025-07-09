@@ -11,3 +11,4 @@ scikit-learn
 yfinance
 stable-baselines
 torch
+gym
