@@ -3113,7 +3113,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key="opt_tipo_orden_2"
     )
     order_type = order_types[order_type_ui]
 
@@ -3339,7 +3339,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key="opt_tipo_orden_3"
     )
     order_type = order_types[order_type_ui]
 
@@ -3569,7 +3569,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     order_type_ui = st.selectbox(
         "Tipo de Orden:",
         options=list(order_types.keys()),
-        key="opt_tipo_orden"
+        key="opt_tipo_orden_4"
     )
     order_type = order_types[order_type_ui]
 
