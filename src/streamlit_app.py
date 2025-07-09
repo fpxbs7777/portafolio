@@ -2625,7 +2625,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         st.error("❌ No se pudo obtener la cotización MEP")
     
     with st.expander("🏦 Tasas de Caución", expanded=True):
-        if st.button("🔄 Actualizar Tasas"):
+        if st.button("🔄 Actualizar Tasas", key="actualizar_tasas_1"):
             with st.spinner("Consultando tasas de caución..."):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
             
@@ -3135,13 +3135,13 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     # Botones de acción
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary", key="ejecutar_opt_2")
     with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", key="ejecutar_frontier_2")
     with col3:
-        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos")
+        mostrar_cauciones = st.button("💸 Ver Cauciones Todos los Plazos", key="mostrar_cauciones_2")
     with col4:
-        comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.")
+        comparar_opt = st.checkbox("Comparar Actual vs Aleatoria", value=False, help="Compara la optimización sobre tu portafolio y sobre un universo aleatorio de activos.", key="comparar_opt_2")
 
     # Ejecución de optimización
     if ejecutar_optimizacion:
@@ -4130,7 +4130,7 @@ def mostrar_analisis_portafolio():
                         )
                 
                 # Botón para ejecutar el análisis
-                if st.button("🔍 Analizar Volatilidad", use_container_width=True):
+                if st.button("🔍 Analizar Volatilidad", use_container_width=True, key="analizar_volatilidad_1"):
                     with st.spinner("Realizando análisis de volatilidad..."):
                         try:
                             # Inicializar el gestor de portafolio si no existe
@@ -4267,7 +4267,7 @@ def main():
                     None
                 )
                 
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+                if st.button("🔄 Actualizar lista de clientes", use_container_width=True, key="actualizar_clientes_1"):
                     with st.spinner("Actualizando..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
                         st.session_state.clientes = nuevos_clientes
