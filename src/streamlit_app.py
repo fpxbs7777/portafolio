@@ -3888,7 +3888,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        key="simbolo_analisis_tecnico_1"
     )
     
     if simbolo_seleccionado:
@@ -3986,12 +3987,14 @@ def mostrar_movimientos_asesor():
             tipo_fecha = st.selectbox(
                 "Tipo de fecha",
                 ["fechaOperacion", "fechaLiquidacion"],
-                index=0
+                index=0,
+                key="tipo_fecha_1"
             )
             estado = st.selectbox(
                 "Estado",
                 ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
+                index=0,
+                key="estado_1"
             )
         with col2:
             tipo_operacion = st.text_input("Tipo de operación")
@@ -4104,7 +4107,7 @@ def mostrar_analisis_portafolio():
                 simbolo_seleccionado = st.selectbox(
                     "Seleccione un activo para analizar:",
                     options=simbolos,
-                    key="vol_asset_selector"
+                    key="vol_asset_selector_1"
                 )
                 
                 # Configuración del análisis
@@ -4259,7 +4262,7 @@ def main():
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
                     label_visibility="collapsed",
-                    key="sidebar_cliente_selector"
+                    key="sidebar_cliente_selector_1"
                 )
                 
                 st.session_state.cliente_seleccionado = next(
