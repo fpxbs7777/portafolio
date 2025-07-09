@@ -2884,7 +2884,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             help="No hay máximo. Si el retorno es muy alto, la simulación puede no converger."
         )
 
-    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier_1")
 
     # Configuración de ejecución
     scheduling_methods = {
