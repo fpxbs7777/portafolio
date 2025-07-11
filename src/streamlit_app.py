@@ -416,10 +416,19 @@ def obtener_tokens(usuario, contraseña):
         return None, None
 
 def obtener_lista_clientes(token_portador):
+    """
+    Obtiene la lista de clientes del asesor
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        list: Lista de clientes o lista vacía en caso de error
+    """
     url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        respuesta = requests.get(url_clientes, headers=encabezados)
+        respuesta = requests.get(url_clientes, headers=encabezados, timeout=30)
         if respuesta.status_code == 200:
             clientes_data = respuesta.json()
             if isinstance(clientes_data, list):
@@ -427,15 +436,47 @@ def obtener_lista_clientes(token_portador):
             elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
                 return clientes_data['clientes']
             else:
+                st.warning("Formato de respuesta inesperado al obtener clientes")
                 return []
-        else:
-            st.error(f'Error al obtener la lista de clientes: {respuesta.status_code}')
+        elif respuesta.status_code == 401:
+            st.error("Error de autenticación al obtener lista de clientes")
             return []
+        elif respuesta.status_code == 403:
+            st.error("No tiene permisos para acceder a la lista de clientes")
+            return []
+        else:
+            st.error(f'Error HTTP {respuesta.status_code} al obtener la lista de clientes')
+            return []
+    except requests.exceptions.Timeout:
+        st.error("Timeout al obtener lista de clientes")
+        return []
     except Exception as e:
         st.error(f'Error de conexión al obtener clientes: {str(e)}')
         return []
 
 def obtener_estado_cuenta(token_portador, id_cliente=None):
+    """
+    Obtiene el estado de cuenta del cliente o del usuario autenticado
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str, optional): ID del cliente. Si es None, obtiene el estado de cuenta del usuario
+        
+    Returns:
+        dict: Estado de cuenta o None en caso de error
+    """
+    # Evitar recursión infinita
+    if hasattr(obtener_estado_cuenta, '_recursion_depth'):
+        obtener_estado_cuenta._recursion_depth += 1
+    else:
+        obtener_estado_cuenta._recursion_depth = 0
+    
+    # Limitar la profundidad de recursión
+    if obtener_estado_cuenta._recursion_depth > 2:
+        st.error("Error: Demasiadas llamadas recursivas al obtener estado de cuenta")
+        obtener_estado_cuenta._recursion_depth = 0
+        return None
+    
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
     else:
@@ -443,26 +484,63 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
     
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        respuesta = requests.get(url_estado_cuenta, headers=encabezados)
+        respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
         if respuesta.status_code == 200:
+            # Resetear contador de recursión en caso de éxito
+            obtener_estado_cuenta._recursion_depth = 0
             return respuesta.json()
         elif respuesta.status_code == 401:
-            return obtener_estado_cuenta(token_portador, None)
+            # Solo intentar una vez más sin ID de cliente
+            if obtener_estado_cuenta._recursion_depth == 1:
+                st.warning("Error de autenticación. Intentando obtener estado de cuenta general...")
+                return obtener_estado_cuenta(token_portador, None)
+            else:
+                st.error("Error de autenticación persistente")
+                obtener_estado_cuenta._recursion_depth = 0
+                return None
         else:
+            st.error(f"Error HTTP {respuesta.status_code} al obtener estado de cuenta")
+            obtener_estado_cuenta._recursion_depth = 0
             return None
+    except requests.exceptions.Timeout:
+        st.error("Timeout al obtener estado de cuenta")
+        obtener_estado_cuenta._recursion_depth = 0
+        return None
     except Exception as e:
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
+        obtener_estado_cuenta._recursion_depth = 0
         return None
 
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
+    """
+    Obtiene el portafolio de un cliente específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        pais (str): País del portafolio (default: 'Argentina')
+        
+    Returns:
+        dict: Portafolio del cliente o None en caso de error
+    """
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        respuesta = requests.get(url_portafolio, headers=encabezados)
+        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=30)
         if respuesta.status_code == 200:
             return respuesta.json()
-        else:
+        elif respuesta.status_code == 401:
+            st.error("Error de autenticación al obtener portafolio")
             return None
+        elif respuesta.status_code == 404:
+            st.warning(f"No se encontró portafolio para el cliente {id_cliente}")
+            return None
+        else:
+            st.error(f"Error HTTP {respuesta.status_code} al obtener portafolio")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("Timeout al obtener portafolio")
+        return None
     except Exception as e:
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
