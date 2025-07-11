@@ -1370,146 +1370,7 @@ def obtener_clase_d(simbolo, mercado, bearer_token):
         # Silencioso para no interrumpir el flujo
         return None
 
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
-    """
-    Obtiene la serie histórica de precios para un activo específico desde la API de InvertirOnline.
-    
-    Args:
-        token_portador (str): Token de autenticación de la API
-        mercado (str): Mercado del activo (ej: 'BCBA', 'NYSE', 'NASDAQ')
-        simbolo (str): Símbolo del activo
-        fecha_desde (str): Fecha de inicio en formato 'YYYY-MM-DD'
-        fecha_hasta (str): Fecha de fin en formato 'YYYY-MM-DD'
-        ajustada (str): Tipo de ajuste ('Ajustada' o 'SinAjustar')
-        
-    Returns:
-        pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
-    """
-    try:
-        print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
-        
-        # Endpoint para FCIs (manejo especial)
-        if mercado.upper() == 'FCI':
-            print("Es un FCI, usando función específica")
-            return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-        
-        # Construir URL según el tipo de activo y mercado
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
-        
-        headers = {
-            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
-            'Accept': 'application/json'
-        }
-        
-        # Realizar la solicitud
-        response = requests.get(url, headers={
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }, timeout=30)
-        
-        # Verificar el estado de la respuesta
-        print(f"Estado de la respuesta: {response.status_code}")
-        response.raise_for_status()
-        
-        # Procesar la respuesta
-        data = response.json()
-        print(f"Tipo de datos recibidos: {type(data)}")
-        
-        # Procesar la respuesta según el formato esperado
-        if isinstance(data, list):
-            print(f"Se recibió una lista con {len(data)} elementos")
-            if data:
-                print(f"Primer elemento: {data[0]}")
-                
-            # Formato estándar para series históricas
-            fechas = []
-            precios = []
-            
-            for item in data:
-                try:
-                    # Manejar diferentes formatos de fecha
-                    fecha_str = item.get('fecha') or item.get('fechaHora')
-                    if not fecha_str:
-                        print(f"  - Item sin fecha: {item}")
-                        continue
-                        
-                    # Manejar diferentes formatos de precio
-                    precio = item.get('ultimoPrecio') or item.get('precioCierre') or item.get('precio')
-                    if precio is None:
-                        print(f"  - Item sin precio: {item}")
-                        continue
-                        
-                    # Convertir fecha
-                    try:
-                        fecha = parse_datetime_flexible(fecha_str)
-                        if pd.isna(fecha):
-                            print(f"  - Fecha inválida: {fecha_str}")
-                            continue
-                            
-                        precio_float = float(precio)
-                        if precio_float <= 0:
-                            print(f"  - Precio inválido: {precio}")
-                            continue
-                            
-                        fechas.append(fecha)
-                        precios.append(precio_float)
-                        
-                    except (ValueError, TypeError) as e:
-                        print(f"  - Error al convertir datos: {e}")
-                        continue
-                        
-                except Exception as e:
-                    print(f"  - Error inesperado al procesar item: {e}")
-                    continue
-            
-            if fechas and precios:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                print(f"Datos procesados: {len(df)} registros válidos")
-                return df
-            else:
-                print("No se encontraron datos válidos en la respuesta")
-                return None
-                
-        elif isinstance(data, dict):
-            print(f"Se recibió un diccionario: {data.keys()}")
-            # Para respuestas que son un solo valor (ej: MEP)
-            precio = data.get('ultimoPrecio') or data.get('precioCierre') or data.get('precio')
-            if precio is not None:
-                print(f"Datos de un solo punto: precio={precio}")
-                return pd.DataFrame({
-                    'fecha': [pd.Timestamp.now(tz='UTC')],
-                    'precio': [float(precio)]
-                })
-            else:
-                print("No se encontró precio en la respuesta")
-        else:
-            print(f"Tipo de respuesta no manejado: {type(data)}")
-            
-        print(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
-        return None
-        
-    except requests.exceptions.RequestException as e:
-        error_msg = f"Error de conexión para {simbolo} en {mercado}: {str(e)}"
-        if hasattr(e, 'response') and e.response is not None:
-            error_msg += f" - Status: {e.response.status_code}"
-            try:
-                error_msg += f" - Respuesta: {e.response.text[:200]}"
-            except:
-                pass
-        print(error_msg)
-        st.warning(error_msg)
-        return None
-    except Exception as e:
-        error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
-        print(error_msg)
-        import traceback
-        traceback.print_exc()
-        st.error(error_msg)
-        return None
-        return None
+# Función duplicada eliminada - usar la versión original en línea 933
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
@@ -1695,10 +1556,20 @@ class manager:
         returns_matrix = {}
         for ric in self.rics:
             prices = self.timeseries[ric]
-            returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+            # Verificar que prices no sea None y tenga datos
+            if prices is not None and len(prices) > 1:
+                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        
+        # Verificar que tenemos datos válidos
+        if not returns_matrix:
+            raise ValueError("No se pudieron obtener datos válidos para calcular la covarianza")
         
         # Convertir a DataFrame para alinear fechas
         self.returns = pd.DataFrame(returns_matrix)
+        
+        # Verificar que el DataFrame no esté vacío
+        if self.returns.empty:
+            raise ValueError("No hay datos suficientes para calcular la covarianza")
         
         # Calcular matriz de covarianza y retornos medios
         self.cov_matrix = self.returns.cov() * 252  # Anualizar
