@@ -1865,29 +1865,88 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
 # --- Portfolio Optimization Functions ---
 def calculate_portfolio_metrics(returns, weights):
     """
-    Calcula métricas básicas de un portafolio
+    Calcula métricas básicas de un portafolio con validaciones mejoradas
     """
-    portfolio_return = np.sum(returns.mean() * weights) * 252
-    portfolio_std = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
-    sharpe_ratio = portfolio_return / portfolio_std if portfolio_std > 0 else 0
-    
-    return portfolio_return, portfolio_std, sharpe_ratio
+    try:
+        # Validar inputs
+        if returns is None or returns.empty:
+            return 0.0, 0.0, 0.0
+        
+        if weights is None or len(weights) == 0:
+            return 0.0, 0.0, 0.0
+        
+        # Asegurar que weights sea un array numpy
+        weights = np.array(weights)
+        
+        # Validar que los pesos sumen aproximadamente 1
+        if abs(np.sum(weights) - 1.0) > 0.01:
+            st.warning("⚠️ Los pesos no suman 1. Normalizando...")
+            weights = weights / np.sum(weights)
+        
+        # Calcular retorno anualizado (252 días de trading)
+        portfolio_return = np.sum(returns.mean() * weights) * 252
+        
+        # Calcular volatilidad anualizada
+        cov_matrix = returns.cov() * 252
+        portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        
+        # Calcular ratio de Sharpe con validación
+        if portfolio_std > 0:
+            sharpe_ratio = portfolio_return / portfolio_std
+        else:
+            sharpe_ratio = 0.0
+        
+        # Validar resultados
+        if np.isnan(portfolio_return) or np.isinf(portfolio_return):
+            portfolio_return = 0.0
+        if np.isnan(portfolio_std) or np.isinf(portfolio_std):
+            portfolio_std = 0.0
+        if np.isnan(sharpe_ratio) or np.isinf(sharpe_ratio):
+            sharpe_ratio = 0.0
+        
+        return portfolio_return, portfolio_std, sharpe_ratio
+        
+    except Exception as e:
+        st.error(f"❌ Error en cálculo de métricas: {str(e)}")
+        return 0.0, 0.0, 0.0
 
 def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
     """
-    Optimiza un portafolio usando teoría moderna de portafolio
+    Optimiza un portafolio usando teoría moderna de portafolio con validaciones mejoradas
     """
     try:
+        # Validar inputs
+        if returns is None or returns.empty:
+            st.error("❌ Datos de retornos no válidos")
+            return None
+        
         n_assets = len(returns.columns)
+        if n_assets < 2:
+            st.error("❌ Se necesitan al menos 2 activos para optimización")
+            return None
+        
+        # Validar que no haya valores NaN o infinitos
+        if returns.isnull().any().any() or np.isinf(returns).any().any():
+            st.warning("⚠️ Datos con valores faltantes o infinitos. Limpiando...")
+            returns = returns.dropna()
+            if returns.empty:
+                st.error("❌ No quedan datos válidos después de limpiar")
+                return None
         
         # Función objetivo para maximizar el ratio de Sharpe
         def negative_sharpe(weights):
-            portfolio_return = np.sum(returns.mean() * weights) * 252
-            portfolio_std = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * 252, weights)))
-            if portfolio_std == 0:
-                return -np.inf
-            sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
-            return -sharpe_ratio
+            try:
+                portfolio_return = np.sum(returns.mean() * weights) * 252
+                cov_matrix = returns.cov() * 252
+                portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                
+                if portfolio_std == 0 or np.isnan(portfolio_std) or np.isinf(portfolio_std):
+                    return 1e6  # Penalización alta
+                
+                sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
+                return -sharpe_ratio
+            except Exception:
+                return 1e6  # Penalización alta en caso de error
         
         # Restricciones
         constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
@@ -1896,21 +1955,51 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
         # Pesos iniciales igualmente distribuidos
         initial_guess = n_assets * [1. / n_assets]
         
-        # Optimización
-        result = optimize.minimize(negative_sharpe, initial_guess, method='SLSQP',
-                                 bounds=bounds, constraints=constraints)
+        # Optimización con múltiples intentos
+        best_result = None
+        best_sharpe = -np.inf
         
-        if result.success:
-            return result.x
+        for attempt in range(3):  # Intentar 3 veces con diferentes puntos iniciales
+            try:
+                if attempt > 0:
+                    # Usar pesos aleatorios para intentos adicionales
+                    random_weights = np.random.dirichlet(np.ones(n_assets))
+                    initial_guess = random_weights
+                
+                result = optimize.minimize(negative_sharpe, initial_guess, method='SLSQP',
+                                         bounds=bounds, constraints=constraints,
+                                         options={'maxiter': 1000})
+                
+                if result.success:
+                    # Validar resultado
+                    weights = result.x
+                    if np.all(weights >= 0) and abs(np.sum(weights) - 1.0) < 0.01:
+                        # Calcular Sharpe del resultado
+                        portfolio_return = np.sum(returns.mean() * weights) * 252
+                        cov_matrix = returns.cov() * 252
+                        portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                        
+                        if portfolio_std > 0:
+                            sharpe = (portfolio_return - risk_free_rate) / portfolio_std
+                            if sharpe > best_sharpe:
+                                best_result = weights
+                                best_sharpe = sharpe
+                
+            except Exception as e:
+                st.warning(f"⚠️ Intento {attempt + 1} falló: {str(e)}")
+                continue
+        
+        if best_result is not None:
+            return best_result
         else:
-            st.warning("La optimización no convergió. Usando pesos iguales.")
-            return np.array(initial_guess)
+            st.warning("⚠️ La optimización no convergió. Usando pesos iguales.")
+            return np.array([1/n_assets] * n_assets)
             
     except ImportError:
-        st.warning("scipy no disponible. Usando pesos iguales.")
+        st.warning("⚠️ scipy no disponible. Usando pesos iguales.")
         return np.array([1/n_assets] * n_assets)
     except Exception as e:
-        st.warning(f"Error en optimización: {str(e)}. Usando pesos iguales.")
+        st.error(f"❌ Error en optimización: {str(e)}. Usando pesos iguales.")
         return np.array([1/n_assets] * n_assets)
 
 # --- Menú de Optimizaciones Avanzadas ---
@@ -2250,28 +2339,81 @@ def mostrar_resultados_optimizacion_avanzada(portafolios, capital_inicial, horiz
 
 def calcular_alpha_beta(portfolio, benchmark):
     """
-    Calcula alpha y beta de un portafolio vs benchmark
+    Calcula alpha y beta de un portafolio vs benchmark con validaciones mejoradas
     """
     try:
-        if hasattr(portfolio, 'returns') and portfolio.returns is not None:
-            # Obtener retornos del benchmark (simulado si no está disponible)
-            benchmark_returns = np.random.normal(0.0003, 0.015, len(portfolio.returns))  # Simulado
-            
-            # Calcular beta
-            if len(benchmark_returns) > 1:
-                beta = np.cov(portfolio.returns, benchmark_returns)[0,1] / np.var(benchmark_returns)
-            else:
-                beta = 1.0
-            
-            # Calcular alpha
-            portfolio_mean = np.mean(portfolio.returns) * 252
-            benchmark_mean = np.mean(benchmark_returns) * 252
-            alpha = portfolio_mean - beta * benchmark_mean
-            
-            return alpha, beta
-        else:
+        if not hasattr(portfolio, 'returns') or portfolio.returns is None:
+            st.warning("⚠️ No hay datos de retornos del portafolio")
             return 0.0, 1.0
-    except Exception:
+        
+        portfolio_returns = portfolio.returns
+        
+        # Validar datos del portafolio
+        if len(portfolio_returns) < 30:  # Mínimo 30 observaciones
+            st.warning("⚠️ Insuficientes datos históricos para cálculo de alpha/beta")
+            return 0.0, 1.0
+        
+        # Obtener retornos del benchmark (mejorado)
+        try:
+            # Intentar obtener datos reales del benchmark
+            if hasattr(benchmark, 'returns') and benchmark.returns is not None:
+                benchmark_returns = benchmark.returns
+            else:
+                # Simular benchmark con parámetros más realistas
+                # Usar volatilidad y retorno más conservadores
+                benchmark_vol = 0.15  # 15% volatilidad anual
+                benchmark_return = 0.08  # 8% retorno anual
+                daily_vol = benchmark_vol / np.sqrt(252)
+                daily_return = benchmark_return / 252
+                
+                benchmark_returns = np.random.normal(daily_return, daily_vol, len(portfolio_returns))
+                st.info("ℹ️ Usando benchmark simulado para cálculo de alpha/beta")
+        except Exception:
+            st.warning("⚠️ Error obteniendo datos del benchmark")
+            return 0.0, 1.0
+        
+        # Validar que ambos arrays tengan la misma longitud
+        if len(portfolio_returns) != len(benchmark_returns):
+            min_length = min(len(portfolio_returns), len(benchmark_returns))
+            portfolio_returns = portfolio_returns[:min_length]
+            benchmark_returns = benchmark_returns[:min_length]
+            st.warning(f"⚠️ Ajustando longitud de datos a {min_length} observaciones")
+        
+        # Calcular beta con validaciones
+        if len(benchmark_returns) > 1:
+            benchmark_var = np.var(benchmark_returns)
+            if benchmark_var > 0:
+                covariance = np.cov(portfolio_returns, benchmark_returns)[0,1]
+                beta = covariance / benchmark_var
+                
+                # Validar beta
+                if np.isnan(beta) or np.isinf(beta):
+                    st.warning("⚠️ Beta calculado no válido, usando beta = 1")
+                    beta = 1.0
+                elif abs(beta) > 5:  # Beta muy extremo
+                    st.warning(f"⚠️ Beta muy extremo ({beta:.2f}), limitando a ±3")
+                    beta = np.clip(beta, -3, 3)
+            else:
+                st.warning("⚠️ Varianza del benchmark es cero, usando beta = 1")
+                beta = 1.0
+        else:
+            st.warning("⚠️ Insuficientes datos para calcular beta, usando beta = 1")
+            beta = 1.0
+        
+        # Calcular alpha anualizado
+        portfolio_mean = np.mean(portfolio_returns) * 252
+        benchmark_mean = np.mean(benchmark_returns) * 252
+        alpha = portfolio_mean - beta * benchmark_mean
+        
+        # Validar alpha
+        if np.isnan(alpha) or np.isinf(alpha):
+            st.warning("⚠️ Alpha calculado no válido, usando alpha = 0")
+            alpha = 0.0
+        
+        return alpha, beta
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando alpha/beta: {str(e)}")
         return 0.0, 1.0
 
 # --- CAPM y Funciones de Cobertura ---
@@ -2794,6 +2936,42 @@ def mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_ha
     else:
         st.info("Selecciona al menos un activo de cobertura para continuar")
 
+def validar_datos_financieros(returns, min_observaciones=30):
+    """
+    Valida la calidad de los datos financieros para análisis
+    """
+    try:
+        if returns is None or returns.empty:
+            return False, "Datos de retornos vacíos o nulos"
+        
+        if len(returns) < min_observaciones:
+            return False, f"Insuficientes observaciones: {len(returns)} < {min_observaciones}"
+        
+        # Verificar valores faltantes
+        missing_pct = returns.isnull().sum().sum() / (returns.shape[0] * returns.shape[1])
+        if missing_pct > 0.1:  # Más del 10% de datos faltantes
+            return False, f"Demasiados datos faltantes: {missing_pct:.1%}"
+        
+        # Verificar valores infinitos
+        inf_count = np.isinf(returns).sum().sum()
+        if inf_count > 0:
+            return False, f"Valores infinitos detectados: {inf_count}"
+        
+        # Verificar valores extremos (outliers)
+        for col in returns.columns:
+            col_returns = returns[col].dropna()
+            if len(col_returns) > 0:
+                q1, q3 = np.percentile(col_returns, [25, 75])
+                iqr = q3 - q1
+                outliers = ((col_returns < (q1 - 3 * iqr)) | (col_returns > (q3 + 3 * iqr))).sum()
+                if outliers > len(col_returns) * 0.05:  # Más del 5% de outliers
+                    return False, f"Demasiados outliers en {col}: {outliers}"
+        
+        return True, "Datos válidos"
+        
+    except Exception as e:
+        return False, f"Error validando datos: {str(e)}"
+
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
@@ -2807,7 +2985,18 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     Returns:
         dict: Diccionario con las métricas calculadas
     """
-    if not isinstance(portafolio, dict) or not portafolio or valor_total <= 0:
+    # Validaciones mejoradas de inputs
+    if not isinstance(portafolio, dict) or not portafolio:
+        st.error("❌ Portafolio no válido")
+        return {}
+    
+    if valor_total <= 0:
+        st.error("❌ Valor total del portafolio debe ser mayor a 0")
+        return {}
+    
+    # Validar que el portafolio tenga activos
+    if len(portafolio) == 0:
+        st.warning("⚠️ Portafolio vacío")
         return {}
 
     # Obtener fechas para el histórico
@@ -3287,6 +3476,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Estadísticas detalladas y distribuciones
         with st.expander("📊 Estadísticas Detalladas y Distribuciones", expanded=False):
+            # Opción para mostrar histograma de retornos
+            mostrar_histograma_retornos = st.checkbox(
+                "📈 Mostrar Histograma de Retornos por Activo", 
+                value=False,
+                help="Muestra histogramas de retornos históricos para cada activo del portafolio"
+            )
+            
             col1, col2 = st.columns(2)
             
             with col1:
@@ -3495,6 +3691,102 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     'Valor': list(projection_metrics.values())
                 })
                 st.dataframe(projection_df, use_container_width=True)
+            
+            # Histograma de retornos por activo (opcional)
+            if mostrar_histograma_retornos:
+                st.markdown("#### 📈 Histograma de Retornos por Activo")
+                st.info("🔄 Cargando datos históricos para análisis de retornos...")
+                
+                # Extraer símbolos únicos del portafolio
+                simbolos_portafolio = df_activos['Símbolo'].unique().tolist()
+                simbolos_validos = [s for s in simbolos_portafolio if s and s != 'N/A']
+                
+                if len(simbolos_validos) > 0:
+                    # Crear manager para obtener datos históricos con cache
+                    @st.cache_data(ttl=600)  # Cache por 10 minutos
+                    def cargar_datos_historicos_resumen(symbols, token, fecha_desde, fecha_hasta):
+                        """Cachea los datos históricos para el resumen"""
+                        manager_inst = PortfolioManager(symbols, token, fecha_desde, fecha_hasta)
+                        if manager_inst.load_data():
+                            return manager_inst
+                        return None
+                    
+                    # Usar fechas de la sesión
+                    fecha_desde = st.session_state.get('fecha_desde', date.today() - timedelta(days=365))
+                    fecha_hasta = st.session_state.get('fecha_hasta', date.today())
+                    
+                    with st.spinner("📊 Cargando datos históricos..."):
+                        manager_inst = cargar_datos_historicos_resumen(
+                            simbolos_validos, token_portador, fecha_desde, fecha_hasta
+                        )
+                    
+                    if manager_inst and manager_inst.returns is not None:
+                        st.success(f"✅ Datos históricos cargados para {len(simbolos_validos)} activos")
+                        
+                        # Mostrar histogramas individuales con lazy loading
+                        for i, simbolo in enumerate(simbolos_validos):
+                            if simbolo in manager_inst.returns.columns:
+                                with st.expander(f"📊 {simbolo}", expanded=False):
+                                    # Obtener retornos del activo
+                                    asset_returns = manager_inst.returns[simbolo].dropna()
+                                    
+                                    if len(asset_returns) > 10:
+                                        # Crear histograma optimizado
+                                        fig_hist = go.Figure(data=[go.Histogram(
+                                            x=asset_returns,
+                                            nbinsx=min(30, len(asset_returns)),
+                                            marker_color='#0d6efd',
+                                            opacity=0.7,
+                                            name=f"Retornos {simbolo}"
+                                        )])
+                                        
+                                        # Agregar líneas de métricas
+                                        mean_return = asset_returns.mean()
+                                        std_return = asset_returns.std()
+                                        var_95 = asset_returns.quantile(0.05)
+                                        
+                                        fig_hist.add_vline(
+                                            x=mean_return, 
+                                            line_dash="dash", 
+                                            line_color="red",
+                                            annotation_text=f"Media: {mean_return:.4f}"
+                                        )
+                                        fig_hist.add_vline(
+                                            x=var_95, 
+                                            line_dash="dash", 
+                                            line_color="orange",
+                                            annotation_text=f"VaR 95%: {var_95:.4f}"
+                                        )
+                                        
+                                        fig_hist.update_layout(
+                                            title=f"Distribución de Retornos - {simbolo}",
+                                            xaxis_title="Retorno Diario",
+                                            yaxis_title="Frecuencia",
+                                            height=400,
+                                            showlegend=False
+                                        )
+                                        
+                                        st.plotly_chart(fig_hist, use_container_width=True)
+                                        
+                                        # Métricas rápidas
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        with col1:
+                                            st.metric("Retorno Medio", f"{mean_return:.4f}")
+                                        with col2:
+                                            st.metric("Volatilidad", f"{std_return:.4f}")
+                                        with col3:
+                                            st.metric("VaR 95%", f"{var_95:.4f}")
+                                        with col4:
+                                            sharpe_ratio = mean_return / std_return if std_return > 0 else 0
+                                            st.metric("Sharpe Ratio", f"{sharpe_ratio:.4f}")
+                                    else:
+                                        st.warning(f"⚠️ Datos insuficientes para {simbolo} ({len(asset_returns)} días)")
+                            else:
+                                st.warning(f"⚠️ No se encontraron datos históricos para {simbolo}")
+                    else:
+                        st.warning("⚠️ No se pudieron cargar los datos históricos para el análisis de retornos")
+                else:
+                    st.warning("⚠️ No hay símbolos válidos en el portafolio para análisis de retornos")
         
         # Recomendaciones
         st.subheader("💡 Recomendaciones")
@@ -3917,26 +4209,107 @@ class PortfolioManager:
     
     def _calculate_portfolio_metrics(self, weights):
         """
-        Calcula métricas básicas del portafolio para un conjunto de pesos
+        Calcula métricas básicas del portafolio para un conjunto de pesos con validaciones mejoradas
         """
         try:
+            # Validar inputs
+            if weights is None or len(weights) == 0:
+                return {'return': 0, 'volatility': 0, 'sharpe': 0}
+            
+            if self.mean_returns is None or self.cov_matrix is None:
+                st.warning("⚠️ Datos de retornos no disponibles")
+                return {'return': 0, 'volatility': 0, 'sharpe': 0}
+            
+            # Asegurar que weights sea un array numpy
+            weights = np.array(weights)
+            
+            # Validar que los pesos sumen aproximadamente 1
+            if abs(np.sum(weights) - 1.0) > 0.01:
+                st.warning("⚠️ Los pesos no suman 1. Normalizando...")
+                weights = weights / np.sum(weights)
+            
+            # Calcular retorno anualizado
             portfolio_return = np.sum(self.mean_returns * weights)
+            
+            # Calcular volatilidad anualizada
             portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
-            sharpe_ratio = portfolio_return / portfolio_volatility if portfolio_volatility > 0 else 0
+            
+            # Calcular ratio de Sharpe con validación
+            if portfolio_volatility > 0:
+                sharpe_ratio = portfolio_return / portfolio_volatility
+            else:
+                sharpe_ratio = 0.0
+            
+            # Validar resultados
+            if np.isnan(portfolio_return) or np.isinf(portfolio_return):
+                portfolio_return = 0.0
+            if np.isnan(portfolio_volatility) or np.isinf(portfolio_volatility):
+                portfolio_volatility = 0.0
+            if np.isnan(sharpe_ratio) or np.isinf(sharpe_ratio):
+                sharpe_ratio = 0.0
             
             return {
                 'return': portfolio_return,
                 'volatility': portfolio_volatility,
                 'sharpe': sharpe_ratio
             }
-        except Exception:
+        except Exception as e:
+            st.error(f"❌ Error en cálculo de métricas del portafolio: {str(e)}")
             return {'return': 0, 'volatility': 0, 'sharpe': 0}
 
-def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
+def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
-    Muestra la optimización del portafolio usando datos históricos con estrategias extendidas
+    Menú unificado organizado en dos categorías: Rebalanceo y Optimizaciones
     """
-    st.markdown("### 🎯 Optimización de Portafolio")
+    st.markdown("### 🎯 Optimización y Cobertura de Portafolio")
+    
+    # Selección de categoría principal
+    categoria = st.selectbox(
+        "Seleccione la categoría:",
+        options=[
+            "🔄 Rebalanceo",
+            "📈 Optimizaciones"
+        ],
+        help="Elija la categoría de análisis que desea realizar"
+    )
+    
+    if categoria == "🔄 Rebalanceo":
+        # Submenú de Rebalanceo
+        tipo_rebalanceo = st.selectbox(
+            "Seleccione el tipo de rebalanceo:",
+            options=[
+                "📊 Optimización Básica",
+                "📈 Frontera Eficiente"
+            ],
+            help="Elija el tipo de rebalanceo que desea realizar"
+        )
+        
+        if tipo_rebalanceo == "📊 Optimización Básica":
+            mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "📈 Frontera Eficiente":
+            mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta)
+    
+    elif categoria == "📈 Optimizaciones":
+        # Submenú de Optimizaciones
+        tipo_optimizacion = st.selectbox(
+            "Seleccione el tipo de optimización:",
+            options=[
+                "🚀 Optimización Avanzada",
+                "🛡️ Análisis de Cobertura"
+            ],
+            help="Elija el tipo de optimización que desea realizar"
+        )
+        
+        if tipo_optimizacion == "🚀 Optimización Avanzada":
+            mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_optimizacion == "🛡️ Análisis de Cobertura":
+            mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
+
+def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Optimización básica del portafolio
+    """
+    st.markdown("#### 📊 Optimización Básica")
     
     activos = portafolio.get('activos', [])
     if not activos:
@@ -3957,7 +4330,7 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
     
     st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
     
-    # Configuración de optimización extendida
+    # Configuración de optimización
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -4026,9 +4399,14 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                     st.markdown("#### 📊 Pesos Optimizados")
                     if portfolio_result.dataframe_allocation is not None:
                         weights_df = portfolio_result.dataframe_allocation.copy()
-                        weights_df['Peso (%)'] = weights_df['weights'] * 100
-                        weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                        st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                        # Verificar que la columna 'weights' existe
+                        if 'weights' in weights_df.columns:
+                            weights_df['Peso (%)'] = weights_df['weights'] * 100
+                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                            st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                        else:
+                            st.warning("⚠️ No se encontraron pesos optimizados en el resultado")
+                            st.dataframe(weights_df, use_container_width=True)
                 
                 with col2:
                     st.markdown("#### 📈 Métricas del Portafolio")
@@ -4054,15 +4432,25 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                     st.plotly_chart(fig, use_container_width=True)
                 
                 # Gráfico de pesos
-                if portfolio_result.weights is not None:
+                if portfolio_result.weights is not None and portfolio_result.dataframe_allocation is not None:
                     st.markdown("#### 🥧 Distribución de Pesos")
-                    fig_pie = go.Figure(data=[go.Pie(
-                        labels=portfolio_result.dataframe_allocation['rics'],
-                        values=portfolio_result.weights,
-                        textinfo='label+percent',
-                    )])
-                    fig_pie.update_layout(title="Distribución Optimizada de Activos")
-                    st.plotly_chart(fig_pie, use_container_width=True)
+                    try:
+                        fig_pie = go.Figure(data=[go.Pie(
+                            labels=portfolio_result.dataframe_allocation['rics'],
+                            values=portfolio_result.weights,
+                            textinfo='label+percent',
+                        )])
+                        fig_pie.update_layout(title="Distribución Optimizada de Activos")
+                        st.plotly_chart(fig_pie, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"⚠️ Error creando gráfico de pesos: {str(e)}")
+                        # Mostrar datos en tabla como alternativa
+                        if 'weights' in portfolio_result.dataframe_allocation.columns:
+                            pie_data = pd.DataFrame({
+                                'Activo': portfolio_result.dataframe_allocation['rics'],
+                                'Peso (%)': portfolio_result.dataframe_allocation['weights'] * 100
+                            })
+                            st.dataframe(pie_data, use_container_width=True)
                 
                 # Análisis de rebalanceo automático
                 st.markdown("#### 🔄 Análisis de Rebalanceo Automático")
@@ -4072,7 +4460,12 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                 total_value = sum([activo.get('valuacionActual', 0) for activo in activos])
                 
                 # Obtener solo los símbolos que están en el resultado de optimización
-                simbolos_optimizados = list(portfolio_result.dataframe_allocation['rics']) if portfolio_result.dataframe_allocation is not None else []
+                simbolos_optimizados = []
+                if portfolio_result.dataframe_allocation is not None and 'rics' in portfolio_result.dataframe_allocation.columns:
+                    simbolos_optimizados = list(portfolio_result.dataframe_allocation['rics'])
+                elif portfolio_result.weights is not None:
+                    # Si no hay dataframe_allocation, usar los símbolos originales
+                    simbolos_optimizados = simbolos[:len(portfolio_result.weights)]
                 
                 for simbolo in simbolos_optimizados:
                     # Buscar el activo correspondiente en el portafolio
@@ -4119,9 +4512,17 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                             current_weights = [w/total_weight for w in current_weights]
                 
                 # Análisis de rebalanceo
-                rebalancing_analysis = manager_inst.compute_rebalancing_analysis(
-                    current_weights, portfolio_result.weights
-                )
+                if len(current_weights) > 0 and portfolio_result.weights is not None:
+                    try:
+                        rebalancing_analysis = manager_inst.compute_rebalancing_analysis(
+                            current_weights, portfolio_result.weights
+                        )
+                    except Exception as e:
+                        st.warning(f"⚠️ Error en análisis de rebalanceo: {str(e)}")
+                        rebalancing_analysis = None
+                else:
+                    st.warning("⚠️ No se pueden calcular pesos para rebalanceo")
+                    rebalancing_analysis = None
                 
                 if rebalancing_analysis:
                     col1, col2, col3, col4 = st.columns(4)
@@ -4253,46 +4654,6 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización completa: {str(e)}")
-                                'Cambio (%)': [d * 100 for d in rebalancing_analysis['weight_differences']],
-                                'Acción': ['Comprar' if d > 0.01 else 'Vender' if d < -0.01 else 'Mantener' 
-                                         for d in rebalancing_analysis['weight_differences']]
-                            })
-                            
-                            st.dataframe(rebalancing_df, use_container_width=True)
-                            
-                            # Gráfico comparativo
-                            fig_comparison = go.Figure()
-                            
-                            fig_comparison.add_trace(go.Bar(
-                                name='Peso Actual',
-                                x=simbolos_optimizados,
-                                y=[w * 100 for w in current_weights],
-                                marker_color='lightblue'
-                            ))
-                            
-                            fig_comparison.add_trace(go.Bar(
-                                name='Peso Objetivo',
-                                x=simbolos_optimizados,
-                                y=[w * 100 for w in portfolio_result.weights],
-                                marker_color='darkblue'
-                            ))
-                            
-                            fig_comparison.update_layout(
-                                title='Comparación de Pesos: Actual vs Objetivo',
-                                xaxis_title='Activos',
-                                yaxis_title='Peso (%)',
-                                barmode='group'
-                            )
-                            
-                            st.plotly_chart(fig_comparison, use_container_width=True)
-                        
-                    else:
-                        st.error("❌ Error en la optimización")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-                    
-            except Exception as e:
-                st.error(f"❌ Error durante la optimización: {str(e)}")
     
     # Función para calcular frontera eficiente interactiva
     def calcular_frontera_interactiva(manager_inst, calcular_todos=True, incluir_actual=True, 
@@ -4642,6 +5003,85 @@ def mostrar_optimizacion_portafolio(portafolio, token_acceso, fecha_desde, fecha
                 st.metric("Período Análisis", f"{fecha_desde} a {fecha_hasta}")
                 st.metric("Estado", "✅ Listo para optimización")
 
+def mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Optimización avanzada con capital inicial, horizonte, benchmark y análisis de alpha/beta
+    """
+    mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde, fecha_hasta)
+
+def mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Análisis específico de frontera eficiente
+    """
+    st.markdown("#### 📈 Análisis de Frontera Eficiente")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para análisis")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if len(simbolos) < 2:
+        st.warning("Se necesitan al menos 2 activos para análisis de frontera eficiente")
+        return
+    
+    st.info(f"📊 Analizando frontera eficiente para {len(simbolos)} activos")
+    
+    # Configuración de frontera eficiente
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01
+        )
+        num_puntos = st.slider("Número de Puntos", min_value=10, max_value=100, value=50)
+    
+    with col2:
+        incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True)
+        mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
+    
+    with col3:
+        calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True)
+        auto_refresh = st.checkbox("Auto-refresh", value=True)
+    
+    ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", use_container_width=True)
+    
+    if ejecutar_frontier:
+        with st.spinner("🔄 Calculando frontera eficiente..."):
+            try:
+                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                
+                if manager_inst.load_data():
+                    # Usar la función de frontera eficiente interactiva
+                    fig = calcular_frontera_interactiva(
+                        manager_inst, 
+                        calcular_todos=calcular_todos,
+                        incluir_actual=incluir_actual,
+                        num_puntos=num_puntos,
+                        target_return=target_return,
+                        mostrar_metricas=mostrar_metricas
+                    )
+                    
+                    if fig:
+                        st.success("✅ Frontera eficiente calculada exitosamente")
+                    else:
+                        st.error("❌ No se pudo calcular la frontera eficiente")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+
+# Función antigua eliminada - reemplazada por mostrar_menu_optimizacion_unificado
+
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
@@ -4668,15 +5108,12 @@ def mostrar_analisis_portafolio():
         portafolio, estado_cuenta = cargar_datos_cliente(token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
-        "🎯 Optimización",
-        "🛡️ Cobertura",
-        "🚀 Optimización Avanzada",
+        "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "📉 Histograma Retornos"
+        "💱 Cotizaciones"
     ])
 
     with tab1:
@@ -4692,117 +5129,17 @@ def mostrar_analisis_portafolio():
             st.warning("No se pudo obtener el estado de cuenta")
     
     with tab3:
-        # Optimización de portafolio
+        # Menú unificado de optimización y cobertura
         if portafolio:
-            mostrar_optimizacion_portafolio(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+            mostrar_menu_optimizacion_unificado(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
         else:
             st.warning("No se pudo obtener el portafolio para optimización")
     
     with tab4:
-        # Cobertura de portafolio
-        if portafolio:
-            mostrar_cobertura_portafolio(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
-        else:
-            st.warning("No se pudo obtener el portafolio para análisis de cobertura")
-    
-    with tab5:
-        # Optimización avanzada
-        if portafolio:
-            mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
-        else:
-            st.warning("No se pudo obtener el portafolio para optimización avanzada")
-    
-    with tab6:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
     
-    with tab7:
+    with tab5:
         mostrar_cotizaciones_mercado(token_acceso)
-    
-    with tab8:
-        # Histograma de retornos de activos individuales
-        st.markdown("### 📉 Histograma de Retornos por Activo")
-        
-        if portafolio:
-            activos = portafolio.get('activos', [])
-            if activos:
-                # Extraer símbolos
-                simbolos = []
-                for activo in activos:
-                    titulo = activo.get('titulo', {})
-                    simbolo = titulo.get('simbolo', '')
-                    if simbolo:
-                        simbolos.append(simbolo)
-                
-                if len(simbolos) >= 1:
-                    # Crear manager para obtener datos históricos con cache
-                    @st.cache_data(ttl=600)  # Cache por 10 minutos
-                    def cargar_datos_historicos(symbols, token, fecha_desde, fecha_hasta):
-                        """Cachea los datos históricos para evitar recargas"""
-                        manager_inst = PortfolioManager(symbols, token, fecha_desde, fecha_hasta)
-                        if manager_inst.load_data():
-                            return manager_inst
-                        return None
-                    
-                    with st.spinner("📊 Cargando datos históricos..."):
-                        manager_inst = cargar_datos_historicos(simbolos, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
-                    
-                    if manager_inst:
-                        st.success("✅ Datos históricos cargados para análisis de retornos")
-                        
-                        # Mostrar histogramas individuales con lazy loading
-                        for i, simbolo in enumerate(simbolos):
-                            if simbolo in manager_inst.returns.columns:
-                                with st.expander(f"📊 {simbolo}", expanded=False):
-                                    # Obtener retornos del activo
-                                    asset_returns = manager_inst.returns[simbolo].dropna()
-                                    
-                                    if len(asset_returns) > 10:
-                                        # Crear histograma optimizado
-                                        fig = go.Figure(data=[go.Histogram(
-                                            x=asset_returns,
-                                            nbinsx=min(20, len(asset_returns)//5),  # Menos bins para mejor rendimiento
-                                            name=f"Retornos de {simbolo}",
-                                            marker_color='#0d6efd'
-                                        )])
-                                        
-                                        # Calcular métricas básicas
-                                        mean_return = asset_returns.mean()
-                                        std_return = asset_returns.std()
-                                        var_95 = np.percentile(asset_returns, 5)
-                                        
-                                        # Agregar líneas de métricas
-                                        fig.add_vline(x=mean_return, line_dash="dash", line_color="red", 
-                                                     annotation_text=f"Media: {mean_return:.4f}")
-                                        fig.add_vline(x=var_95, line_dash="dash", line_color="orange", 
-                                                     annotation_text=f"VaR 95%: {var_95:.4f}")
-                                        
-                                        fig.update_layout(
-                                            title=f"Distribución de Retornos - {simbolo}",
-                                            xaxis_title="Retorno",
-                                            yaxis_title="Frecuencia",
-                                            showlegend=False,
-                                            template='plotly_white',
-                                            height=400  # Altura fija para mejor rendimiento
-                                        )
-                                        
-                                        st.plotly_chart(fig, use_container_width=True)
-                                        
-                                        # Mostrar métricas en columnas
-                                        col1, col2, col3, col4 = st.columns(4)
-                                        col1.metric("Retorno Medio", f"{mean_return:.4f}")
-                                        col2.metric("Volatilidad", f"{std_return:.4f}")
-                                        col3.metric("VaR 95%", f"{var_95:.4f}")
-                                        col4.metric("Observaciones", len(asset_returns))
-                                    else:
-                                        st.warning(f"⚠️ No hay suficientes datos para {simbolo}")
-                    else:
-                        st.error("❌ No se pudieron cargar los datos históricos")
-                else:
-                    st.warning("⚠️ No hay activos disponibles para análisis")
-            else:
-                st.warning("⚠️ No hay activos en el portafolio")
-        else:
-            st.warning("⚠️ No se pudo obtener el portafolio")
 
 def main():
     # Configuración de rendimiento
