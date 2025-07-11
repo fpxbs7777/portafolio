@@ -810,13 +810,23 @@ def obtener_tasas_caucion(token_portador):
             st.error("Error de autenticación. Por favor, verifique su token de acceso.")
             return None
             
+        elif response.status_code == 500:
+            st.warning("⚠️ Error 500 del servidor de IOL al obtener tasas de caución")
+            st.info("💡 Esto puede ser temporal. Intente nuevamente en unos minutos.")
+            return None
+            
+        elif response.status_code == 503:
+            st.warning("⚠️ Servicio temporalmente no disponible")
+            st.info("💡 El servidor de IOL puede estar en mantenimiento")
+            return None
+            
         else:
             error_msg = f"Error {response.status_code} al obtener tasas de caución"
             try:
                 error_data = response.json()
                 error_msg += f": {error_data.get('message', 'Error desconocido')}"
             except:
-                error_msg += f": {response.text}"
+                error_msg += f": {response.text[:200]}"  # Limitar el texto del error
             st.error(error_msg)
             return None
             
@@ -958,13 +968,22 @@ def parse_datetime_flexible(date_str: str):
             # Handle format with milliseconds: "2024-12-10T17:11:04.123"
             elif '.' in date_str and 'T' in date_str:
                 return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
+            # Handle format with timezone: "2024-12-10T17:11:04-03:00"
+            elif 'T' in date_str and ('+' in date_str or '-' in date_str.split('T')[1]):
+                return pd.to_datetime(date_str, utc=True)
         except (ValueError, TypeError):
             pass
             
         # Fall back to pandas' built-in parser if specific formats don't match
-        return pd.to_datetime(date_str, errors='coerce', utc=True)
+        parsed_date = pd.to_datetime(date_str, errors='coerce', utc=True)
+        
+        # Si la fecha se parseó correctamente, normalizar a UTC
+        if pd.notna(parsed_date):
+            return parsed_date.tz_localize(None).tz_localize('UTC')
+        
+        return None
     except Exception as e:
-        st.warning(f"Error parsing date '{date_str}': {str(e)}")
+        # Silencioso para no interrumpir el flujo
         return None
 
 def procesar_respuesta_historico(data, tipo_activo):
@@ -1091,6 +1110,12 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 # Crear serie ordenada por fecha
                 serie = pd.Series(precios, index=fechas)
                 serie = serie.sort_index()  # Asegurar orden cronológico
+                
+                # Normalizar zona horaria a UTC si es necesario
+                if serie.index.tz is not None:
+                    serie.index = serie.index.tz_convert('UTC')
+                else:
+                    serie.index = serie.index.tz_localize('UTC')
                 
                 # Eliminar duplicados manteniendo el último valor
                 serie = serie[~serie.index.duplicated(keep='last')]
@@ -1310,37 +1335,97 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         with st.expander("🔍 Debug - Información de fechas"):
             for col in df_precios.columns:
                 serie = df_precios[col]
-                st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
+                fechas_validas = serie.dropna()
+                st.text(f"{col}: {len(fechas_validas)} puntos válidos de {len(serie)} total")
+                if len(fechas_validas) > 0:
+                    st.text(f"  Rango: {fechas_validas.index.min()} a {fechas_validas.index.max()}")
+                else:
+                    st.text(f"  ⚠️ Sin datos válidos")
         
-        # Intentar diferentes estrategias de alineación
+        # Estrategia mejorada de alineación de datos
+        st.info("🔄 Aplicando estrategias de alineación de datos...")
+        
         try:
-            # Estrategia 1: Forward fill y luego backward fill
-            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            # Mostrar información detallada antes de alinear
+            with st.expander("📊 Información detallada de fechas por activo"):
+                for col in df_precios.columns:
+                    serie = df_precios[col]
+                    fechas_validas = serie.dropna()
+                    st.text(f"{col}: {len(fechas_validas)} puntos válidos de {len(serie)} total")
+                    if len(fechas_validas) > 0:
+                        st.text(f"  Rango: {fechas_validas.index.min()} a {fechas_validas.index.max()}")
             
-            # Estrategia 2: Interpolar valores faltantes
-            df_precios_interpolated = df_precios.interpolate(method='time')
+            # Estrategia 1: Forward fill con límite de días
+            df_precios_ffill = df_precios.fillna(method='ffill', limit=5)
+            df_precios_ffill = df_precios_ffill.fillna(method='bfill', limit=5)
             
-            # Usar la estrategia que conserve más datos
-            if not df_precios_filled.dropna().empty:
-                df_precios = df_precios_filled.dropna()
-                st.info("✅ Usando estrategia forward/backward fill")
-            elif not df_precios_interpolated.dropna().empty:
-                df_precios = df_precios_interpolated.dropna()
-                st.info("✅ Usando estrategia de interpolación")
+            # Estrategia 2: Interpolación temporal
+            df_precios_interp = df_precios.interpolate(method='time', limit_direction='both', limit=10)
+            
+            # Estrategia 3: Reindexar a fechas comunes y usar forward fill
+            fecha_min = df_precios.index.min()
+            fecha_max = df_precios.index.max()
+            fechas_completas = pd.date_range(start=fecha_min, end=fecha_max, freq='D')
+            df_precios_reindex = df_precios.reindex(fechas_completas)
+            df_precios_reindex = df_precios_reindex.fillna(method='ffill', limit=5)
+            df_precios_reindex = df_precios_reindex.fillna(method='bfill', limit=5)
+            
+            # Elegir la estrategia que conserve más datos
+            estrategias = [
+                ("Forward/Backward Fill", df_precios_ffill.dropna()),
+                ("Interpolación Temporal", df_precios_interp.dropna()),
+                ("Reindex + Forward Fill", df_precios_reindex.dropna())
+            ]
+            
+            mejor_estrategia = None
+            max_observaciones = 0
+            
+            for nombre, df_temp in estrategias:
+                if not df_temp.empty and len(df_temp) > max_observaciones:
+                    max_observaciones = len(df_temp)
+                    mejor_estrategia = (nombre, df_temp)
+            
+            if mejor_estrategia:
+                nombre_estrategia, df_precios = mejor_estrategia
+                st.success(f"✅ Usando estrategia: {nombre_estrategia}")
+                st.info(f"📊 Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
             else:
-                # Estrategia 3: Usar solo fechas con datos completos
-                df_precios = df_precios.dropna()
-                st.info("✅ Usando solo fechas con datos completos")
+                # Estrategia de último recurso: usar solo fechas con al menos 2 activos
+                st.warning("⚠️ Aplicando estrategia de último recurso...")
+                
+                # Contar valores no-nulos por fila
+                conteo_por_fila = df_precios.count(axis=1)
+                
+                # Usar solo filas con al menos 2 activos con datos
+                filas_validas = conteo_por_fila >= 2
+                df_precios = df_precios[filas_validas]
+                
+                if df_precios.empty:
+                    st.error("❌ No hay suficientes datos comunes entre los activos")
+                    return None, None, None
+                
+                # Forward fill para completar datos faltantes
+                df_precios = df_precios.fillna(method='ffill', limit=3)
+                df_precios = df_precios.fillna(method='bfill', limit=3)
+                
+                st.info(f"✅ Estrategia de último recurso: {len(df_precios)} observaciones con al menos 2 activos")
                 
         except Exception as e:
-            st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
+            st.warning(f"⚠️ Error en alineación de datos: {str(e)}")
+            
+            # Estrategia de emergencia: usar solo fechas con datos completos
             df_precios = df_precios.dropna()
-        
-        if df_precios.empty:
-            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
-            return None, None, None
+            
+            if df_precios.empty:
+                st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+                return None, None, None
         
         st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
+        
+        # Verificar que tenemos suficientes datos antes de calcular retornos
+        if len(df_precios) < 30:
+            st.warning(f"⚠️ Solo {len(df_precios)} observaciones disponibles (mínimo recomendado: 30)")
+            st.info("💡 Considerando usar un rango de fechas más amplio para obtener más datos históricos")
         
         # Calcular retornos
         returns = df_precios.pct_change().dropna()
