@@ -1784,12 +1784,23 @@ class manager:
         # Crear objeto output
         port_output = output(portfolio_returns, self.notional)
         port_output.weights = weights
-        port_output.dataframe_allocation = pd.DataFrame({
-            'rics': self.rics,
-            'weights': weights,
-            'volatilities': np.sqrt(np.diag(self.cov_matrix)),
-            'returns': self.mean_returns
-        })
+        
+        # Crear DataFrame de asignación con debugging
+        try:
+            port_output.dataframe_allocation = pd.DataFrame({
+                'rics': self.rics,
+                'weights': weights,
+                'volatilities': np.sqrt(np.diag(self.cov_matrix)),
+                'returns': self.mean_returns
+            })
+            st.info(f"ℹ️ Debug: Manager DataFrame creado con columnas: {port_output.dataframe_allocation.columns.tolist()}")
+        except Exception as e:
+            st.error(f"❌ Error creando DataFrame en manager: {str(e)}")
+            # Crear DataFrame básico como fallback
+            port_output.dataframe_allocation = pd.DataFrame({
+                'rics': self.rics,
+                'weights': weights
+            })
         
         return port_output
 
@@ -3803,27 +3814,31 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         else:
                             pesos_actuales = [1/len(simbolos_validos)] * len(simbolos_validos)
                         
-                        # Calcular retornos del portafolio completo
+                        # Calcular retornos del portafolio actual
                         portfolio_returns = None
                         try:
                             # Obtener solo las columnas que existen en los datos
                             available_symbols = [s for s in simbolos_validos if s in manager_inst.returns.columns]
                             if available_symbols:
-                                # Usar solo los símbolos disponibles
-                                available_weights = []
-                                for simbolo in available_symbols:
-                                    idx = simbolos_validos.index(simbolo)
-                                    available_weights.append(pesos_actuales[idx])
-                                
-                                # Normalizar pesos de símbolos disponibles
-                                if sum(available_weights) > 0:
-                                    available_weights = [w/sum(available_weights) for w in available_weights]
+                                if len(available_symbols) == 1:
+                                    # Si solo hay un activo, usar sus retornos directamente
+                                    portfolio_returns = manager_inst.returns[available_symbols[0]].dropna()
                                 else:
-                                    available_weights = [1/len(available_symbols)] * len(available_symbols)
-                                
-                                # Calcular retornos del portafolio
-                                portfolio_returns = (manager_inst.returns[available_symbols] * available_weights).sum(axis=1)
-                                portfolio_returns = portfolio_returns.dropna()
+                                    # Si hay múltiples activos, calcular retornos ponderados
+                                    available_weights = []
+                                    for simbolo in available_symbols:
+                                        idx = simbolos_validos.index(simbolo)
+                                        available_weights.append(pesos_actuales[idx])
+                                    
+                                    # Normalizar pesos de símbolos disponibles
+                                    if sum(available_weights) > 0:
+                                        available_weights = [w/sum(available_weights) for w in available_weights]
+                                    else:
+                                        available_weights = [1/len(available_symbols)] * len(available_symbols)
+                                    
+                                    # Calcular retornos del portafolio
+                                    portfolio_returns = (manager_inst.returns[available_symbols] * available_weights).sum(axis=1)
+                                    portfolio_returns = portfolio_returns.dropna()
                             else:
                                 st.warning("⚠️ No hay símbolos disponibles en los datos históricos")
                         except Exception as e:
@@ -3898,12 +3913,21 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 st.metric("Sharpe Ratio Anual", f"{annual_sharpe:.4f}")
                             
                             # Información adicional
-                            st.info(f"""
-                            **ℹ️ Información del Análisis:**
-                            - **Período analizado:** {len(portfolio_returns)} días de trading
-                            - **Activos incluidos:** {len(available_symbols)} de {len(simbolos_validos)} activos
-                            - **Composición:** Basada en la valuación actual del portafolio
-                            """)
+                            if len(available_symbols) == 1:
+                                st.info(f"""
+                                **ℹ️ Información del Análisis:**
+                                - **Período analizado:** {len(portfolio_returns)} días de trading
+                                - **Activo analizado:** {available_symbols[0]}
+                                - **Tipo de análisis:** Retornos del activo individual
+                                """)
+                            else:
+                                st.info(f"""
+                                **ℹ️ Información del Análisis:**
+                                - **Período analizado:** {len(portfolio_returns)} días de trading
+                                - **Activos incluidos:** {len(available_symbols)} de {len(simbolos_validos)} activos
+                                - **Composición:** Basada en la valuación actual del portafolio
+                                - **Tipo de análisis:** Retornos ponderados del portafolio completo
+                                """)
                         else:
                             st.warning("⚠️ Datos insuficientes para calcular retornos del portafolio")
                     else:
@@ -4277,12 +4301,23 @@ class PortfolioManager:
                 portfolio_returns = (self.returns * weights).sum(axis=1)
                 portfolio_output = output(portfolio_returns, self.notional)
                 portfolio_output.weights = weights
-                portfolio_output.dataframe_allocation = pd.DataFrame({
-                    'rics': list(self.returns.columns),
-                    'weights': weights,
-                    'volatilities': self.returns.std().values,
-                    'returns': self.returns.mean().values
-                })
+                
+                # Crear DataFrame de asignación con debugging
+                try:
+                    portfolio_output.dataframe_allocation = pd.DataFrame({
+                        'rics': list(self.returns.columns),
+                        'weights': weights,
+                        'volatilities': self.returns.std().values,
+                        'returns': self.returns.mean().values
+                    })
+                    st.info(f"ℹ️ Debug: DataFrame creado con columnas: {portfolio_output.dataframe_allocation.columns.tolist()}")
+                except Exception as e:
+                    st.error(f"❌ Error creando DataFrame de asignación: {str(e)}")
+                    # Crear DataFrame básico como fallback
+                    portfolio_output.dataframe_allocation = pd.DataFrame({
+                        'rics': [f'Activo_{i+1}' for i in range(len(weights))],
+                        'weights': weights
+                    })
                 
                 return portfolio_output
             
@@ -6059,6 +6094,8 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                     st.markdown("#### 📊 Pesos Optimizados")
                     if portfolio_result.dataframe_allocation is not None:
                         weights_df = portfolio_result.dataframe_allocation.copy()
+                        st.info(f"ℹ️ Debug: Columnas en dataframe_allocation: {weights_df.columns.tolist()}")
+                        
                         # Verificar que las columnas necesarias existen
                         if 'weights' in weights_df.columns and 'rics' in weights_df.columns:
                             weights_df['Peso (%)'] = weights_df['weights'] * 100
@@ -6083,6 +6120,8 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                             })
                             weights_df = weights_df.sort_values('Peso (%)', ascending=False)
                             st.dataframe(weights_df, use_container_width=True)
+                        else:
+                            st.error("❌ No hay weights disponibles en el resultado de optimización")
                 
                 with col2:
                     st.markdown("#### 📈 Métricas del Portafolio")
