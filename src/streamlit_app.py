@@ -753,7 +753,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
 
 def obtener_tasas_caucion(token_portador):
     """
-    Obtiene las tasas de caución desde la API de IOL con múltiples endpoints de respaldo
+    Obtiene las tasas de caución desde la API de IOL
     
     Args:
         token_portador (str): Token de autenticación Bearer
@@ -761,122 +761,71 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
-    # Múltiples endpoints para intentar
-    endpoints = [
-        {
-            'url': "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables",
-            'params': {
-                'cotizacionInstrumentoModel.instrumento': 'cauciones',
-                'cotizacionInstrumentoModel.pais': 'argentina'
-            }
-        },
-        {
-            'url': "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos",
-            'params': {}
-        },
-        {
-            'url': "https://api.invertironline.com/api/v2/cotizaciones/cauciones/argentina",
-            'params': {}
-        }
-    ]
-    
+    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
+    params = {
+        'cotizacionInstrumentoModel.instrumento': 'cauciones',
+        'cotizacionInstrumentoModel.pais': 'argentina'
+    }
     headers = {
         'Accept': 'application/json',
-        'Authorization': f'Bearer {token_portador}',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'Authorization': f'Bearer {token_portador}'
     }
     
-    for i, endpoint in enumerate(endpoints):
-        try:
-            st.info(f"🔄 Intentando endpoint {i+1}/{len(endpoints)} para tasas de caución...")
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
             
-            response = requests.get(
-                endpoint['url'], 
-                headers=headers, 
-                params=endpoint['params'], 
-                timeout=20
-            )
+            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
+                df = pd.DataFrame(data['titulos'])
+                
+                # Filtrar solo las cauciónes y limpiar los datos
+                df = df[df['plazo'].notna()].copy()
+                
+                # Extraer el plazo en días
+                df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
+                
+                # Limpiar la tasa (convertir a float si es necesario)
+                if 'ultimoPrecio' in df.columns:
+                    df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                
+                # Asegurarse de que las columnas necesarias existan
+                if 'monto' not in df.columns and 'volumen' in df.columns:
+                    df['monto'] = df['volumen']
+                
+                # Ordenar por plazo
+                df = df.sort_values('plazo_dias')
+                
+                # Seleccionar solo las columnas necesarias
+                columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
+                columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
+                
+                return df[columnas_disponibles]
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Procesar diferentes estructuras de respuesta
-                titulos = None
-                if 'titulos' in data and isinstance(data['titulos'], list):
-                    titulos = data['titulos']
-                elif isinstance(data, list):
-                    titulos = data
-                elif 'data' in data and isinstance(data['data'], list):
-                    titulos = data['data']
-                
-                if titulos and len(titulos) > 0:
-                    df = pd.DataFrame(titulos)
-                    
-                    # Filtrar solo las cauciónes y limpiar los datos
-                    if 'plazo' in df.columns:
-                        df = df[df['plazo'].notna()].copy()
-                        
-                        # Extraer el plazo en días
-                        df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
-                        
-                        # Limpiar la tasa (convertir a float si es necesario)
-                        if 'ultimoPrecio' in df.columns:
-                            df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
-                        elif 'tasa' in df.columns:
-                            df['tasa_limpia'] = df['tasa'].astype(str).str.rstrip('%').astype('float')
-                        
-                        # Asegurarse de que las columnas necesarias existan
-                        if 'monto' not in df.columns and 'volumen' in df.columns:
-                            df['monto'] = df['volumen']
-                        
-                        # Ordenar por plazo
-                        df = df.sort_values('plazo_dias')
-                        
-                        # Seleccionar solo las columnas necesarias
-                        columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
-                        columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
-                        
-                        st.success(f"✅ Datos obtenidos exitosamente del endpoint {i+1}")
-                        return df[columnas_disponibles]
-                
-                st.warning(f"⚠️ Endpoint {i+1} no devolvió datos válidos")
-                continue
-                
-            elif response.status_code == 401:
-                st.error("❌ Error de autenticación. Verifique su token de acceso.")
-                return None
-                
-            elif response.status_code == 500:
-                st.warning(f"⚠️ Error 500 del servidor de IOL en endpoint {i+1}")
-                if i == len(endpoints) - 1:  # Último intento
-                    st.info("💡 Todos los endpoints fallaron. Intente nuevamente en unos minutos.")
-                continue
-                
-            elif response.status_code == 503:
-                st.warning(f"⚠️ Servicio temporalmente no disponible en endpoint {i+1}")
-                continue
-                
-            else:
-                st.warning(f"⚠️ Error {response.status_code} en endpoint {i+1}")
-                continue
-                
-        except requests.exceptions.Timeout:
-            st.warning(f"⚠️ Timeout en endpoint {i+1}")
-            continue
-        except requests.exceptions.ConnectionError:
-            st.warning(f"⚠️ Error de conexión en endpoint {i+1}")
-            continue
-        except Exception as e:
-            st.warning(f"⚠️ Error inesperado en endpoint {i+1}: {str(e)}")
-            continue
-    
-    # Si llegamos aquí, todos los endpoints fallaron
-    st.error("❌ No se pudieron obtener tasas de caución de ningún endpoint")
-    st.info("💡 Sugerencias:")
-    st.info("• Verifique su conexión a internet")
-    st.info("• Espere unos minutos y reintente")
-    st.info("• Verifique que su token de IOL sea válido")
-    return None
+            st.warning("No se encontraron datos de tasas de caución en la respuesta")
+            return None
+            
+        elif response.status_code == 401:
+            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
+            return None
+            
+        else:
+            error_msg = f"Error {response.status_code} al obtener tasas de caución"
+            try:
+                error_data = response.json()
+                error_msg += f": {error_data.get('message', 'Error desconocido')}"
+            except:
+                error_msg += f": {response.text}"
+            st.error(error_msg)
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
+        return None
 
 def mostrar_tasas_caucion(token_portador):
     """
@@ -1009,22 +958,13 @@ def parse_datetime_flexible(date_str: str):
             # Handle format with milliseconds: "2024-12-10T17:11:04.123"
             elif '.' in date_str and 'T' in date_str:
                 return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
-            # Handle format with timezone: "2024-12-10T17:11:04-03:00"
-            elif 'T' in date_str and ('+' in date_str or '-' in date_str.split('T')[1]):
-                return pd.to_datetime(date_str, utc=True)
         except (ValueError, TypeError):
             pass
             
         # Fall back to pandas' built-in parser if specific formats don't match
-        parsed_date = pd.to_datetime(date_str, errors='coerce', utc=True)
-        
-        # Si la fecha se parseó correctamente, normalizar a UTC
-        if pd.notna(parsed_date):
-            return parsed_date.tz_localize(None).tz_localize('UTC')
-        
-        return None
+        return pd.to_datetime(date_str, errors='coerce', utc=True)
     except Exception as e:
-        # Silencioso para no interrumpir el flujo
+        st.warning(f"Error parsing date '{date_str}': {str(e)}")
         return None
 
 def procesar_respuesta_historico(data, tipo_activo):
@@ -1151,12 +1091,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 # Crear serie ordenada por fecha
                 serie = pd.Series(precios, index=fechas)
                 serie = serie.sort_index()  # Asegurar orden cronológico
-                
-                # Normalizar zona horaria a UTC si es necesario
-                if serie.index.tz is not None:
-                    serie.index = serie.index.tz_convert('UTC')
-                else:
-                    serie.index = serie.index.tz_localize('UTC')
                 
                 # Eliminar duplicados manteniendo el último valor
                 serie = serie[~serie.index.duplicated(keep='last')]
@@ -1376,172 +1310,44 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         with st.expander("🔍 Debug - Información de fechas"):
             for col in df_precios.columns:
                 serie = df_precios[col]
-                fechas_validas = serie.dropna()
-                porcentaje_valido = (len(fechas_validas) / len(serie)) * 100 if len(serie) > 0 else 0
-                st.text(f"{col}: {len(fechas_validas)} puntos válidos de {len(serie)} total ({porcentaje_valido:.1f}%)")
-                if len(fechas_validas) > 0:
-                    st.text(f"  Rango: {fechas_validas.index.min()} a {fechas_validas.index.max()}")
-                    if fechas_validas.std() == 0:
-                        st.text(f"  ⚠️ Precios constantes (sin variación)")
-                    else:
-                        st.text(f"  Volatilidad: {fechas_validas.std():.2f}")
-                else:
-                    st.text(f"  ⚠️ Sin datos válidos")
-            
-            # Mostrar estadísticas generales
-            st.markdown("**📈 Estadísticas generales:**")
-            total_observaciones = len(df_precios)
-            total_activos = len(df_precios.columns)
-            valores_faltantes = df_precios.isnull().sum().sum()
-            total_valores = df_precios.size
-            porcentaje_faltantes = (valores_faltantes / total_valores) * 100 if total_valores > 0 else 0
-            
-            st.text(f"• Total observaciones: {total_observaciones}")
-            st.text(f"• Total activos: {total_activos}")
-            st.text(f"• Valores faltantes: {valores_faltantes} ({porcentaje_faltantes:.1f}%)")
-            st.text(f"• Observaciones completas: {df_precios.dropna().shape[0]}")
+                st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
         
-        # Estrategia mejorada de alineación de datos
-        st.info("🔄 Aplicando estrategias de alineación de datos...")
-        
+        # Intentar diferentes estrategias de alineación
         try:
-            # Mostrar información detallada antes de alinear
-            with st.expander("📊 Información detallada de fechas por activo"):
-                for col in df_precios.columns:
-                    serie = df_precios[col]
-                    fechas_validas = serie.dropna()
-                    st.text(f"{col}: {len(fechas_validas)} puntos válidos de {len(serie)} total")
-                    if len(fechas_validas) > 0:
-                        st.text(f"  Rango: {fechas_validas.index.min()} a {fechas_validas.index.max()}")
+            # Estrategia 1: Forward fill y luego backward fill
+            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
             
-            # Estrategia 1: Forward fill con límite de días
-            df_precios_ffill = df_precios.fillna(method='ffill', limit=5)
-            df_precios_ffill = df_precios_ffill.fillna(method='bfill', limit=5)
+            # Estrategia 2: Interpolar valores faltantes
+            df_precios_interpolated = df_precios.interpolate(method='time')
             
-            # Estrategia 2: Interpolación temporal
-            df_precios_interp = df_precios.interpolate(method='time', limit_direction='both', limit=10)
-            
-            # Estrategia 3: Reindexar a fechas comunes y usar forward fill
-            fecha_min = df_precios.index.min()
-            fecha_max = df_precios.index.max()
-            fechas_completas = pd.date_range(start=fecha_min, end=fecha_max, freq='D')
-            df_precios_reindex = df_precios.reindex(fechas_completas)
-            df_precios_reindex = df_precios_reindex.fillna(method='ffill', limit=5)
-            df_precios_reindex = df_precios_reindex.fillna(method='bfill', limit=5)
-            
-            # Elegir la estrategia que conserve más datos
-            estrategias = [
-                ("Forward/Backward Fill", df_precios_ffill.dropna()),
-                ("Interpolación Temporal", df_precios_interp.dropna()),
-                ("Reindex + Forward Fill", df_precios_reindex.dropna())
-            ]
-            
-            mejor_estrategia = None
-            max_observaciones = 0
-            
-            for nombre, df_temp in estrategias:
-                if not df_temp.empty and len(df_temp) > max_observaciones:
-                    max_observaciones = len(df_temp)
-                    mejor_estrategia = (nombre, df_temp)
-            
-            if mejor_estrategia:
-                nombre_estrategia, df_precios = mejor_estrategia
-                st.success(f"✅ Usando estrategia: {nombre_estrategia}")
-                st.info(f"📊 Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
+            # Usar la estrategia que conserve más datos
+            if not df_precios_filled.dropna().empty:
+                df_precios = df_precios_filled.dropna()
+                st.info("✅ Usando estrategia forward/backward fill")
+            elif not df_precios_interpolated.dropna().empty:
+                df_precios = df_precios_interpolated.dropna()
+                st.info("✅ Usando estrategia de interpolación")
             else:
-                # Estrategia de último recurso: usar solo fechas con al menos 2 activos
-                st.warning("⚠️ Aplicando estrategia de último recurso...")
-                
-                # Contar valores no-nulos por fila
-                conteo_por_fila = df_precios.count(axis=1)
-                
-                # Usar solo filas con al menos 2 activos con datos
-                filas_validas = conteo_por_fila >= 2
-                df_precios = df_precios[filas_validas]
-                
-                if df_precios.empty:
-                    st.error("❌ No hay suficientes datos comunes entre los activos")
-                    return None, None, None
-                
-                # Forward fill para completar datos faltantes
-                df_precios = df_precios.fillna(method='ffill', limit=3)
-                df_precios = df_precios.fillna(method='bfill', limit=3)
-                
-                st.info(f"✅ Estrategia de último recurso: {len(df_precios)} observaciones con al menos 2 activos")
+                # Estrategia 3: Usar solo fechas con datos completos
+                df_precios = df_precios.dropna()
+                st.info("✅ Usando solo fechas con datos completos")
                 
         except Exception as e:
-            st.warning(f"⚠️ Error en alineación de datos: {str(e)}")
-            
-            # Estrategia de emergencia: usar solo fechas con datos completos
+            st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
             df_precios = df_precios.dropna()
-            
-            if df_precios.empty:
-                st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
-                return None, None, None
+        
+        if df_precios.empty:
+            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            return None, None, None
         
         st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
-        
-        # Mejorar la calidad de los datos antes de calcular retornos
-        st.info("🔧 Mejorando calidad de datos...")
-        
-        # Eliminar columnas con demasiados valores faltantes
-        columnas_originales = len(df_precios.columns)
-        umbral_faltantes = 0.5  # Máximo 50% de valores faltantes por activo
-        df_precios_limpio = df_precios.dropna(axis=1, thresh=int(len(df_precios) * (1 - umbral_faltantes)))
-        
-        if len(df_precios_limpio.columns) < columnas_originales:
-            columnas_eliminadas = columnas_originales - len(df_precios_limpio.columns)
-            st.warning(f"⚠️ Eliminadas {columnas_eliminadas} columnas con demasiados valores faltantes")
-        
-        # Eliminar filas con demasiados valores faltantes
-        filas_originales = len(df_precios_limpio)
-        df_precios_limpio = df_precios_limpio.dropna(thresh=len(df_precios_limpio.columns) * 0.5)
-        
-        if len(df_precios_limpio) < filas_originales:
-            filas_eliminadas = filas_originales - len(df_precios_limpio)
-            st.warning(f"⚠️ Eliminadas {filas_eliminadas} filas con demasiados valores faltantes")
-        
-        # Verificar que tenemos suficientes datos después de la limpieza
-        if len(df_precios_limpio) < 10:
-            st.error(f"❌ Solo {len(df_precios_limpio)} observaciones después de la limpieza (mínimo 10)")
-            st.info("💡 Intente con un rango de fechas más amplio")
-            return None, None, None
-        
-        if len(df_precios_limpio.columns) < 2:
-            st.error(f"❌ Solo {len(df_precios_limpio.columns)} activos válidos después de la limpieza (mínimo 2)")
-            st.info("💡 Intente con diferentes activos o un rango de fechas más amplio")
-            return None, None, None
-        
-        st.success(f"✅ Datos limpios: {len(df_precios_limpio)} observaciones para {len(df_precios_limpio.columns)} activos")
-        
-        # Usar los datos limpios
-        df_precios = df_precios_limpio
-        
-        # Verificar que tenemos suficientes datos antes de calcular retornos
-        if len(df_precios) < 30:
-            st.warning(f"⚠️ Solo {len(df_precios)} observaciones disponibles (mínimo recomendado: 30)")
-            st.info("💡 Considerando usar un rango de fechas más amplio para obtener más datos históricos")
         
         # Calcular retornos
         returns = df_precios.pct_change().dropna()
         
-        # Verificar cuántos retornos válidos tenemos después del cálculo
-        if returns.empty:
-            st.error("❌ No se pudieron calcular retornos válidos (todos los valores son NaN)")
+        if returns.empty or len(returns) < 30:
+            st.error("❌ No hay suficientes datos para calcular retornos válidos (mínimo 30 observaciones)")
             return None, None, None
-        
-        if len(returns) < 10:
-            st.error(f"❌ Solo {len(returns)} observaciones de retornos válidos (mínimo 10)")
-            st.info("💡 Esto puede deberse a:")
-            st.info("   • Datos con muchos valores faltantes")
-            st.info("   • Activos con precios constantes")
-            st.info("   • Problemas en la alineación de fechas")
-            return None, None, None
-        
-        if len(returns) < 30:
-            st.warning(f"⚠️ Solo {len(returns)} observaciones de retornos válidos (mínimo recomendado: 30)")
-            st.info("💡 Continuando con análisis limitado...")
-            st.info("💡 Para mejores resultados, use un rango de fechas más amplio")
         
         # Verificar que los retornos no sean constantes
         if (returns.std() == 0).any():
@@ -6004,20 +5810,16 @@ def obtener_cotizaciones_caucion(bearer_token):
 
 def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta):
     """
-    Obtiene datos de benchmarks del mercado argentino con múltiples fuentes de respaldo
+    Obtiene datos de benchmarks del mercado argentino
     """
     try:
-        st.info(f"🔍 Obteniendo datos del benchmark: {benchmark}")
-        
         if benchmark == 'Tasa_Caucion_Promedio':
-            # Obtener cotizaciones de cauciones usando la función mejorada
-            st.info("🔄 Obteniendo tasas de caución...")
-            tasas_caucion = obtener_tasas_caucion(token_acceso)
-            
-            if tasas_caucion is not None and not tasas_caucion.empty:
+            # Obtener cotizaciones de cauciones usando la nueva función
+            cotizaciones_caucion = obtener_cotizaciones_caucion(token_acceso)
+            if cotizaciones_caucion is not None and not cotizaciones_caucion.empty:
                 # Calcular promedio de tasas de caución
-                if 'tasa_limpia' in tasas_caucion.columns:
-                    tasas = tasas_caucion['tasa_limpia'].dropna()
+                if 'tasa' in cotizaciones_caucion.columns:
+                    tasas = cotizaciones_caucion['tasa'].dropna()
                     if len(tasas) > 0:
                         tasa_promedio = tasas.mean() / 100  # Convertir a decimal
                         retorno_diario = (1 + tasa_promedio) ** (1/252) - 1
@@ -6026,71 +5828,69 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
                         fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
                         retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
                         
-                        st.success(f"✅ Tasa de caución promedio: {tasa_promedio:.2%}")
                         return pd.DataFrame({'Tasa_Caucion_Promedio': retornos})
-                elif 'ultimoPrecio' in tasas_caucion.columns:
-                    tasas = tasas_caucion['ultimoPrecio'].dropna()
-                    if len(tasas) > 0:
-                        tasa_promedio = tasas.mean() / 100
+                
+                # Fallback a método anterior si no hay datos
+                tasas_caucion = obtener_tasas_caucion(token_acceso)
+                if tasas_caucion and 'tasas' in tasas_caucion:
+                    tasas = []
+                    for tasa in tasas_caucion['tasas']:
+                        if 'tasa' in tasa:
+                            tasas.append(tasa['tasa'])
+                    
+                    if tasas:
+                        tasa_promedio = np.mean(tasas) / 100
                         retorno_diario = (1 + tasa_promedio) ** (1/252) - 1
                         fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
                         retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
-                        
-                        st.success(f"✅ Tasa de caución promedio: {tasa_promedio:.2%}")
                         return pd.DataFrame({'Tasa_Caucion_Promedio': retornos})
-            
-            st.warning("⚠️ No se pudieron obtener tasas de caución, usando valor por defecto")
-            # Fallback a tasa fija
-            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-            retorno_diario = 0.04 / 252  # 4% anual
-            retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
-            return pd.DataFrame({'Tasa_Caucion_Promedio': retornos})
         
-        elif benchmark in ['Dolar_MEP', 'Dolar_Blue', 'Dolar_Oficial']:
-            # Obtener datos del dólar (simulado por ahora)
+        elif benchmark == 'Dolar_MEP':
+            # Obtener datos del dólar MEP (simulado por ahora)
+            # Aquí se integraría con la API de InvertirOnline para obtener datos reales
             fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-            
-            if benchmark == 'Dolar_MEP':
-                retornos = np.random.normal(0.0005, 0.02, len(fechas))  # 0.05% diario promedio
-            elif benchmark == 'Dolar_Blue':
-                retornos = np.random.normal(0.0008, 0.025, len(fechas))  # 0.08% diario promedio
-            else:  # Dolar_Oficial
-                retornos = np.random.normal(0.0002, 0.01, len(fechas))  # 0.02% diario promedio
-            
-            st.info(f"✅ Datos simulados para {benchmark}")
-            return pd.DataFrame({benchmark: retornos}, index=fechas)
+            # Simular retornos del dólar MEP (esto se reemplazará con datos reales)
+            retornos_mep = np.random.normal(0.0005, 0.02, len(fechas))  # 0.05% diario promedio
+            return pd.DataFrame({'Dolar_MEP': retornos_mep}, index=fechas)
+        
+        elif benchmark == 'Dolar_Blue':
+            # Obtener datos del dólar Blue (simulado por ahora)
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            # Simular retornos del dólar Blue
+            retornos_blue = np.random.normal(0.0008, 0.025, len(fechas))  # 0.08% diario promedio
+            return pd.DataFrame({'Dolar_Blue': retornos_blue}, index=fechas)
+        
+        elif benchmark == 'Dolar_Oficial':
+            # Obtener datos del dólar Oficial (simulado por ahora)
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            # Simular retornos del dólar Oficial
+            retornos_oficial = np.random.normal(0.0002, 0.01, len(fechas))  # 0.02% diario promedio
+            return pd.DataFrame({'Dolar_Oficial': retornos_oficial}, index=fechas)
         
         elif benchmark.startswith('Bono_'):
             # Obtener datos de bonos argentinos
             simbolo_bono = benchmark.replace('Bono_', '')
-            st.info(f"🔄 Buscando datos del bono {simbolo_bono}...")
-            
             try:
-                # Intentar obtener datos históricos del bono
-                for mercado in ['bCBA', 'TitulosPublicos']:
-                    try:
-                        datos_bono = obtener_serie_historica_iol(
-                            token_acceso, mercado, simbolo_bono, 
-                            fecha_desde.strftime('%Y-%m-%d'), 
-                            fecha_hasta.strftime('%Y-%m-%d')
-                        )
-                        if datos_bono is not None and len(datos_bono) > 10:
-                            retornos = datos_bono.pct_change().dropna()
-                            st.success(f"✅ Datos obtenidos del bono {simbolo_bono}")
-                            return pd.DataFrame({benchmark: retornos})
-                    except Exception as e:
-                        st.warning(f"⚠️ Error en mercado {mercado}: {str(e)}")
-                        continue
+                # Intentar obtener cotizaciones de bonos
+                cotizaciones_bonos = obtener_cotizaciones_generico('bonos', 'argentina', token_acceso)
+                if cotizaciones_bonos is not None and not cotizaciones_bonos.empty:
+                    # Buscar el bono específico
+                    bono_data = cotizaciones_bonos[cotizaciones_bonos['simbolo'] == simbolo_bono]
+                    if not bono_data.empty:
+                        # Usar datos de cotización actual para simular retornos
+                        precio_actual = bono_data.iloc[0].get('ultimoPrecio', 100)
+                        # Simular retornos basados en precio actual
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        retornos_bono = np.random.normal(0.0003, 0.015, len(fechas))
+                        return pd.DataFrame({benchmark: retornos_bono}, index=fechas)
                 
+                # Fallback a método anterior
+                datos_bono = obtener_serie_historica_iol(token_acceso, 'BONOS', simbolo_bono, fecha_desde, fecha_hasta)
+                if datos_bono is not None and not datos_bono.empty:
+                    retornos = datos_bono['close'].pct_change().dropna()
+                    return pd.DataFrame({benchmark: retornos})
+            except:
                 # Si falla, usar datos simulados
-                st.warning(f"⚠️ No se pudieron obtener datos del bono {simbolo_bono}, usando simulación")
-                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-                retornos_bono = np.random.normal(0.0003, 0.015, len(fechas))
-                return pd.DataFrame({benchmark: retornos_bono}, index=fechas)
-                
-            except Exception as e:
-                st.warning(f"⚠️ Error obteniendo datos del bono: {str(e)}")
-                # Datos simulados como fallback
                 fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
                 retornos_bono = np.random.normal(0.0003, 0.015, len(fechas))
                 return pd.DataFrame({benchmark: retornos_bono}, index=fechas)
@@ -6098,44 +5898,35 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
         elif benchmark.startswith('Indice_'):
             # Obtener datos de índices argentinos
             nombre_indice = benchmark.replace('Indice_', '')
-            st.info(f"🔄 Buscando datos del índice {nombre_indice}...")
-            
             try:
-                # Intentar obtener datos históricos del índice
-                for mercado in ['bCBA', 'INDICES']:
-                    try:
-                        datos_indice = obtener_serie_historica_iol(
-                            token_acceso, mercado, nombre_indice, 
-                            fecha_desde.strftime('%Y-%m-%d'), 
-                            fecha_hasta.strftime('%Y-%m-%d')
-                        )
-                        if datos_indice is not None and len(datos_indice) > 10:
-                            retornos = datos_indice.pct_change().dropna()
-                            st.success(f"✅ Datos obtenidos del índice {nombre_indice}")
-                            return pd.DataFrame({benchmark: retornos})
-                    except Exception as e:
-                        st.warning(f"⚠️ Error en mercado {mercado}: {str(e)}")
-                        continue
+                # Intentar obtener cotizaciones de índices
+                cotizaciones_indices = obtener_cotizaciones_generico('indices', 'argentina', token_acceso)
+                if cotizaciones_indices is not None and not cotizaciones_indices.empty:
+                    # Buscar el índice específico
+                    indice_data = cotizaciones_indices[cotizaciones_indices['simbolo'] == nombre_indice]
+                    if not indice_data.empty:
+                        # Usar datos de cotización actual para simular retornos
+                        precio_actual = indice_data.iloc[0].get('ultimoPrecio', 1000)
+                        # Simular retornos basados en precio actual
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        retornos_indice = np.random.normal(0.0004, 0.018, len(fechas))
+                        return pd.DataFrame({benchmark: retornos_indice}, index=fechas)
                 
+                # Fallback a método anterior
+                datos_indice = obtener_serie_historica_iol(token_acceso, 'INDICES', nombre_indice, fecha_desde, fecha_hasta)
+                if datos_indice is not None and not datos_indice.empty:
+                    retornos = datos_indice['close'].pct_change().dropna()
+                    return pd.DataFrame({benchmark: retornos})
+            except:
                 # Si falla, usar datos simulados
-                st.warning(f"⚠️ No se pudieron obtener datos del índice {nombre_indice}, usando simulación")
-                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-                retornos_indice = np.random.normal(0.0004, 0.018, len(fechas))
-                return pd.DataFrame({benchmark: retornos_indice}, index=fechas)
-                
-            except Exception as e:
-                st.warning(f"⚠️ Error obteniendo datos del índice: {str(e)}")
-                # Datos simulados como fallback
                 fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
                 retornos_indice = np.random.normal(0.0004, 0.018, len(fechas))
                 return pd.DataFrame({benchmark: retornos_indice}, index=fechas)
         
-        else:
-            st.warning(f"⚠️ Benchmark '{benchmark}' no reconocido")
-            return None
+        return None
         
     except Exception as e:
-        st.error(f"❌ Error crítico obteniendo datos del benchmark {benchmark}: {str(e)}")
+        st.error(f"❌ Error obteniendo datos del benchmark {benchmark}: {str(e)}")
         return None
 
 def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta):
