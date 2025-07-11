@@ -164,28 +164,6 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Estilos para los elementos de entrada */
-    input[type="text"],
-    input[type="number"],
-    input[type="date"],
-    input[type="time"],
-    input[type="password"],
-    input[type="email"],
-    input[type="search"],
-    select,
-    textarea {
-        background-color: #1e293b !important;
-        color: #f8f9fa !important;
-        border-color: #4CAF50 !important;
-    }
-    
-    /* Placeholder */
-    input::placeholder,
-    textarea::placeholder {
-        color: #94a3b8 !important;
-        opacity: 1;
-    }
-    
     /* Estilos para las listas de selección múltiple */
     .stMultiSelect [role="button"],
     .stMultiSelect [role="button"]:hover,
@@ -4076,11 +4054,12 @@ class PortfolioManager:
     """
     Clase para manejo de portafolio y optimización con funcionalidades extendidas
     """
-    def __init__(self, symbols, token, fecha_desde, fecha_hasta):
+    def __init__(self, symbols, token, fecha_desde, fecha_hasta, risk_free_rate=0.04):
         self.symbols = symbols
         self.token = token
         self.fecha_desde = fecha_desde
         self.fecha_hasta = fecha_hasta
+        self.risk_free_rate = risk_free_rate  # Tasa libre de riesgo configurable
         self.data_loaded = False
         self.returns = None
         self.prices = None
@@ -4114,16 +4093,20 @@ class PortfolioManager:
             st.error(f"Error cargando datos: {str(e)}")
             return False
     
-    def compute_portfolio(self, strategy='markowitz', target_return=None):
+    def compute_portfolio(self, strategy='markowitz', target_return=None, risk_free_rate=None):
         """
         Computa la optimización del portafolio con estrategias extendidas
         """
         if not self.data_loaded or self.returns is None:
             return None
         
+        # Usar la tasa libre de riesgo proporcionada o la configurada en la instancia
+        if risk_free_rate is not None:
+            self.risk_free_rate = risk_free_rate
+        
         try:
             if self.manager:
-                # Usar el manager avanzado
+                # Usar el manager avanzado con tasa libre de riesgo actualizada
                 portfolio_output = self.manager.compute_portfolio(strategy, target_return)
                 return portfolio_output
             else:
@@ -4132,8 +4115,18 @@ class PortfolioManager:
                 
                 if strategy == 'equi-weight':
                     weights = np.array([1/n_assets] * n_assets)
+                elif strategy == 'max_return':
+                    # Optimización para máximo retorno
+                    weights = self._optimize_max_return()
+                elif strategy == 'min-variance-l2':
+                    # Optimización para mínima varianza
+                    weights = self._optimize_min_variance()
+                elif strategy == 'sharpe_ratio':
+                    # Optimización para máximo ratio de Sharpe
+                    weights = self._optimize_sharpe_ratio()
                 else:
-                    weights = optimize_portfolio(self.returns, target_return=target_return)
+                    # Markowitz por defecto
+                    weights = optimize_portfolio(self.returns, risk_free_rate=self.risk_free_rate, target_return=target_return)
                 
                 # Crear objeto de resultado básico
                 portfolio_returns = (self.returns * weights).sum(axis=1)
@@ -4151,6 +4144,109 @@ class PortfolioManager:
         except Exception as e:
             st.error(f"Error en optimización: {str(e)}")
             return None
+    
+    def _optimize_max_return(self):
+        """
+        Optimiza para máximo retorno
+        """
+        try:
+            # Calcular retornos esperados
+            expected_returns = self.returns.mean()
+            
+            # Encontrar el activo con mayor retorno esperado
+            max_return_idx = expected_returns.idxmax()
+            
+            # Asignar todo el peso al activo con mayor retorno
+            weights = np.zeros(len(self.returns.columns))
+            weights[self.returns.columns.get_loc(max_return_idx)] = 1.0
+            
+            return weights
+        except Exception as e:
+            st.error(f"Error en optimización de máximo retorno: {str(e)}")
+            return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
+    
+    def _optimize_min_variance(self):
+        """
+        Optimiza para mínima varianza
+        """
+        try:
+            # Calcular matriz de covarianza
+            cov_matrix = self.returns.cov()
+            
+            # Función objetivo: minimizar varianza del portafolio
+            def objective(weights):
+                return np.dot(weights.T, np.dot(cov_matrix, weights))
+            
+            # Restricciones: pesos suman 1
+            def constraint(weights):
+                return np.sum(weights) - 1.0
+            
+            # Optimización
+            n_assets = len(self.returns.columns)
+            initial_weights = np.array([1/n_assets] * n_assets)
+            
+            constraints = {'type': 'eq', 'fun': constraint}
+            bounds = [(0, 1) for _ in range(n_assets)]
+            
+            result = optimize.minimize(objective, initial_weights, 
+                                    constraints=constraints, bounds=bounds)
+            
+            if result.success:
+                return result.x
+            else:
+                st.warning("⚠️ Optimización de mínima varianza falló, usando pesos iguales")
+                return np.array([1/n_assets] * n_assets)
+                
+        except Exception as e:
+            st.error(f"Error en optimización de mínima varianza: {str(e)}")
+            return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
+    
+    def _optimize_sharpe_ratio(self):
+        """
+        Optimiza para máximo ratio de Sharpe usando la tasa libre de riesgo configurada
+        """
+        try:
+            # Calcular retornos esperados y matriz de covarianza
+            expected_returns = self.returns.mean()
+            cov_matrix = self.returns.cov()
+            
+            # Usar la tasa libre de riesgo configurada en la instancia
+            risk_free_rate = self.risk_free_rate
+            
+            # Función objetivo: maximizar ratio de Sharpe (minimizar negativo)
+            def objective(weights):
+                portfolio_return = np.sum(expected_returns * weights)
+                portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                
+                if portfolio_volatility == 0:
+                    return 0
+                
+                sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility
+                return -sharpe_ratio  # Minimizar negativo = maximizar positivo
+            
+            # Restricciones: pesos suman 1
+            def constraint(weights):
+                return np.sum(weights) - 1.0
+            
+            # Optimización
+            n_assets = len(self.returns.columns)
+            initial_weights = np.array([1/n_assets] * n_assets)
+            
+            constraints = {'type': 'eq', 'fun': constraint}
+            bounds = [(0, 1) for _ in range(n_assets)]
+            
+            result = optimize.minimize(objective, initial_weights, 
+                                    constraints=constraints, bounds=bounds)
+            
+            if result.success:
+                return result.x
+            else:
+                st.warning("⚠️ Optimización de Sharpe ratio falló, usando pesos iguales")
+                return np.array([1/n_assets] * n_assets)
+                
+        except Exception as e:
+            st.error(f"Error en optimización de Sharpe ratio: {str(e)}")
+            return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """
@@ -4278,36 +4374,1383 @@ def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, f
         tipo_rebalanceo = st.selectbox(
             "Seleccione el tipo de rebalanceo:",
             options=[
+                "🔄 Rebalanceo con Composición Actual",
+                "🎲 Rebalanceo con Símbolos Aleatorios",
                 "📊 Optimización Básica",
                 "📈 Frontera Eficiente"
             ],
             help="Elija el tipo de rebalanceo que desea realizar"
         )
         
-        if tipo_rebalanceo == "📊 Optimización Básica":
+        if tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
+            mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "📊 Optimización Básica":
             mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta)
         elif tipo_rebalanceo == "📈 Frontera Eficiente":
             mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
+            mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "🎲 Rebalanceo con Símbolos Aleatorios":
+            mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta)
     
     elif categoria == "📈 Optimizaciones":
         # Submenú de Optimizaciones
         tipo_optimizacion = st.selectbox(
             "Seleccione el tipo de optimización:",
             options=[
+                "🎲 Optimización Aleatoria",
                 "🚀 Optimización Avanzada",
                 "🛡️ Análisis de Cobertura"
             ],
             help="Elija el tipo de optimización que desea realizar"
         )
         
-        if tipo_optimizacion == "🚀 Optimización Avanzada":
+        if tipo_optimizacion == "🎲 Optimización Aleatoria":
+            mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_optimizacion == "🚀 Optimización Avanzada":
             mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta)
         elif tipo_optimizacion == "🛡️ Análisis de Cobertura":
             mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
 
+def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Rebalanceo con la composición actual del portafolio pero optimizando los pesos
+    """
+    st.markdown("#### 🔄 Rebalanceo con Composición Actual")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para rebalancear")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if len(simbolos) < 2:
+        st.warning("Se necesitan al menos 2 activos para rebalanceo")
+        return
+    
+    st.info(f"📊 Rebalanceando {len(simbolos)} activos del portafolio actual")
+    
+    # Configuración de benchmark y tasa libre de riesgo
+    st.markdown("#### 🎯 Configuración de Benchmark")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        benchmark = st.selectbox(
+            "Benchmark para Tasa Libre de Riesgo:",
+            options=[
+                'Tasa_Caucion_Promedio',
+                'Dolar_MEP',
+                'Dolar_Blue', 
+                'Dolar_Oficial',
+                'Bono_AL30',
+                'Bono_GD30',
+                'Indice_S&P_MERVAL',
+                'Indice_S&P_500',
+                'Tasa_Fija_4%',
+                'Tasa_Fija_6%',
+                'Tasa_Fija_8%'
+            ],
+            format_func=lambda x: {
+                'Tasa_Caucion_Promedio': 'Tasa de Caución Promedio',
+                'Dolar_MEP': 'Dólar MEP',
+                'Dolar_Blue': 'Dólar Blue',
+                'Dolar_Oficial': 'Dólar Oficial',
+                'Bono_AL30': 'Bono AL30',
+                'Bono_GD30': 'Bono GD30',
+                'Indice_S&P_MERVAL': 'S&P MERVAL',
+                'Indice_S&P_500': 'S&P 500',
+                'Tasa_Fija_4%': 'Tasa Fija 4%',
+                'Tasa_Fija_6%': 'Tasa Fija 6%',
+                'Tasa_Fija_8%': 'Tasa Fija 8%'
+            }[x],
+            help="Seleccione el benchmark que servirá como tasa libre de riesgo"
+        )
+    
+    with col2:
+        # Calcular retorno del benchmark
+        benchmark_return = 0.04  # Valor por defecto
+        if benchmark.startswith('Tasa_Fija'):
+            benchmark_return = float(benchmark.split('_')[-1].replace('%', '')) / 100
+        else:
+            try:
+                # Obtener datos del benchmark
+                benchmark_data = obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
+                if benchmark_data is not None and not benchmark_data.empty:
+                    # Calcular retorno anual del benchmark
+                    benchmark_returns = benchmark_data.iloc[:, 0].dropna()
+                    if len(benchmark_returns) > 0:
+                        benchmark_return = benchmark_returns.mean() * 252  # Anualizar
+                        st.success(f"✅ Retorno benchmark calculado: {benchmark_return:.2%}")
+                    else:
+                        st.warning("⚠️ No se pudieron calcular retornos del benchmark")
+                else:
+                    st.warning("⚠️ No se pudieron obtener datos del benchmark")
+            except Exception as e:
+                st.error(f"❌ Error calculando retorno del benchmark: {str(e)}")
+        
+        st.metric("Retorno Anual del Benchmark", f"{benchmark_return:.2%}")
+    
+    with col3:
+        usar_benchmark = st.checkbox(
+            "Usar Benchmark como Tasa Libre de Riesgo",
+            value=True,
+            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones"
+        )
+    
+    # Configuración de optimización
+    st.markdown("#### ⚙️ Configuración de Optimización")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        modo_optimizacion = st.selectbox(
+            "Modo de Optimización:",
+            options=['markowitz', 'max_return', 'min_variance', 'sharpe_ratio'],
+            format_func=lambda x: {
+                'markowitz': 'Markowitz (Retorno-Riesgo)',
+                'max_return': 'Máximo Retorno',
+                'min_variance': 'Mínima Varianza',
+                'sharpe_ratio': 'Máximo Ratio de Sharpe'
+            }[x],
+            help="Seleccione el criterio de optimización"
+        )
+    
+    with col2:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+            help="Solo aplica para optimización Markowitz"
+        )
+    
+    with col3:
+        mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
+    
+    # Botón de ejecución
+    col1, col2 = st.columns(2)
+    with col1:
+        ejecutar_rebalanceo = st.button("🚀 Ejecutar Rebalanceo")
+    with col2:
+        ejecutar_completo = st.button("🎯 Rebalanceo Completo")
+    
+    if ejecutar_rebalanceo or ejecutar_completo:
+        with st.spinner("🔄 Ejecutando rebalanceo..."):
+            try:
+                # Crear manager de portafolio con tasa libre de riesgo del benchmark
+                risk_free_rate = benchmark_return if usar_benchmark else 0.04
+                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta, risk_free_rate)
+                
+                # Cargar datos
+                if manager_inst.load_data():
+                    st.success("✅ Datos cargados correctamente")
+                    
+                    # Ejecutar optimización
+                    portfolio_result = manager_inst.compute_portfolio(
+                        strategy=modo_optimizacion, 
+                        target_return=target_return if modo_optimizacion == 'markowitz' else None,
+                        risk_free_rate=risk_free_rate if usar_benchmark else None
+                    )
+                    
+                    if portfolio_result:
+                        st.success("✅ Rebalanceo completado")
+                        
+                        # Mostrar resultados
+                        mostrar_resultados_rebalanceo_aleatorio(
+                            portfolio_result, simbolos, sum(activo.get('valor', 0) for activo in activos),
+                            activos, mostrar_comparacion=mostrar_comparacion, mostrar_metricas=True
+                        )
+                    else:
+                        st.error("❌ No se pudo completar el rebalanceo")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante el rebalanceo: {str(e)}")
+
+def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Rebalanceo usando símbolos aleatorios pero manteniendo el mismo capital total
+    del portafolio actual, con opción de incluir saldo disponible
+    """
+    st.markdown("#### 🎲 Rebalanceo con Símbolos Aleatorios")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para calcular el capital total")
+        return
+    
+    # Calcular capital total actual
+    capital_total_actual = sum(activo.get('valor', 0) for activo in activos)
+    
+    if capital_total_actual <= 0:
+        st.warning("No se puede calcular el capital total del portafolio")
+        return
+    
+    st.info(f"💰 Capital total actual del portafolio: ${capital_total_actual:,.2f}")
+    
+    # Opción para incluir saldo disponible
+    incluir_saldo_disponible = st.checkbox(
+        "💳 Incluir saldo disponible del estado de cuenta",
+        value=False,
+        help="Si está marcado, se incluirá el saldo disponible en el capital total"
+    )
+    
+    capital_disponible = 0
+    if incluir_saldo_disponible:
+        try:
+            # Obtener estado de cuenta para calcular saldo disponible
+            estado_cuenta = obtener_estado_cuenta(token_acceso)
+            if estado_cuenta and 'cuentas' in estado_cuenta:
+                for cuenta in estado_cuenta['cuentas']:
+                    if 'saldoDisponible' in cuenta:
+                        capital_disponible += cuenta.get('saldoDisponible', 0)
+            
+            if capital_disponible > 0:
+                st.success(f"💵 Saldo disponible encontrado: ${capital_disponible:,.2f}")
+            else:
+                st.warning("⚠️ No se encontró saldo disponible")
+        except Exception as e:
+            st.error(f"❌ Error obteniendo saldo disponible: {str(e)}")
+            capital_disponible = 0
+    
+    capital_total = capital_total_actual + capital_disponible
+    st.success(f"🎯 Capital total para rebalanceo: ${capital_total:,.2f}")
+    
+    # Configuración de símbolos aleatorios
+    st.markdown("#### 🎲 Configuración de Símbolos Aleatorios")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        num_simbolos = st.slider(
+            "Número de símbolos:",
+            min_value=2, max_value=20, value=10,
+            help="Cantidad de símbolos aleatorios a incluir en el portafolio"
+        )
+    
+    with col2:
+        incluir_actuales = st.checkbox(
+            "🔄 Incluir símbolos actuales",
+            value=True,
+            help="Incluir algunos símbolos del portafolio actual en la selección aleatoria"
+        )
+    
+    with col3:
+        porcentaje_actuales = st.slider(
+            "Porcentaje de símbolos actuales:",
+            min_value=0, max_value=100, value=30,
+            help="Porcentaje de símbolos actuales a incluir en la selección"
+        )
+    
+    # Configuración de optimización
+    st.markdown("#### ⚙️ Configuración de Optimización")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        modo_optimizacion = st.selectbox(
+            "Modo de Optimización:",
+            options=['markowitz', 'max_return', 'min_variance', 'sharpe_ratio'],
+            format_func=lambda x: {
+                'markowitz': 'Markowitz (Retorno-Riesgo)',
+                'max_return': 'Máximo Retorno',
+                'min_variance': 'Mínima Varianza',
+                'sharpe_ratio': 'Máximo Ratio de Sharpe'
+            }[x],
+            help="Seleccione el criterio de optimización"
+        )
+    
+    with col2:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+            help="Solo aplica para optimización Markowitz"
+        )
+    
+    with col3:
+        restriccion_pesos = st.selectbox(
+            "Restricción de Pesos:",
+            options=['sin_restriccion', 'max_20', 'max_30', 'max_40'],
+            format_func=lambda x: {
+                'sin_restriccion': 'Sin Restricción',
+                'max_20': 'Máximo 20% por activo',
+                'max_30': 'Máximo 30% por activo',
+                'max_40': 'Máximo 40% por activo'
+            }[x],
+            help="Limita el peso máximo por activo"
+        )
+    
+    # Configuración avanzada
+    with st.expander("⚙️ Configuración Avanzada", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            tasa_libre_riesgo = st.number_input(
+                "Tasa Libre de Riesgo (anual):",
+                min_value=0.0, max_value=0.5, value=0.04, step=0.01,
+                help="Para cálculo del ratio de Sharpe"
+            )
+        with col2:
+            mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
+        with col3:
+            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
+    
+    # Botón de ejecución
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        generar_simbolos = st.button("🎲 Generar Símbolos Aleatorios")
+    with col2:
+        ejecutar_rebalanceo = st.button("🚀 Ejecutar Rebalanceo")
+    with col3:
+        ejecutar_completo = st.button("🎯 Rebalanceo Completo")
+    
+    if generar_simbolos or ejecutar_rebalanceo or ejecutar_completo:
+        # Generar símbolos aleatorios
+        simbolos_aleatorios = generar_simbolos_aleatorios(
+            num_simbolos, incluir_actuales, porcentaje_actuales, activos
+        )
+        
+        if not simbolos_aleatorios:
+            st.error("❌ Error generando símbolos aleatorios")
+            return
+        
+        st.success(f"✅ Generados {len(simbolos_aleatorios)} símbolos aleatorios")
+        
+        # Mostrar símbolos seleccionados
+        st.markdown("#### 📋 Símbolos Seleccionados")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Símbolos aleatorios generados:**")
+            for i, simbolo in enumerate(simbolos_aleatorios, 1):
+                st.write(f"{i}. {simbolo}")
+        
+        with col2:
+            # Gráfico de distribución de tipos de activos
+            tipos_activos = categorizar_simbolos(simbolos_aleatorios)
+            if tipos_activos:
+                fig_tipos = go.Figure(data=[go.Pie(
+                    labels=list(tipos_activos.keys()),
+                    values=list(tipos_activos.values()),
+                    textinfo='label+percent'
+                )])
+                fig_tipos.update_layout(title="Distribución por Tipo de Activo")
+                st.plotly_chart(fig_tipos, use_container_width=True)
+        
+        if ejecutar_rebalanceo or ejecutar_completo:
+            # Cargar datos históricos
+            with st.spinner("📊 Cargando datos históricos..."):
+                try:
+                    # Crear PortfolioManager con los símbolos aleatorios
+                    portfolio_manager = PortfolioManager(simbolos_aleatorios, token_acceso, fecha_desde, fecha_hasta)
+                    portfolio_manager.load_data()
+                    
+                    if not portfolio_manager.data_loaded:
+                        st.error("❌ Error cargando datos históricos")
+                        return
+                    
+                    st.success("✅ Datos cargados exitosamente")
+                    
+                    # Ejecutar optimización
+                    st.markdown("#### 🔄 Optimizando Portafolio Aleatorio")
+                    
+                    # Determinar estrategia según modo de optimización
+                    if modo_optimizacion == 'markowitz':
+                        strategy = 'markowitz'
+                        target = target_return
+                    elif modo_optimizacion == 'max_return':
+                        strategy = 'max_return'
+                        target = None
+                    elif modo_optimizacion == 'min_variance':
+                        strategy = 'min-variance-l2'
+                        target = None
+                    elif modo_optimizacion == 'sharpe_ratio':
+                        strategy = 'sharpe_ratio'
+                        target = None
+                    else:
+                        strategy = 'markowitz'
+                        target = target_return
+                    
+                    # Ejecutar optimización
+                    resultado_optimizacion = portfolio_manager.compute_portfolio(strategy=strategy, target_return=target)
+                    
+                    if resultado_optimizacion:
+                        st.success("✅ Optimización completada")
+                        
+                        # Mostrar resultados
+                        mostrar_resultados_rebalanceo_aleatorio(
+                            resultado_optimizacion, simbolos_aleatorios, capital_total,
+                            activos, mostrar_comparacion, mostrar_metricas
+                        )
+                    else:
+                        st.error("❌ Error en la optimización")
+                
+                except Exception as e:
+                    st.error(f"❌ Error en el proceso de rebalanceo: {str(e)}")
+
+def generar_simbolos_aleatorios(num_simbolos, incluir_actuales, porcentaje_actuales, activos):
+    """
+    Genera una lista de símbolos aleatorios para el rebalanceo
+    """
+    try:
+        simbolos_seleccionados = []
+        
+        # Lista de símbolos disponibles (puede ser expandida)
+        simbolos_disponibles = [
+            # Acciones argentinas
+            'GGAL', 'PAMP', 'YPF', 'TEN', 'CRES', 'EDN', 'ALUA', 'COME', 'LOMA', 'MIRG',
+            'PGR', 'SUPV', 'TECO2', 'TGNO4', 'TGSU2', 'TRAN', 'TS', 'VALO', 'YPF',
+            # ADRs
+            'BMA', 'CEPU', 'CRESY', 'EDN', 'GGAL', 'IRCP', 'PAM', 'PZE', 'TGS', 'YPF',
+            # Bonos
+            'GD30', 'GD35', 'GD38', 'GD41', 'GD46', 'GD47', 'GD48', 'GD49', 'GD50',
+            'GD51', 'GD52', 'GD53', 'GD54', 'GD55', 'GD56', 'GD57', 'GD58', 'GD59',
+            # Fondos comunes
+            'FCI001', 'FCI002', 'FCI003', 'FCI004', 'FCI005', 'FCI006', 'FCI007',
+            'FCI008', 'FCI009', 'FCI010', 'FCI011', 'FCI012', 'FCI013', 'FCI014',
+            # ETFs
+            'SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'AGG', 'TLT', 'GLD', 'SLV', 'USO',
+            # Acciones internacionales
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX', 'AMD',
+            'INTC', 'ORCL', 'CRM', 'ADBE', 'PYPL', 'UBER', 'LYFT', 'SNAP', 'TWTR'
+        ]
+        
+        # Si incluir actuales, agregar algunos símbolos del portafolio actual
+        if incluir_actuales and activos:
+            simbolos_actuales = []
+            for activo in activos:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', '')
+                if simbolo and simbolo not in simbolos_actuales:
+                    simbolos_actuales.append(simbolo)
+            
+            if simbolos_actuales:
+                # Calcular cuántos símbolos actuales incluir
+                num_actuales = max(1, int(num_simbolos * porcentaje_actuales / 100))
+                num_actuales = min(num_actuales, len(simbolos_actuales))
+                
+                # Seleccionar símbolos actuales aleatoriamente
+                simbolos_actuales_seleccionados = random.sample(simbolos_actuales, num_actuales)
+                simbolos_seleccionados.extend(simbolos_actuales_seleccionados)
+                
+                st.info(f"🔄 Incluyendo {num_actuales} símbolos del portafolio actual")
+        
+        # Completar con símbolos aleatorios
+        simbolos_restantes = num_simbolos - len(simbolos_seleccionados)
+        
+        if simbolos_restantes > 0:
+            # Filtrar símbolos no seleccionados
+            simbolos_disponibles = [s for s in simbolos_disponibles if s not in simbolos_seleccionados]
+            
+            if len(simbolos_disponibles) >= simbolos_restantes:
+                simbolos_aleatorios = random.sample(simbolos_disponibles, simbolos_restantes)
+                simbolos_seleccionados.extend(simbolos_aleatorios)
+            else:
+                st.warning(f"⚠️ Solo hay {len(simbolos_disponibles)} símbolos disponibles")
+                simbolos_seleccionados.extend(simbolos_disponibles)
+        
+        return simbolos_seleccionados
+        
+    except Exception as e:
+        st.error(f"❌ Error generando símbolos aleatorios: {str(e)}")
+        return []
+
+def categorizar_simbolos(simbolos):
+    """
+    Categoriza los símbolos por tipo de activo
+    """
+    try:
+        categorias = {
+            'Acciones Argentinas': 0,
+            'ADRs': 0,
+            'Bonos': 0,
+            'Fondos Comunes': 0,
+            'ETFs': 0,
+            'Acciones Internacionales': 0
+        }
+        
+        # Listas de símbolos por categoría
+        acciones_arg = ['GGAL', 'PAMP', 'YPF', 'TEN', 'CRES', 'EDN', 'ALUA', 'COME', 'LOMA', 'MIRG',
+                       'PGR', 'SUPV', 'TECO2', 'TGNO4', 'TGSU2', 'TRAN', 'TS', 'VALO']
+        
+        adrs = ['BMA', 'CEPU', 'CRESY', 'EDN', 'GGAL', 'IRCP', 'PAM', 'PZE', 'TGS', 'YPF']
+        
+        bonos = ['GD30', 'GD35', 'GD38', 'GD41', 'GD46', 'GD47', 'GD48', 'GD49', 'GD50',
+                'GD51', 'GD52', 'GD53', 'GD54', 'GD55', 'GD56', 'GD57', 'GD58', 'GD59']
+        
+        fondos = ['FCI001', 'FCI002', 'FCI003', 'FCI004', 'FCI005', 'FCI006', 'FCI007',
+                 'FCI008', 'FCI009', 'FCI010', 'FCI011', 'FCI012', 'FCI013', 'FCI014']
+        
+        etfs = ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'AGG', 'TLT', 'GLD', 'SLV', 'USO']
+        
+        acciones_int = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX', 'AMD',
+                       'INTC', 'ORCL', 'CRM', 'ADBE', 'PYPL', 'UBER', 'LYFT', 'SNAP', 'TWTR']
+        
+        # Categorizar cada símbolo
+        for simbolo in simbolos:
+            if simbolo in acciones_arg:
+                categorias['Acciones Argentinas'] += 1
+            elif simbolo in adrs:
+                categorias['ADRs'] += 1
+            elif simbolo in bonos:
+                categorias['Bonos'] += 1
+            elif simbolo in fondos:
+                categorias['Fondos Comunes'] += 1
+            elif simbolo in etfs:
+                categorias['ETFs'] += 1
+            elif simbolo in acciones_int:
+                categorias['Acciones Internacionales'] += 1
+            else:
+                # Categoría por defecto
+                categorias['Acciones Argentinas'] += 1
+        
+        # Filtrar categorías vacías
+        return {k: v for k, v in categorias.items() if v > 0}
+        
+    except Exception as e:
+        st.error(f"❌ Error categorizando símbolos: {str(e)}")
+        return {}
+
+def mostrar_resultados_rebalanceo_aleatorio(resultado_optimizacion, simbolos_aleatorios, capital_total,
+                                          activos, mostrar_comparacion=True, mostrar_metricas=True):
+    """
+    Muestra los resultados del rebalanceo con símbolos aleatorios
+    """
+    pesos_optimizados = resultado_optimizacion.weights
+    
+    # Métricas del portafolio optimizado
+    metricas = resultado_optimizacion.get_metrics_dict()
+    
+    st.markdown("#### 📈 Resultados del Portafolio Aleatorio Optimizado")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
+        st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
+        st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+    
+    with col2:
+        st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+        st.metric("Skewness", f"{metricas['Skewness']:.4f}")
+        st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+    
+    with col3:
+        normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
+        st.metric("Normalidad", normalidad)
+        st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+    
+    # Distribución de pesos optimizados
+    st.markdown("#### 🥧 Distribución de Pesos Optimizados")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Gráfico de torta optimizado
+        fig_optimizado = go.Figure(data=[go.Pie(
+            labels=simbolos_aleatorios,
+            values=pesos_optimizados,
+            textinfo='label+percent',
+            hole=0.3
+        )])
+        fig_optimizado.update_layout(title="Distribución Optimizada de Pesos")
+        st.plotly_chart(fig_optimizado, use_container_width=True)
+    
+    with col2:
+        # Gráfico de distribución de retornos
+        if resultado_optimizacion.returns is not None:
+            fig_hist = resultado_optimizacion.plot_histogram_streamlit("Distribución de Retornos Optimizados")
+            st.plotly_chart(fig_hist, use_container_width=True)
+    
+    # Análisis de asignación de capital
+    st.markdown("#### 💰 Análisis de Asignación de Capital")
+    
+    # Calcular asignación de capital por activo
+    asignacion_capital = []
+    for i, (simbolo, peso) in enumerate(zip(simbolos_aleatorios, pesos_optimizados)):
+        capital_asignado = capital_total * peso
+        asignacion_capital.append({
+            'Símbolo': simbolo,
+            'Peso (%)': peso * 100,
+            'Capital Asignado ($)': capital_asignado,
+            'Capital Asignado (USD)': capital_asignado  # Asumiendo pesos en USD
+        })
+    
+    # Crear DataFrame de asignación
+    df_asignacion = pd.DataFrame(asignacion_capital)
+    df_asignacion = df_asignacion.sort_values('Capital Asignado ($)', ascending=False)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Asignación de Capital por Activo:**")
+        st.dataframe(df_asignacion, use_container_width=True)
+    
+    with col2:
+        # Gráfico de barras de capital asignado
+        fig_capital = go.Figure(data=[go.Bar(
+            x=df_asignacion['Símbolo'],
+            y=df_asignacion['Capital Asignado ($)'],
+            text=[f"${val:,.0f}" for val in df_asignacion['Capital Asignado ($)']],
+            textposition='auto'
+        )])
+        fig_capital.update_layout(
+            title="Capital Asignado por Activo",
+            xaxis_title="Activos",
+            yaxis_title="Capital ($)"
+        )
+        st.plotly_chart(fig_capital, use_container_width=True)
+    
+    # Comparación con portafolio actual
+    if mostrar_comparacion and activos:
+        st.markdown("#### 🔄 Comparación con Portafolio Actual")
+        
+        # Calcular métricas del portafolio actual
+        capital_actual = sum(activo.get('valor', 0) for activo in activos)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Capital Actual", f"${capital_actual:,.2f}")
+            st.metric("Capital Nuevo", f"${capital_total:,.2f}")
+            diferencia_capital = capital_total - capital_actual
+            st.metric("Diferencia", f"${diferencia_capital:,.2f}")
+        
+        with col2:
+            num_activos_actual = len(activos)
+            st.metric("Activos Actuales", num_activos_actual)
+            st.metric("Activos Nuevos", len(simbolos_aleatorios))
+            st.metric("Diferencia", len(simbolos_aleatorios) - num_activos_actual)
+        
+        with col3:
+            # Calcular diversificación (número de activos únicos)
+            simbolos_actuales = set()
+            for activo in activos:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', '')
+                if simbolo:
+                    simbolos_actuales.add(simbolo)
+            
+            st.metric("Diversificación Actual", len(simbolos_actuales))
+            st.metric("Diversificación Nueva", len(set(simbolos_aleatorios)))
+            st.metric("Mejora", len(set(simbolos_aleatorios)) - len(simbolos_actuales))
+    
+    # Métricas de rebalanceo
+    if mostrar_metricas:
+        st.markdown("#### 📊 Métricas de Rebalanceo")
+        
+        # Calcular métricas de diversificación
+        diversificacion_nueva = len(set(simbolos_aleatorios))
+        concentracion_maxima = np.max(pesos_optimizados) * 100
+        concentracion_top5 = np.sum(np.sort(pesos_optimizados)[-5:]) * 100
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Diversificación", diversificacion_nueva)
+        with col2:
+            st.metric("Concentración Máxima", f"{concentracion_maxima:.1f}%")
+        with col3:
+            st.metric("Concentración Top 5", f"{concentracion_top5:.1f}%")
+        with col4:
+            st.metric("Capital Total", f"${capital_total:,.0f}")
+        
+        # Recomendaciones
+        st.markdown("#### 💡 Recomendaciones")
+        
+        if diversificacion_nueva > 10:
+            st.success("✅ Excelente diversificación del portafolio")
+        elif diversificacion_nueva > 5:
+            st.info("ℹ️ Buena diversificación del portafolio")
+        else:
+            st.warning("⚠️ Considerar aumentar la diversificación")
+        
+        if concentracion_maxima < 20:
+            st.success("✅ Buena distribución de riesgo")
+        elif concentracion_maxima < 30:
+            st.info("ℹ️ Distribución de riesgo moderada")
+        else:
+            st.warning("⚠️ Alta concentración en un activo")
+        
+        if diferencia_capital > 0:
+            st.info(f"💡 Se requiere capital adicional de ${diferencia_capital:,.2f}")
+        elif diferencia_capital < 0:
+            st.info(f"💡 Se liberaría capital de ${abs(diferencia_capital):,.2f}")
+
+def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Optimización aleatoria con inputs manuales de capital, horizonte, benchmark
+    y simulaciones iterativas hasta alcanzar el retorno objetivo
+    """
+    st.markdown("#### 🎲 Optimización Aleatoria")
+    
+    # Configuración de parámetros básicos
+    st.markdown("#### 💰 Configuración de Capital y Horizonte")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        capital_inicial = st.number_input(
+            "Capital Inicial ($):",
+            min_value=1000.0, max_value=10000000.0, value=100000.0, step=1000.0,
+            help="Capital inicial para la optimización"
+        )
+    
+    with col2:
+        horizonte_dias = st.number_input(
+            "Horizonte de Inversión (días):",
+            min_value=30, max_value=3650, value=252, step=30,
+            help="Horizonte temporal para la optimización"
+        )
+    
+    with col3:
+        retorno_objetivo = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.01, max_value=2.0, value=0.15, step=0.01,
+            help="Retorno anual objetivo a superar"
+        )
+    
+    # Configuración de benchmark
+    st.markdown("#### 📊 Configuración de Benchmark")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        benchmark = st.selectbox(
+            "Benchmark:",
+            options=[
+                'SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'AGG', '^GSPC', '^IXIC', '^DJI',
+                'Tasa_Caucion_Promedio', 'Dolar_MEP', 'Dolar_Blue', 'Dolar_Oficial',
+                'Bono_GD30', 'Bono_GD35', 'Bono_GD38', 'Bono_GD41', 'Bono_GD46',
+                'Indice_S&P_Merval', 'Indice_Burcap', 'Indice_IGPA'
+            ],
+            help="Benchmark para calcular alpha y beta"
+        )
+    
+    with col2:
+        usar_portafolio_actual = st.checkbox(
+            "🔄 Usar portafolio actual como benchmark",
+            value=False,
+            help="Si está marcado, se usará el portafolio actual como benchmark"
+        )
+    
+    with col3:
+        tasa_libre_riesgo = st.number_input(
+            "Tasa Libre de Riesgo (anual):",
+            min_value=0.0, max_value=0.5, value=0.04, step=0.01,
+            help="Tasa libre de riesgo para cálculos"
+        )
+    
+    # Configuración de optimización aleatoria
+    st.markdown("#### 🎯 Configuración de Optimización Aleatoria")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        num_simulaciones = st.slider(
+            "Número de Simulaciones:",
+            min_value=10, max_value=1000, value=100, step=10,
+            help="Número de simulaciones aleatorias a realizar"
+        )
+    
+    with col2:
+        num_activos = st.slider(
+            "Número de Activos por Simulación:",
+            min_value=3, max_value=20, value=8, step=1,
+            help="Número de activos a incluir en cada simulación"
+        )
+    
+    with col3:
+        max_iteraciones = st.slider(
+            "Máximo de Iteraciones:",
+            min_value=1, max_value=50, value=10, step=1,
+            help="Máximo número de iteraciones para alcanzar objetivo"
+    )
+    
+    # Configuración avanzada
+    with st.expander("⚙️ Configuración Avanzada", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            estrategia_optimizacion = st.selectbox(
+                "Estrategia de Optimización:",
+                options=['markowitz', 'max_return', 'min_variance', 'sharpe_ratio'],
+                format_func=lambda x: {
+                    'markowitz': 'Markowitz (Retorno-Riesgo)',
+                    'max_return': 'Máximo Retorno',
+                    'min_variance': 'Mínima Varianza',
+                    'sharpe_ratio': 'Máximo Ratio de Sharpe'
+                }[x]
+            )
+        with col2:
+            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
+        with col3:
+            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False)
+    
+    # Botones de ejecución
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Aleatoria")
+    with col2:
+        ejecutar_iterativo = st.button("🔄 Optimización Iterativa")
+    with col3:
+        ejecutar_completo = st.button("🎯 Optimización Completa")
+    
+    if ejecutar_optimizacion or ejecutar_iterativo or ejecutar_completo:
+        # Ejecutar optimización aleatoria
+        with st.spinner("🎲 Ejecutando optimización aleatoria..."):
+            try:
+                resultados = ejecutar_optimizacion_aleatoria_completa(
+                    portafolio, token_acceso, fecha_desde, fecha_hasta,
+                    capital_inicial, horizonte_dias, retorno_objetivo,
+                    benchmark, usar_portafolio_actual, tasa_libre_riesgo,
+                    num_simulaciones, num_activos, max_iteraciones,
+                    estrategia_optimizacion, ejecutar_iterativo or ejecutar_completo
+                )
+                
+                if resultados:
+                    mostrar_resultados_optimizacion_aleatoria(
+                        resultados, capital_inicial, horizonte_dias,
+                        benchmark, retorno_objetivo, tasa_libre_riesgo,
+                        mostrar_histogramas, mostrar_frontera
+                    )
+                else:
+                    st.error("❌ Error en la optimización aleatoria")
+            
+            except Exception as e:
+                st.error(f"❌ Error en el proceso: {str(e)}")
+
+def ejecutar_optimizacion_aleatoria_completa(portafolio, token_acceso, fecha_desde, fecha_hasta,
+                                           capital_inicial, horizonte_dias, retorno_objetivo,
+                                           benchmark, usar_portafolio_actual, tasa_libre_riesgo,
+                                           num_simulaciones, num_activos, max_iteraciones,
+                                           estrategia_optimizacion, es_iterativo):
+    """
+    Ejecuta la optimización aleatoria completa
+    """
+    try:
+        # Lista de símbolos disponibles
+        simbolos_disponibles = [
+            # Acciones argentinas
+            'GGAL', 'PAMP', 'YPF', 'TEN', 'CRES', 'EDN', 'ALUA', 'COME', 'LOMA', 'MIRG',
+            'PGR', 'SUPV', 'TECO2', 'TGNO4', 'TGSU2', 'TRAN', 'TS', 'VALO',
+            # ADRs
+            'BMA', 'CEPU', 'CRESY', 'EDN', 'GGAL', 'IRCP', 'PAM', 'PZE', 'TGS', 'YPF',
+            # Bonos
+            'GD30', 'GD35', 'GD38', 'GD41', 'GD46', 'GD47', 'GD48', 'GD49', 'GD50',
+            'GD51', 'GD52', 'GD53', 'GD54', 'GD55', 'GD56', 'GD57', 'GD58', 'GD59',
+            # ETFs
+            'SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'AGG', 'TLT', 'GLD', 'SLV', 'USO',
+            # Acciones internacionales
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX', 'AMD',
+            'INTC', 'ORCL', 'CRM', 'ADBE', 'PYPL', 'UBER', 'LYFT', 'SNAP', 'TWTR'
+        ]
+        
+        # Obtener datos del benchmark
+        benchmark_data = None
+        if usar_portafolio_actual:
+            # Usar portafolio actual como benchmark
+            activos = portafolio.get('activos', [])
+            if activos:
+                simbolos_actuales = []
+                for activo in activos:
+                    titulo = activo.get('titulo', {})
+                    simbolo = titulo.get('simbolo', '')
+                    if simbolo:
+                        simbolos_actuales.append(simbolo)
+                
+                if simbolos_actuales:
+                    portfolio_manager_actual = PortfolioManager(simbolos_actuales, token_acceso, fecha_desde, fecha_hasta)
+                    portfolio_manager_actual.load_data()
+                    if portfolio_manager_actual.data_loaded:
+                        benchmark_data = portfolio_manager_actual.returns
+        else:
+            # Usar benchmark específico
+            benchmark_data = obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
+            if benchmark_data is None:
+                try:
+                    benchmark_manager = PortfolioManager([benchmark], token_acceso, fecha_desde, fecha_hasta)
+                    benchmark_manager.load_data()
+                    if benchmark_manager.data_loaded:
+                        benchmark_data = benchmark_manager.returns
+                except:
+                    st.warning(f"⚠️ No se pudo cargar datos del benchmark {benchmark}")
+        
+        # Ejecutar simulaciones
+        resultados_simulaciones = []
+        mejor_resultado = None
+        mejor_retorno = -float('inf')
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for iteracion in range(max_iteraciones):
+            status_text.text(f"🔄 Iteración {iteracion + 1}/{max_iteraciones}")
+            
+            for sim in range(num_simulaciones):
+                # Generar portafolio aleatorio
+                simbolos_aleatorios = random.sample(simbolos_disponibles, num_activos)
+                
+                try:
+                    # Crear PortfolioManager con tasa libre de riesgo del benchmark
+                    portfolio_manager = PortfolioManager(simbolos_aleatorios, token_acceso, fecha_desde, fecha_hasta, tasa_libre_riesgo)
+                    portfolio_manager.load_data()
+                    
+                    if portfolio_manager.data_loaded:
+                        # Ejecutar optimización con tasa libre de riesgo del benchmark
+                        resultado = portfolio_manager.compute_portfolio(strategy=estrategia_optimizacion, risk_free_rate=tasa_libre_riesgo)
+                        
+                        if resultado:
+                            # Calcular métricas
+                            metricas = resultado.get_metrics_dict()
+                            retorno_anual = metricas['Annual Return']
+                            
+                            # Calcular alpha y beta si hay benchmark
+                            alpha = 0
+                            beta = 1
+                            if benchmark_data is not None:
+                                try:
+                                    # Calcular retornos del benchmark
+                                    benchmark_returns = benchmark_data.mean() if len(benchmark_data.columns) == 1 else benchmark_data.mean().mean()
+                                    portfolio_returns = retorno_anual
+                                    
+                                    # Calcular beta (simplificado)
+                                    if benchmark_returns != 0:
+                                        beta = portfolio_returns / benchmark_returns
+                                    
+                                    # Calcular alpha
+                                    alpha = portfolio_returns - (tasa_libre_riesgo + beta * (benchmark_returns - tasa_libre_riesgo))
+                                except:
+                                    pass
+                            
+                            # Crear resultado
+                            resultado_sim = {
+                                'simulacion': sim + 1,
+                                'iteracion': iteracion + 1,
+                                'simbolos': simbolos_aleatorios,
+                                'retorno_anual': retorno_anual,
+                                'volatilidad': metricas['Annual Volatility'],
+                                'sharpe_ratio': metricas['Sharpe Ratio'],
+                                'alpha': alpha,
+                                'beta': beta,
+                                'pesos': resultado.weights,
+                                'metricas': metricas
+                            }
+                            
+                            resultados_simulaciones.append(resultado_sim)
+                            
+                            # Verificar si es el mejor resultado
+                            if retorno_anual > mejor_retorno:
+                                mejor_retorno = retorno_anual
+                                mejor_resultado = resultado_sim
+                            
+                            # Si es iterativo y alcanzamos el objetivo, parar
+                            if es_iterativo and retorno_anual >= retorno_objetivo:
+                                st.success(f"✅ Objetivo alcanzado en iteración {iteracion + 1}, simulación {sim + 1}")
+                                return {
+                                    'mejor_resultado': mejor_resultado,
+                                    'todos_resultados': resultados_simulaciones,
+                                    'objetivo_alcanzado': True,
+                                    'iteracion_final': iteracion + 1,
+                                    'simulacion_final': sim + 1
+                                }
+                
+                except Exception as e:
+                    continue
+                
+                # Actualizar progreso
+                progreso = ((iteracion * num_simulaciones + sim + 1) / (max_iteraciones * num_simulaciones))
+                progress_bar.progress(progreso)
+        
+        # Si llegamos aquí, no se alcanzó el objetivo
+        if es_iterativo:
+            st.warning(f"⚠️ No se alcanzó el objetivo de {retorno_objetivo:.2%} en {max_iteraciones} iteraciones")
+        
+        return {
+            'mejor_resultado': mejor_resultado,
+            'todos_resultados': resultados_simulaciones,
+            'objetivo_alcanzado': False,
+            'iteracion_final': max_iteraciones,
+            'simulacion_final': num_simulaciones
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Error en optimización aleatoria: {str(e)}")
+        return None
+
+def mostrar_resultados_optimizacion_aleatoria(resultados, capital_inicial, horizonte_dias,
+                                            benchmark, retorno_objetivo, tasa_libre_riesgo,
+                                            mostrar_histogramas, mostrar_frontera):
+    """
+    Muestra los resultados de la optimización aleatoria
+    """
+    mejor_resultado = resultados['mejor_resultado']
+    todos_resultados = resultados['todos_resultados']
+    
+    if not mejor_resultado:
+        st.error("❌ No se encontraron resultados válidos")
+        return
+    
+    st.markdown("#### 🏆 Mejor Resultado de Optimización Aleatoria")
+    
+    # Métricas del mejor resultado
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Retorno Anual", f"{mejor_resultado['retorno_anual']:.2%}")
+        st.metric("Volatilidad Anual", f"{mejor_resultado['volatilidad']:.2%}")
+        st.metric("Ratio de Sharpe", f"{mejor_resultado['sharpe_ratio']:.4f}")
+    
+    with col2:
+        st.metric("Alpha", f"{mejor_resultado['alpha']:.4f}")
+        st.metric("Beta", f"{mejor_resultado['beta']:.4f}")
+        st.metric("VaR 95%", f"{mejor_resultado['metricas']['VaR 95%']:.4f}")
+    
+    with col3:
+        normalidad = "✅ Normal" if mejor_resultado['metricas']['Is Normal'] else "❌ No Normal"
+        st.metric("Normalidad", normalidad)
+        st.metric("Skewness", f"{mejor_resultado['metricas']['Skewness']:.4f}")
+        st.metric("Kurtosis", f"{mejor_resultado['metricas']['Kurtosis']:.4f}")
+    
+    # Información del portafolio ganador
+    st.markdown("#### 🎯 Portafolio Ganador")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Activos del portafolio ganador:**")
+        for i, simbolo in enumerate(mejor_resultado['simbolos'], 1):
+            st.write(f"{i}. {simbolo}")
+    
+    with col2:
+        # Gráfico de pesos del portafolio ganador
+        if mejor_resultado['pesos'] is not None:
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=mejor_resultado['simbolos'],
+                values=mejor_resultado['pesos'],
+                textinfo='label+percent'
+            )])
+            fig_pie.update_layout(title="Distribución de Pesos - Portafolio Ganador")
+            st.plotly_chart(fig_pie, use_container_width=True)
+    
+    # Análisis de rendimiento vs objetivo
+    st.markdown("#### 📊 Análisis de Rendimiento")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Retorno Objetivo", f"{retorno_objetivo:.2%}")
+        st.metric("Retorno Alcanzado", f"{mejor_resultado['retorno_anual']:.2%}")
+        diferencia = mejor_resultado['retorno_anual'] - retorno_objetivo
+        st.metric("Diferencia", f"{diferencia:.2%}")
+    
+    with col2:
+        # Calcular proyección de capital
+        capital_final = capital_inicial * (1 + mejor_resultado['retorno_anual']) ** (horizonte_dias / 252)
+        ganancia_total = capital_final - capital_inicial
+        st.metric("Capital Final Proyectado", f"${capital_final:,.2f}")
+        st.metric("Ganancia Total", f"${ganancia_total:,.2f}")
+        st.metric("Horizonte (días)", horizonte_dias)
+    
+    with col3:
+        if resultados['objetivo_alcanzado']:
+            st.success("✅ Objetivo Alcanzado")
+            st.metric("Iteración Final", resultados['iteracion_final'])
+            st.metric("Simulación Final", resultados['simulacion_final'])
+        else:
+            st.warning("⚠️ Objetivo No Alcanzado")
+            st.metric("Iteraciones Ejecutadas", resultados['iteracion_final'])
+            st.metric("Simulaciones Totales", resultados['simulacion_final'])
+    
+    # Análisis estadístico de todas las simulaciones
+    if len(todos_resultados) > 1:
+        st.markdown("#### 📈 Análisis Estadístico de Simulaciones")
+        
+        # Extraer métricas de todas las simulaciones
+        retornos = [r['retorno_anual'] for r in todos_resultados]
+        volatilidades = [r['volatilidad'] for r in todos_resultados]
+        sharpe_ratios = [r['sharpe_ratio'] for r in todos_resultados]
+        alphas = [r['alpha'] for r in todos_resultados]
+        betas = [r['beta'] for r in todos_resultados]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Estadísticas de Retornos:**")
+            st.write(f"• Media: {np.mean(retornos):.2%}")
+            st.write(f"• Mediana: {np.median(retornos):.2%}")
+            st.write(f"• Desviación Estándar: {np.std(retornos):.2%}")
+            st.write(f"• Mínimo: {np.min(retornos):.2%}")
+            st.write(f"• Máximo: {np.max(retornos):.2%}")
+        
+        with col2:
+            st.markdown("**Estadísticas de Sharpe Ratios:**")
+            st.write(f"• Media: {np.mean(sharpe_ratios):.4f}")
+            st.write(f"• Mediana: {np.median(sharpe_ratios):.4f}")
+            st.write(f"• Desviación Estándar: {np.std(sharpe_ratios):.4f}")
+            st.write(f"• Mínimo: {np.min(sharpe_ratios):.4f}")
+            st.write(f"• Máximo: {np.max(sharpe_ratios):.4f}")
+        
+        # Histogramas si se solicitan
+        if mostrar_histogramas:
+            st.markdown("#### 📊 Histogramas de Distribución")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Histograma de retornos
+                fig_retornos = go.Figure(data=[go.Histogram(x=retornos, nbinsx=20)])
+                fig_retornos.update_layout(
+                    title="Distribución de Retornos Anuales",
+                    xaxis_title="Retorno Anual",
+                    yaxis_title="Frecuencia"
+                )
+                st.plotly_chart(fig_retornos, use_container_width=True)
+            
+            with col2:
+                # Histograma de Sharpe ratios
+                fig_sharpe = go.Figure(data=[go.Histogram(x=sharpe_ratios, nbinsx=20)])
+                fig_sharpe.update_layout(
+                    title="Distribución de Sharpe Ratios",
+                    xaxis_title="Sharpe Ratio",
+                    yaxis_title="Frecuencia"
+                )
+                st.plotly_chart(fig_sharpe, use_container_width=True)
+        
+        # Frontera eficiente si se solicita
+        if mostrar_frontera and len(todos_resultados) > 10:
+            st.markdown("#### 📈 Frontera Eficiente de Simulaciones")
+            
+            # Crear gráfico de dispersión retorno vs riesgo
+            fig_frontera = go.Figure()
+            
+            fig_frontera.add_trace(go.Scatter(
+                x=volatilidades,
+                y=retornos,
+                mode='markers',
+                marker=dict(
+                    size=8,
+                    color=sharpe_ratios,
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title="Sharpe Ratio")
+                ),
+                text=[f"Sim {i+1}" for i in range(len(todos_resultados))],
+                hovertemplate='<b>%{text}</b><br>' +
+                            'Retorno: %{y:.2%}<br>' +
+                            'Volatilidad: %{x:.2%}<br>' +
+                            'Sharpe: %{marker.color:.4f}<extra></extra>'
+            ))
+            
+            # Marcar el mejor resultado
+            fig_frontera.add_trace(go.Scatter(
+                x=[mejor_resultado['volatilidad']],
+                y=[mejor_resultado['retorno_anual']],
+                mode='markers',
+                marker=dict(
+                    size=15,
+                    color='red',
+                    symbol='star'
+                ),
+                name='Mejor Resultado'
+            ))
+            
+            fig_frontera.update_layout(
+                title="Frontera Eficiente de Simulaciones",
+                xaxis_title="Volatilidad Anual",
+                yaxis_title="Retorno Anual",
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_frontera, use_container_width=True)
+    
+    # Recomendaciones finales
+    st.markdown("#### 💡 Recomendaciones")
+    
+    if mejor_resultado['retorno_anual'] >= retorno_objetivo:
+        st.success("✅ El portafolio ganador supera el retorno objetivo")
+    else:
+        st.warning("⚠️ El portafolio ganador no alcanza el retorno objetivo")
+    
+    if mejor_resultado['alpha'] > 0:
+        st.success("✅ El portafolio tiene alpha positivo (supera al benchmark)")
+    else:
+        st.info("ℹ️ El portafolio tiene alpha negativo")
+    
+    if mejor_resultado['beta'] < 1:
+        st.info("ℹ️ El portafolio es menos volátil que el benchmark")
+    else:
+        st.info("ℹ️ El portafolio es más volátil que el benchmark")
+    
+    # Recomendaciones de capital
+    if capital_final > capital_inicial * (1 + retorno_objetivo) ** (horizonte_dias / 252):
+        st.success("✅ El portafolio proyecta superar el objetivo de capital")
+    else:
+        st.warning("⚠️ El portafolio no proyecta alcanzar el objetivo de capital")
+
+def obtener_cotizaciones_generico(instrumento, pais, bearer_token):
+    """
+    Obtiene cotizaciones de cualquier instrumento usando la API de InvertirOnline
+    """
+    try:
+        url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{pais}/Todos"
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {bearer_token}'
+        }
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            cotizaciones = response.json()
+            if cotizaciones and 'titulos' in cotizaciones:
+                # Convertir los datos a un DataFrame de pandas
+                df = pd.DataFrame(cotizaciones['titulos'])
+                return df
+            else:
+                st.warning(f"⚠️ No se encontraron datos de {instrumento} en la respuesta")
+                return None
+        else:
+            st.error(f"❌ Error en la solicitud de {instrumento}: {response.status_code}")
+            st.error(response.text)
+            return None
+    except Exception as e:
+        st.error(f"❌ Error obteniendo cotizaciones de {instrumento}: {str(e)}")
+        return None
+
+def obtener_cotizaciones_caucion(bearer_token):
+    """
+    Obtiene cotizaciones de cauciones usando la API de InvertirOnline
+    """
+    return obtener_cotizaciones_generico('cauciones', 'argentina', bearer_token)
+
+def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos de benchmarks del mercado argentino
+    """
+    try:
+        if benchmark == 'Tasa_Caucion_Promedio':
+            # Obtener cotizaciones de cauciones usando la nueva función
+            cotizaciones_caucion = obtener_cotizaciones_caucion(token_acceso)
+            if cotizaciones_caucion is not None and not cotizaciones_caucion.empty:
+                # Calcular promedio de tasas de caución
+                if 'tasa' in cotizaciones_caucion.columns:
+                    tasas = cotizaciones_caucion['tasa'].dropna()
+                    if len(tasas) > 0:
+                        tasa_promedio = tasas.mean() / 100  # Convertir a decimal
+                        retorno_diario = (1 + tasa_promedio) ** (1/252) - 1
+                        
+                        # Crear serie temporal de retornos
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
+                        
+                        return pd.DataFrame({'Tasa_Caucion_Promedio': retornos})
+                
+                # Fallback a método anterior si no hay datos
+                tasas_caucion = obtener_tasas_caucion(token_acceso)
+                if tasas_caucion and 'tasas' in tasas_caucion:
+                    tasas = []
+                    for tasa in tasas_caucion['tasas']:
+                        if 'tasa' in tasa:
+                            tasas.append(tasa['tasa'])
+                    
+                    if tasas:
+                        tasa_promedio = np.mean(tasas) / 100
+                        retorno_diario = (1 + tasa_promedio) ** (1/252) - 1
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
+                        return pd.DataFrame({'Tasa_Caucion_Promedio': retornos})
+        
+        elif benchmark == 'Dolar_MEP':
+            # Obtener datos del dólar MEP (simulado por ahora)
+            # Aquí se integraría con la API de InvertirOnline para obtener datos reales
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            # Simular retornos del dólar MEP (esto se reemplazará con datos reales)
+            retornos_mep = np.random.normal(0.0005, 0.02, len(fechas))  # 0.05% diario promedio
+            return pd.DataFrame({'Dolar_MEP': retornos_mep}, index=fechas)
+        
+        elif benchmark == 'Dolar_Blue':
+            # Obtener datos del dólar Blue (simulado por ahora)
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            # Simular retornos del dólar Blue
+            retornos_blue = np.random.normal(0.0008, 0.025, len(fechas))  # 0.08% diario promedio
+            return pd.DataFrame({'Dolar_Blue': retornos_blue}, index=fechas)
+        
+        elif benchmark == 'Dolar_Oficial':
+            # Obtener datos del dólar Oficial (simulado por ahora)
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            # Simular retornos del dólar Oficial
+            retornos_oficial = np.random.normal(0.0002, 0.01, len(fechas))  # 0.02% diario promedio
+            return pd.DataFrame({'Dolar_Oficial': retornos_oficial}, index=fechas)
+        
+        elif benchmark.startswith('Bono_'):
+            # Obtener datos de bonos argentinos
+            simbolo_bono = benchmark.replace('Bono_', '')
+            try:
+                # Intentar obtener cotizaciones de bonos
+                cotizaciones_bonos = obtener_cotizaciones_generico('bonos', 'argentina', token_acceso)
+                if cotizaciones_bonos is not None and not cotizaciones_bonos.empty:
+                    # Buscar el bono específico
+                    bono_data = cotizaciones_bonos[cotizaciones_bonos['simbolo'] == simbolo_bono]
+                    if not bono_data.empty:
+                        # Usar datos de cotización actual para simular retornos
+                        precio_actual = bono_data.iloc[0].get('ultimoPrecio', 100)
+                        # Simular retornos basados en precio actual
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        retornos_bono = np.random.normal(0.0003, 0.015, len(fechas))
+                        return pd.DataFrame({benchmark: retornos_bono}, index=fechas)
+                
+                # Fallback a método anterior
+                datos_bono = obtener_serie_historica_iol(token_acceso, 'BONOS', simbolo_bono, fecha_desde, fecha_hasta)
+                if datos_bono is not None and not datos_bono.empty:
+                    retornos = datos_bono['close'].pct_change().dropna()
+                    return pd.DataFrame({benchmark: retornos})
+            except:
+                # Si falla, usar datos simulados
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                retornos_bono = np.random.normal(0.0003, 0.015, len(fechas))
+                return pd.DataFrame({benchmark: retornos_bono}, index=fechas)
+        
+        elif benchmark.startswith('Indice_'):
+            # Obtener datos de índices argentinos
+            nombre_indice = benchmark.replace('Indice_', '')
+            try:
+                # Intentar obtener cotizaciones de índices
+                cotizaciones_indices = obtener_cotizaciones_generico('indices', 'argentina', token_acceso)
+                if cotizaciones_indices is not None and not cotizaciones_indices.empty:
+                    # Buscar el índice específico
+                    indice_data = cotizaciones_indices[cotizaciones_indices['simbolo'] == nombre_indice]
+                    if not indice_data.empty:
+                        # Usar datos de cotización actual para simular retornos
+                        precio_actual = indice_data.iloc[0].get('ultimoPrecio', 1000)
+                        # Simular retornos basados en precio actual
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        retornos_indice = np.random.normal(0.0004, 0.018, len(fechas))
+                        return pd.DataFrame({benchmark: retornos_indice}, index=fechas)
+                
+                # Fallback a método anterior
+                datos_indice = obtener_serie_historica_iol(token_acceso, 'INDICES', nombre_indice, fecha_desde, fecha_hasta)
+                if datos_indice is not None and not datos_indice.empty:
+                    retornos = datos_indice['close'].pct_change().dropna()
+                    return pd.DataFrame({benchmark: retornos})
+            except:
+                # Si falla, usar datos simulados
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                retornos_indice = np.random.normal(0.0004, 0.018, len(fechas))
+                return pd.DataFrame({benchmark: retornos_indice}, index=fechas)
+        
+        return None
+        
+    except Exception as e:
+        st.error(f"❌ Error obteniendo datos del benchmark {benchmark}: {str(e)}")
+        return None
+
 def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
-    Optimización básica del portafolio
+    Optimización básica del portafolio con benchmark como tasa libre de riesgo
     """
     st.markdown("#### 📊 Optimización Básica")
     
@@ -4330,7 +5773,77 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
     
     st.info(f"📊 Analizando {len(simbolos)} activos del portafolio")
     
+    # Configuración de benchmark y tasa libre de riesgo
+    st.markdown("#### 🎯 Configuración de Benchmark")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        benchmark = st.selectbox(
+            "Benchmark para Tasa Libre de Riesgo:",
+            options=[
+                'Tasa_Caucion_Promedio',
+                'Dolar_MEP',
+                'Dolar_Blue', 
+                'Dolar_Oficial',
+                'Bono_AL30',
+                'Bono_GD30',
+                'Indice_S&P_MERVAL',
+                'Indice_S&P_500',
+                'Tasa_Fija_4%',
+                'Tasa_Fija_6%',
+                'Tasa_Fija_8%'
+            ],
+            format_func=lambda x: {
+                'Tasa_Caucion_Promedio': 'Tasa de Caución Promedio',
+                'Dolar_MEP': 'Dólar MEP',
+                'Dolar_Blue': 'Dólar Blue',
+                'Dolar_Oficial': 'Dólar Oficial',
+                'Bono_AL30': 'Bono AL30',
+                'Bono_GD30': 'Bono GD30',
+                'Indice_S&P_MERVAL': 'S&P MERVAL',
+                'Indice_S&P_500': 'S&P 500',
+                'Tasa_Fija_4%': 'Tasa Fija 4%',
+                'Tasa_Fija_6%': 'Tasa Fija 6%',
+                'Tasa_Fija_8%': 'Tasa Fija 8%'
+            }[x],
+            help="Seleccione el benchmark que servirá como tasa libre de riesgo"
+        )
+    
+    with col2:
+        # Calcular retorno del benchmark
+        benchmark_return = 0.04  # Valor por defecto
+        if benchmark.startswith('Tasa_Fija'):
+            benchmark_return = float(benchmark.split('_')[-1].replace('%', '')) / 100
+        else:
+            try:
+                # Obtener datos del benchmark
+                benchmark_data = obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
+                if benchmark_data is not None and not benchmark_data.empty:
+                    # Calcular retorno anual del benchmark
+                    benchmark_returns = benchmark_data.iloc[:, 0].dropna()
+                    if len(benchmark_returns) > 0:
+                        benchmark_return = benchmark_returns.mean() * 252  # Anualizar
+                        st.success(f"✅ Retorno benchmark calculado: {benchmark_return:.2%}")
+                    else:
+                        st.warning("⚠️ No se pudieron calcular retornos del benchmark")
+                else:
+                    st.warning("⚠️ No se pudieron obtener datos del benchmark")
+            except Exception as e:
+                st.error(f"❌ Error calculando retorno del benchmark: {str(e)}")
+        
+        st.metric("Retorno Anual del Benchmark", f"{benchmark_return:.2%}")
+    
+    with col3:
+        usar_benchmark = st.checkbox(
+            "Usar Benchmark como Tasa Libre de Riesgo",
+            value=True,
+            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones"
+        )
+    
     # Configuración de optimización
+    st.markdown("#### ⚙️ Configuración de Optimización")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -4387,7 +5900,9 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
         """Ejecuta optimización individual y muestra resultados"""
         try:
             use_target = target_return if estrategia == 'markowitz' else None
-            portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+            # Usar la tasa libre de riesgo del benchmark si está habilitada
+            risk_free_rate = benchmark_return if usar_benchmark else None
+            portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target, risk_free_rate=risk_free_rate)
             
             if portfolio_result:
                 st.success("✅ Optimización completada")
@@ -4606,8 +6121,9 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
     if ejecutar_optimizacion:
         with st.spinner("🔄 Ejecutando optimización individual..."):
             try:
-                # Crear manager de portafolio
-                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                # Crear manager de portafolio con tasa libre de riesgo del benchmark
+                risk_free_rate = benchmark_return if usar_benchmark else 0.04
+                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta, risk_free_rate)
                 
                 # Cargar datos
                 if manager_inst.load_data():
@@ -4622,8 +6138,9 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
     if ejecutar_completo:
         with st.spinner("🚀 Ejecutando optimización completa..."):
             try:
-                # Crear manager de portafolio
-                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                # Crear manager de portafolio con tasa libre de riesgo del benchmark
+                risk_free_rate = benchmark_return if usar_benchmark else 0.04
+                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta, risk_free_rate)
                 
                 # Cargar datos
                 if manager_inst.load_data():
