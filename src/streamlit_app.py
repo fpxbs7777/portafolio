@@ -3509,11 +3509,29 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Tabla de activos
         st.subheader("📋 Detalle de Activos")
         df_display = df_activos.copy()
+        
+        # Verificar que df_activos tenga la columna 'Valuación'
+        if 'Valuación' not in df_display.columns:
+            st.error("❌ Error: No se encontró la columna 'Valuación' en los datos del portafolio")
+            return
+        
+        # Verificar que valor_total sea válido
+        if valor_total <= 0:
+            st.error("❌ Error: El valor total del portafolio debe ser mayor a 0")
+            return
+        
         df_display['Valuación'] = df_display['Valuación'].apply(
             lambda x: f"${x:,.2f}" if x > 0 else "N/A"
         )
-        df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
-        df_display = df_display.sort_values('Peso (%)', ascending=False)
+        
+        # Crear columna de peso con validación
+        try:
+            df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
+            df_display = df_display.sort_values('Peso (%)', ascending=False)
+        except Exception as e:
+            st.error(f"❌ Error calculando pesos: {str(e)}")
+            # Crear columna de peso con valores por defecto
+            df_display['Peso (%)'] = 0.0
         
         st.dataframe(df_display, use_container_width=True, height=400)
         
@@ -3652,7 +3670,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         st.plotly_chart(fig, use_container_width=True)
             
             # Análisis por tipo de activo
-            if 'Tipo' in df_activos.columns:
+            if 'Tipo' in df_activos.columns and 'Peso (%)' in df_activos.columns:
                 st.markdown("#### 📊 Análisis por Tipo de Activo")
                 tipo_analysis = df_activos.groupby('Tipo').agg({
                     'Valuación': ['count', 'sum', 'mean', 'std'],
@@ -3702,21 +3720,24 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 
                 with col2:
                     # Gráfico de concentración
-                    simbolos_top = df_activos.nlargest(5, 'Peso (%)')
-                    fig_concentration = go.Figure(data=[go.Bar(
-                        x=simbolos_top['Símbolo'],
-                        y=simbolos_top['Peso (%)'],
-                        marker_color='#dc3545',
-                        text=simbolos_top['Peso (%)'].apply(lambda x: f"{x:.1f}%"),
-                        textposition='auto'
-                    )])
-                    fig_concentration.update_layout(
-                        title="Top 5 Activos por Peso",
-                        xaxis_title="Símbolo",
-                        yaxis_title="Peso (%)",
-                        height=300
-                    )
-                    st.plotly_chart(fig_concentration, use_container_width=True)
+                    if 'Peso (%)' in df_activos.columns:
+                        simbolos_top = df_activos.nlargest(5, 'Peso (%)')
+                        fig_concentration = go.Figure(data=[go.Bar(
+                            x=simbolos_top['Símbolo'],
+                            y=simbolos_top['Peso (%)'],
+                            marker_color='#dc3545',
+                            text=simbolos_top['Peso (%)'].apply(lambda x: f"{x:.1f}%"),
+                            textposition='auto'
+                        )])
+                        fig_concentration.update_layout(
+                            title="Top 5 Activos por Peso",
+                            xaxis_title="Símbolo",
+                            yaxis_title="Peso (%)",
+                            height=300
+                        )
+                        st.plotly_chart(fig_concentration, use_container_width=True)
+                    else:
+                        st.warning("⚠️ No se puede mostrar el gráfico de concentración - faltan datos de peso")
                 
                 # Proyecciones detalladas
                 st.markdown("#### 📈 Proyecciones Detalladas")
