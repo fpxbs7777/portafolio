@@ -874,17 +874,18 @@ def obtener_fondos_comunes(token_portador):
 
 
 
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
     Obtiene la serie histórica de precios de un título desde la API de IOL.
     Actualizada para manejar correctamente la estructura de respuesta de la API.
     """
-    # Determinar endpoint según tipo de instrumento
+    # Determinar endpoint según tipo de instrumento según la documentación de IOL
     if mercado == "Opciones":
-        url = f"https://api.invertironline.com/api/v2/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        url = f"https://api.invertironline.com/api/v2/Opciones/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     elif mercado == "FCI":
-        url = f"https://api.invertironline.com/api/v2/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        url = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     else:
+        # Para mercados tradicionales usar el formato estándar
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
     
     headers = {
@@ -913,7 +914,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                     if not precio or precio == 0:
                         precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
                     
-                    fecha_str = item.get('fechaHora')
+                    fecha_str = item.get('fechaHora') or item.get('fecha')
                     
                     if precio is not None and precio > 0 and fecha_str:
                         fecha_parsed = parse_datetime_flexible(fecha_str)
@@ -938,17 +939,15 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 return None
                 
         elif response.status_code == 401:
-            # Token expirado o inválido
-            st.warning(f"⚠️ Token de autorización inválido para {simbolo}")
+            # Token expirado o inválido - silencioso para no interrumpir
             return None
             
         elif response.status_code == 404:
-            # Símbolo no encontrado en este mercado
+            # Símbolo no encontrado en este mercado - silencioso
             return None
             
         elif response.status_code == 400:
-            # Parámetros inválidos
-            st.warning(f"⚠️ Parámetros inválidos para {simbolo} en {mercado}")
+            # Parámetros inválidos - silencioso
             return None
             
         elif response.status_code == 500:
@@ -956,7 +955,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
             return None
             
         else:
-            # Otros errores HTTP
+            # Otros errores HTTP - silencioso
             return None
             
     except requests.exceptions.Timeout:
@@ -987,7 +986,7 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
                 if not data.empty and len(data) > 10:
                     # Usar precio de cierre
                     return data['Close']
-            except:
+            except Exception:
                 continue
         
         # Intentar sin sufijo
@@ -996,7 +995,7 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
             data = ticker.history(start=fecha_desde, end=fecha_hasta)
             if not data.empty and len(data) > 10:
                 return data['Close']
-        except:
+        except Exception:
             pass
             
         return None
@@ -1028,8 +1027,16 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             # Actualizar barra de progreso
             progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
             
-            # Usar mercados correctos según la API de IOL (sin 'Merval')
-            mercados = ['bCBA', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones', 'FCI']
+            # Detectar mercado más probable para el símbolo
+            mercado_detectado = detectar_mercado_simbolo(simbolo, token_portador)
+            
+            # Usar mercados correctos según la API de IOL
+            # Ordenar mercados por probabilidad de éxito para optimizar búsqueda
+            if mercado_detectado:
+                mercados = [mercado_detectado, 'bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+            else:
+                mercados = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+            
             serie_obtenida = False
             
             for mercado in mercados:
@@ -1117,6 +1124,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             2. **Revisar símbolos**: Algunos símbolos pueden haber cambiado o no estar disponibles
             3. **Ajustar fechas**: Pruebe con un rango de fechas más amplio o diferente
             4. **Verificar permisos**: Asegúrese de tener permisos para acceder a datos históricos
+            5. **Usar símbolos conocidos**: Pruebe con símbolos como 'GGAL', 'YPF', 'PAMP', 'COME' para acciones argentinas
             """)
             
             return None, None, None
@@ -1234,6 +1242,37 @@ def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada
     except Exception:
         return None
 
+def detectar_mercado_simbolo(simbolo, bearer_token):
+    """
+    Detecta automáticamente el mercado correcto para un símbolo.
+    Devuelve el mercado más probable o None si no se puede determinar.
+    """
+    # Patrones para detectar tipos de instrumentos
+    if simbolo.endswith('D') or len(simbolo) >= 8:
+        return 'bCBA'  # Probablemente un bono argentino
+    elif simbolo in ['COME', 'GGAL', 'YPF', 'PAMP', 'TECO2', 'TGS', 'EDN', 'APBR']:
+        return 'bCBA'  # Acciones argentinas conocidas
+    elif simbolo in ['GOOGL', 'AAPL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'INTC']:
+        return 'nYSE'  # Acciones estadounidenses conocidas
+    elif simbolo.endswith('FCI') or simbolo in ['ADCGLOA', 'AE38', 'ETHA']:
+        return 'FCI'  # Fondos comunes de inversión
+    else:
+        # Intentar detectar consultando la API
+        mercados_test = ['bCBA', 'FCI', 'nYSE', 'nASDAQ']
+        for mercado in mercados_test:
+            try:
+                url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                headers = {
+                    'Accept': 'application/json',
+                    'Authorization': f'Bearer {bearer_token}'
+                }
+                response = requests.get(url, headers=headers, timeout=5)
+                if response.status_code == 200:
+                    return mercado
+            except Exception:
+                continue
+        return None
+
 def obtener_clase_d(simbolo, mercado, bearer_token):
     """
     Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
@@ -1256,7 +1295,7 @@ def obtener_clase_d(simbolo, mercado, bearer_token):
         'Authorization': f'Bearer {bearer_token}'
     }
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             clases = response.json()
             for clase in clases:
@@ -1264,8 +1303,10 @@ def obtener_clase_d(simbolo, mercado, bearer_token):
                     return clase['simbolo']
             return None
         else:
+            # Silencioso para no interrumpir el flujo
             return None
     except Exception:
+        # Silencioso para no interrumpir el flujo
         return None
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
