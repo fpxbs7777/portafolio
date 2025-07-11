@@ -526,22 +526,30 @@ def parse_datetime_flexible(date_str: str):
     """
     if not isinstance(date_str, str):
         return None
-    try:
-        # First try parsing with the exact format that matches the error
+    
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "ISO8601",
+        "mixed"
+    ]
+    
+    for fmt in formats_to_try:
         try:
-            # Handle format without milliseconds: "2024-12-10T17:11:04"
-            if len(date_str) == 19 and 'T' in date_str and date_str.count(':') == 2:
-                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S', utc=True)
-            # Handle format with milliseconds: "2024-12-10T17:11:04.123"
-            elif '.' in date_str and 'T' in date_str:
-                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
-        except (ValueError, TypeError):
-            pass
-            
-        # Fall back to pandas' built-in parser if specific formats don't match
-        return pd.to_datetime(date_str, errors='coerce', utc=True)
-    except Exception as e:
-        st.warning(f"Error parsing date '{date_str}': {str(e)}")
+            if fmt == "ISO8601":
+                return pd.to_datetime(date_str, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(date_str, format='mixed')
+            else:
+                return pd.to_datetime(date_str, format=fmt)
+        except Exception:
+            continue
+
+    try:
+        return pd.to_datetime(date_str, infer_datetime_format=True)
+    except Exception:
         return None
 
 def procesar_respuesta_historico(data, tipo_activo):
@@ -610,34 +618,7 @@ def obtener_fondos_comunes(token_portador):
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
 
-def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene la serie histórica de un fondo común de inversión
-    """
-    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
-    headers = {
-        'Authorization': f'Bearer {token_portador}',
-        'Accept': 'application/json'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        # Procesar la respuesta para convertirla al formato esperado
-        if isinstance(data, list):
-            fechas = []
-            precios = []
-            for item in data:
-                if 'fecha' in item and 'valorCuota' in item:
-                    fechas.append(pd.to_datetime(item['fecha']))
-                    precios.append(float(item['valorCuota']))
-            if fechas and precios:
-                return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
-        return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
-        return None
+# Función duplicada eliminada - usar la versión completa más abajo
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
@@ -931,17 +912,24 @@ class manager:
         self.synchronise_timeseries()
         # Calcular retornos logarítmicos
         returns_matrix = {}
-        for ric in self.rics:
-            if ric in self.timeseries:
-                prices = self.timeseries[ric]
-                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        if self.timeseries is not None:
+            for ric in self.rics:
+                if ric in self.timeseries and self.timeseries[ric] is not None:
+                    prices = self.timeseries[ric]
+                    if prices is not None and len(prices) > 1:
+                        returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
         
         # Convertir a DataFrame para alinear fechas
-        self.returns = pd.DataFrame(returns_matrix)
-        
-        # Calcular matriz de covarianza y retornos medios
-        self.cov_matrix = self.returns.cov() * 252  # Anualizar
-        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        if returns_matrix:
+            self.returns = pd.DataFrame(returns_matrix)
+            
+            # Calcular matriz de covarianza y retornos medios
+            self.cov_matrix = self.returns.cov() * 252  # Anualizar
+            self.mean_returns = self.returns.mean() * 252  # Anualizar
+        else:
+            self.returns = None
+            self.cov_matrix = None
+            self.mean_returns = None
         
         return self.cov_matrix, self.mean_returns
 
@@ -1014,6 +1002,9 @@ class manager:
 
     def _create_output(self, weights):
         """Crea un objeto output con los pesos optimizados"""
+        if self.mean_returns is None or self.cov_matrix is None or self.returns is None:
+            return None
+            
         port_ret = np.sum(self.mean_returns * weights)
         port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
         
@@ -1109,6 +1100,71 @@ def portfolio_variance(x, mtx_var_covar):
     variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
     return variance
 
+def optimize_portfolio(returns, target_return=None):
+    """
+    Optimización básica de portafolio usando Markowitz
+    
+    Args:
+        returns (pd.DataFrame): DataFrame con retornos de activos
+        target_return (float, optional): Retorno objetivo anual
+        
+    Returns:
+        np.array: Pesos optimizados del portafolio
+    """
+    n_assets = len(returns.columns)
+    
+    # Calcular matriz de covarianza y retornos medios
+    cov_matrix = returns.cov() * 252  # Anualizar
+    mean_returns = returns.mean() * 252  # Anualizar
+    
+    # Pesos iniciales iguales
+    weights = np.ones(n_assets) / n_assets
+    
+    # Restricciones
+    bounds = tuple((0, 1) for _ in range(n_assets))
+    
+    if target_return is not None:
+        # Optimización con retorno objetivo
+        constraints = [
+            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+            {'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return}
+        ]
+    else:
+        # Maximizar Sharpe Ratio
+        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+        
+        def neg_sharpe_ratio(weights):
+            port_ret = np.sum(mean_returns * weights)
+            port_vol = np.sqrt(portfolio_variance(weights, cov_matrix))
+            if port_vol == 0:
+                return np.inf
+            return -(port_ret - 0.40) / port_vol  # Tasa libre de riesgo 40%
+        
+        try:
+            result = op.minimize(
+                neg_sharpe_ratio, 
+                x0=weights,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+            return result.x
+        except:
+            return weights
+    
+    # Optimización de varianza mínima
+    try:
+        result = op.minimize(
+            lambda x: portfolio_variance(x, cov_matrix),
+            x0=weights,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+        return result.x
+    except:
+        return weights
+
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
     # special portfolios    
@@ -1130,13 +1186,14 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     volatilities = []
     valid_returns = []
     
-    for ret in returns:
-        try:
-            port = port_mgr.compute_portfolio('markowitz', ret)
-            volatilities.append(port.volatility_annual)
-            valid_returns.append(ret)
-        except:
-            continue
+            for ret in returns:
+            try:
+                port = port_mgr.compute_portfolio('markowitz', ret)
+                if port is not None:
+                    volatilities.append(port.volatility_annual)
+                    valid_returns.append(ret)
+            except:
+                continue
     
     # compute special portfolios
     portfolios = {}
@@ -1322,7 +1379,7 @@ class PortfolioManager:
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
-        if not self.data_loaded or not self.manager:
+        if not self.data_loaded or not self.manager or self.prices is None:
             return None, None, None
         
         try:
@@ -1338,61 +1395,6 @@ class PortfolioManager:
 def _deprecated_serie_historica_iol(*args, **kwargs):
     """Deprecated duplicate of `obtener_serie_historica_iol`. Kept for backward compatibility."""
     return None
-    """Obtiene series históricas desde la API de IOL
-    
-    Args:
-        token_portador: Token de autenticación Bearer
-        mercado: Mercado (BCBA, NYSE, NASDAQ, ROFEX)
-        simbolo: Símbolo del activo (puede ser string o dict con clave 'simbolo')
-        fecha_desde: Fecha inicio (YYYY-MM-DD)
-        fecha_hasta: Fecha fin (YYYY-MM-DD)
-        ajustada: "Ajustada" o "SinAjustar"
-    
-    Returns:
-        DataFrame con datos históricos o None si hay error
-    """
-    # Manejar caso donde simbolo es un diccionario
-    if isinstance(simbolo, dict):
-        simbolo = simbolo.get('simbolo', '')
-    
-    if not simbolo:
-        st.warning("No se proporcionó un símbolo válido")
-        return None
-        
-    # Asegurarse de que el mercado esté en mayúsculas
-    mercado = mercado.upper() if mercado else 'BCBA'
-    try:
-        # Construir la URL de la API
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {token_portador}'
-        }
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        data = response.json()
-        df = pd.DataFrame(data)
-        
-        if 'fechaHora' in df.columns:
-            # Handle different datetime formats
-            df['fecha'] = pd.to_datetime(
-                df['fechaHora'], 
-                format='mixed',  # Automatically infer format for each element
-                utc=True,        # Ensure timezone awareness
-                errors='coerce'  # Convert parsing errors to NaT
-            ).dt.tz_convert(None).dt.date  # Convert to naive date
-            
-            # Drop rows where date parsing failed
-            df = df.dropna(subset=['fecha'])
-            df = df.sort_values('fecha')
-            
-        return df
-        
-    except Exception as e:
-        st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
-        return None
 
 # --- Portfolio Metrics Function ---
 def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
@@ -1944,7 +1946,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2372,7 +2374,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             st.plotly_chart(fig, use_container_width=True)
                         
                         # Gráfico de pesos
-                        if portfolio_result.weights is not None:
+                        if (portfolio_result.weights is not None and 
+                            portfolio_result.dataframe_allocation is not None):
                             st.markdown("#### 🥧 Distribución de Pesos")
                             fig_pie = go.Figure(data=[go.Pie(
                                 labels=portfolio_result.dataframe_allocation['rics'],
