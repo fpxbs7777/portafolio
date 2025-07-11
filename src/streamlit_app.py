@@ -13,6 +13,7 @@ import random
 import warnings
 import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
+import time
 
 warnings.filterwarnings('ignore')
 
@@ -391,29 +392,133 @@ def obtener_encabezado_autorizacion(token_portador):
     }
 
 def obtener_tokens(usuario, contraseña):
+    """
+    Obtiene tokens de autenticación de IOL con manejo mejorado de errores y reintentos
+    """
     url_login = 'https://api.invertironline.com/token'
     datos = {
         'username': usuario,
         'password': contraseña,
         'grant_type': 'password'
     }
-    try:
-        respuesta = requests.post(url_login, data=datos, timeout=15)
-        respuesta.raise_for_status()
-        respuesta_json = respuesta.json()
-        return respuesta_json['access_token'], respuesta_json['refresh_token']
-    except requests.exceptions.HTTPError as http_err:
-        st.error(f'Error HTTP al obtener tokens: {http_err}')
-        if respuesta.status_code == 400:
-            st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
-        elif respuesta.status_code == 401:
-            st.warning("No autorizado. Verifique sus credenciales o permisos.")
-        else:
-            st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
-        return None, None
-    except Exception as e:
-        st.error(f'Error inesperado al obtener tokens: {str(e)}')
-        return None, None
+    
+    # Configuración de sesión con reintentos
+    session = requests.Session()
+    session.mount('https://', requests.adapters.HTTPAdapter(
+        max_retries=3,
+        pool_connections=10,
+        pool_maxsize=10
+    ))
+    
+    # Headers adicionales para mejorar la conexión
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            st.info(f"🔄 Intento {attempt + 1}/{max_attempts} de conexión a IOL...")
+            
+            # Timeout más largo para la primera conexión
+            timeout = 30 if attempt == 0 else 15
+            
+            respuesta = session.post(
+                url_login, 
+                data=datos, 
+                headers=headers,
+                timeout=timeout,
+                verify=True  # Verificar certificados SSL
+            )
+            
+            # Verificar si la respuesta es exitosa
+            if respuesta.status_code == 200:
+                try:
+                    respuesta_json = respuesta.json()
+                    if 'access_token' in respuesta_json and 'refresh_token' in respuesta_json:
+                        st.success("✅ Autenticación exitosa con IOL")
+                        return respuesta_json['access_token'], respuesta_json['refresh_token']
+                    else:
+                        st.error("❌ Respuesta de IOL incompleta - faltan tokens")
+                        return None, None
+                except ValueError as json_err:
+                    st.error(f"❌ Error al procesar respuesta JSON: {json_err}")
+                    return None, None
+            
+            # Manejar códigos de error específicos
+            elif respuesta.status_code == 400:
+                st.error("❌ Error 400: Verifique sus credenciales (usuario/contraseña)")
+                return None, None
+            elif respuesta.status_code == 401:
+                st.error("❌ Error 401: Credenciales inválidas o cuenta bloqueada")
+                return None, None
+            elif respuesta.status_code == 403:
+                st.error("❌ Error 403: Acceso denegado - verifique permisos de su cuenta")
+                return None, None
+            elif respuesta.status_code == 429:
+                st.warning("⚠️ Demasiadas solicitudes. Esperando antes de reintentar...")
+                if attempt < max_attempts - 1:
+                    time.sleep(2 ** attempt)  # Backoff exponencial
+                    continue
+                else:
+                    st.error("❌ Límite de solicitudes excedido")
+                    return None, None
+            elif respuesta.status_code >= 500:
+                st.warning(f"⚠️ Error del servidor ({respuesta.status_code}). Reintentando...")
+                if attempt < max_attempts - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                else:
+                    st.error(f"❌ Error persistente del servidor: {respuesta.status_code}")
+                    return None, None
+            else:
+                st.error(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text[:200]}")
+                return None, None
+                
+        except requests.exceptions.Timeout:
+            st.warning(f"⏱️ Timeout en intento {attempt + 1}. Reintentando...")
+            if attempt < max_attempts - 1:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                st.error("❌ Timeout persistente al conectar con IOL")
+                st.info("💡 Sugerencias:")
+                st.info("• Verifique su conexión a internet")
+                st.info("• Intente nuevamente en unos minutos")
+                st.info("• Contacte a IOL si el problema persiste")
+                return None, None
+                
+        except requests.exceptions.ConnectionError:
+            st.warning(f"🔌 Error de conexión en intento {attempt + 1}. Reintentando...")
+            if attempt < max_attempts - 1:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                st.error("❌ Error de conexión persistente")
+                st.info("💡 Verifique:")
+                st.info("• Su conexión a internet")
+                st.info("• Que no haya firewall bloqueando la conexión")
+                st.info("• Que el servidor de IOL esté disponible")
+                return None, None
+                
+        except requests.exceptions.SSLError:
+            st.error("❌ Error de certificado SSL")
+            st.info("💡 Esto puede indicar problemas de seguridad de red")
+            return None, None
+            
+        except Exception as e:
+            st.error(f"❌ Error inesperado: {str(e)}")
+            if attempt < max_attempts - 1:
+                st.info("🔄 Reintentando...")
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                return None, None
+    
+    st.error("❌ No se pudo establecer conexión después de múltiples intentos")
+    return None, None
 
 def obtener_lista_clientes(token_portador):
     """
@@ -4198,23 +4303,27 @@ class PortfolioManager:
     
     def _optimize_max_return(self):
         """
-        Optimiza para máximo retorno
+        Optimiza el portafolio para máximo retorno esperado
         """
         try:
+            # Verificar que self.returns no sea None y tenga columnas
+            if self.returns is None or not hasattr(self.returns, 'columns') or len(self.returns.columns) == 0:
+                st.error("No hay datos de retornos disponibles para optimización de máximo retorno")
+                return None
             # Calcular retornos esperados
             expected_returns = self.returns.mean()
-            
             # Encontrar el activo con mayor retorno esperado
             max_return_idx = expected_returns.idxmax()
-            
             # Asignar todo el peso al activo con mayor retorno
             weights = np.zeros(len(self.returns.columns))
             weights[self.returns.columns.get_loc(max_return_idx)] = 1.0
-            
             return weights
         except Exception as e:
             st.error(f"Error en optimización de máximo retorno: {str(e)}")
-            return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
+            if self.returns is not None and hasattr(self.returns, 'columns') and len(self.returns.columns) > 0:
+                return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
+            else:
+                return None
     
     def _optimize_min_variance(self):
         """
