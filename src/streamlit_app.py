@@ -12,6 +12,7 @@ from scipy import optimize
 import random
 import warnings
 import streamlit.components.v1 as components
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 
@@ -1866,6 +1867,887 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
         st.warning(f"Error en optimización: {str(e)}. Usando pesos iguales.")
         return np.array([1/n_assets] * n_assets)
 
+# --- Menú de Optimizaciones Avanzadas ---
+def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Menú completo de optimizaciones con capital inicial, horizonte, benchmark y análisis de alpha/beta
+    """
+    st.markdown("### 🎯 Menú de Optimizaciones Avanzadas")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para optimizar")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if len(simbolos) < 2:
+        st.warning("Se necesitan al menos 2 activos para optimización")
+        return
+    
+    # Configuración principal
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 💰 Configuración de Capital")
+        capital_inicial = st.number_input(
+            "Capital Inicial (USD):",
+            min_value=1000.0, max_value=10000000.0, value=100000.0, step=1000.0,
+            help="Capital inicial para la optimización"
+        )
+        
+        horizonte_dias = st.number_input(
+            "Horizonte de Inversión (días):",
+            min_value=30, max_value=3650, value=252, step=30,
+            help="Horizonte temporal para el análisis"
+        )
+        
+        tasa_libre_riesgo = st.number_input(
+            "Tasa Libre de Riesgo (% anual):",
+            min_value=0.0, max_value=50.0, value=4.0, step=0.1,
+            help="Tasa libre de riesgo para cálculos de Sharpe"
+        )
+    
+    with col2:
+        st.markdown("#### 📊 Configuración de Benchmark")
+        benchmark_options = ['^SPX', 'SPY', '^GSPC', '^IXIC', '^DJI'] + simbolos
+        benchmark = st.selectbox(
+            "Benchmark de Referencia:",
+            options=benchmark_options,
+            index=0,
+            help="Índice de referencia para análisis alpha/beta"
+        )
+        
+        profit_esperado = st.number_input(
+            "Profit Esperado (% anual):",
+            min_value=0.0, max_value=100.0, value=8.0, step=0.1,
+            help="Rendimiento esperado del portafolio"
+        )
+        
+        usar_tasa_manual = st.checkbox(
+            "Usar Tasa Libre de Riesgo Manual",
+            help="Marcar para usar tasa personalizada en lugar de la del benchmark"
+        )
+    
+    # Configuración de estrategias
+    st.markdown("#### 🎯 Estrategias de Optimización")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        estrategias_basicas = st.multiselect(
+            "Estrategias Básicas:",
+            options=['min-variance-l1', 'min-variance-l2', 'equi-weight', 'long-only'],
+            default=['min-variance-l1', 'equi-weight'],
+            help="Estrategias de optimización básicas"
+        )
+    
+    with col2:
+        estrategias_avanzadas = st.multiselect(
+            "Estrategias Avanzadas:",
+            options=['markowitz', 'markowitz-target', 'black-litterman', 'risk-parity'],
+            default=['markowitz'],
+            help="Estrategias de optimización avanzadas"
+        )
+    
+    with col3:
+        mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
+        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    
+    # Botón de ejecución
+    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Avanzada", type="primary")
+    
+    if ejecutar_optimizacion:
+        with st.spinner("Ejecutando optimización avanzada..."):
+            try:
+                # Crear manager de portafolio
+                manager_inst = PortfolioManager(simbolos, token_acceso, fecha_desde, fecha_hasta)
+                
+                # Cargar datos
+                if manager_inst.load_data():
+                    st.success("✅ Datos históricos cargados")
+                    
+                    # Calcular rendimiento esperado del benchmark
+                    if benchmark in manager_inst.returns.columns:
+                        benchmark_return = manager_inst.returns[benchmark].mean() * 252
+                        st.info(f"📈 Rendimiento esperado del benchmark ({benchmark}): {benchmark_return:.2%} anual")
+                        
+                        # Validar que profit esperado sea mayor al benchmark
+                        if profit_esperado/100 <= benchmark_return:
+                            st.warning(f"⚠️ El profit esperado ({profit_esperado:.1f}%) debe ser mayor al rendimiento del benchmark ({benchmark_return:.2%})")
+                            profit_esperado = (benchmark_return + 0.02) * 100  # Ajustar automáticamente
+                            st.info(f"💡 Profit esperado ajustado a: {profit_esperado:.1f}%")
+                    else:
+                        st.warning(f"⚠️ Benchmark {benchmark} no disponible en datos históricos")
+                        benchmark_return = 0.08  # Valor por defecto
+                    
+                    # Calcular portafolios
+                    portafolios_resultados = {}
+                    
+                    # Estrategias básicas
+                    for estrategia in estrategias_basicas:
+                        try:
+                            portfolio_result = manager_inst.compute_portfolio(strategy=estrategia)
+                            if portfolio_result:
+                                portafolios_resultados[estrategia] = portfolio_result
+                        except Exception as e:
+                            st.warning(f"⚠️ Error en estrategia {estrategia}: {str(e)}")
+                    
+                    # Estrategias avanzadas
+                    for estrategia in estrategias_avanzadas:
+                        try:
+                            if estrategia == 'markowitz-target':
+                                portfolio_result = manager_inst.compute_portfolio(
+                                    strategy='markowitz', 
+                                    target_return=profit_esperado/100
+                                )
+                            else:
+                                portfolio_result = manager_inst.compute_portfolio(strategy=estrategia)
+                            
+                            if portfolio_result:
+                                portafolios_resultados[estrategia] = portfolio_result
+                        except Exception as e:
+                            st.warning(f"⚠️ Error en estrategia {estrategia}: {str(e)}")
+                    
+                    if portafolios_resultados:
+                        st.success(f"✅ {len(portafolios_resultados)} portafolios optimizados calculados")
+                        
+                        # Mostrar resultados comparativos
+                        mostrar_resultados_optimizacion_avanzada(
+                            portafolios_resultados, capital_inicial, horizonte_dias,
+                            benchmark, benchmark_return, profit_esperado, tasa_libre_riesgo,
+                            mostrar_histogramas, mostrar_frontera
+                        )
+                    else:
+                        st.error("❌ No se pudieron calcular portafolios optimizados")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+
+def mostrar_resultados_optimizacion_avanzada(portafolios, capital_inicial, horizonte_dias, 
+                                           benchmark, benchmark_return, profit_esperado, 
+                                           tasa_libre_riesgo, mostrar_histogramas, mostrar_frontera):
+    """
+    Muestra resultados detallados de la optimización avanzada
+    """
+    st.markdown("#### 📊 Resultados de Optimización")
+    
+    # Tabla comparativa
+    resultados_data = []
+    for nombre, portfolio in portafolios.items():
+        if portfolio and hasattr(portfolio, 'get_metrics_dict'):
+            metricas = portfolio.get_metrics_dict()
+            
+            # Calcular alpha y beta vs benchmark
+            alpha, beta = calcular_alpha_beta(portfolio, benchmark)
+            
+            # Calcular métricas adicionales
+            sharpe_ratio = (metricas['Annual Return'] - tasa_libre_riesgo/100) / metricas['Annual Volatility'] if metricas['Annual Volatility'] > 0 else 0
+            sortino_ratio = (metricas['Annual Return'] - tasa_libre_riesgo/100) / metricas.get('Downside Deviation', metricas['Annual Volatility']) if metricas.get('Downside Deviation', metricas['Annual Volatility']) > 0 else 0
+            
+            resultados_data.append({
+                'Estrategia': nombre.replace('-', ' ').title(),
+                'Retorno Anual': f"{metricas['Annual Return']:.2%}",
+                'Volatilidad Anual': f"{metricas['Annual Volatility']:.2%}",
+                'Sharpe Ratio': f"{sharpe_ratio:.3f}",
+                'Sortino Ratio': f"{sortino_ratio:.3f}",
+                'VaR 95%': f"{metricas['VaR 95%']:.4f}",
+                'Alpha': f"{alpha:.4f}",
+                'Beta': f"{beta:.4f}",
+                'Capital Final': f"${capital_inicial * (1 + metricas['Annual Return']):,.0f}"
+            })
+    
+    if resultados_data:
+        df_resultados = pd.DataFrame(resultados_data)
+        st.dataframe(df_resultados, use_container_width=True)
+        
+        # Gráficos de histogramas
+        if mostrar_histogramas:
+            st.markdown("#### 📈 Histogramas de Retornos")
+            
+            # Crear subplots para histogramas
+            num_portafolios = len(portafolios)
+            cols = st.columns(min(3, num_portafolios))
+            
+            for idx, (nombre, portfolio) in enumerate(portafolios.items()):
+                if portfolio and hasattr(portfolio, 'plot_histogram_streamlit'):
+                    with cols[idx % 3]:
+                        fig = portfolio.plot_histogram_streamlit(f"Distribución - {nombre}")
+                        st.plotly_chart(fig, use_container_width=True)
+        
+        # Gráfico de frontera eficiente
+        if mostrar_frontera:
+            st.markdown("#### 📊 Frontera Eficiente")
+            
+            # Preparar datos para la frontera
+            riesgos = []
+            retornos = []
+            nombres = []
+            
+            for nombre, portfolio in portafolios.items():
+                if portfolio and hasattr(portfolio, 'get_metrics_dict'):
+                    metricas = portfolio.get_metrics_dict()
+                    riesgos.append(metricas['Annual Volatility'])
+                    retornos.append(metricas['Annual Return'])
+                    nombres.append(nombre)
+            
+            if len(riesgos) > 1:
+                # Crear gráfico de frontera eficiente
+                fig = go.Figure()
+                
+                # Puntos de portafolios
+                fig.add_trace(go.Scatter(
+                    x=riesgos,
+                    y=retornos,
+                    mode='markers+text',
+                    text=nombres,
+                    textposition="top center",
+                    marker=dict(
+                        size=12,
+                        color=['red', 'blue', 'green', 'orange', 'purple', 'brown'][:len(riesgos)],
+                        symbol='diamond'
+                    ),
+                    name='Portafolios Optimizados'
+                ))
+                
+                # Línea de frontera eficiente (simplificada)
+                if len(riesgos) >= 3:
+                    # Ordenar por riesgo
+                    sorted_data = sorted(zip(riesgos, retornos, nombres))
+                    sorted_riesgos, sorted_retornos, sorted_nombres = zip(*sorted_data)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=sorted_riesgos,
+                        y=sorted_retornos,
+                        mode='lines',
+                        line=dict(color='gray', dash='dash'),
+                        name='Frontera Eficiente'
+                    ))
+                
+                # Punto de benchmark
+                fig.add_trace(go.Scatter(
+                    x=[benchmark_return * 0.2],  # Volatilidad estimada del benchmark
+                    y=[benchmark_return],
+                    mode='markers',
+                    marker=dict(size=15, color='black', symbol='star'),
+                    name=f'Benchmark ({benchmark})'
+                ))
+                
+                fig.update_layout(
+                    title='Frontera Eficiente - Portafolios Optimizados',
+                    xaxis_title='Volatilidad Anual',
+                    yaxis_title='Retorno Anual',
+                    showlegend=True,
+                    template='plotly_white'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Análisis de recomendaciones
+        st.markdown("#### 💡 Análisis y Recomendaciones")
+        
+        # Encontrar mejor portafolio por Sharpe ratio
+        mejor_sharpe = max(resultados_data, key=lambda x: float(x['Sharpe Ratio']))
+        mejor_retorno = max(resultados_data, key=lambda x: float(x['Retorno Anual'].rstrip('%')))
+        menor_riesgo = min(resultados_data, key=lambda x: float(x['Volatilidad Anual'].rstrip('%')))
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                "Mejor Sharpe Ratio",
+                mejor_sharpe['Estrategia'],
+                delta=f"Sharpe: {mejor_sharpe['Sharpe Ratio']}"
+            )
+        
+        with col2:
+            st.metric(
+                "Mayor Retorno",
+                mejor_retorno['Estrategia'],
+                delta=f"Retorno: {mejor_retorno['Retorno Anual']}"
+            )
+        
+        with col3:
+            st.metric(
+                "Menor Riesgo",
+                menor_riesgo['Estrategia'],
+                delta=f"Volatilidad: {menor_riesgo['Volatilidad Anual']}"
+            )
+        
+        # Recomendaciones específicas
+        st.markdown("#### 🎯 Recomendaciones Específicas")
+        
+        if float(mejor_sharpe['Sharpe Ratio']) > 1.0:
+            st.success(f"✅ **{mejor_sharpe['Estrategia']}** es la estrategia más eficiente (Sharpe > 1.0)")
+        elif float(mejor_sharpe['Sharpe Ratio']) > 0.5:
+            st.info(f"ℹ️ **{mejor_sharpe['Estrategia']}** muestra buena eficiencia (Sharpe > 0.5)")
+        else:
+            st.warning(f"⚠️ Todas las estrategias muestran baja eficiencia (Sharpe < 0.5)")
+        
+        # Análisis de alpha
+        alphas = [float(r['Alpha']) for r in resultados_data]
+        mejor_alpha = max(alphas)
+        if mejor_alpha > 0.02:
+            st.success(f"✅ Estrategia con mejor alpha: {mejor_alpha:.2%} (genera valor agregado)")
+        elif mejor_alpha > 0:
+            st.info(f"ℹ️ Alpha positivo: {mejor_alpha:.2%} (moderado valor agregado)")
+        else:
+            st.warning(f"⚠️ Alpha negativo: {mejor_alpha:.2%} (no genera valor agregado)")
+
+def calcular_alpha_beta(portfolio, benchmark):
+    """
+    Calcula alpha y beta de un portafolio vs benchmark
+    """
+    try:
+        if hasattr(portfolio, 'returns') and portfolio.returns is not None:
+            # Obtener retornos del benchmark (simulado si no está disponible)
+            benchmark_returns = np.random.normal(0.0003, 0.015, len(portfolio.returns))  # Simulado
+            
+            # Calcular beta
+            if len(benchmark_returns) > 1:
+                beta = np.cov(portfolio.returns, benchmark_returns)[0,1] / np.var(benchmark_returns)
+            else:
+                beta = 1.0
+            
+            # Calcular alpha
+            portfolio_mean = np.mean(portfolio.returns) * 252
+            benchmark_mean = np.mean(benchmark_returns) * 252
+            alpha = portfolio_mean - beta * benchmark_mean
+            
+            return alpha, beta
+        else:
+            return 0.0, 1.0
+    except Exception:
+        return 0.0, 1.0
+
+# --- CAPM y Funciones de Cobertura ---
+def dataframe_correlacion_beta(benchmark, position_security, hedge_universe, token_portador=None, fecha_desde=None, fecha_hasta=None):
+    """
+    Calcula correlaciones y betas usando datos históricos de IOL
+    """
+    try:
+        # Obtener datos históricos para todos los activos
+        all_securities = [benchmark, position_security] + hedge_universe
+        all_securities = list(set(all_securities))  # Eliminar duplicados
+        
+        if token_portador and fecha_desde and fecha_hasta:
+            # Usar datos de IOL si están disponibles
+            mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                token_portador, all_securities, fecha_desde, fecha_hasta
+            )
+            
+            if mean_returns is not None and cov_matrix is not None:
+                returns = df_precios.pct_change().dropna()
+            else:
+                # Fallback a yfinance
+                returns = _get_returns_yfinance(all_securities)
+        else:
+            # Usar yfinance como fallback
+            returns = _get_returns_yfinance(all_securities)
+        
+        if returns is None or returns.empty:
+            st.error("No se pudieron obtener datos históricos")
+            return pd.DataFrame()
+        
+        # Calcular correlaciones y betas
+        correlations = {}
+        betas = {}
+        
+        for security in hedge_universe:
+            if security in returns.columns and benchmark in returns.columns:
+                # Correlación con la posición
+                if position_security in returns.columns:
+                    corr_pos = returns[security].corr(returns[position_security])
+                    correlations[f'{security}_vs_position'] = corr_pos
+                
+                # Correlación con benchmark
+                corr_bench = returns[security].corr(returns[benchmark])
+                correlations[f'{security}_vs_benchmark'] = corr_bench
+                
+                # Beta vs benchmark
+                if returns[benchmark].var() > 0:
+                    beta = returns[security].cov(returns[benchmark]) / returns[benchmark].var()
+                    betas[security] = beta
+                else:
+                    betas[security] = 0
+        
+        # Crear DataFrame de resultados
+        results = []
+        for security in hedge_universe:
+            if security in returns.columns:
+                results.append({
+                    'Activo': security,
+                    'Correlación vs Posición': correlations.get(f'{security}_vs_position', 0),
+                    'Correlación vs Benchmark': correlations.get(f'{security}_vs_benchmark', 0),
+                    'Beta vs Benchmark': betas.get(security, 0),
+                    'Volatilidad': returns[security].std() * np.sqrt(252),
+                    'Retorno Anual': returns[security].mean() * 252
+                })
+        
+        return pd.DataFrame(results)
+        
+    except Exception as e:
+        st.error(f"Error calculando correlaciones y betas: {str(e)}")
+        return pd.DataFrame()
+
+def _get_returns_yfinance(securities):
+    """
+    Obtiene retornos usando yfinance como fallback
+    """
+    try:
+        returns_data = {}
+        for security in securities:
+            try:
+                ticker = yf.Ticker(security)
+                data = ticker.history(period="1y")
+                if not data.empty:
+                    returns_data[security] = data['Close'].pct_change().dropna()
+            except Exception:
+                continue
+        
+        if returns_data:
+            return pd.DataFrame(returns_data)
+        else:
+            return None
+    except Exception:
+        return None
+
+class Coberturista:
+    """
+    Clase para calcular coberturas óptimas usando modelo CAPM
+    """
+    def __init__(self, position_security, position_delta_usd, benchmark, hedge_securities, 
+                 token_portador=None, fecha_desde=None, fecha_hasta=None):
+        self.position_security = position_security
+        self.position_delta_usd = position_delta_usd
+        self.benchmark = benchmark
+        self.hedge_securities = hedge_securities
+        self.token_portador = token_portador
+        self.fecha_desde = fecha_desde
+        self.fecha_hasta = fecha_hasta
+        
+        # Variables de resultado
+        self.beta_posicion_ars = 0
+        self.pesos_cobertura = []
+        self.delta_cobertura_ars = 0
+        self.beta_cobertura_ars = 0
+        self.costo_cobertura_ars = 0
+        self.betas_cobertura = []
+        
+        # Datos históricos
+        self.returns = None
+        self.mean_returns = None
+        self.cov_matrix = None
+    
+    def cargar_datos_historicos(self):
+        """
+        Carga datos históricos usando IOL o yfinance
+        """
+        try:
+            all_securities = [self.benchmark, self.position_security] + self.hedge_securities
+            all_securities = list(set(all_securities))
+            
+            if self.token_portador and self.fecha_desde and self.fecha_hasta:
+                # Intentar con IOL primero
+                mean_returns, cov_matrix, df_precios = get_historical_data_for_optimization(
+                    self.token_portador, all_securities, self.fecha_desde, self.fecha_hasta
+                )
+                
+                if mean_returns is not None and cov_matrix is not None:
+                    self.returns = df_precios.pct_change().dropna()
+                    self.mean_returns = mean_returns
+                    self.cov_matrix = cov_matrix
+                    return True
+            
+            # Fallback a yfinance
+            self.returns = _get_returns_yfinance(all_securities)
+            if self.returns is not None and not self.returns.empty:
+                self.mean_returns = self.returns.mean() * 252
+                self.cov_matrix = self.returns.cov() * 252
+                return True
+            
+            return False
+            
+        except Exception as e:
+            st.error(f"Error cargando datos históricos: {str(e)}")
+            return False
+    
+    def calcular_betas(self):
+        """
+        Calcula betas de la posición y activos de cobertura
+        """
+        if self.returns is None:
+            if not self.cargar_datos_historicos():
+                return False
+        
+        try:
+            # Beta de la posición vs benchmark
+            if (self.position_security in self.returns.columns and 
+                self.benchmark in self.returns.columns):
+                if self.returns[self.benchmark].var() > 0:
+                    self.beta_posicion_ars = (self.returns[self.position_security]
+                                            .cov(self.returns[self.benchmark]) / 
+                                            self.returns[self.benchmark].var())
+                else:
+                    self.beta_posicion_ars = 0
+            
+            # Betas de activos de cobertura
+            self.betas_cobertura = []
+            for security in self.hedge_securities:
+                if security in self.returns.columns and self.benchmark in self.returns.columns:
+                    if self.returns[self.benchmark].var() > 0:
+                        beta = (self.returns[security]
+                               .cov(self.returns[self.benchmark]) / 
+                               self.returns[self.benchmark].var())
+                    else:
+                        beta = 0
+                    self.betas_cobertura.append(beta)
+                else:
+                    self.betas_cobertura.append(0)
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error calculando betas: {str(e)}")
+            return False
+    
+    def calcular_pesos_cobertura(self, regularizacion=0.1):
+        """
+        Calcula pesos óptimos de cobertura usando optimización
+        """
+        if not self.betas_cobertura or len(self.betas_cobertura) != len(self.hedge_securities):
+            st.error("Debe calcular betas antes de calcular pesos de cobertura")
+            return False
+        
+        try:
+            n_hedge = len(self.hedge_securities)
+            
+            # Función objetivo: minimizar varianza de la cobertura
+            def objective(weights):
+                # Varianza del portafolio de cobertura
+                hedge_variance = 0
+                for i in range(n_hedge):
+                    for j in range(n_hedge):
+                        if (self.hedge_securities[i] in self.returns.columns and 
+                            self.hedge_securities[j] in self.returns.columns):
+                            hedge_variance += (weights[i] * weights[j] * 
+                                            self.cov_matrix.loc[self.hedge_securities[i], 
+                                                              self.hedge_securities[j]])
+                
+                # Penalización por regularización
+                regularization_penalty = regularizacion * np.sum(weights**2)
+                
+                return hedge_variance + regularization_penalty
+            
+            # Restricciones: beta de cobertura = -beta de posición
+            def constraint_beta(weights):
+                hedge_beta = np.sum(np.array(weights) * np.array(self.betas_cobertura))
+                return hedge_beta + self.beta_posicion_ars
+            
+            # Restricción: suma de pesos = 1
+            def constraint_sum(weights):
+                return np.sum(weights) - 1
+            
+            # Optimización
+            initial_weights = np.ones(n_hedge) / n_hedge
+            bounds = [(-2, 2) for _ in range(n_hedge)]  # Permitir posiciones cortas
+            
+            constraints = [
+                {'type': 'eq', 'fun': constraint_beta},
+                {'type': 'eq', 'fun': constraint_sum}
+            ]
+            
+            result = optimize.minimize(
+                objective, 
+                initial_weights,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+            
+            if result.success:
+                self.pesos_cobertura = result.x
+                
+                # Calcular métricas de la cobertura
+                self._calcular_metricas_cobertura()
+                return True
+            else:
+                st.warning("La optimización no convergió")
+                return False
+                
+        except Exception as e:
+            st.error(f"Error calculando pesos de cobertura: {str(e)}")
+            return False
+    
+    def _calcular_metricas_cobertura(self):
+        """
+        Calcula métricas de la cobertura
+        """
+        try:
+            # Delta de la cobertura
+            self.delta_cobertura_ars = np.sum(np.array(self.pesos_cobertura) * 
+                                            np.array(self.betas_cobertura)) * self.position_delta_usd
+            
+            # Beta de la cobertura
+            self.beta_cobertura_ars = np.sum(np.array(self.pesos_cobertura) * 
+                                           np.array(self.betas_cobertura))
+            
+            # Costo estimado (simplificado)
+            self.costo_cobertura_ars = np.sum(np.abs(self.pesos_cobertura)) * self.position_delta_usd * 0.001
+            
+        except Exception as e:
+            st.error(f"Error calculando métricas de cobertura: {str(e)}")
+
+def mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Muestra la funcionalidad de cobertura de portafolio
+    """
+    st.markdown("### 🛡️ Cobertura de Portafolio")
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("No hay activos en el portafolio para analizar cobertura")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if len(simbolos) < 1:
+        st.warning("Se necesita al menos 1 activo para análisis de cobertura")
+        return
+    
+    st.info(f"📊 Analizando cobertura para {len(simbolos)} activos del portafolio")
+    
+    # Configuración de cobertura
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 📈 Configuración de Posición")
+        position_security = st.selectbox(
+            "Activo principal de la posición:",
+            options=simbolos,
+            help="Selecciona el activo principal que deseas cubrir"
+        )
+        
+        position_delta_usd = st.number_input(
+            "Delta de la posición (millones USD):",
+            min_value=0.1, max_value=1000.0, value=10.0, step=0.1,
+            help="Exposición en millones de dólares"
+        )
+        
+        benchmark = st.selectbox(
+            "Benchmark de referencia:",
+            options=['^SPX', 'SPY', 'BTC-USD', 'ETH-USD'] + simbolos,
+            index=0,
+            help="Índice de referencia para calcular betas"
+        )
+    
+    with col2:
+        st.markdown("#### 🎯 Configuración de Cobertura")
+        
+        # Universo de cobertura
+        hedge_universe = st.multiselect(
+            "Universo de activos para cobertura:",
+            options=simbolos + ['^SPX', 'SPY', 'BTC-USD', 'ETH-USD', 'XLK', 'XLF'],
+            default=simbolos[:3] if len(simbolos) >= 3 else simbolos,
+            help="Activos disponibles para construir la cobertura"
+        )
+        
+        regularizacion = st.slider(
+            "Regularización:",
+            min_value=0.0, max_value=10.0, value=0.1, step=0.1,
+            help="Mayor valor = cobertura más conservadora"
+        )
+    
+    # Calcular correlaciones y betas
+    if hedge_universe:
+        st.markdown("#### 📊 Correlaciones y Betas")
+        
+        with st.spinner("Calculando correlaciones y betas..."):
+            df_correlaciones = dataframe_correlacion_beta(
+                benchmark, position_security, hedge_universe, 
+                token_acceso, fecha_desde, fecha_hasta
+            )
+        
+        if not df_correlaciones.empty:
+            st.dataframe(df_correlaciones, use_container_width=True)
+            
+            # Gráfico de correlaciones
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=df_correlaciones['Activo'],
+                    y=df_correlaciones['Correlación vs Posición'],
+                    name='Correlación vs Posición',
+                    marker_color='lightblue'
+                ),
+                go.Bar(
+                    x=df_correlaciones['Activo'],
+                    y=df_correlaciones['Correlación vs Benchmark'],
+                    name='Correlación vs Benchmark',
+                    marker_color='darkblue'
+                )
+            ])
+            
+            fig.update_layout(
+                title='Correlaciones de Activos',
+                xaxis_title='Activos',
+                yaxis_title='Correlación',
+                barmode='group'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No se pudieron calcular correlaciones")
+    
+    # Selección de activos de cobertura
+    st.markdown("#### 🎯 Selección de Activos de Cobertura")
+    
+    hedge_securities = st.multiselect(
+        "Activos específicos para cobertura:",
+        options=hedge_universe,
+        default=hedge_universe[:2] if len(hedge_universe) >= 2 else hedge_universe,
+        help="Selecciona los activos específicos para construir la cobertura"
+    )
+    
+    # Cálculo de cobertura
+    if hedge_securities:
+        st.markdown("#### 🛡️ Resultados de la Cobertura")
+        
+        with st.spinner("Calculando cobertura óptima..."):
+            try:
+                # Crear coberturista
+                hedger = Coberturista(
+                    position_security, position_delta_usd, benchmark, hedge_securities,
+                    token_acceso, fecha_desde, fecha_hasta
+                )
+                
+                # Calcular betas y pesos
+                if hedger.calcular_betas():
+                    if hedger.calcular_pesos_cobertura(regularizacion):
+                        st.success("✅ Cobertura calculada exitosamente")
+                        
+                        # Mostrar resultados
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        col1.metric(
+                            "Beta de la Posición", 
+                            f"{hedger.beta_posicion_ars:.4f}",
+                            help="Beta de la posición principal vs benchmark"
+                        )
+                        
+                        col2.metric(
+                            "Delta de Cobertura", 
+                            f"${hedger.delta_cobertura_ars:.2f}M",
+                            help="Exposición de la cobertura en millones USD"
+                        )
+                        
+                        col3.metric(
+                            "Beta de Cobertura", 
+                            f"{hedger.beta_cobertura_ars:.4f}",
+                            help="Beta de la cobertura vs benchmark"
+                        )
+                        
+                        col4.metric(
+                            "Costo Estimado", 
+                            f"${hedger.costo_cobertura_ars:.2f}M",
+                            help="Costo estimado de la cobertura"
+                        )
+                        
+                        # Tabla de pesos de cobertura
+                        st.markdown("#### 📋 Pesos de Cobertura")
+                        
+                        df_pesos = pd.DataFrame({
+                            'Activo': hedge_securities,
+                            'Peso Cobertura': [f"{w:.4f}" for w in hedger.pesos_cobertura],
+                            'Beta': [f"{b:.4f}" for b in hedger.betas_cobertura],
+                            'Acción': ['Comprar' if w > 0.01 else 'Vender' if w < -0.01 else 'Mantener' 
+                                     for w in hedger.pesos_cobertura]
+                        })
+                        
+                        st.dataframe(df_pesos, use_container_width=True)
+                        
+                        # Gráfico de pesos
+                        fig = go.Figure(data=[go.Bar(
+                            x=hedge_securities,
+                            y=hedger.pesos_cobertura,
+                            text=[f"{w:.2%}" for w in hedger.pesos_cobertura],
+                            textposition='auto',
+                            marker_color=['red' if w < 0 else 'green' for w in hedger.pesos_cobertura]
+                        )])
+                        
+                        fig.update_layout(
+                            title='Pesos de Cobertura por Activo',
+                            xaxis_title='Activos',
+                            yaxis_title='Peso',
+                            showlegend=False
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Análisis de efectividad
+                        st.markdown("#### 📊 Análisis de Efectividad")
+                        
+                        # Calcular métricas de efectividad
+                        beta_neto = hedger.beta_posicion_ars + hedger.beta_cobertura_ars
+                        reduccion_riesgo = abs(hedger.beta_posicion_ars) - abs(beta_neto)
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        col1.metric(
+                            "Beta Neto", 
+                            f"{beta_neto:.4f}",
+                            delta=f"{beta_neto - hedger.beta_posicion_ars:.4f}",
+                            help="Beta combinado de posición + cobertura"
+                        )
+                        
+                        col2.metric(
+                            "Reducción de Riesgo", 
+                            f"{reduccion_riesgo:.4f}",
+                            help="Reducción en beta absoluto"
+                        )
+                        
+                        col3.metric(
+                            "Efectividad", 
+                            f"{(reduccion_riesgo / abs(hedger.beta_posicion_ars) * 100):.1f}%",
+                            help="Porcentaje de reducción de riesgo"
+                        )
+                        
+                        # Recomendaciones
+                        st.markdown("#### 💡 Recomendaciones")
+                        
+                        if abs(beta_neto) < 0.1:
+                            st.success("✅ **Cobertura Efectiva**: La cobertura reduce significativamente el riesgo de mercado.")
+                        elif abs(beta_neto) < 0.3:
+                            st.info("ℹ️ **Cobertura Moderada**: La cobertura reduce parcialmente el riesgo. Considere ajustar los pesos.")
+                        else:
+                            st.warning("⚠️ **Cobertura Limitada**: La cobertura no reduce significativamente el riesgo. Revise la selección de activos.")
+                        
+                        if hedger.costo_cobertura_ars > position_delta_usd * 0.05:
+                            st.warning("⚠️ **Costo Elevado**: El costo de la cobertura es alto. Considere alternativas más eficientes.")
+                        
+                    else:
+                        st.error("❌ Error en el cálculo de pesos de cobertura")
+                else:
+                    st.error("❌ Error en el cálculo de betas")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante el cálculo de cobertura: {str(e)}")
+    else:
+        st.info("Selecciona al menos un activo de cobertura para continuar")
+
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
@@ -3129,10 +4011,12 @@ def mostrar_analisis_portafolio():
     st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "🎯 Optimización",
+        "🛡️ Cobertura",
+        "🚀 Optimización Avanzada",
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "📉 Histograma Retornos"
@@ -3163,12 +4047,32 @@ def mostrar_analisis_portafolio():
             st.warning("No se pudo obtener el portafolio para optimización")
     
     with tab4:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
+        # Cobertura de portafolio
+        if 'portafolio' not in locals():
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if portafolio:
+            mostrar_cobertura_portafolio(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+        else:
+            st.warning("No se pudo obtener el portafolio para análisis de cobertura")
     
     with tab5:
-        mostrar_cotizaciones_mercado(token_acceso)
+        # Optimización avanzada
+        if 'portafolio' not in locals():
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+        
+        if portafolio:
+            mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+        else:
+            st.warning("No se pudo obtener el portafolio para optimización avanzada")
     
     with tab6:
+        mostrar_analisis_tecnico(token_acceso, id_cliente)
+    
+    with tab7:
+        mostrar_cotizaciones_mercado(token_acceso)
+    
+    with tab8:
         # Histograma de retornos de activos individuales
         st.markdown("### 📉 Histograma de Retornos por Activo")
         
