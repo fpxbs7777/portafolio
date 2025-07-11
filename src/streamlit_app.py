@@ -3779,66 +3779,133 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     if manager_inst and manager_inst.returns is not None:
                         st.success(f"✅ Datos históricos cargados para {len(simbolos_validos)} activos")
                         
-                        # Mostrar histogramas individuales con lazy loading
-                        for i, simbolo in enumerate(simbolos_validos):
-                            if simbolo in manager_inst.returns.columns:
-                                with st.expander(f"📊 {simbolo}", expanded=False):
-                                    # Obtener retornos del activo
-                                    asset_returns = manager_inst.returns[simbolo].dropna()
-                                    
-                                    if len(asset_returns) > 10:
-                                        # Crear histograma optimizado
-                                        fig_hist = go.Figure(data=[go.Histogram(
-                                            x=asset_returns,
-                                            nbinsx=min(30, len(asset_returns)),
-                                            marker_color='#0d6efd',
-                                            opacity=0.7,
-                                            name=f"Retornos {simbolo}"
-                                        )])
-                                        
-                                        # Agregar líneas de métricas
-                                        mean_return = asset_returns.mean()
-                                        std_return = asset_returns.std()
-                                        var_95 = asset_returns.quantile(0.05)
-                                        
-                                        fig_hist.add_vline(
-                                            x=mean_return, 
-                                            line_dash="dash", 
-                                            line_color="red",
-                                            annotation_text=f"Media: {mean_return:.4f}"
-                                        )
-                                        fig_hist.add_vline(
-                                            x=var_95, 
-                                            line_dash="dash", 
-                                            line_color="orange",
-                                            annotation_text=f"VaR 95%: {var_95:.4f}"
-                                        )
-                                        
-                                        fig_hist.update_layout(
-                                            title=f"Distribución de Retornos - {simbolo}",
-                                            xaxis_title="Retorno Diario",
-                                            yaxis_title="Frecuencia",
-                                            height=400,
-                                            showlegend=False
-                                        )
-                                        
-                                        st.plotly_chart(fig_hist, use_container_width=True)
-                                        
-                                        # Métricas rápidas
-                                        col1, col2, col3, col4 = st.columns(4)
-                                        with col1:
-                                            st.metric("Retorno Medio", f"{mean_return:.4f}")
-                                        with col2:
-                                            st.metric("Volatilidad", f"{std_return:.4f}")
-                                        with col3:
-                                            st.metric("VaR 95%", f"{var_95:.4f}")
-                                        with col4:
-                                            sharpe_ratio = mean_return / std_return if std_return > 0 else 0
-                                            st.metric("Sharpe Ratio", f"{sharpe_ratio:.4f}")
-                                    else:
-                                        st.warning(f"⚠️ Datos insuficientes para {simbolo} ({len(asset_returns)} días)")
+                        # Calcular pesos actuales del portafolio
+                        pesos_actuales = []
+                        for simbolo in simbolos_validos:
+                            # Buscar el activo en el portafolio
+                            activo_encontrado = None
+                            for activo in activos:
+                                if activo.get('titulo', {}).get('simbolo') == simbolo:
+                                    activo_encontrado = activo
+                                    break
+                            
+                            if activo_encontrado:
+                                value = activo_encontrado.get('valuacionActual', 0)
+                                peso = value / valor_total if valor_total > 0 else 0
+                                pesos_actuales.append(peso)
                             else:
-                                st.warning(f"⚠️ No se encontraron datos históricos para {simbolo}")
+                                # Si no se encuentra, usar peso igual
+                                pesos_actuales.append(1/len(simbolos_validos))
+                        
+                        # Normalizar pesos para que sumen 1
+                        if sum(pesos_actuales) > 0:
+                            pesos_actuales = [w/sum(pesos_actuales) for w in pesos_actuales]
+                        else:
+                            pesos_actuales = [1/len(simbolos_validos)] * len(simbolos_validos)
+                        
+                        # Calcular retornos del portafolio completo
+                        portfolio_returns = None
+                        try:
+                            # Obtener solo las columnas que existen en los datos
+                            available_symbols = [s for s in simbolos_validos if s in manager_inst.returns.columns]
+                            if available_symbols:
+                                # Usar solo los símbolos disponibles
+                                available_weights = []
+                                for simbolo in available_symbols:
+                                    idx = simbolos_validos.index(simbolo)
+                                    available_weights.append(pesos_actuales[idx])
+                                
+                                # Normalizar pesos de símbolos disponibles
+                                if sum(available_weights) > 0:
+                                    available_weights = [w/sum(available_weights) for w in available_weights]
+                                else:
+                                    available_weights = [1/len(available_symbols)] * len(available_symbols)
+                                
+                                # Calcular retornos del portafolio
+                                portfolio_returns = (manager_inst.returns[available_symbols] * available_weights).sum(axis=1)
+                                portfolio_returns = portfolio_returns.dropna()
+                            else:
+                                st.warning("⚠️ No hay símbolos disponibles en los datos históricos")
+                        except Exception as e:
+                            st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
+                        
+                        # Mostrar histograma del portafolio completo
+                        if portfolio_returns is not None and len(portfolio_returns) > 10:
+                            st.markdown("#### 📊 Distribución de Retornos del Portafolio")
+                            
+                            # Crear histograma del portafolio
+                            fig_portfolio_hist = go.Figure(data=[go.Histogram(
+                                x=portfolio_returns,
+                                nbinsx=min(30, len(portfolio_returns)),
+                                marker_color='#0d6efd',
+                                opacity=0.7,
+                                name="Retornos del Portafolio"
+                            )])
+                            
+                            # Agregar líneas de métricas del portafolio
+                            mean_portfolio_return = portfolio_returns.mean()
+                            std_portfolio_return = portfolio_returns.std()
+                            var_95_portfolio = portfolio_returns.quantile(0.05)
+                            
+                            fig_portfolio_hist.add_vline(
+                                x=mean_portfolio_return, 
+                                line_dash="dash", 
+                                line_color="red",
+                                annotation_text=f"Media: {mean_portfolio_return:.4f}"
+                            )
+                            fig_portfolio_hist.add_vline(
+                                x=var_95_portfolio, 
+                                line_dash="dash", 
+                                line_color="orange",
+                                annotation_text=f"VaR 95%: {var_95_portfolio:.4f}"
+                            )
+                            
+                            fig_portfolio_hist.update_layout(
+                                title="Distribución de Retornos del Portafolio Actual",
+                                xaxis_title="Retorno Diario del Portafolio",
+                                yaxis_title="Frecuencia",
+                                height=400,
+                                showlegend=False
+                            )
+                            
+                            st.plotly_chart(fig_portfolio_hist, use_container_width=True)
+                            
+                            # Métricas del portafolio
+                            st.markdown("#### 📈 Métricas del Portafolio")
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Retorno Medio Diario", f"{mean_portfolio_return:.4f}")
+                            with col2:
+                                st.metric("Volatilidad Diaria", f"{std_portfolio_return:.4f}")
+                            with col3:
+                                st.metric("VaR 95% Diario", f"{var_95_portfolio:.4f}")
+                            with col4:
+                                sharpe_ratio_portfolio = mean_portfolio_return / std_portfolio_return if std_portfolio_return > 0 else 0
+                                st.metric("Sharpe Ratio Diario", f"{sharpe_ratio_portfolio:.4f}")
+                            
+                            # Métricas anualizadas
+                            st.markdown("#### 📊 Métricas Anualizadas")
+                            annual_return = mean_portfolio_return * 252
+                            annual_volatility = std_portfolio_return * np.sqrt(252)
+                            annual_sharpe = annual_return / annual_volatility if annual_volatility > 0 else 0
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Retorno Anual", f"{annual_return:.2%}")
+                            with col2:
+                                st.metric("Volatilidad Anual", f"{annual_volatility:.2%}")
+                            with col3:
+                                st.metric("Sharpe Ratio Anual", f"{annual_sharpe:.4f}")
+                            
+                            # Información adicional
+                            st.info(f"""
+                            **ℹ️ Información del Análisis:**
+                            - **Período analizado:** {len(portfolio_returns)} días de trading
+                            - **Activos incluidos:** {len(available_symbols)} de {len(simbolos_validos)} activos
+                            - **Composición:** Basada en la valuación actual del portafolio
+                            """)
+                        else:
+                            st.warning("⚠️ Datos insuficientes para calcular retornos del portafolio")
                     else:
                         st.warning("⚠️ No se pudieron cargar los datos históricos para el análisis de retornos")
                 else:
@@ -5992,13 +6059,29 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                     st.markdown("#### 📊 Pesos Optimizados")
                     if portfolio_result.dataframe_allocation is not None:
                         weights_df = portfolio_result.dataframe_allocation.copy()
-                        # Verificar que la columna 'weights' existe
-                        if 'weights' in weights_df.columns:
+                        # Verificar que las columnas necesarias existen
+                        if 'weights' in weights_df.columns and 'rics' in weights_df.columns:
                             weights_df['Peso (%)'] = weights_df['weights'] * 100
                             weights_df = weights_df.sort_values('Peso (%)', ascending=False)
                             st.dataframe(weights_df[['rics', 'Peso (%)']], use_container_width=True)
+                        elif 'weights' in weights_df.columns:
+                            # Si no hay columna 'rics', usar índices
+                            weights_df['Peso (%)'] = weights_df['weights'] * 100
+                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                            st.dataframe(weights_df[['weights', 'Peso (%)']], use_container_width=True)
                         else:
                             st.warning("⚠️ No se encontraron pesos optimizados en el resultado")
+                            st.info("ℹ️ Columnas disponibles: " + ", ".join(weights_df.columns.tolist()))
+                            st.dataframe(weights_df, use_container_width=True)
+                    else:
+                        st.warning("⚠️ No hay datos de asignación disponibles")
+                        if portfolio_result.weights is not None:
+                            # Crear DataFrame manualmente si solo tenemos weights
+                            weights_df = pd.DataFrame({
+                                'Activo': [f'Activo_{i+1}' for i in range(len(portfolio_result.weights))],
+                                'Peso (%)': portfolio_result.weights * 100
+                            })
+                            weights_df = weights_df.sort_values('Peso (%)', ascending=False)
                             st.dataframe(weights_df, use_container_width=True)
                 
                 with col2:
@@ -6025,11 +6108,18 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                     st.plotly_chart(fig, use_container_width=True)
                 
                 # Gráfico de pesos
-                if portfolio_result.weights is not None and portfolio_result.dataframe_allocation is not None:
+                if portfolio_result.weights is not None:
                     st.markdown("#### 🥧 Distribución de Pesos")
                     try:
+                        # Determinar las etiquetas para el gráfico
+                        if portfolio_result.dataframe_allocation is not None and 'rics' in portfolio_result.dataframe_allocation.columns:
+                            labels = portfolio_result.dataframe_allocation['rics']
+                        else:
+                            # Usar nombres genéricos si no hay etiquetas específicas
+                            labels = [f'Activo_{i+1}' for i in range(len(portfolio_result.weights))]
+                        
                         fig_pie = go.Figure(data=[go.Pie(
-                            labels=portfolio_result.dataframe_allocation['rics'],
+                            labels=labels,
                             values=portfolio_result.weights,
                             textinfo='label+percent',
                         )])
@@ -6038,10 +6128,23 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                     except Exception as e:
                         st.warning(f"⚠️ Error creando gráfico de pesos: {str(e)}")
                         # Mostrar datos en tabla como alternativa
-                        if 'weights' in portfolio_result.dataframe_allocation.columns:
+                        if portfolio_result.dataframe_allocation is not None and 'weights' in portfolio_result.dataframe_allocation.columns:
+                            if 'rics' in portfolio_result.dataframe_allocation.columns:
+                                pie_data = pd.DataFrame({
+                                    'Activo': portfolio_result.dataframe_allocation['rics'],
+                                    'Peso (%)': portfolio_result.dataframe_allocation['weights'] * 100
+                                })
+                            else:
+                                pie_data = pd.DataFrame({
+                                    'Activo': [f'Activo_{i+1}' for i in range(len(portfolio_result.weights))],
+                                    'Peso (%)': portfolio_result.weights * 100
+                                })
+                            st.dataframe(pie_data, use_container_width=True)
+                        else:
+                            # Crear tabla básica con weights
                             pie_data = pd.DataFrame({
-                                'Activo': portfolio_result.dataframe_allocation['rics'],
-                                'Peso (%)': portfolio_result.dataframe_allocation['weights'] * 100
+                                'Activo': [f'Activo_{i+1}' for i in range(len(portfolio_result.weights))],
+                                'Peso (%)': portfolio_result.weights * 100
                             })
                             st.dataframe(pie_data, use_container_width=True)
                 
@@ -6059,6 +6162,9 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                 elif portfolio_result.weights is not None:
                     # Si no hay dataframe_allocation, usar los símbolos originales
                     simbolos_optimizados = simbolos[:len(portfolio_result.weights)]
+                else:
+                    # Fallback: usar símbolos originales
+                    simbolos_optimizados = simbolos
                 
                 for simbolo in simbolos_optimizados:
                     # Buscar el activo correspondiente en el portafolio
@@ -6162,29 +6268,43 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                     st.dataframe(rebalancing_df, use_container_width=True)
                     
                     # Gráfico de cambios en pesos
-                    fig_changes = go.Figure()
-                    fig_changes.add_trace(go.Bar(
-                        x=simbolos_optimizados,
-                        y=[w * 100 for w in current_weights],
-                        name='Peso Actual',
-                        marker_color='lightblue'
-                    ))
-                    fig_changes.add_trace(go.Bar(
-                        x=simbolos_optimizados,
-                        y=[w * 100 for w in portfolio_result.weights],
-                        name='Peso Objetivo',
-                        marker_color='orange'
-                    ))
-                    
-                    fig_changes.update_layout(
-                        title='Comparación de Pesos: Actual vs Optimizado',
-                        xaxis_title='Activo',
-                        yaxis_title='Peso (%)',
-                        barmode='group',
-                        height=400
-                    )
-                    
-                    st.plotly_chart(fig_changes, use_container_width=True)
+                    if len(simbolos_optimizados) > 0 and len(current_weights) > 0 and portfolio_result.weights is not None:
+                        try:
+                            fig_changes = go.Figure()
+                            fig_changes.add_trace(go.Bar(
+                                x=simbolos_optimizados,
+                                y=[w * 100 for w in current_weights],
+                                name='Peso Actual',
+                                marker_color='lightblue'
+                            ))
+                            fig_changes.add_trace(go.Bar(
+                                x=simbolos_optimizados,
+                                y=[w * 100 for w in portfolio_result.weights],
+                                name='Peso Objetivo',
+                                marker_color='orange'
+                            ))
+                            
+                            fig_changes.update_layout(
+                                title='Comparación de Pesos: Actual vs Optimizado',
+                                xaxis_title='Activo',
+                                yaxis_title='Peso (%)',
+                                barmode='group',
+                                height=400
+                            )
+                            
+                            st.plotly_chart(fig_changes, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"⚠️ Error creando gráfico de cambios: {str(e)}")
+                            # Mostrar datos en tabla como alternativa
+                            comparison_df = pd.DataFrame({
+                                'Activo': simbolos_optimizados,
+                                'Peso Actual (%)': [w * 100 for w in current_weights],
+                                'Peso Objetivo (%)': [w * 100 for w in portfolio_result.weights],
+                                'Cambio (%)': [(w2 - w1) * 100 for w1, w2 in zip(current_weights, portfolio_result.weights)]
+                            })
+                            st.dataframe(comparison_df, use_container_width=True)
+                    else:
+                        st.warning("⚠️ No hay datos suficientes para crear gráfico de cambios")
                 
                 return portfolio_result
             else:
