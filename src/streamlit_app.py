@@ -1069,8 +1069,20 @@ def optimize_portfolio(returns, target_return=None):
     return result.x
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
-    """Computa la frontera eficiente y portafolios especiales"""
-    # special portfolios    
+    """
+    Computa la frontera eficiente y portafolios especiales con análisis avanzado
+    
+    Args:
+        rics (list): Lista de símbolos de activos
+        notional (float): Valor nominal del portafolio
+        target_return (float): Retorno objetivo anualizado
+        include_min_variance (bool): Incluir portafolio de mínima varianza
+        data (dict): Datos históricos de precios
+        
+    Returns:
+        tuple: (portfolios, returns, volatilities, frontier_data)
+    """
+    # Etiquetas para portafolios especiales
     label1 = 'min-variance-l1'
     label2 = 'min-variance-l2'
     label3 = 'equi-weight'
@@ -1078,48 +1090,70 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     label5 = 'markowitz-none'
     label6 = 'markowitz-target'
     
-    # compute covariance matrix
+    # Crear manager y computar covarianza
     port_mgr = manager(rics, notional, data)
-    port_mgr.compute_covariance()
+    cov_matrix, mean_returns = port_mgr.compute_covariance()
     
-    # compute vectors of returns and volatilities for Markowitz portfolios
-    min_returns = np.min(port_mgr.mean_returns)
-    max_returns = np.max(port_mgr.mean_returns)
-    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
+    if cov_matrix is None or mean_returns is None:
+        st.warning("No se pudo calcular la matriz de covarianza")
+        return {}, [], [], {}
+    
+    # Computar frontera eficiente con más puntos para mejor resolución
+    min_returns = np.min(mean_returns)
+    max_returns = np.max(mean_returns)
+    
+    # Crear más puntos para una frontera más suave
+    num_points = 100
+    returns_range = np.linspace(min_returns * 0.8, max_returns * 1.2, num_points)
     volatilities = []
     valid_returns = []
+    frontier_weights = []
     
-    for ret in returns:
+    # Calcular portafolios a lo largo de la frontera eficiente
+    for ret in returns_range:
         try:
             port = port_mgr.compute_portfolio('markowitz', ret)
             if port is not None and hasattr(port, 'volatility_annual'):
                 volatilities.append(port.volatility_annual)
                 valid_returns.append(ret)
-        except:
+                frontier_weights.append(port.weights)
+        except Exception as e:
             continue
     
-    # compute special portfolios
+    # Computar portafolios especiales
     portfolios = {}
-    try:
-        portfolios[label1] = port_mgr.compute_portfolio(label1)
-    except:
-        portfolios[label1] = None
-        
-    try:
-        portfolios[label2] = port_mgr.compute_portfolio(label2)
-    except:
-        portfolios[label2] = None
-        
-    portfolios[label3] = port_mgr.compute_portfolio(label3)
-    portfolios[label4] = port_mgr.compute_portfolio(label4)
-    portfolios[label5] = port_mgr.compute_portfolio('markowitz')
+    portfolio_labels = {
+        label1: 'Mínima Varianza L1',
+        label2: 'Mínima Varianza L2', 
+        label3: 'Pesos Iguales',
+        label4: 'Solo Largos',
+        label5: 'Markowitz (Max Sharpe)',
+        label6: 'Markowitz (Target)'
+    }
     
+    for label in [label1, label2, label3, label4, label5]:
+        try:
+            portfolios[label] = port_mgr.compute_portfolio(label)
+        except Exception as e:
+            portfolios[label] = None
+    
+    # Portafolio con retorno objetivo
     try:
         portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
-    except:
+    except Exception as e:
         portfolios[label6] = None
     
-    return portfolios, valid_returns, volatilities
+    # Datos adicionales para análisis avanzado
+    frontier_data = {
+        'weights': frontier_weights,
+        'cov_matrix': cov_matrix,
+        'mean_returns': mean_returns,
+        'portfolio_labels': portfolio_labels,
+        'risk_free_rate': 0.40,  # Tasa libre de riesgo para Argentina
+        'num_assets': len(rics)
+    }
+    
+    return portfolios, valid_returns, volatilities, frontier_data
 
 class PortfolioManager:
     def __init__(self, activos, token, fecha_desde, fecha_hasta):
@@ -1281,22 +1315,23 @@ class PortfolioManager:
             return None
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
-        """Computa la frontera eficiente"""
+        """Computa la frontera eficiente con análisis avanzado"""
         if not self.data_loaded or not self.manager:
-            return None, None, None
+            return None, None, None, None
         
         try:
             if self.prices is not None:
-                portfolios, returns, volatilities = compute_efficient_frontier(
+                portfolios, returns, volatilities, frontier_data = compute_efficient_frontier(
                     self.manager.rics, self.notional, target_return, include_min_variance, 
                     self.prices.to_dict('series')
                 )
-                return portfolios, returns, volatilities
+                return portfolios, returns, volatilities, frontier_data
             else:
                 st.warning("No hay datos de precios disponibles para calcular la frontera eficiente")
-                return None, None, None
+                return None, None, None, None
         except Exception as e:
-            return None, None, None
+            st.error(f"Error calculando frontera eficiente: {str(e)}")
+            return None, None, None, None
 
 # --- Historical Data Methods ---
 def _deprecated_serie_historica_iol(*args, **kwargs):
@@ -1489,6 +1524,178 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
         'r_cuadrado': r_squared,
         'observations': alpha_beta_metrics.get('observations', 0)
     }
+
+def plot_advanced_efficient_frontier(portfolios, returns, volatilities, frontier_data, target_return=0.08):
+    """
+    Crea visualizaciones avanzadas de la frontera eficiente
+    
+    Args:
+        portfolios (dict): Diccionario con portafolios especiales
+        returns (list): Lista de retornos de la frontera eficiente
+        volatilities (list): Lista de volatilidades de la frontera eficiente
+        frontier_data (dict): Datos adicionales de la frontera
+        target_return (float): Retorno objetivo
+        
+    Returns:
+        dict: Diccionario con figuras de Plotly
+    """
+    figures = {}
+    
+    # 1. Gráfico principal de frontera eficiente
+    fig_frontier = go.Figure()
+    
+    # Línea de frontera eficiente
+    fig_frontier.add_trace(go.Scatter(
+        x=volatilities, y=returns,
+        mode='lines+markers',
+        name='Frontera Eficiente',
+        line=dict(color='#0d6efd', width=3),
+        marker=dict(size=4, color='#0d6efd'),
+        hovertemplate='<b>Volatilidad:</b> %{x:.2%}<br><b>Retorno:</b> %{y:.2%}<extra></extra>'
+    ))
+    
+    # Portafolios especiales con colores y símbolos únicos
+    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+    symbols = ['diamond', 'star', 'circle', 'square', 'triangle-up', 'x']
+    
+    portfolio_labels = frontier_data.get('portfolio_labels', {})
+    
+    for i, (label, portfolio) in enumerate(portfolios.items()):
+        if portfolio is not None:
+            display_name = portfolio_labels.get(label, label)
+            fig_frontier.add_trace(go.Scatter(
+                x=[portfolio.volatility_annual], 
+                y=[portfolio.return_annual],
+                mode='markers+text',
+                name=display_name,
+                marker=dict(
+                    size=15, 
+                    color=colors[i % len(colors)],
+                    symbol=symbols[i % len(symbols)]
+                ),
+                text=[display_name],
+                textposition="top center",
+                hovertemplate=f'<b>{display_name}</b><br>' +
+                            f'<b>Retorno:</b> %{{y:.2%}}<br>' +
+                            f'<b>Volatilidad:</b> %{{x:.2%}}<br>' +
+                            f'<b>Sharpe:</b> {portfolio.sharpe_ratio:.3f}<extra></extra>'
+            ))
+    
+    # Línea de retorno objetivo
+    if target_return and volatilities:
+        min_vol = min(volatilities)
+        max_vol = max(volatilities)
+        fig_frontier.add_trace(go.Scatter(
+            x=[min_vol, max_vol], y=[target_return, target_return],
+            mode='lines',
+            name=f'Retorno Objetivo ({target_return:.1%})',
+            line=dict(color='red', width=2, dash='dash'),
+            hovertemplate='<b>Retorno Objetivo:</b> %{y:.2%}<extra></extra>'
+        ))
+    
+    fig_frontier.update_layout(
+        title='Frontera Eficiente del Portafolio',
+        xaxis_title='Volatilidad Anual',
+        yaxis_title='Retorno Anual',
+        showlegend=True,
+        template='plotly_white',
+        height=600,
+        hovermode='closest'
+    )
+    
+    figures['frontier'] = fig_frontier
+    
+    # 2. Gráfico de distribución de pesos a lo largo de la frontera
+    if frontier_data.get('weights') and len(frontier_data['weights']) > 0:
+        weights_array = np.array(frontier_data['weights'])
+        rics = list(frontier_data.get('rics', [f'Asset_{i}' for i in range(weights_array.shape[1])]))
+        
+        fig_weights = go.Figure()
+        
+        for i, ric in enumerate(rics):
+            fig_weights.add_trace(go.Scatter(
+                x=volatilities, y=weights_array[:, i],
+                mode='lines',
+                name=ric,
+                line=dict(width=2),
+                hovertemplate=f'<b>{ric}</b><br>' +
+                            f'<b>Volatilidad:</b> %{{x:.2%}}<br>' +
+                            f'<b>Peso:</b> %{{y:.2%}}<extra></extra>'
+            ))
+        
+        fig_weights.update_layout(
+            title='Distribución de Pesos a lo largo de la Frontera Eficiente',
+            xaxis_title='Volatilidad Anual',
+            yaxis_title='Peso del Activo',
+            template='plotly_white',
+            height=500
+        )
+        
+        figures['weights'] = fig_weights
+    
+    # 3. Gráfico de correlación entre activos
+    if frontier_data.get('cov_matrix') is not None:
+        cov_matrix = frontier_data['cov_matrix']
+        corr_matrix = pd.DataFrame(cov_matrix).corr()
+        
+        fig_corr = go.Figure(data=go.Heatmap(
+            z=corr_matrix.values,
+            x=corr_matrix.columns,
+            y=corr_matrix.index,
+            colorscale='RdBu',
+            zmid=0,
+            hovertemplate='<b>%{y} vs %{x}</b><br>' +
+                        f'<b>Correlación:</b> %{{z:.3f}}<extra></extra>'
+        ))
+        
+        fig_corr.update_layout(
+            title='Matriz de Correlación entre Activos',
+            template='plotly_white',
+            height=500
+        )
+        
+        figures['correlation'] = fig_corr
+    
+    # 4. Gráfico de ratio de Sharpe a lo largo de la frontera
+    if returns and volatilities:
+        risk_free_rate = frontier_data.get('risk_free_rate', 0.40)
+        sharpe_ratios = [(r - risk_free_rate) / v if v > 0 else 0 for r, v in zip(returns, volatilities)]
+        
+        fig_sharpe = go.Figure()
+        fig_sharpe.add_trace(go.Scatter(
+            x=volatilities, y=sharpe_ratios,
+            mode='lines+markers',
+            name='Ratio de Sharpe',
+            line=dict(color='green', width=3),
+            marker=dict(size=6),
+            hovertemplate='<b>Volatilidad:</b> %{x:.2%}<br>' +
+                        f'<b>Sharpe Ratio:</b> %{{y:.3f}}<extra></extra>'
+        ))
+        
+        # Marcar el punto de máximo Sharpe
+        max_sharpe_idx = np.argmax(sharpe_ratios)
+        fig_sharpe.add_trace(go.Scatter(
+            x=[volatilities[max_sharpe_idx]], 
+            y=[sharpe_ratios[max_sharpe_idx]],
+            mode='markers',
+            name='Máximo Sharpe',
+            marker=dict(size=15, color='red', symbol='star'),
+            hovertemplate='<b>Máximo Sharpe</b><br>' +
+                        f'<b>Volatilidad:</b> %{{x:.2%}}<br>' +
+                        f'<b>Sharpe Ratio:</b> %{{y:.3f}}<extra></extra>'
+        ))
+        
+        fig_sharpe.update_layout(
+            title='Ratio de Sharpe a lo largo de la Frontera Eficiente',
+            xaxis_title='Volatilidad Anual',
+            yaxis_title='Ratio de Sharpe',
+            template='plotly_white',
+            height=500
+        )
+        
+        figures['sharpe'] = fig_sharpe
+    
+    return figures
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
@@ -2345,76 +2552,110 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             st.plotly_chart(fig_pie, use_container_width=True)
                         
                         # Calcular y mostrar frontera eficiente automáticamente
-                        st.markdown("#### 📈 Frontera Eficiente")
-                        with st.spinner("Calculando frontera eficiente..."):
+                        st.markdown("#### 📈 Análisis Avanzado de Frontera Eficiente")
+                        with st.spinner("Calculando frontera eficiente avanzada..."):
                             try:
-                                portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
+                                portfolios, returns, volatilities, frontier_data = manager_inst.compute_efficient_frontier(
                                     target_return=target_return, include_min_variance=True
                                 )
                                 
-                                if portfolios and returns and volatilities:
-                                    st.success("✅ Frontera eficiente calculada")
+                                if portfolios and returns and volatilities and frontier_data:
+                                    st.success("✅ Frontera eficiente avanzada calculada")
                                     
-                                    # Crear gráfico de frontera eficiente
-                                    fig = go.Figure()
-                                    
-                                    # Línea de frontera eficiente
-                                    fig.add_trace(go.Scatter(
-                                        x=volatilities, y=returns,
-                                        mode='lines+markers',
-                                        name='Frontera Eficiente',
-                                        line=dict(color='#0d6efd', width=3),
-                                        marker=dict(size=6)
-                                    ))
-                                    
-                                    # Portafolios especiales
-                                    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
-                                    labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
-                                    
-                                    for i, (label, portfolio) in enumerate(portfolios.items()):
-                                        if portfolio is not None:
-                                            fig.add_trace(go.Scatter(
-                                                x=[portfolio.volatility_annual], 
-                                                y=[portfolio.return_annual],
-                                                mode='markers',
-                                                name=labels[i] if i < len(labels) else label,
-                                                marker=dict(size=12, color=colors[i % len(colors)])
-                                            ))
-                                    
-                                    fig.update_layout(
-                                        title='Frontera Eficiente del Portafolio',
-                                        xaxis_title='Volatilidad Anual',
-                                        yaxis_title='Retorno Anual',
-                                        showlegend=True,
-                                        template='plotly_white',
-                                        height=500
+                                    # Crear visualizaciones avanzadas
+                                    figures = plot_advanced_efficient_frontier(
+                                        portfolios, returns, volatilities, frontier_data, target_return
                                     )
                                     
-                                    st.plotly_chart(fig, use_container_width=True)
+                                    # Mostrar gráficos en tabs
+                                    if figures:
+                                        tab_names = list(figures.keys())
+                                        tabs = st.tabs([f"📊 {name.title()}" for name in tab_names])
+                                        
+                                        for i, (name, fig) in enumerate(figures.items()):
+                                            with tabs[i]:
+                                                st.plotly_chart(fig, use_container_width=True)
+                                                
+                                                # Información adicional según el tipo de gráfico
+                                                if name == 'frontier':
+                                                    st.info("""
+                                                    **📈 Interpretación de la Frontera Eficiente:**
+                                                    - Cada punto representa un portafolio con diferentes pesos
+                                                    - La línea azul muestra la combinación óptima de riesgo-retorno
+                                                    - Los puntos de colores son estrategias específicas
+                                                    - El punto más alto en la línea es el portafolio de máximo Sharpe
+                                                    """)
+                                                elif name == 'weights':
+                                                    st.info("""
+                                                    **⚖️ Distribución de Pesos:**
+                                                    - Muestra cómo cambian los pesos de cada activo a lo largo de la frontera
+                                                    - Las líneas más estables indican activos más consistentes
+                                                    - Los cambios bruscos sugieren activos más volátiles
+                                                    """)
+                                                elif name == 'correlation':
+                                                    st.info("""
+                                                    **🔗 Matriz de Correlación:**
+                                                    - Rojo: Correlación positiva alta
+                                                    - Azul: Correlación negativa
+                                                    - Blanco: Poca correlación
+                                                    - Activos con baja correlación ofrecen mejor diversificación
+                                                    """)
+                                                elif name == 'sharpe':
+                                                    st.info("""
+                                                    **📊 Ratio de Sharpe:**
+                                                    - Mide el retorno ajustado por riesgo
+                                                    - El punto rojo marca el portafolio con máximo Sharpe
+                                                    - Valores más altos indican mejor rendimiento por unidad de riesgo
+                                                    """)
                                     
-                                    # Tabla comparativa de portafolios
-                                    st.markdown("#### 📊 Comparación de Estrategias")
+                                    # Tabla comparativa mejorada
+                                    st.markdown("#### 📊 Comparación Detallada de Estrategias")
                                     comparison_data = []
+                                    portfolio_labels = frontier_data.get('portfolio_labels', {})
+                                    
                                     for label, portfolio in portfolios.items():
                                         if portfolio is not None:
+                                            display_name = portfolio_labels.get(label, label)
                                             comparison_data.append({
-                                                'Estrategia': label,
+                                                'Estrategia': display_name,
                                                 'Retorno Anual': f"{portfolio.return_annual:.2%}",
                                                 'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
                                                 'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
                                                 'VaR 95%': f"{portfolio.var_95:.4f}",
                                                 'Skewness': f"{portfolio.skewness:.4f}",
-                                                'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                                'Kurtosis': f"{portfolio.kurtosis:.4f}",
+                                                'Normalidad': "✅ Normal" if portfolio.is_normal else "❌ No Normal"
                                             })
                                     
                                     if comparison_data:
                                         df_comparison = pd.DataFrame(comparison_data)
+                                        df_comparison = df_comparison.sort_values('Sharpe Ratio', ascending=False)
                                         st.dataframe(df_comparison, use_container_width=True)
+                                        
+                                        # Recomendaciones basadas en el análisis
+                                        st.markdown("#### 💡 Recomendaciones")
+                                        best_sharpe = df_comparison.iloc[0]
+                                        st.success(f"""
+                                        **🏆 Mejor Estrategia por Sharpe Ratio:** {best_sharpe['Estrategia']}
+                                        - Retorno: {best_sharpe['Retorno Anual']}
+                                        - Volatilidad: {best_sharpe['Volatilidad Anual']}
+                                        - Sharpe: {best_sharpe['Sharpe Ratio']}
+                                        """)
+                                        
+                                        # Análisis de riesgo
+                                        min_vol = df_comparison.loc[df_comparison['Volatilidad Anual'].str.rstrip('%').astype(float).idxmin()]
+                                        st.info(f"""
+                                        **🛡️ Estrategia de Menor Riesgo:** {min_vol['Estrategia']}
+                                        - Volatilidad: {min_vol['Volatilidad Anual']}
+                                        - Retorno: {min_vol['Retorno Anual']}
+                                        """)
                                 
                                 else:
-                                    st.warning("⚠️ No se pudo calcular la frontera eficiente")
+                                    st.warning("⚠️ No se pudo calcular la frontera eficiente avanzada")
                             except Exception as e:
                                 st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+                                import traceback
+                                st.exception(e)
                         
                     else:
                         st.error("❌ Error en la optimización")
@@ -2423,81 +2664,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
-        with st.spinner("Calculando frontera eficiente..."):
-            try:
-                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
-                
-                if manager_inst.load_data():
-                    portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
-                        target_return=target_return, include_min_variance=True
-                    )
-                    
-                    if portfolios and returns and volatilities:
-                        st.success("✅ Frontera eficiente calculada")
-                        
-                        # Crear gráfico de frontera eficiente
-                        fig = go.Figure()
-                        
-                        # Línea de frontera eficiente
-                        fig.add_trace(go.Scatter(
-                            x=volatilities, y=returns,
-                            mode='lines+markers',
-                            name='Frontera Eficiente',
-                            line=dict(color='#0d6efd', width=3),
-                            marker=dict(size=6)
-                        ))
-                        
-                        # Portafolios especiales
-                        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
-                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
-                        
-                        for i, (label, portfolio) in enumerate(portfolios.items()):
-                            if portfolio is not None:
-                                fig.add_trace(go.Scatter(
-                                    x=[portfolio.volatility_annual], 
-                                    y=[portfolio.return_annual],
-                                    mode='markers',
-                                    name=labels[i] if i < len(labels) else label,
-                                    marker=dict(size=12, color=colors[i % len(colors)])
-                                ))
-                        
-                        fig.update_layout(
-                            title='Frontera Eficiente del Portafolio',
-                            xaxis_title='Volatilidad Anual',
-                            yaxis_title='Retorno Anual',
-                            showlegend=True,
-                            template='plotly_white',
-                            height=500
-                        )
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Tabla comparativa de portafolios
-                        st.markdown("#### 📊 Comparación de Estrategias")
-                        comparison_data = []
-                        for label, portfolio in portfolios.items():
-                            if portfolio is not None:
-                                comparison_data.append({
-                                    'Estrategia': label,
-                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                    'VaR 95%': f"{portfolio.var_95:.4f}",
-                                    'Skewness': f"{portfolio.skewness:.4f}",
-                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
-                                })
-                        
-                        if comparison_data:
-                            df_comparison = pd.DataFrame(comparison_data)
-                            st.dataframe(df_comparison, use_container_width=True)
-                    
-                    else:
-                        st.error("❌ No se pudo calcular la frontera eficiente")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
-                    
-            except Exception as e:
-                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+
     
     # Información adicional extendida
     with st.expander("ℹ️ Información sobre las Estrategias"):
