@@ -2140,6 +2140,160 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     )
                     st.plotly_chart(fig_hist, use_container_width=True)
         
+        # Análisis de Retornos del Portafolio
+        if metricas and 'retorno_esperado_anual' in metricas:
+            st.subheader("📈 Análisis de Retornos del Portafolio")
+            
+            # Calcular retornos históricos del portafolio usando los datos de los activos
+            try:
+                # Obtener datos históricos para calcular retornos del portafolio
+                fecha_desde = (datetime.now() - timedelta(days=252)).strftime('%Y-%m-%d')
+                fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+                
+                # Crear lista de activos para análisis
+                activos_para_analisis = []
+                for activo in datos_activos:
+                    simbolo = activo['Símbolo']
+                    tipo = activo['Tipo']
+                    peso = activo['Valuación'] / valor_total if valor_total > 0 else 0
+                    
+                    # Determinar mercado basado en el tipo
+                    mercado = 'BCBA'  # Default
+                    if tipo in ['TitulosPublicos', 'Bonos']:
+                        mercado = 'Bonos'
+                    elif tipo in ['Cedears']:
+                        mercado = 'Cedears'
+                    elif tipo in ['FCI']:
+                        mercado = 'FCI'
+                    
+                    activos_para_analisis.append({
+                        'simbolo': simbolo,
+                        'mercado': mercado,
+                        'peso': peso
+                    })
+                
+                # Obtener datos históricos y calcular retornos del portafolio
+                retornos_portafolio = []
+                fechas_retornos = []
+                
+                if len(activos_para_analisis) > 0:
+                    # Obtener datos para cada activo
+                    datos_historicos = {}
+                    for activo in activos_para_analisis:
+                        if activo['peso'] > 0:  # Solo activos con peso significativo
+                            df_hist = obtener_serie_historica_iol(
+                                token_portador,
+                                activo['mercado'],
+                                activo['simbolo'],
+                                fecha_desde,
+                                fecha_hasta
+                            )
+                            if df_hist is not None and not df_hist.empty:
+                                datos_historicos[activo['simbolo']] = df_hist
+                    
+                    # Calcular retornos diarios del portafolio
+                    if datos_historicos:
+                        # Crear DataFrame con todos los precios
+                        df_precios = pd.DataFrame()
+                        for simbolo, df in datos_historicos.items():
+                            df_temp = df.set_index('fecha')['precio']
+                            df_precios[simbolo] = df_temp
+                        
+                        # Alinear fechas y calcular retornos
+                        df_precios = df_precios.fillna(method='ffill').dropna()
+                        df_retornos = df_precios.pct_change().dropna()
+                        
+                        # Calcular retornos ponderados del portafolio
+                        pesos = [activo['peso'] for activo in activos_para_analisis if activo['simbolo'] in df_retornos.columns]
+                        simbolos_validos = [activo['simbolo'] for activo in activos_para_analisis if activo['simbolo'] in df_retornos.columns]
+                        
+                        if len(pesos) == len(simbolos_validos) and len(simbolos_validos) > 0:
+                            # Normalizar pesos
+                            pesos = np.array(pesos) / sum(pesos)
+                            
+                            # Calcular retornos del portafolio
+                            retornos_portafolio = df_retornos[simbolos_validos].dot(pesos)
+                            fechas_retornos = df_retornos.index
+                            
+                            # Crear objeto output para análisis estadístico
+                            if len(retornos_portafolio) > 10:  # Mínimo de datos
+                                portfolio_output = output(retornos_portafolio, valor_total)
+                                
+                                # Mostrar métricas estadísticas
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown("#### 📊 Estadísticas de Retornos")
+                                    metricas_retornos = portfolio_output.get_metrics_dict()
+                                    
+                                    st.metric("Retorno Diario Promedio", f"{metricas_retornos['Mean Daily']:.4f}")
+                                    st.metric("Volatilidad Diaria", f"{metricas_retornos['Volatility Daily']:.4f}")
+                                    st.metric("Ratio de Sharpe", f"{metricas_retornos['Sharpe Ratio']:.4f}")
+                                    st.metric("VaR 95%", f"{metricas_retornos['VaR 95%']:.4f}")
+                                
+                                with col2:
+                                    st.metric("Skewness", f"{metricas_retornos['Skewness']:.4f}")
+                                    st.metric("Kurtosis", f"{metricas_retornos['Kurtosis']:.4f}")
+                                    st.metric("JB Statistic", f"{metricas_retornos['JB Statistic']:.4f}")
+                                    normalidad = "✅ Normal" if metricas_retornos['Is Normal'] else "❌ No Normal"
+                                    st.metric("Normalidad", normalidad)
+                                
+                                # Gráfico de distribución de retornos
+                                st.markdown("#### 📈 Distribución de Retornos del Portafolio")
+                                fig_histogram = portfolio_output.plot_histogram_streamlit("Retornos del Portafolio")
+                                st.plotly_chart(fig_histogram, use_container_width=True)
+                                
+                                # Análisis adicional
+                                st.markdown("#### 🔍 Interpretación de Métricas")
+                                
+                                # Interpretación del VaR
+                                var_interpretacion = ""
+                                if metricas_retornos['VaR 95%'] < -0.02:
+                                    var_interpretacion = "🔴 Alto riesgo: Pérdidas diarias pueden superar 2%"
+                                elif metricas_retornos['VaR 95%'] < -0.01:
+                                    var_interpretacion = "🟡 Riesgo moderado: Pérdidas diarias pueden superar 1%"
+                                else:
+                                    var_interpretacion = "🟢 Riesgo bajo: Pérdidas diarias típicamente menores a 1%"
+                                
+                                # Interpretación del Sharpe
+                                sharpe_interpretacion = ""
+                                if metricas_retornos['Sharpe Ratio'] > 1.0:
+                                    sharpe_interpretacion = "✅ Excelente: Alto retorno por unidad de riesgo"
+                                elif metricas_retornos['Sharpe Ratio'] > 0.5:
+                                    sharpe_interpretacion = "🟡 Bueno: Retorno aceptable por unidad de riesgo"
+                                else:
+                                    sharpe_interpretacion = "🔴 Bajo: Poco retorno por unidad de riesgo"
+                                
+                                # Interpretación de la normalidad
+                                normalidad_interpretacion = ""
+                                if metricas_retornos['Is Normal']:
+                                    normalidad_interpretacion = "✅ Los retornos siguen una distribución normal"
+                                else:
+                                    normalidad_interpretacion = "⚠️ Los retornos no siguen una distribución normal (mayor riesgo de eventos extremos)"
+                                
+                                # Mostrar interpretaciones
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.info(f"**VaR 95%**: {var_interpretacion}")
+                                with col2:
+                                    st.info(f"**Sharpe Ratio**: {sharpe_interpretacion}")
+                                with col3:
+                                    st.info(f"**Normalidad**: {normalidad_interpretacion}")
+                                
+                            else:
+                                st.warning("⚠️ No hay suficientes datos históricos para calcular retornos del portafolio")
+                        else:
+                            st.warning("⚠️ No se pudieron calcular retornos ponderados del portafolio")
+                    else:
+                        st.warning("⚠️ No se obtuvieron datos históricos suficientes para el análisis")
+                else:
+                    st.warning("⚠️ No hay activos con peso significativo para el análisis")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al calcular retornos del portafolio: {str(e)}")
+                import traceback
+                traceback.print_exc()
+        
         # Tabla de activos
         st.subheader("📋 Detalle de Activos")
         df_display = df_activos.copy()
