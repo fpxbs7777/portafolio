@@ -2265,7 +2265,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 with col2:
                                     st.info(f"**Sharpe Ratio**: {sharpe_interpretacion}")
                                 with col3:
-                                                                     st.info(f"**Normalidad**: {normalidad_interpretacion}")
+                                    st.info(f"**Normalidad**: {normalidad_interpretacion}")
                                  
                              else:
                                  st.warning("⚠️ No hay suficientes datos históricos para calcular retornos del portafolio")
