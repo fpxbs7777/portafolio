@@ -305,6 +305,146 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         st.error(f"Error de conexión: {str(e)}")
         return None
 
+def obtener_tickers_por_panel(token_portador, paneles, pais):
+    """
+    Obtiene los tickers disponibles por panel desde la API de IOL
+    """
+    tickers_por_panel = {}
+    tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
+    
+    for panel in paneles:
+        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+        params = {
+            'cotizacionInstrumentoModel.instrumento': panel,
+            'cotizacionInstrumentoModel.pais': pais.lower()
+        }
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        respuesta = requests.get(url, headers=encabezados, params=params)
+        
+        if respuesta.status_code == 200:
+            datos = respuesta.json()
+            tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+            tickers_por_panel[panel] = tickers
+            panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
+            tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
+        else:
+            st.warning(f'Error obteniendo tickers para {panel}: {respuesta.status_code}')
+    
+    return tickers_por_panel, tickers_df
+
+def obtener_series_historicas_aleatorias_con_capital(
+    tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde,
+    fecha_hasta, ajustada, bearer_token, capital_ars
+):
+    """
+    Selecciona aleatoriamente activos por panel, pero solo descarga series históricas
+    de aquellos cuyo último precio permite comprar al menos 1 unidad con el capital disponible.
+    """
+    series_historicas = pd.DataFrame()
+    precios_ultimos = {}
+    seleccion_final = {}
+
+    for panel in paneles_seleccionados:
+        if panel in tickers_por_panel:
+            tickers = tickers_por_panel[panel]
+            random.shuffle(tickers)
+            seleccionados = []
+            
+            for simbolo in tickers:
+                mercado = 'BCBA'  # Ajustar según sea necesario
+                serie = obtener_serie_historica_iol(bearer_token, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+                
+                if serie is not None and not serie.empty:
+                    # Buscar columna de precio
+                    col_precio = None
+                    for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                        if c in serie.columns:
+                            col_precio = c
+                            break
+                    
+                    if col_precio is not None:
+                        precio_final = serie[col_precio].dropna().iloc[-1]
+                        precios_ultimos[simbolo] = precio_final
+                        seleccionados.append((simbolo, serie, precio_final))
+                
+                if len(seleccionados) >= cantidad_activos:
+                    break
+            
+            # Ordenar por precio y filtrar por capital
+            seleccionados.sort(key=lambda x: x[2])
+            seleccionables = []
+            capital_restante = capital_ars
+            
+            for simbolo, df, precio in seleccionados:
+                if precio <= capital_restante:
+                    seleccionables.append((simbolo, df, precio))
+                    capital_restante -= precio
+            
+            # Si no hay suficientes activos asequibles, tomar los que se pueda
+            if len(seleccionables) < 2:
+                st.warning(f"No hay suficientes activos asequibles en el panel {panel} para el capital disponible.")
+            else:
+                for simbolo, df, precio in seleccionables:
+                    df['simbolo'] = simbolo
+                    df['panel'] = panel
+                    series_historicas = pd.concat([series_historicas, df], ignore_index=True)
+                seleccion_final[panel] = [s[0] for s in seleccionables]
+    
+    return series_historicas, seleccion_final
+
+def calcular_valorizado_portafolio(series_historicas, seleccion_final):
+    """
+    Calcula la evolución del índice valorizado de cada portafolio (por panel).
+    Devuelve un diccionario: {panel: pd.Series(valor_portafolio)}
+    """
+    portafolios_val = {}
+    
+    for panel, simbolos in seleccion_final.items():
+        df_panel = series_historicas[series_historicas['panel'] == panel]
+        
+        # Buscar columna de precio
+        col_precio = None
+        for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+            if c in df_panel.columns:
+                col_precio = c
+                break
+        
+        if col_precio is None:
+            continue
+        
+        # Pivotear para tener fechas como índice y columnas por símbolo
+        df_pivot = df_panel.pivot_table(index='fecha', columns='simbolo', values=col_precio)
+        df_pivot = df_pivot[simbolos].sort_index()
+        
+        # Calcular valorizado: suma simple (pesos iguales)
+        portafolio_val = df_pivot.sum(axis=1)
+        portafolios_val[panel] = portafolio_val
+    
+    return portafolios_val
+
+def calcular_rsi(series, period=14):
+    """Calcula el RSI de una serie de precios."""
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calcular_rvi(series, period=14):
+    """
+    Calcula el Relative Volatility Index (RVI) de una serie de precios.
+    El RVI es similar al RSI pero usa la desviación estándar de los cambios de precio.
+    """
+    delta = series.diff()
+    std = delta.rolling(window=period).std()
+    up = std.where(delta > 0, 0)
+    down = std.where(delta < 0, 0).abs()
+    up_mean = up.rolling(window=period).mean()
+    down_mean = down.rolling(window=period).mean()
+    rvi = 100 * up_mean / (up_mean + down_mean)
+    return rvi
+
 def obtener_tasas_caucion(token_portador):
     """
     Obtiene las tasas de caución desde la API de IOL
@@ -2528,142 +2668,337 @@ def mostrar_rebalanceo_composicion_actual(token_acceso, id_cliente):
     # Configuración de rebalanceo
     st.markdown("#### ⚙️ Configuración de Rebalanceo")
     
-    col1, col2 = st.columns(2)
+    # Selección de modo de rebalanceo
+    modo_rebalanceo = st.radio(
+        "Modo de Rebalanceo:",
+        options=['composicion_actual', 'aleatorio_valorizado'],
+        format_func=lambda x: {
+            'composicion_actual': 'Composición Actual',
+            'aleatorio_valorizado': 'Aleatorio con Total Valorizado'
+        }[x],
+        help="Composición Actual: Mantiene tus activos actuales. Aleatorio: Selecciona activos aleatoriamente del mercado."
+    )
     
-    with col1:
-        estrategia = st.selectbox(
-            "Estrategia de Rebalanceo:",
-            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
-            format_func=lambda x: {
-                'markowitz': 'Optimización de Markowitz',
-                'equi-weight': 'Pesos Iguales',
-                'min-variance-l1': 'Mínima Varianza L1',
-                'min-variance-l2': 'Mínima Varianza L2',
-                'long-only': 'Solo Posiciones Largas'
-            }[x]
-        )
-    
-    with col2:
-        target_return = st.number_input(
-            "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para estrategia Markowitz"
-        )
-    
-    ejecutar_rebalanceo = st.button("⚖️ Ejecutar Rebalanceo", type="primary")
+    if modo_rebalanceo == 'composicion_actual':
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            estrategia = st.selectbox(
+                "Estrategia de Rebalanceo:",
+                options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
+                format_func=lambda x: {
+                    'markowitz': 'Optimización de Markowitz',
+                    'equi-weight': 'Pesos Iguales',
+                    'min-variance-l1': 'Mínima Varianza L1',
+                    'min-variance-l2': 'Mínima Varianza L2',
+                    'long-only': 'Solo Posiciones Largas'
+                }[x]
+            )
+        
+        with col2:
+            target_return = st.number_input(
+                "Retorno Objetivo (anual):",
+                min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+                help="Solo aplica para estrategia Markowitz"
+            )
+        
+        ejecutar_rebalanceo = st.button("⚖️ Ejecutar Rebalanceo", type="primary")
+        
+    else:  # Modo aleatorio
+        st.markdown("#### 🎲 Configuración de Rebalanceo Aleatorio")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Paneles disponibles
+            paneles_disponibles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
+            paneles_seleccionados = st.multiselect(
+                "Seleccionar Paneles:",
+                options=paneles_disponibles,
+                default=['acciones'],
+                help="Selecciona los paneles de donde se elegirán activos aleatoriamente"
+            )
+            
+            cantidad_activos = st.number_input(
+                "Cantidad de Activos por Panel:",
+                min_value=1, max_value=20, value=5,
+                help="Número de activos a seleccionar aleatoriamente por panel"
+            )
+        
+        with col2:
+            # Opción de incluir saldo disponible
+            incluir_saldo = st.checkbox(
+                "Incluir Saldo Disponible",
+                value=True,
+                help="Si está activado, considerará el saldo disponible en la cuenta"
+            )
+            
+            if incluir_saldo:
+                # Obtener saldo disponible del estado de cuenta
+                estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+                saldo_disponible = 0
+                
+                if estado_cuenta and 'cuentas' in estado_cuenta:
+                    for cuenta in estado_cuenta['cuentas']:
+                        if cuenta.get('moneda', '').upper() == 'ARS':
+                            saldo_disponible += cuenta.get('disponible', 0)
+                
+                st.info(f"💰 Saldo Disponible: ${saldo_disponible:,.2f} ARS")
+                
+                capital_total = valor_total + saldo_disponible
+                st.success(f"💵 Capital Total Disponible: ${capital_total:,.2f} ARS")
+            else:
+                capital_total = valor_total
+                st.info(f"💵 Capital del Portafolio: ${capital_total:,.2f} ARS")
+        
+        ejecutar_rebalanceo = st.button("🎲 Ejecutar Rebalanceo Aleatorio", type="primary")
     
     if ejecutar_rebalanceo:
-        with st.spinner("Ejecutando rebalanceo..."):
-            try:
-                # Crear manager de portafolio con la lista de activos actuales
-                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
-                
-                # Cargar datos
-                if manager_inst.load_data():
-                    # Computar optimización
-                    use_target = target_return if estrategia == 'markowitz' else None
-                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+        if modo_rebalanceo == 'composicion_actual':
+            with st.spinner("Ejecutando rebalanceo con composición actual..."):
+                try:
+                    # Crear manager de portafolio con la lista de activos actuales
+                    manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
                     
-                    if portfolio_result:
-                        st.success("✅ Rebalanceo completado")
+                    # Cargar datos
+                    if manager_inst.load_data():
+                        # Computar optimización
+                        use_target = target_return if estrategia == 'markowitz' else None
+                        portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
                         
-                        # Comparar pesos actuales vs optimizados
-                        st.markdown("#### 📊 Comparación: Actual vs Optimizado")
-                        
-                        if portfolio_result.dataframe_allocation is not None:
-                            # Crear DataFrame de comparación
-                            df_comparacion = portfolio_result.dataframe_allocation.copy()
-                            df_comparacion['Peso Optimizado (%)'] = df_comparacion['weights'] * 100
+                        if portfolio_result:
+                            st.success("✅ Rebalanceo completado")
                             
-                            # Agregar pesos actuales
-                            df_comparacion['Peso Actual (%)'] = df_comparacion['rics'].map(
-                                {simbolo: peso / valor_total * 100 for simbolo, peso in pesos_actuales.items()}
-                            ).fillna(0)
+                            # Comparar pesos actuales vs optimizados
+                            st.markdown("#### 📊 Comparación: Actual vs Optimizado")
                             
-                            # Calcular diferencia
-                            df_comparacion['Diferencia (%)'] = (
-                                df_comparacion['Peso Optimizado (%)'] - df_comparacion['Peso Actual (%)']
-                            )
+                            if portfolio_result.dataframe_allocation is not None:
+                                # Crear DataFrame de comparación
+                                df_comparacion = portfolio_result.dataframe_allocation.copy()
+                                df_comparacion['Peso Optimizado (%)'] = df_comparacion['weights'] * 100
+                                
+                                # Agregar pesos actuales
+                                df_comparacion['Peso Actual (%)'] = df_comparacion['rics'].map(
+                                    {simbolo: peso / valor_total * 100 for simbolo, peso in pesos_actuales.items()}
+                                ).fillna(0)
+                                
+                                # Calcular diferencia
+                                df_comparacion['Diferencia (%)'] = (
+                                    df_comparacion['Peso Optimizado (%)'] - df_comparacion['Peso Actual (%)']
+                                )
+                                
+                                # Ordenar por diferencia absoluta
+                                df_comparacion = df_comparacion.sort_values('Diferencia (%)', key=abs, ascending=False)
+                                
+                                # Mostrar tabla de comparación
+                                st.dataframe(df_comparacion[['rics', 'Peso Actual (%)', 'Peso Optimizado (%)', 'Diferencia (%)']], 
+                                           use_container_width=True)
+                                
+                                # Gráfico de comparación
+                                fig_comparacion = go.Figure()
+                                
+                                fig_comparacion.add_trace(go.Bar(
+                                    x=df_comparacion['rics'],
+                                    y=df_comparacion['Peso Actual (%)'],
+                                    name='Peso Actual',
+                                    marker_color='#1f77b4'
+                                ))
+                                
+                                fig_comparacion.add_trace(go.Bar(
+                                    x=df_comparacion['rics'],
+                                    y=df_comparacion['Peso Optimizado (%)'],
+                                    name='Peso Optimizado',
+                                    marker_color='#ff7f0e'
+                                ))
+                                
+                                fig_comparacion.update_layout(
+                                    title='Comparación de Pesos: Actual vs Optimizado',
+                                    xaxis_title='Activos',
+                                    yaxis_title='Peso (%)',
+                                    barmode='group',
+                                    template='plotly_white'
+                                )
+                                
+                                st.plotly_chart(fig_comparacion, use_container_width=True)
                             
-                            # Ordenar por diferencia absoluta
-                            df_comparacion = df_comparacion.sort_values('Diferencia (%)', key=abs, ascending=False)
+                            # Mostrar métricas del portafolio optimizado
+                            st.markdown("#### 📈 Métricas del Portafolio Optimizado")
+                            metricas = portfolio_result.get_metrics_dict()
                             
-                            # Mostrar tabla de comparación
-                            st.dataframe(df_comparacion[['rics', 'Peso Actual (%)', 'Peso Optimizado (%)', 'Diferencia (%)']], 
-                                       use_container_width=True)
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
+                                st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
+                                st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                                st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                            with col2:
+                                st.metric("Skewness", f"{metricas['Skewness']:.4f}")
+                                st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+                                st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+                                normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
+                                st.metric("Normalidad", normalidad)
                             
-                            # Gráfico de comparación
-                            fig_comparacion = go.Figure()
+                            # Recomendaciones de rebalanceo
+                            st.markdown("#### 💡 Recomendaciones de Rebalanceo")
                             
-                            fig_comparacion.add_trace(go.Bar(
-                                x=df_comparacion['rics'],
-                                y=df_comparacion['Peso Actual (%)'],
-                                name='Peso Actual',
-                                marker_color='#1f77b4'
-                            ))
+                            # Identificar activos que necesitan ajuste
+                            if 'Diferencia (%)' in df_comparacion.columns:
+                                activos_aumentar = df_comparacion[df_comparacion['Diferencia (%)'] > 5]
+                                activos_reducir = df_comparacion[df_comparacion['Diferencia (%)'] < -5]
+                                
+                                if not activos_aumentar.empty:
+                                    st.success("**📈 Activos a Aumentar:**")
+                                    for _, row in activos_aumentar.iterrows():
+                                        st.write(f"- {row['rics']}: +{row['Diferencia (%)']:.1f}%")
+                                
+                                if not activos_reducir.empty:
+                                    st.warning("**📉 Activos a Reducir:**")
+                                    for _, row in activos_reducir.iterrows():
+                                        st.write(f"- {row['rics']}: {row['Diferencia (%)']:.1f}%")
+                                
+                                if activos_aumentar.empty and activos_reducir.empty:
+                                    st.info("**✅ Portafolio Bien Balanceado** - No se requieren cambios significativos")
                             
-                            fig_comparacion.add_trace(go.Bar(
-                                x=df_comparacion['rics'],
-                                y=df_comparacion['Peso Optimizado (%)'],
-                                name='Peso Optimizado',
-                                marker_color='#ff7f0e'
-                            ))
-                            
-                            fig_comparacion.update_layout(
-                                title='Comparación de Pesos: Actual vs Optimizado',
-                                xaxis_title='Activos',
-                                yaxis_title='Peso (%)',
-                                barmode='group',
-                                template='plotly_white'
-                            )
-                            
-                            st.plotly_chart(fig_comparacion, use_container_width=True)
-                        
-                        # Mostrar métricas del portafolio optimizado
-                        st.markdown("#### 📈 Métricas del Portafolio Optimizado")
-                        metricas = portfolio_result.get_metrics_dict()
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                            st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                        with col2:
-                            st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                            st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                            st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                            normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                            st.metric("Normalidad", normalidad)
-                        
-                        # Recomendaciones de rebalanceo
-                        st.markdown("#### 💡 Recomendaciones de Rebalanceo")
-                        
-                        # Identificar activos que necesitan ajuste
-                        if 'Diferencia (%)' in df_comparacion.columns:
-                            activos_aumentar = df_comparacion[df_comparacion['Diferencia (%)'] > 5]
-                            activos_reducir = df_comparacion[df_comparacion['Diferencia (%)'] < -5]
-                            
-                            if not activos_aumentar.empty:
-                                st.success("**📈 Activos a Aumentar:**")
-                                for _, row in activos_aumentar.iterrows():
-                                    st.write(f"- {row['rics']}: +{row['Diferencia (%)']:.1f}%")
-                            
-                            if not activos_reducir.empty:
-                                st.warning("**📉 Activos a Reducir:**")
-                                for _, row in activos_reducir.iterrows():
-                                    st.write(f"- {row['rics']}: {row['Diferencia (%)']:.1f}%")
-                            
-                            if activos_aumentar.empty and activos_reducir.empty:
-                                st.info("**✅ Portafolio Bien Balanceado** - No se requieren cambios significativos")
-                        
+                        else:
+                            st.error("❌ Error en el rebalanceo")
                     else:
-                        st.error("❌ Error en el rebalanceo")
-                else:
-                    st.error("❌ No se pudieron cargar los datos históricos")
+                        st.error("❌ No se pudieron cargar los datos históricos")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error durante el rebalanceo: {str(e)}")
+        
+        else:  # Modo aleatorio
+            with st.spinner("Ejecutando rebalanceo aleatorio..."):
+                try:
+                    # Obtener tickers por panel
+                    tickers_por_panel, tickers_df = obtener_tickers_por_panel(
+                        token_acceso, paneles_seleccionados, 'Argentina'
+                    )
                     
-            except Exception as e:
-                st.error(f"❌ Error durante el rebalanceo: {str(e)}")
+                    if not tickers_por_panel:
+                        st.error("❌ No se pudieron obtener tickers de los paneles seleccionados")
+                        return
+                    
+                    # Obtener series históricas aleatorias con control de capital
+                    series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
+                        tickers_por_panel, paneles_seleccionados, cantidad_activos,
+                        fecha_desde, fecha_hasta, "SinAjustar", token_acceso, capital_total
+                    )
+                    
+                    if series_historicas.empty:
+                        st.error("❌ No se pudieron obtener series históricas válidas")
+                        return
+                    
+                    st.success("✅ Rebalanceo aleatorio completado")
+                    
+                    # Mostrar activos seleccionados
+                    st.markdown("#### 🎲 Activos Seleccionados Aleatoriamente")
+                    
+                    for panel, simbolos in seleccion_final.items():
+                        st.info(f"**Panel {panel}:** {', '.join(simbolos)}")
+                    
+                    # Calcular portafolios valorizados
+                    portafolios_val = calcular_valorizado_portafolio(series_historicas, seleccion_final)
+                    
+                    if portafolios_val:
+                        st.markdown("#### 📈 Evolución de Portafolios Valorizados")
+                        
+                        # Crear gráfico de evolución
+                        fig_evolucion = go.Figure()
+                        
+                        for panel, serie_val in portafolios_val.items():
+                            fig_evolucion.add_trace(go.Scatter(
+                                x=serie_val.index,
+                                y=serie_val.values,
+                                mode='lines',
+                                name=f'Portafolio {panel}',
+                                line=dict(width=2)
+                            ))
+                        
+                        fig_evolucion.update_layout(
+                            title='Evolución de Portafolios Valorizados',
+                            xaxis_title='Fecha',
+                            yaxis_title='Valor del Portafolio',
+                            template='plotly_white',
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig_evolucion, use_container_width=True)
+                        
+                        # Calcular y mostrar indicadores técnicos
+                        st.markdown("#### 📊 Indicadores Técnicos")
+                        
+                        for panel, serie_val in portafolios_val.items():
+                            if len(serie_val) > 14:  # Necesitamos suficientes datos para RSI
+                                # Calcular RSI
+                                rsi = calcular_rsi(serie_val)
+                                
+                                # Calcular RVI
+                                rvi = calcular_rvi(serie_val)
+                                
+                                # Crear subplots para RSI y RVI
+                                fig_indicadores = make_subplots(
+                                    rows=2, cols=1,
+                                    subplot_titles=(f'RSI - {panel}', f'RVI - {panel}'),
+                                    vertical_spacing=0.1
+                                )
+                                
+                                # RSI
+                                fig_indicadores.add_trace(
+                                    go.Scatter(x=rsi.index, y=rsi.values, name='RSI', line=dict(color='blue')),
+                                    row=1, col=1
+                                )
+                                fig_indicadores.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
+                                fig_indicadores.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
+                                
+                                # RVI
+                                fig_indicadores.add_trace(
+                                    go.Scatter(x=rvi.index, y=rvi.values, name='RVI', line=dict(color='purple')),
+                                    row=2, col=1
+                                )
+                                fig_indicadores.add_hline(y=80, line_dash="dash", line_color="gray", row=2, col=1)
+                                fig_indicadores.add_hline(y=20, line_dash="dash", line_color="gray", row=2, col=1)
+                                
+                                fig_indicadores.update_layout(
+                                    title=f'Indicadores Técnicos - {panel}',
+                                    height=600,
+                                    template='plotly_white'
+                                )
+                                
+                                st.plotly_chart(fig_indicadores, use_container_width=True)
+                                
+                                # Análisis de señales
+                                ultimo_rsi = rsi.iloc[-1] if not rsi.empty else 50
+                                ultimo_rvi = rvi.iloc[-1] if not rvi.empty else 50
+                                
+                                st.markdown(f"#### 📊 Análisis de Señales - {panel}")
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric("RSI Actual", f"{ultimo_rsi:.1f}")
+                                    if ultimo_rsi > 70:
+                                        st.warning("⚠️ Sobrecomprado")
+                                    elif ultimo_rsi < 30:
+                                        st.success("✅ Sobreventido")
+                                    else:
+                                        st.info("ℹ️ Neutral")
+                                
+                                with col2:
+                                    st.metric("RVI Actual", f"{ultimo_rvi:.1f}")
+                                    if ultimo_rvi > 80:
+                                        st.warning("⚠️ Alta volatilidad")
+                                    elif ultimo_rvi < 20:
+                                        st.success("✅ Baja volatilidad")
+                                    else:
+                                        st.info("ℹ️ Volatilidad normal")
+                    
+                    else:
+                        st.warning("⚠️ No se pudieron calcular los portafolios valorizados")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error durante el rebalanceo aleatorio: {str(e)}")
+                    import traceback
+                    st.exception(e)
 
 def mostrar_optimizacion_completa(token_acceso, id_cliente):
     """
