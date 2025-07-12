@@ -456,6 +456,14 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
+
+def parse_datetime_string(datetime_string):
+    """
+    Parsea una cadena de fecha/hora usando múltiples formatos
+    """
+    if not datetime_string:
+        return None
+        
     formats_to_try = [
         "%Y-%m-%dT%H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S",
@@ -610,34 +618,7 @@ def obtener_fondos_comunes(token_portador):
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
 
-def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene la serie histórica de un fondo común de inversión
-    """
-    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/ajustada'
-    headers = {
-        'Authorization': f'Bearer {token_portador}',
-        'Accept': 'application/json'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        # Procesar la respuesta para convertirla al formato esperado
-        if isinstance(data, list):
-            fechas = []
-            precios = []
-            for item in data:
-                if 'fecha' in item and 'valorCuota' in item:
-                    fechas.append(pd.to_datetime(item['fecha']))
-                    precios.append(float(item['valorCuota']))
-            if fechas and precios:
-                return pd.DataFrame({'fecha': fechas, 'precio': precios}).sort_values('fecha')
-        return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error al obtener serie histórica del FCI {simbolo}: {str(e)}")
-        return None
+
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
@@ -932,7 +913,7 @@ class manager:
         # Calcular retornos logarítmicos
         returns_matrix = {}
         for ric in self.rics:
-            if ric in self.timeseries:
+            if ric in self.timeseries and self.timeseries[ric] is not None:
                 prices = self.timeseries[ric]
                 returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
         
@@ -1018,7 +999,11 @@ class manager:
         port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
         
         # Calcular retornos del portafolio
-        portfolio_returns = self.returns.dot(weights)
+        if self.returns is not None:
+            portfolio_returns = self.returns.dot(weights)
+        else:
+            # Fallback si returns es None
+            portfolio_returns = pd.Series([0] * 252)  # Serie vacía
         
         # Crear objeto output
         port_output = output(portfolio_returns, self.notional)
@@ -1108,6 +1093,74 @@ def portfolio_variance(x, mtx_var_covar):
     """Calcula la varianza del portafolio"""
     variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
     return variance
+
+def optimize_portfolio(returns, target_return=None):
+    """
+    Optimiza un portafolio usando el método de Markowitz
+    
+    Args:
+        returns (pd.DataFrame): DataFrame con retornos de activos
+        target_return (float, optional): Retorno objetivo anual
+        
+    Returns:
+        np.array: Pesos optimizados del portafolio
+    """
+    if returns is None or returns.empty:
+        return None
+        
+    n_assets = len(returns.columns)
+    
+    # Calcular matriz de covarianza y retornos medios
+    cov_matrix = returns.cov() * 252  # Anualizar
+    mean_returns = returns.mean() * 252  # Anualizar
+    
+    # Pesos iniciales iguales
+    initial_weights = np.ones(n_assets) / n_assets
+    
+    # Restricciones
+    bounds = tuple((0, 1) for _ in range(n_assets))
+    
+    if target_return is not None:
+        # Optimización con retorno objetivo
+        constraints = [
+            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},  # Suma de pesos = 1
+            {'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return}  # Retorno objetivo
+        ]
+        
+        # Minimizar varianza
+        result = op.minimize(
+            lambda x: portfolio_variance(x, cov_matrix),
+            initial_weights,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+    else:
+        # Maximizar Sharpe ratio
+        risk_free_rate = 0.40  # Tasa libre de riesgo para Argentina
+        
+        def neg_sharpe_ratio(weights):
+            port_return = np.sum(mean_returns * weights)
+            port_vol = np.sqrt(portfolio_variance(weights, cov_matrix))
+            if port_vol == 0:
+                return np.inf
+            return -(port_return - risk_free_rate) / port_vol
+        
+        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+        
+        result = op.minimize(
+            neg_sharpe_ratio,
+            initial_weights,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+    
+    if result.success:
+        return result.x
+    else:
+        # Si falla la optimización, usar pesos iguales
+        return initial_weights
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
@@ -1326,10 +1379,13 @@ class PortfolioManager:
             return None, None, None
         
         try:
-            portfolios, returns, volatilities = compute_efficient_frontier(
-                self.manager.rics, self.notional, target_return, include_min_variance, 
-                self.prices.to_dict('series')
-            )
+            if self.prices is not None:
+                portfolios, returns, volatilities = compute_efficient_frontier(
+                    self.manager.rics, self.notional, target_return, include_min_variance, 
+                    self.prices.to_dict('series')
+                )
+            else:
+                portfolios, returns, volatilities = None, None, None
             return portfolios, returns, volatilities
         except Exception as e:
             return None, None, None
@@ -1944,7 +2000,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2374,13 +2430,23 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         # Gráfico de pesos
                         if portfolio_result.weights is not None:
                             st.markdown("#### 🥧 Distribución de Pesos")
-                            fig_pie = go.Figure(data=[go.Pie(
-                                labels=portfolio_result.dataframe_allocation['rics'],
-                                values=portfolio_result.weights,
-                                textinfo='label+percent',
-                                hole=0.4,
-                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                            )])
+                            if portfolio_result.dataframe_allocation is not None:
+                                fig_pie = go.Figure(data=[go.Pie(
+                                    labels=portfolio_result.dataframe_allocation['rics'],
+                                    values=portfolio_result.weights,
+                                    textinfo='label+percent',
+                                    hole=0.4,
+                                    marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                )])
+                            else:
+                                # Crear gráfico con datos básicos si no hay dataframe_allocation
+                                fig_pie = go.Figure(data=[go.Pie(
+                                    labels=[f'Activo {i+1}' for i in range(len(portfolio_result.weights))],
+                                    values=portfolio_result.weights,
+                                    textinfo='label+percent',
+                                    hole=0.4,
+                                    marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                )])
                             fig_pie.update_layout(
                                 title="Distribución Optimizada de Activos",
                                 template='plotly_white'
