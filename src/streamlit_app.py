@@ -468,16 +468,16 @@ def mostrar_tasas_caucion(token_portador):
     for fmt in formats_to_try:
         try:
             if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
+                return pd.to_datetime(date_str, format='ISO8601')
             elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
+                return pd.to_datetime(date_str, format='mixed')
             else:
-                return pd.to_datetime(datetime_string, format=fmt)
+                return pd.to_datetime(date_str, format=fmt)
         except Exception:
             continue
 
     try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
+        return pd.to_datetime(date_str, infer_datetime_format=True)
     except Exception:
         return None
 
@@ -2351,12 +2351,16 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         st.info(f"**Normalidad**: {normalidad_interpretacion}")
                                     
                                     st.warning("⚠️ **Nota**: Los datos mostrados son simulados basados en las métricas calculadas del portafolio actual.")
+                                else:
+                                    st.warning("⚠️ No se pudieron calcular retornos ponderados del portafolio")
                             else:
-                                st.warning("⚠️ No se pudieron calcular retornos ponderados del portafolio")
+                                st.warning("⚠️ No se obtuvieron datos históricos suficientes para el análisis")
                         else:
-                            st.warning("⚠️ No se obtuvieron datos históricos suficientes para el análisis")
+                            st.warning("⚠️ No hay activos con peso significativo para el análisis")
                     else:
-                        st.warning("⚠️ No hay activos con peso significativo para el análisis")
+                        st.warning("⚠️ No se pudieron obtener datos históricos suficientes para el análisis")
+                else:
+                    st.warning("⚠️ No hay activos para analizar")
             except Exception as e:
                 st.error(f"❌ Error al calcular retornos del portafolio: {str(e)}")
                 import traceback
