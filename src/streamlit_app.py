@@ -456,30 +456,6 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
-            continue
-
-    try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
-    except Exception:
-        return None
 
 def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """Devuelve la URL correcta para la serie histórica del símbolo indicado.
@@ -781,90 +757,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         return None
         return None
 
-def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
-    """
-    Obtiene la serie histórica de un Fondo Común de Inversión.
-    
-    Args:
-        token_portador (str): Token de autenticación
-        simbolo (str): Símbolo del FCI
-        fecha_desde (str): Fecha inicio (YYYY-MM-DD)
-        fecha_hasta (str): Fecha fin (YYYY-MM-DD)
-        
-    Returns:
-        pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
-    """
-    try:
-        # Primero intentar obtener directamente la serie histórica
-        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
-        headers = {
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }
-        
-        response = requests.get(url_serie, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Procesar la respuesta según el formato esperado
-        if isinstance(data, list):
-            fechas = []
-            precios = []
-            
-            for item in data:
-                try:
-                    # Manejar diferentes formatos de fecha
-                    fecha_str = item.get('fecha') or item.get('fechaHora')
-                    if not fecha_str:
-                        continue
-                        
-                    # Obtener el valor de la cuota (puede venir en diferentes campos)
-                    precio = item.get('valorCuota') or item.get('precio') or item.get('ultimoPrecio')
-                    if not precio:
-                        continue
-                        
-                    # Convertir fecha
-                    fecha = parse_datetime_flexible(fecha_str)
-                    if not pd.isna(fecha):
-                        fechas.append(fecha)
-                        precios.append(float(precio))
-                        
-                except (ValueError, TypeError, AttributeError) as e:
-                    continue
-            
-            if fechas and precios:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                return df
-        
-        # Si no se pudo obtener la serie histórica, intentar obtener el último valor
-        try:
-            # Obtener información del FCI
-            url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
-            response = requests.get(url_fci, headers=headers, timeout=30)
-            response.raise_for_status()
-            fc_data = response.json()
-            
-            # Buscar el FCI por símbolo
-            fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
-            if fci and 'ultimoValorCuotaParte' in fci:
-                return pd.DataFrame({
-                    'fecha': [pd.Timestamp.now(tz='UTC')],
-                    'precio': [float(fci['ultimoValorCuotaParte'])]
-                })
-        except Exception:
-            pass
-        
-        st.warning(f"No se pudieron obtener datos históricos para el FCI {simbolo}")
-        return None
-        
-    except requests.exceptions.RequestException as e:
-        st.warning(f"Error de conexión al obtener datos del FCI {simbolo}: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error inesperado al procesar el FCI {simbolo}: {str(e)}")
-        return None
+
 
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
     """
@@ -931,8 +824,12 @@ class manager:
         self.synchronise_timeseries()
         # Calcular retornos logarítmicos
         returns_matrix = {}
+        if self.timeseries is None:
+            st.warning("No hay datos de series temporales disponibles")
+            return None, None
+            
         for ric in self.rics:
-            if ric in self.timeseries:
+            if ric in self.timeseries and self.timeseries[ric] is not None:
                 prices = self.timeseries[ric]
                 returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
         
@@ -1018,7 +915,11 @@ class manager:
         port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
         
         # Calcular retornos del portafolio
-        portfolio_returns = self.returns.dot(weights)
+        if self.returns is not None:
+            portfolio_returns = self.returns.dot(weights)
+        else:
+            st.warning("No hay datos de retornos disponibles")
+            return None
         
         # Crear objeto output
         port_output = output(portfolio_returns, self.notional)
@@ -1109,6 +1010,64 @@ def portfolio_variance(x, mtx_var_covar):
     variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
     return variance
 
+def optimize_portfolio(returns, target_return=None):
+    """
+    Optimiza un portafolio usando el método de Markowitz
+    
+    Args:
+        returns (pd.DataFrame): DataFrame con retornos de activos
+        target_return (float, optional): Retorno objetivo anualizado
+        
+    Returns:
+        np.array: Pesos optimizados del portafolio
+    """
+    n_assets = len(returns.columns)
+    
+    # Calcular matriz de covarianza y retornos medios
+    cov_matrix = returns.cov() * 252  # Anualizar
+    mean_returns = returns.mean() * 252  # Anualizar
+    
+    # Restricciones básicas
+    bounds = tuple((0, 1) for _ in range(n_assets))
+    
+    if target_return is not None:
+        # Optimización con retorno objetivo
+        constraints = [
+            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+            {'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return}
+        ]
+    else:
+        # Maximizar Sharpe Ratio
+        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+        risk_free_rate = 0.40  # Tasa libre de riesgo para Argentina
+        
+        def neg_sharpe_ratio(weights):
+            port_ret = np.sum(mean_returns * weights)
+            port_vol = np.sqrt(portfolio_variance(weights, cov_matrix))
+            if port_vol == 0:
+                return np.inf
+            return -(port_ret - risk_free_rate) / port_vol
+        
+        result = op.minimize(
+            neg_sharpe_ratio, 
+            x0=np.ones(n_assets)/n_assets,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints
+        )
+        return result.x
+    
+    # Optimización de varianza mínima
+    result = op.minimize(
+        lambda x: portfolio_variance(x, cov_matrix),
+        x0=np.ones(n_assets)/n_assets,
+        method='SLSQP',
+        bounds=bounds,
+        constraints=constraints
+    )
+    
+    return result.x
+
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
     """Computa la frontera eficiente y portafolios especiales"""
     # special portfolios    
@@ -1133,8 +1092,9 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     for ret in returns:
         try:
             port = port_mgr.compute_portfolio('markowitz', ret)
-            volatilities.append(port.volatility_annual)
-            valid_returns.append(ret)
+            if port is not None and hasattr(port, 'volatility_annual'):
+                volatilities.append(port.volatility_annual)
+                valid_returns.append(ret)
         except:
             continue
     
@@ -1326,11 +1286,15 @@ class PortfolioManager:
             return None, None, None
         
         try:
-            portfolios, returns, volatilities = compute_efficient_frontier(
-                self.manager.rics, self.notional, target_return, include_min_variance, 
-                self.prices.to_dict('series')
-            )
-            return portfolios, returns, volatilities
+            if self.prices is not None:
+                portfolios, returns, volatilities = compute_efficient_frontier(
+                    self.manager.rics, self.notional, target_return, include_min_variance, 
+                    self.prices.to_dict('series')
+                )
+                return portfolios, returns, volatilities
+            else:
+                st.warning("No hay datos de precios disponibles para calcular la frontera eficiente")
+                return None, None, None
         except Exception as e:
             return None, None, None
 
@@ -1944,7 +1908,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2291,7 +2255,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
     
     # Configuración de optimización extendida
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         estrategia = st.selectbox(
@@ -2313,14 +2277,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             help="Solo aplica para estrategia Markowitz"
         )
     
-    with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
-    with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización y Frontera Eficiente", type="primary")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
@@ -2372,7 +2329,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             st.plotly_chart(fig, use_container_width=True)
                         
                         # Gráfico de pesos
-                        if portfolio_result.weights is not None:
+                        if portfolio_result.weights is not None and portfolio_result.dataframe_allocation is not None:
                             st.markdown("#### 🥧 Distribución de Pesos")
                             fig_pie = go.Figure(data=[go.Pie(
                                 labels=portfolio_result.dataframe_allocation['rics'],
@@ -2387,6 +2344,78 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             )
                             st.plotly_chart(fig_pie, use_container_width=True)
                         
+                        # Calcular y mostrar frontera eficiente automáticamente
+                        st.markdown("#### 📈 Frontera Eficiente")
+                        with st.spinner("Calculando frontera eficiente..."):
+                            try:
+                                portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
+                                    target_return=target_return, include_min_variance=True
+                                )
+                                
+                                if portfolios and returns and volatilities:
+                                    st.success("✅ Frontera eficiente calculada")
+                                    
+                                    # Crear gráfico de frontera eficiente
+                                    fig = go.Figure()
+                                    
+                                    # Línea de frontera eficiente
+                                    fig.add_trace(go.Scatter(
+                                        x=volatilities, y=returns,
+                                        mode='lines+markers',
+                                        name='Frontera Eficiente',
+                                        line=dict(color='#0d6efd', width=3),
+                                        marker=dict(size=6)
+                                    ))
+                                    
+                                    # Portafolios especiales
+                                    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+                                    labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
+                                    
+                                    for i, (label, portfolio) in enumerate(portfolios.items()):
+                                        if portfolio is not None:
+                                            fig.add_trace(go.Scatter(
+                                                x=[portfolio.volatility_annual], 
+                                                y=[portfolio.return_annual],
+                                                mode='markers',
+                                                name=labels[i] if i < len(labels) else label,
+                                                marker=dict(size=12, color=colors[i % len(colors)])
+                                            ))
+                                    
+                                    fig.update_layout(
+                                        title='Frontera Eficiente del Portafolio',
+                                        xaxis_title='Volatilidad Anual',
+                                        yaxis_title='Retorno Anual',
+                                        showlegend=True,
+                                        template='plotly_white',
+                                        height=500
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Tabla comparativa de portafolios
+                                    st.markdown("#### 📊 Comparación de Estrategias")
+                                    comparison_data = []
+                                    for label, portfolio in portfolios.items():
+                                        if portfolio is not None:
+                                            comparison_data.append({
+                                                'Estrategia': label,
+                                                'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                                'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                                'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                                'VaR 95%': f"{portfolio.var_95:.4f}",
+                                                'Skewness': f"{portfolio.skewness:.4f}",
+                                                'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                            })
+                                    
+                                    if comparison_data:
+                                        df_comparison = pd.DataFrame(comparison_data)
+                                        st.dataframe(df_comparison, use_container_width=True)
+                                
+                                else:
+                                    st.warning("⚠️ No se pudo calcular la frontera eficiente")
+                            except Exception as e:
+                                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+                        
                     else:
                         st.error("❌ Error en la optimización")
                 else:
@@ -2394,8 +2423,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
-    
-    if ejecutar_frontier and show_frontier:
         with st.spinner("Calculando frontera eficiente..."):
             try:
                 manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
