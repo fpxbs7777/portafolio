@@ -2703,15 +2703,15 @@ def mostrar_rebalanceo_composicion_actual(token_acceso, id_cliente):
             )
         
         col1, col2 = st.columns(2)
-    with col1:
-        ejecutar_rebalanceo = st.button("⚖️ Ejecutar Rebalanceo", type="primary")
-    with col2:
-        if st.button("🔄 Limpiar Cache", help="Reinicia los cálculos"):
-            if 'rebalanceo_resultado' in st.session_state:
-                del st.session_state.rebalanceo_resultado
-            if 'modo_rebalanceo_actual' in st.session_state:
-                del st.session_state.modo_rebalanceo_actual
-            st.rerun()
+        with col1:
+            ejecutar_rebalanceo = st.button("⚖️ Ejecutar Rebalanceo", type="primary")
+        with col2:
+            if st.button("🔄 Limpiar Cache", help="Reinicia los cálculos"):
+                if 'rebalanceo_resultado' in st.session_state:
+                    del st.session_state.rebalanceo_resultado
+                if 'modo_rebalanceo_actual' in st.session_state:
+                    del st.session_state.modo_rebalanceo_actual
+                st.rerun()
         
     else:  # Modo aleatorio
         st.markdown("#### 🎲 Configuración de Rebalanceo Aleatorio")
