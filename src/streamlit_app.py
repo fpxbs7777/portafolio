@@ -1186,14 +1186,14 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     volatilities = []
     valid_returns = []
     
-            for ret in returns:
-            try:
-                port = port_mgr.compute_portfolio('markowitz', ret)
-                if port is not None:
-                    volatilities.append(port.volatility_annual)
-                    valid_returns.append(ret)
-            except:
-                continue
+    for ret in returns:
+        try:
+            port = port_mgr.compute_portfolio('markowitz', ret)
+            if port is not None:
+                volatilities.append(port.volatility_annual)
+                valid_returns.append(ret)
+        except:
+            continue
     
     # compute special portfolios
     portfolios = {}
