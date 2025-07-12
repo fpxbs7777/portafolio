@@ -498,6 +498,8 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
     # Cubrir alias frecuentes para que el mapeo sea coherente
     alias = {
         'TITULOSPUBLICOS': 'TitulosPublicos',
+        'TITULOS PUBLICOS': 'TitulosPublicos',
+        'BONOS': 'Bonos',
         'TITULOS PUBLICOS': 'TitulosPublicos'
     }
     mercado_norm = alias.get(mercado.upper(), mercado)
@@ -510,7 +512,7 @@ def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajust
         'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
         'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
         'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Bonos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
     }
 
     if mercado_norm in especiales:
@@ -643,23 +645,29 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
             print("Es un FCI, usando función específica")
             return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
         
-        # Construir URL según el tipo de activo y mercado
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        # Usar la función obtener_endpoint_historico para construir la URL correcta
+        url = obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
         print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
         
         headers = {
-            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
+            'Authorization': f'Bearer {token_portador}',
             'Accept': 'application/json'
         }
         
         # Realizar la solicitud
-        response = requests.get(url, headers={
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
         
         # Verificar el estado de la respuesta
         print(f"Estado de la respuesta: {response.status_code}")
+        
+        if response.status_code == 400:
+            # Intentar con diferentes endpoints para bonos
+            if mercado.upper() in ['BONOS', 'BONO']:
+                print(f"Error 400 para bonos, intentando con TitulosPublicos...")
+                url_alternativa = f"https://api.invertironline.com/api/v2/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+                response = requests.get(url_alternativa, headers=headers, timeout=30)
+                print(f"Nuevo estado de respuesta: {response.status_code}")
+        
         response.raise_for_status()
         
         # Procesar la respuesta
@@ -759,7 +767,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         import traceback
         traceback.print_exc()
         st.error(error_msg)
-        return None
         return None
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
@@ -2103,42 +2110,22 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     El portafolio tiende a moverse en dirección opuesta al mercado. Útil para estrategias de cobertura.
                     """)
         
-        # Gráficos
+        # Gráfico de distribución por tipo de activo
         st.subheader("📊 Distribución de Activos")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-                tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
-                fig_pie = go.Figure(data=[go.Pie(
-                    labels=tipo_stats['Tipo'],
-                    values=tipo_stats['Valuación'],
-                    textinfo='label+percent',
-                    hole=0.4,
-                    marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
-                )])
-                fig_pie.update_layout(
-                    title="Distribución por Tipo",
-                    height=400
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
-        
-        with col2:
-            if len(datos_activos) > 1:
-                valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                if valores_activos:
-                    fig_hist = go.Figure(data=[go.Histogram(
-                        x=valores_activos,
-                        nbinsx=min(20, len(valores_activos)),
-                        marker_color='#0d6efd'
-                    )])
-                    fig_hist.update_layout(
-                        title="Distribución de Valores",
-                        xaxis_title="Valor ($)",
-                        yaxis_title="Frecuencia",
-                        height=400
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
+        if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
+            tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=tipo_stats['Tipo'],
+                values=tipo_stats['Valuación'],
+                textinfo='label+percent',
+                hole=0.4,
+                marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+            )])
+            fig_pie.update_layout(
+                title="Distribución por Tipo",
+                height=400
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
         
         # Análisis de Retornos del Portafolio
         if metricas and 'retorno_esperado_anual' in metricas:
@@ -2159,8 +2146,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     
                     # Determinar mercado basado en el tipo
                     mercado = 'BCBA'  # Default
-                    if tipo in ['TitulosPublicos', 'Bonos']:
-                        mercado = 'Bonos'
+                    if tipo in ['TitulosPublicos', 'Bonos', 'Bono']:
+                        mercado = 'TitulosPublicos'  # Los bonos usan el endpoint de TitulosPublicos
                     elif tipo in ['Cedears']:
                         mercado = 'Cedears'
                     elif tipo in ['FCI']:
@@ -2278,16 +2265,98 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 with col2:
                                     st.info(f"**Sharpe Ratio**: {sharpe_interpretacion}")
                                 with col3:
-                                    st.info(f"**Normalidad**: {normalidad_interpretacion}")
-                                
-                            else:
-                                st.warning("⚠️ No hay suficientes datos históricos para calcular retornos del portafolio")
-                        else:
-                            st.warning("⚠️ No se pudieron calcular retornos ponderados del portafolio")
-                    else:
-                        st.warning("⚠️ No se obtuvieron datos históricos suficientes para el análisis")
-                else:
-                    st.warning("⚠️ No hay activos con peso significativo para el análisis")
+                                                                     st.info(f"**Normalidad**: {normalidad_interpretacion}")
+                                 
+                             else:
+                                 st.warning("⚠️ No hay suficientes datos históricos para calcular retornos del portafolio")
+                                 
+                                 # Crear datos simulados basados en las métricas calculadas
+                                 if 'retorno_esperado_anual' in metricas and 'std_dev_activo' in metricas:
+                                     st.info("📊 Generando análisis con datos simulados basados en métricas calculadas...")
+                                     
+                                     # Simular retornos basados en las métricas del portafolio
+                                     retorno_diario_esperado = metricas['retorno_esperado_anual'] / 252
+                                     volatilidad_diaria = metricas['std_dev_activo'] / np.sqrt(252)
+                                     
+                                     # Generar 252 días de retornos simulados
+                                     np.random.seed(42)  # Para reproducibilidad
+                                     retornos_simulados = np.random.normal(
+                                         retorno_diario_esperado, 
+                                         volatilidad_diaria, 
+                                         252
+                                     )
+                                     
+                                     # Crear objeto output con datos simulados
+                                     portfolio_output = output(retornos_simulados, valor_total)
+                                     
+                                     # Mostrar métricas estadísticas
+                                     col1, col2 = st.columns(2)
+                                     
+                                     with col1:
+                                         st.markdown("#### 📊 Estadísticas de Retornos (Simulados)")
+                                         metricas_retornos = portfolio_output.get_metrics_dict()
+                                         
+                                         st.metric("Retorno Diario Promedio", f"{metricas_retornos['Mean Daily']:.4f}")
+                                         st.metric("Volatilidad Diaria", f"{metricas_retornos['Volatility Daily']:.4f}")
+                                         st.metric("Ratio de Sharpe", f"{metricas_retornos['Sharpe Ratio']:.4f}")
+                                         st.metric("VaR 95%", f"{metricas_retornos['VaR 95%']:.4f}")
+                                     
+                                     with col2:
+                                         st.metric("Skewness", f"{metricas_retornos['Skewness']:.4f}")
+                                         st.metric("Kurtosis", f"{metricas_retornos['Kurtosis']:.4f}")
+                                         st.metric("JB Statistic", f"{metricas_retornos['JB Statistic']:.4f}")
+                                         normalidad = "✅ Normal" if metricas_retornos['Is Normal'] else "❌ No Normal"
+                                         st.metric("Normalidad", normalidad)
+                                     
+                                     # Gráfico de distribución de retornos simulados
+                                     st.markdown("#### 📈 Distribución de Retornos del Portafolio (Simulados)")
+                                     fig_histogram = portfolio_output.plot_histogram_streamlit("Retornos Simulados del Portafolio")
+                                     st.plotly_chart(fig_histogram, use_container_width=True)
+                                     
+                                     # Análisis adicional
+                                     st.markdown("#### 🔍 Interpretación de Métricas")
+                                     
+                                     # Interpretación del VaR
+                                     var_interpretacion = ""
+                                     if metricas_retornos['VaR 95%'] < -0.02:
+                                         var_interpretacion = "🔴 Alto riesgo: Pérdidas diarias pueden superar 2%"
+                                     elif metricas_retornos['VaR 95%'] < -0.01:
+                                         var_interpretacion = "🟡 Riesgo moderado: Pérdidas diarias pueden superar 1%"
+                                     else:
+                                         var_interpretacion = "🟢 Riesgo bajo: Pérdidas diarias típicamente menores a 1%"
+                                     
+                                     # Interpretación del Sharpe
+                                     sharpe_interpretacion = ""
+                                     if metricas_retornos['Sharpe Ratio'] > 1.0:
+                                         sharpe_interpretacion = "✅ Excelente: Alto retorno por unidad de riesgo"
+                                     elif metricas_retornos['Sharpe Ratio'] > 0.5:
+                                         sharpe_interpretacion = "🟡 Bueno: Retorno aceptable por unidad de riesgo"
+                                     else:
+                                         sharpe_interpretacion = "🔴 Bajo: Poco retorno por unidad de riesgo"
+                                     
+                                     # Interpretación de la normalidad
+                                     normalidad_interpretacion = ""
+                                     if metricas_retornos['Is Normal']:
+                                         normalidad_interpretacion = "✅ Los retornos siguen una distribución normal"
+                                     else:
+                                         normalidad_interpretacion = "⚠️ Los retornos no siguen una distribución normal (mayor riesgo de eventos extremos)"
+                                     
+                                     # Mostrar interpretaciones
+                                     col1, col2, col3 = st.columns(3)
+                                     with col1:
+                                         st.info(f"**VaR 95%**: {var_interpretacion}")
+                                     with col2:
+                                         st.info(f"**Sharpe Ratio**: {sharpe_interpretacion}")
+                                     with col3:
+                                         st.info(f"**Normalidad**: {normalidad_interpretacion}")
+                                     
+                                     st.warning("⚠️ **Nota**: Los datos mostrados son simulados basados en las métricas calculadas del portafolio actual.")
+                         else:
+                             st.warning("⚠️ No se pudieron calcular retornos ponderados del portafolio")
+                     else:
+                         st.warning("⚠️ No se obtuvieron datos históricos suficientes para el análisis")
+                 else:
+                     st.warning("⚠️ No hay activos con peso significativo para el análisis")
                     
             except Exception as e:
                 st.error(f"❌ Error al calcular retornos del portafolio: {str(e)}")
