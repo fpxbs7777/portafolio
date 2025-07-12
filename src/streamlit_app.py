@@ -305,146 +305,6 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         st.error(f"Error de conexión: {str(e)}")
         return None
 
-def obtener_tickers_por_panel(token_portador, paneles, pais):
-    """
-    Obtiene los tickers disponibles por panel desde la API de IOL
-    """
-    tickers_por_panel = {}
-    tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
-    
-    for panel in paneles:
-        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
-        params = {
-            'cotizacionInstrumentoModel.instrumento': panel,
-            'cotizacionInstrumentoModel.pais': pais.lower()
-        }
-        encabezados = obtener_encabezado_autorizacion(token_portador)
-        respuesta = requests.get(url, headers=encabezados, params=params)
-        
-        if respuesta.status_code == 200:
-            datos = respuesta.json()
-            tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
-            tickers_por_panel[panel] = tickers
-            panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
-            tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
-        else:
-            st.warning(f'Error obteniendo tickers para {panel}: {respuesta.status_code}')
-    
-    return tickers_por_panel, tickers_df
-
-def obtener_series_historicas_aleatorias_con_capital(
-    tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde,
-    fecha_hasta, ajustada, bearer_token, capital_ars
-):
-    """
-    Selecciona aleatoriamente activos por panel, pero solo descarga series históricas
-    de aquellos cuyo último precio permite comprar al menos 1 unidad con el capital disponible.
-    """
-    series_historicas = pd.DataFrame()
-    precios_ultimos = {}
-    seleccion_final = {}
-
-    for panel in paneles_seleccionados:
-        if panel in tickers_por_panel:
-            tickers = tickers_por_panel[panel]
-            random.shuffle(tickers)
-            seleccionados = []
-            
-            for simbolo in tickers:
-                mercado = 'BCBA'  # Ajustar según sea necesario
-                serie = obtener_serie_historica_iol(bearer_token, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-                
-                if serie is not None and not serie.empty:
-                    # Buscar columna de precio
-                    col_precio = None
-                    for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
-                        if c in serie.columns:
-                            col_precio = c
-                            break
-                    
-                    if col_precio is not None:
-                        precio_final = serie[col_precio].dropna().iloc[-1]
-                        precios_ultimos[simbolo] = precio_final
-                        seleccionados.append((simbolo, serie, precio_final))
-                
-                if len(seleccionados) >= cantidad_activos:
-                    break
-            
-            # Ordenar por precio y filtrar por capital
-            seleccionados.sort(key=lambda x: x[2])
-            seleccionables = []
-            capital_restante = capital_ars
-            
-            for simbolo, df, precio in seleccionados:
-                if precio <= capital_restante:
-                    seleccionables.append((simbolo, df, precio))
-                    capital_restante -= precio
-            
-            # Si no hay suficientes activos asequibles, tomar los que se pueda
-            if len(seleccionables) < 2:
-                st.warning(f"No hay suficientes activos asequibles en el panel {panel} para el capital disponible.")
-            else:
-                for simbolo, df, precio in seleccionables:
-                    df['simbolo'] = simbolo
-                    df['panel'] = panel
-                    series_historicas = pd.concat([series_historicas, df], ignore_index=True)
-                seleccion_final[panel] = [s[0] for s in seleccionables]
-    
-    return series_historicas, seleccion_final
-
-def calcular_valorizado_portafolio(series_historicas, seleccion_final):
-    """
-    Calcula la evolución del índice valorizado de cada portafolio (por panel).
-    Devuelve un diccionario: {panel: pd.Series(valor_portafolio)}
-    """
-    portafolios_val = {}
-    
-    for panel, simbolos in seleccion_final.items():
-        df_panel = series_historicas[series_historicas['panel'] == panel]
-        
-        # Buscar columna de precio
-        col_precio = None
-        for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
-            if c in df_panel.columns:
-                col_precio = c
-                break
-        
-        if col_precio is None:
-            continue
-        
-        # Pivotear para tener fechas como índice y columnas por símbolo
-        df_pivot = df_panel.pivot_table(index='fecha', columns='simbolo', values=col_precio)
-        df_pivot = df_pivot[simbolos].sort_index()
-        
-        # Calcular valorizado: suma simple (pesos iguales)
-        portafolio_val = df_pivot.sum(axis=1)
-        portafolios_val[panel] = portafolio_val
-    
-    return portafolios_val
-
-def calcular_rsi(series, period=14):
-    """Calcula el RSI de una serie de precios."""
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-def calcular_rvi(series, period=14):
-    """
-    Calcula el Relative Volatility Index (RVI) de una serie de precios.
-    El RVI es similar al RSI pero usa la desviación estándar de los cambios de precio.
-    """
-    delta = series.diff()
-    std = delta.rolling(window=period).std()
-    up = std.where(delta > 0, 0)
-    down = std.where(delta < 0, 0).abs()
-    up_mean = up.rolling(window=period).mean()
-    down_mean = down.rolling(window=period).mean()
-    rvi = 100 * up_mean / (up_mean + down_mean)
-    return rvi
-
 def obtener_tasas_caucion(token_portador):
     """
     Obtiene las tasas de caución desde la API de IOL
@@ -596,6 +456,30 @@ def mostrar_tasas_caucion(token_portador):
     except Exception as e:
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "ISO8601",
+        "mixed"
+    ]
+    
+    for fmt in formats_to_try:
+        try:
+            if fmt == "ISO8601":
+                return pd.to_datetime(datetime_string, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(datetime_string, format='mixed')
+            else:
+                return pd.to_datetime(datetime_string, format=fmt)
+        except Exception:
+            continue
+
+    try:
+        return pd.to_datetime(datetime_string, infer_datetime_format=True)
+    except Exception:
+        return None
 
 def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """Devuelve la URL correcta para la serie histórica del símbolo indicado.
@@ -897,7 +781,90 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         return None
         return None
 
-
+def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """
+    Obtiene la serie histórica de un Fondo Común de Inversión.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo (str): Símbolo del FCI
+        fecha_desde (str): Fecha inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha fin (YYYY-MM-DD)
+        
+    Returns:
+        pd.DataFrame: DataFrame con columnas 'fecha' y 'precio', o None si hay error
+    """
+    try:
+        # Primero intentar obtener directamente la serie histórica
+        url_serie = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/SinAjustar"
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
+        
+        response = requests.get(url_serie, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Procesar la respuesta según el formato esperado
+        if isinstance(data, list):
+            fechas = []
+            precios = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes formatos de fecha
+                    fecha_str = item.get('fecha') or item.get('fechaHora')
+                    if not fecha_str:
+                        continue
+                        
+                    # Obtener el valor de la cuota (puede venir en diferentes campos)
+                    precio = item.get('valorCuota') or item.get('precio') or item.get('ultimoPrecio')
+                    if not precio:
+                        continue
+                        
+                    # Convertir fecha
+                    fecha = parse_datetime_flexible(fecha_str)
+                    if not pd.isna(fecha):
+                        fechas.append(fecha)
+                        precios.append(float(precio))
+                        
+                except (ValueError, TypeError, AttributeError) as e:
+                    continue
+            
+            if fechas and precios:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
+        
+        # Si no se pudo obtener la serie histórica, intentar obtener el último valor
+        try:
+            # Obtener información del FCI
+            url_fci = "https://api.invertironline.com/api/v2/Titulos/FCI"
+            response = requests.get(url_fci, headers=headers, timeout=30)
+            response.raise_for_status()
+            fc_data = response.json()
+            
+            # Buscar el FCI por símbolo
+            fci = next((f for f in fc_data if f.get('simbolo') == simbolo), None)
+            if fci and 'ultimoValorCuotaParte' in fci:
+                return pd.DataFrame({
+                    'fecha': [pd.Timestamp.now(tz='UTC')],
+                    'precio': [float(fci['ultimoValorCuotaParte'])]
+                })
+        except Exception:
+            pass
+        
+        st.warning(f"No se pudieron obtener datos históricos para el FCI {simbolo}")
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Error de conexión al obtener datos del FCI {simbolo}: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar el FCI {simbolo}: {str(e)}")
+        return None
 
 def get_historical_data_for_optimization(token_portador, activos, fecha_desde, fecha_hasta):
     """
@@ -964,12 +931,8 @@ class manager:
         self.synchronise_timeseries()
         # Calcular retornos logarítmicos
         returns_matrix = {}
-        if self.timeseries is None:
-            st.warning("No hay datos de series temporales disponibles")
-            return None, None
-            
         for ric in self.rics:
-            if ric in self.timeseries and self.timeseries[ric] is not None:
+            if ric in self.timeseries:
                 prices = self.timeseries[ric]
                 returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
         
@@ -1055,11 +1018,7 @@ class manager:
         port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
         
         # Calcular retornos del portafolio
-        if self.returns is not None:
-            portfolio_returns = self.returns.dot(weights)
-        else:
-            st.warning("No hay datos de retornos disponibles")
-            return None
+        portfolio_returns = self.returns.dot(weights)
         
         # Crear objeto output
         port_output = output(portfolio_returns, self.notional)
@@ -1150,79 +1109,9 @@ def portfolio_variance(x, mtx_var_covar):
     variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
     return variance
 
-def optimize_portfolio(returns, target_return=None):
-    """
-    Optimiza un portafolio usando el método de Markowitz
-    
-    Args:
-        returns (pd.DataFrame): DataFrame con retornos de activos
-        target_return (float, optional): Retorno objetivo anualizado
-        
-    Returns:
-        np.array: Pesos optimizados del portafolio
-    """
-    n_assets = len(returns.columns)
-    
-    # Calcular matriz de covarianza y retornos medios
-    cov_matrix = returns.cov() * 252  # Anualizar
-    mean_returns = returns.mean() * 252  # Anualizar
-    
-    # Restricciones básicas
-    bounds = tuple((0, 1) for _ in range(n_assets))
-    
-    if target_return is not None:
-        # Optimización con retorno objetivo
-        constraints = [
-            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-            {'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return}
-        ]
-    else:
-        # Maximizar Sharpe Ratio
-        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-        risk_free_rate = 0.40  # Tasa libre de riesgo para Argentina
-        
-        def neg_sharpe_ratio(weights):
-            port_ret = np.sum(mean_returns * weights)
-            port_vol = np.sqrt(portfolio_variance(weights, cov_matrix))
-            if port_vol == 0:
-                return np.inf
-            return -(port_ret - risk_free_rate) / port_vol
-        
-        result = op.minimize(
-            neg_sharpe_ratio, 
-            x0=np.ones(n_assets)/n_assets,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-        return result.x
-    
-    # Optimización de varianza mínima
-    result = op.minimize(
-        lambda x: portfolio_variance(x, cov_matrix),
-        x0=np.ones(n_assets)/n_assets,
-        method='SLSQP',
-        bounds=bounds,
-        constraints=constraints
-    )
-    
-    return result.x
-
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
-    """
-    Computa la frontera eficiente y portafolios especiales con análisis avanzado
-    
-    Args:
-        rics (list): Lista de símbolos de activos
-        notional (float): Valor nominal del portafolio
-        target_return (float): Retorno objetivo anualizado
-        include_min_variance (bool): Incluir portafolio de mínima varianza
-        data (dict): Datos históricos de precios
-        
-    Returns:
-        tuple: (portfolios, returns, volatilities, frontier_data)
-    """
-    # Etiquetas para portafolios especiales
+    """Computa la frontera eficiente y portafolios especiales"""
+    # special portfolios    
     label1 = 'min-variance-l1'
     label2 = 'min-variance-l2'
     label3 = 'equi-weight'
@@ -1230,70 +1119,47 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     label5 = 'markowitz-none'
     label6 = 'markowitz-target'
     
-    # Crear manager y computar covarianza
+    # compute covariance matrix
     port_mgr = manager(rics, notional, data)
-    cov_matrix, mean_returns = port_mgr.compute_covariance()
+    port_mgr.compute_covariance()
     
-    if cov_matrix is None or mean_returns is None:
-        st.warning("No se pudo calcular la matriz de covarianza")
-        return {}, [], [], {}
-    
-    # Computar frontera eficiente con más puntos para mejor resolución
-    min_returns = np.min(mean_returns)
-    max_returns = np.max(mean_returns)
-    
-    # Crear más puntos para una frontera más suave
-    num_points = 100
-    returns_range = np.linspace(min_returns * 0.8, max_returns * 1.2, num_points)
+    # compute vectors of returns and volatilities for Markowitz portfolios
+    min_returns = np.min(port_mgr.mean_returns)
+    max_returns = np.max(port_mgr.mean_returns)
+    returns = min_returns + np.linspace(0.05, 0.95, 50) * (max_returns - min_returns)
     volatilities = []
     valid_returns = []
-    frontier_weights = []
     
-    # Calcular portafolios a lo largo de la frontera eficiente
-    for ret in returns_range:
+    for ret in returns:
         try:
             port = port_mgr.compute_portfolio('markowitz', ret)
-            if port is not None and hasattr(port, 'volatility_annual'):
-                volatilities.append(port.volatility_annual)
-                valid_returns.append(ret)
-                frontier_weights.append(port.weights)
-        except Exception as e:
+            volatilities.append(port.volatility_annual)
+            valid_returns.append(ret)
+        except:
             continue
     
-    # Computar portafolios especiales
+    # compute special portfolios
     portfolios = {}
-    portfolio_labels = {
-        label1: 'Mínima Varianza L1',
-        label2: 'Mínima Varianza L2', 
-        label3: 'Pesos Iguales',
-        label4: 'Solo Largos',
-        label5: 'Markowitz (Max Sharpe)',
-        label6: 'Markowitz (Target)'
-    }
+    try:
+        portfolios[label1] = port_mgr.compute_portfolio(label1)
+    except:
+        portfolios[label1] = None
+        
+    try:
+        portfolios[label2] = port_mgr.compute_portfolio(label2)
+    except:
+        portfolios[label2] = None
+        
+    portfolios[label3] = port_mgr.compute_portfolio(label3)
+    portfolios[label4] = port_mgr.compute_portfolio(label4)
+    portfolios[label5] = port_mgr.compute_portfolio('markowitz')
     
-    for label in [label1, label2, label3, label4, label5]:
-        try:
-            portfolios[label] = port_mgr.compute_portfolio(label)
-        except Exception as e:
-            portfolios[label] = None
-    
-    # Portafolio con retorno objetivo
     try:
         portfolios[label6] = port_mgr.compute_portfolio('markowitz', target_return)
-    except Exception as e:
+    except:
         portfolios[label6] = None
     
-    # Datos adicionales para análisis avanzado
-    frontier_data = {
-        'weights': frontier_weights,
-        'cov_matrix': cov_matrix,
-        'mean_returns': mean_returns,
-        'portfolio_labels': portfolio_labels,
-        'risk_free_rate': 0.40,  # Tasa libre de riesgo para Argentina
-        'num_assets': len(rics)
-    }
-    
-    return portfolios, valid_returns, volatilities, frontier_data
+    return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
     def __init__(self, activos, token, fecha_desde, fecha_hasta):
@@ -1455,23 +1321,18 @@ class PortfolioManager:
             return None
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
-        """Computa la frontera eficiente con análisis avanzado"""
+        """Computa la frontera eficiente"""
         if not self.data_loaded or not self.manager:
-            return None, None, None, None
+            return None, None, None
         
         try:
-            if self.prices is not None:
-                portfolios, returns, volatilities, frontier_data = compute_efficient_frontier(
-                    self.manager.rics, self.notional, target_return, include_min_variance, 
-                    self.prices.to_dict('series')
-                )
-                return portfolios, returns, volatilities, frontier_data
-            else:
-                st.warning("No hay datos de precios disponibles para calcular la frontera eficiente")
-                return None, None, None, None
+            portfolios, returns, volatilities = compute_efficient_frontier(
+                self.manager.rics, self.notional, target_return, include_min_variance, 
+                self.prices.to_dict('series')
+            )
+            return portfolios, returns, volatilities
         except Exception as e:
-            st.error(f"Error calculando frontera eficiente: {str(e)}")
-            return None, None, None, None
+            return None, None, None
 
 # --- Historical Data Methods ---
 def _deprecated_serie_historica_iol(*args, **kwargs):
@@ -1664,178 +1525,6 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
         'r_cuadrado': r_squared,
         'observations': alpha_beta_metrics.get('observations', 0)
     }
-
-def plot_advanced_efficient_frontier(portfolios, returns, volatilities, frontier_data, target_return=0.08):
-    """
-    Crea visualizaciones avanzadas de la frontera eficiente
-    
-    Args:
-        portfolios (dict): Diccionario con portafolios especiales
-        returns (list): Lista de retornos de la frontera eficiente
-        volatilities (list): Lista de volatilidades de la frontera eficiente
-        frontier_data (dict): Datos adicionales de la frontera
-        target_return (float): Retorno objetivo
-        
-    Returns:
-        dict: Diccionario con figuras de Plotly
-    """
-    figures = {}
-    
-    # 1. Gráfico principal de frontera eficiente
-    fig_frontier = go.Figure()
-    
-    # Línea de frontera eficiente
-    fig_frontier.add_trace(go.Scatter(
-        x=volatilities, y=returns,
-        mode='lines+markers',
-        name='Frontera Eficiente',
-        line=dict(color='#0d6efd', width=3),
-        marker=dict(size=4, color='#0d6efd'),
-        hovertemplate='<b>Volatilidad:</b> %{x:.2%}<br><b>Retorno:</b> %{y:.2%}<extra></extra>'
-    ))
-    
-    # Portafolios especiales con colores y símbolos únicos
-    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
-    symbols = ['diamond', 'star', 'circle', 'square', 'triangle-up', 'x']
-    
-    portfolio_labels = frontier_data.get('portfolio_labels', {})
-    
-    for i, (label, portfolio) in enumerate(portfolios.items()):
-        if portfolio is not None:
-            display_name = portfolio_labels.get(label, label)
-            fig_frontier.add_trace(go.Scatter(
-                x=[portfolio.volatility_annual], 
-                y=[portfolio.return_annual],
-                mode='markers+text',
-                name=display_name,
-                marker=dict(
-                    size=15, 
-                    color=colors[i % len(colors)],
-                    symbol=symbols[i % len(symbols)]
-                ),
-                text=[display_name],
-                textposition="top center",
-                hovertemplate=f'<b>{display_name}</b><br>' +
-                            f'<b>Retorno:</b> %{{y:.2%}}<br>' +
-                            f'<b>Volatilidad:</b> %{{x:.2%}}<br>' +
-                            f'<b>Sharpe:</b> {portfolio.sharpe_ratio:.3f}<extra></extra>'
-            ))
-    
-    # Línea de retorno objetivo
-    if target_return and volatilities:
-        min_vol = min(volatilities)
-        max_vol = max(volatilities)
-        fig_frontier.add_trace(go.Scatter(
-            x=[min_vol, max_vol], y=[target_return, target_return],
-            mode='lines',
-            name=f'Retorno Objetivo ({target_return:.1%})',
-            line=dict(color='red', width=2, dash='dash'),
-            hovertemplate='<b>Retorno Objetivo:</b> %{y:.2%}<extra></extra>'
-        ))
-    
-    fig_frontier.update_layout(
-        title='Frontera Eficiente del Portafolio',
-        xaxis_title='Volatilidad Anual',
-        yaxis_title='Retorno Anual',
-        showlegend=True,
-        template='plotly_white',
-        height=600,
-        hovermode='closest'
-    )
-    
-    figures['frontier'] = fig_frontier
-    
-    # 2. Gráfico de distribución de pesos a lo largo de la frontera
-    if frontier_data.get('weights') and len(frontier_data['weights']) > 0:
-        weights_array = np.array(frontier_data['weights'])
-        rics = list(frontier_data.get('rics', [f'Asset_{i}' for i in range(weights_array.shape[1])]))
-        
-        fig_weights = go.Figure()
-        
-        for i, ric in enumerate(rics):
-            fig_weights.add_trace(go.Scatter(
-                x=volatilities, y=weights_array[:, i],
-                mode='lines',
-                name=ric,
-                line=dict(width=2),
-                hovertemplate=f'<b>{ric}</b><br>' +
-                            f'<b>Volatilidad:</b> %{{x:.2%}}<br>' +
-                            f'<b>Peso:</b> %{{y:.2%}}<extra></extra>'
-            ))
-        
-        fig_weights.update_layout(
-            title='Distribución de Pesos a lo largo de la Frontera Eficiente',
-            xaxis_title='Volatilidad Anual',
-            yaxis_title='Peso del Activo',
-            template='plotly_white',
-            height=500
-        )
-        
-        figures['weights'] = fig_weights
-    
-    # 3. Gráfico de correlación entre activos
-    if frontier_data.get('cov_matrix') is not None:
-        cov_matrix = frontier_data['cov_matrix']
-        corr_matrix = pd.DataFrame(cov_matrix).corr()
-        
-        fig_corr = go.Figure(data=go.Heatmap(
-            z=corr_matrix.values,
-            x=corr_matrix.columns,
-            y=corr_matrix.index,
-            colorscale='RdBu',
-            zmid=0,
-            hovertemplate='<b>%{y} vs %{x}</b><br>' +
-                        f'<b>Correlación:</b> %{{z:.3f}}<extra></extra>'
-        ))
-        
-        fig_corr.update_layout(
-            title='Matriz de Correlación entre Activos',
-            template='plotly_white',
-            height=500
-        )
-        
-        figures['correlation'] = fig_corr
-    
-    # 4. Gráfico de ratio de Sharpe a lo largo de la frontera
-    if returns and volatilities:
-        risk_free_rate = frontier_data.get('risk_free_rate', 0.40)
-        sharpe_ratios = [(r - risk_free_rate) / v if v > 0 else 0 for r, v in zip(returns, volatilities)]
-        
-        fig_sharpe = go.Figure()
-        fig_sharpe.add_trace(go.Scatter(
-            x=volatilities, y=sharpe_ratios,
-            mode='lines+markers',
-            name='Ratio de Sharpe',
-            line=dict(color='green', width=3),
-            marker=dict(size=6),
-            hovertemplate='<b>Volatilidad:</b> %{x:.2%}<br>' +
-                        f'<b>Sharpe Ratio:</b> %{{y:.3f}}<extra></extra>'
-        ))
-        
-        # Marcar el punto de máximo Sharpe
-        max_sharpe_idx = np.argmax(sharpe_ratios)
-        fig_sharpe.add_trace(go.Scatter(
-            x=[volatilities[max_sharpe_idx]], 
-            y=[sharpe_ratios[max_sharpe_idx]],
-            mode='markers',
-            name='Máximo Sharpe',
-            marker=dict(size=15, color='red', symbol='star'),
-            hovertemplate='<b>Máximo Sharpe</b><br>' +
-                        f'<b>Volatilidad:</b> %{{x:.2%}}<br>' +
-                        f'<b>Sharpe Ratio:</b> %{{y:.3f}}<extra></extra>'
-        ))
-        
-        fig_sharpe.update_layout(
-            title='Ratio de Sharpe a lo largo de la Frontera Eficiente',
-            xaxis_title='Volatilidad Anual',
-            yaxis_title='Ratio de Sharpe',
-            template='plotly_white',
-            height=500
-        )
-        
-        figures['sharpe'] = fig_sharpe
-    
-    return figures
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
@@ -2255,7 +1944,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
+                    ultimo_precio = obtener_precio_actual(token, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2565,726 +2254,8 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
-def mostrar_rebalanceo_composicion_actual(token_acceso, id_cliente):
-    """
-    Función para rebalanceo manteniendo la composición actual del portafolio
-    """
-    st.markdown("### ⚖️ Rebalanceo con Composición Actual")
-    
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
-        return
-    
-    activos_raw = portafolio.get('activos', [])
-    if not activos_raw:
-        st.warning("El portafolio está vacío")
-        return
-    
-    # Extraer símbolos, mercados y tipos de activo
-    activos_para_optimizacion = []
-    for activo in activos_raw:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo')
-        mercado = titulo.get('mercado')
-        tipo = titulo.get('tipo')
-        if simbolo:
-            activos_para_optimizacion.append({'simbolo': simbolo,
-                                              'mercado': mercado,
-                                              'tipo': tipo})
-    
-    if not activos_para_optimizacion:
-        st.warning("No se encontraron activos con información de mercado válida para optimizar.")
-        return
-    
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
-    
-    st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
-    
-    # Mostrar composición actual
-    st.markdown("#### 📊 Composición Actual del Portafolio")
-    
-    # Calcular pesos actuales basados en valuación
-    pesos_actuales = {}
-    valor_total = 0
-    
-    for activo in activos_raw:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo')
-        cantidad = activo.get('cantidad', 0)
-        
-        # Calcular valuación
-        campos_valuacion = [
-            'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal', 
-            'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido',
-            'valorMercado', 'valorTotal', 'importe'
-        ]
-        
-        valuacion = 0
-        for campo in campos_valuacion:
-            if campo in activo and activo[campo] is not None:
-                try:
-                    val = float(activo[campo])
-                    if val > 0:
-                        valuacion = val
-                        break
-                except (ValueError, TypeError):
-                    continue
-        
-        if valuacion > 0:
-            pesos_actuales[simbolo] = valuacion
-            valor_total += valuacion
-    
-    # Mostrar pesos actuales
-    if pesos_actuales:
-        df_pesos_actuales = pd.DataFrame([
-            {'Símbolo': simbolo, 'Peso Actual (%)': (peso / valor_total * 100)}
-            for simbolo, peso in pesos_actuales.items()
-        ]).sort_values('Peso Actual (%)', ascending=False)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.dataframe(df_pesos_actuales, use_container_width=True)
-        
-        with col2:
-            # Gráfico de composición actual
-            fig_pie_actual = go.Figure(data=[go.Pie(
-                labels=df_pesos_actuales['Símbolo'],
-                values=df_pesos_actuales['Peso Actual (%)'],
-                textinfo='label+percent',
-                hole=0.4,
-                marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b'])
-            )])
-            fig_pie_actual.update_layout(
-                title="Composición Actual",
-                template='plotly_white'
-            )
-            st.plotly_chart(fig_pie_actual, use_container_width=True)
-    
-    # Configuración de rebalanceo
-    st.markdown("#### ⚙️ Configuración de Rebalanceo")
-    
-    # Selección de modo de rebalanceo
-    modo_rebalanceo = st.radio(
-        "Modo de Rebalanceo:",
-        options=['composicion_actual', 'aleatorio_valorizado'],
-        format_func=lambda x: {
-            'composicion_actual': 'Composición Actual',
-            'aleatorio_valorizado': 'Aleatorio con Total Valorizado'
-        }[x],
-        help="Composición Actual: Mantiene tus activos actuales. Aleatorio: Selecciona activos aleatoriamente del mercado."
-    )
-    
-    if modo_rebalanceo == 'composicion_actual':
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            estrategia = st.selectbox(
-                "Estrategia de Rebalanceo:",
-                options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
-                format_func=lambda x: {
-                    'markowitz': 'Optimización de Markowitz',
-                    'equi-weight': 'Pesos Iguales',
-                    'min-variance-l1': 'Mínima Varianza L1',
-                    'min-variance-l2': 'Mínima Varianza L2',
-                    'long-only': 'Solo Posiciones Largas'
-                }[x]
-            )
-        
-        with col2:
-            target_return = st.number_input(
-                "Retorno Objetivo (anual):",
-                min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-                help="Solo aplica para estrategia Markowitz"
-            )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            ejecutar_rebalanceo = st.button("⚖️ Ejecutar Rebalanceo", type="primary")
-        with col2:
-            if st.button("🔄 Limpiar Cache", help="Reinicia los cálculos"):
-                if 'rebalanceo_resultado' in st.session_state:
-                    del st.session_state.rebalanceo_resultado
-                if 'modo_rebalanceo_actual' in st.session_state:
-                    del st.session_state.modo_rebalanceo_actual
-                st.rerun()
-        
-    else:  # Modo aleatorio
-        st.markdown("#### 🎲 Configuración de Rebalanceo Aleatorio")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Paneles disponibles
-            paneles_disponibles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
-            paneles_seleccionados = st.multiselect(
-                "Seleccionar Paneles:",
-                options=paneles_disponibles,
-                default=['acciones'],
-                help="Selecciona los paneles de donde se elegirán activos aleatoriamente"
-            )
-            
-            cantidad_activos = st.number_input(
-                "Cantidad de Activos por Panel:",
-                min_value=1, max_value=20, value=5,
-                help="Número de activos a seleccionar aleatoriamente por panel"
-            )
-        
-        with col2:
-            # Opción de incluir saldo disponible
-            incluir_saldo = st.checkbox(
-                "Incluir Saldo Disponible",
-                value=True,
-                help="Si está activado, considerará el saldo disponible en la cuenta"
-            )
-            
-            if incluir_saldo:
-                # Obtener saldo disponible del estado de cuenta
-                estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-                saldo_disponible = 0
-                
-                if estado_cuenta and 'cuentas' in estado_cuenta:
-                    for cuenta in estado_cuenta['cuentas']:
-                        if cuenta.get('moneda', '').upper() == 'ARS':
-                            saldo_disponible += cuenta.get('disponible', 0)
-                
-                st.info(f"💰 Saldo Disponible: ${saldo_disponible:,.2f} ARS")
-                
-                capital_total = valor_total + saldo_disponible
-                st.success(f"💵 Capital Total Disponible: ${capital_total:,.2f} ARS")
-            else:
-                capital_total = valor_total
-                st.info(f"💵 Capital del Portafolio: ${capital_total:,.2f} ARS")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            ejecutar_rebalanceo = st.button("🎲 Ejecutar Rebalanceo Aleatorio", type="primary")
-        with col2:
-            if st.button("🔄 Limpiar Cache", help="Reinicia los cálculos", key="limpiar_aleatorio"):
-                if 'rebalanceo_resultado' in st.session_state:
-                    del st.session_state.rebalanceo_resultado
-                if 'modo_rebalanceo_actual' in st.session_state:
-                    del st.session_state.modo_rebalanceo_actual
-                st.rerun()
-    
-    if ejecutar_rebalanceo:
-        # Usar session state para evitar recargas
-        if 'rebalanceo_resultado' not in st.session_state:
-            st.session_state.rebalanceo_resultado = None
-            st.session_state.modo_rebalanceo_actual = None
-        
-        # Solo ejecutar si no se ha ejecutado antes o si cambió el modo
-        if (st.session_state.rebalanceo_resultado is None or 
-            st.session_state.modo_rebalanceo_actual != modo_rebalanceo):
-            
-            st.session_state.modo_rebalanceo_actual = modo_rebalanceo
-            
-            if modo_rebalanceo == 'composicion_actual':
-                st.session_state.procesando = True
-                with st.spinner("Ejecutando rebalanceo con composición actual..."):
-                    try:
-                        # Crear manager de portafolio con la lista de activos actuales
-                        manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
-                        
-                        # Cargar datos
-                        if manager_inst.load_data():
-                            # Computar optimización
-                            use_target = target_return if estrategia == 'markowitz' else None
-                            portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
-                            
-                            if portfolio_result:
-                                st.success("✅ Rebalanceo completado")
-                                
-                                # Comparar pesos actuales vs optimizados
-                                st.markdown("#### 📊 Comparación: Actual vs Optimizado")
-                                
-                                if portfolio_result.dataframe_allocation is not None:
-                                    # Crear DataFrame de comparación
-                                    df_comparacion = portfolio_result.dataframe_allocation.copy()
-                                    df_comparacion['Peso Optimizado (%)'] = df_comparacion['weights'] * 100
-                                    
-                                    # Agregar pesos actuales
-                                    df_comparacion['Peso Actual (%)'] = df_comparacion['rics'].map(
-                                        {simbolo: peso / valor_total * 100 for simbolo, peso in pesos_actuales.items()}
-                                    ).fillna(0)
-                                    
-                                    # Calcular diferencia
-                                    df_comparacion['Diferencia (%)'] = (
-                                        df_comparacion['Peso Optimizado (%)'] - df_comparacion['Peso Actual (%)']
-                                    )
-                                    
-                                    # Ordenar por diferencia absoluta
-                                    df_comparacion = df_comparacion.sort_values('Diferencia (%)', key=abs, ascending=False)
-                                    
-                                    # Mostrar tabla de comparación
-                                    st.dataframe(df_comparacion[['rics', 'Peso Actual (%)', 'Peso Optimizado (%)', 'Diferencia (%)']], 
-                                               use_container_width=True)
-                                    
-                                    # Gráfico de comparación
-                                    fig_comparacion = go.Figure()
-                                    
-                                    fig_comparacion.add_trace(go.Bar(
-                                        x=df_comparacion['rics'],
-                                        y=df_comparacion['Peso Actual (%)'],
-                                        name='Peso Actual',
-                                        marker_color='#1f77b4'
-                                    ))
-                                    
-                                    fig_comparacion.add_trace(go.Bar(
-                                        x=df_comparacion['rics'],
-                                        y=df_comparacion['Peso Optimizado (%)'],
-                                        name='Peso Optimizado',
-                                        marker_color='#ff7f0e'
-                                    ))
-                                    
-                                    fig_comparacion.update_layout(
-                                        title='Comparación de Pesos: Actual vs Optimizado',
-                                        xaxis_title='Activos',
-                                        yaxis_title='Peso (%)',
-                                        barmode='group',
-                                        template='plotly_white'
-                                    )
-                                    
-                                    st.plotly_chart(fig_comparacion, use_container_width=True)
-                                
-                                # Mostrar métricas del portafolio optimizado
-                                st.markdown("#### 📈 Métricas del Portafolio Optimizado")
-                                metricas = portfolio_result.get_metrics_dict()
-                                
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
-                                    st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
-                                    st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
-                                    st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
-                                with col2:
-                                    st.metric("Skewness", f"{metricas['Skewness']:.4f}")
-                                    st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
-                                    st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
-                                    normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
-                                    st.metric("Normalidad", normalidad)
-                                
-                                # Recomendaciones de rebalanceo
-                                st.markdown("#### 💡 Recomendaciones de Rebalanceo")
-                                
-                                # Identificar activos que necesitan ajuste
-                                if portfolio_result.dataframe_allocation is not None and 'Diferencia (%)' in df_comparacion.columns:
-                                    activos_aumentar = df_comparacion[df_comparacion['Diferencia (%)'] > 5]
-                                    activos_reducir = df_comparacion[df_comparacion['Diferencia (%)'] < -5]
-                                    
-                                    if not activos_aumentar.empty:
-                                        st.success("**📈 Activos a Aumentar:**")
-                                        for _, row in activos_aumentar.iterrows():
-                                            st.write(f"- {row['rics']}: +{row['Diferencia (%)']:.1f}%")
-                                    
-                                    if not activos_reducir.empty:
-                                        st.warning("**📉 Activos a Reducir:**")
-                                        for _, row in activos_reducir.iterrows():
-                                            st.write(f"- {row['rics']}: {row['Diferencia (%)']:.1f}%")
-                                    
-                                    if activos_aumentar.empty and activos_reducir.empty:
-                                        st.info("**✅ Portafolio Bien Balanceado** - No se requieren cambios significativos")
-                                else:
-                                    st.info("**ℹ️ No hay datos suficientes para generar recomendaciones específicas**")
-                                
-                                # Calcular y mostrar frontera eficiente para la composición actual
-                                st.markdown("#### 📈 Análisis de Frontera Eficiente")
-                                
-                                try:
-                                    # Calcular frontera eficiente con los activos actuales
-                                    portfolios, returns, volatilities, frontier_data = manager_inst.compute_efficient_frontier(
-                                        target_return=target_return, include_min_variance=True
-                                    )
-                                    
-                                    if portfolios and returns and volatilities and frontier_data:
-                                        st.success("✅ Frontera eficiente calculada")
-                                        
-                                        # Crear visualizaciones avanzadas
-                                        figures = plot_advanced_efficient_frontier(
-                                            portfolios, returns, volatilities, frontier_data, target_return
-                                        )
-                                        
-                                        # Mostrar gráficos en tabs
-                                        if figures:
-                                            tab_names = list(figures.keys())
-                                            tabs = st.tabs([f"📊 {name.title()}" for name in tab_names])
-                                            
-                                            for i, (name, fig) in enumerate(figures.items()):
-                                                with tabs[i]:
-                                                    st.plotly_chart(fig, use_container_width=True)
-                                                    
-                                                    # Información adicional según el tipo de gráfico
-                                                    if name == 'frontier':
-                                                        st.info("""
-                                                        **📈 Interpretación de la Frontera Eficiente:**
-                                                        - Cada punto representa un portafolio con diferentes pesos
-                                                        - La línea azul muestra la combinación óptima de riesgo-retorno
-                                                        - Los puntos de colores son estrategias específicas
-                                                        - El punto más alto en la línea es el portafolio de máximo Sharpe
-                                                        """)
-                                                    elif name == 'weights':
-                                                        st.info("""
-                                                        **⚖️ Distribución de Pesos:**
-                                                        - Muestra cómo cambian los pesos de cada activo a lo largo de la frontera
-                                                        - Las líneas más estables indican activos más consistentes
-                                                        - Los cambios bruscos sugieren activos más volátiles
-                                                        """)
-                                                    elif name == 'correlation':
-                                                        st.info("""
-                                                        **🔗 Matriz de Correlación:**
-                                                        - Rojo: Correlación positiva alta
-                                                        - Azul: Correlación negativa
-                                                        - Blanco: Poca correlación
-                                                        - Activos con baja correlación ofrecen mejor diversificación
-                                                        """)
-                                                    elif name == 'sharpe':
-                                                        st.info("""
-                                                        **📊 Ratio de Sharpe:**
-                                                        - Mide el retorno ajustado por riesgo
-                                                        - El punto rojo marca el portafolio con máximo Sharpe
-                                                        - Valores más altos indican mejor rendimiento por unidad de riesgo
-                                                        """)
-                                        
-                                        # Tabla comparativa de estrategias
-                                        st.markdown("#### 📊 Comparación Detallada de Estrategias")
-                                        comparison_data = []
-                                        portfolio_labels = frontier_data.get('portfolio_labels', {})
-                                        
-                                        for label, portfolio in portfolios.items():
-                                            if portfolio is not None:
-                                                display_name = portfolio_labels.get(label, label)
-                                                comparison_data.append({
-                                                    'Estrategia': display_name,
-                                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                                    'VaR 95%': f"{portfolio.var_95:.4f}",
-                                                    'Skewness': f"{portfolio.skewness:.4f}",
-                                                    'Kurtosis': f"{portfolio.kurtosis:.4f}",
-                                                    'Normalidad': "✅ Normal" if portfolio.is_normal else "❌ No Normal"
-                                                })
-                                        
-                                        if comparison_data:
-                                            df_comparison = pd.DataFrame(comparison_data)
-                                            df_comparison = df_comparison.sort_values('Sharpe Ratio', ascending=False)
-                                            st.dataframe(df_comparison, use_container_width=True)
-                                            
-                                            # Recomendaciones basadas en el análisis
-                                            st.markdown("#### 💡 Recomendaciones")
-                                            best_sharpe = df_comparison.iloc[0]
-                                            st.success(f"""
-                                            **🏆 Mejor Estrategia por Sharpe Ratio:** {best_sharpe['Estrategia']}
-                                            - Retorno: {best_sharpe['Retorno Anual']}
-                                            - Volatilidad: {best_sharpe['Volatilidad Anual']}
-                                            - Sharpe: {best_sharpe['Sharpe Ratio']}
-                                            """)
-                                            
-                                            # Análisis de riesgo
-                                            min_vol = df_comparison.loc[df_comparison['Volatilidad Anual'].str.rstrip('%').astype(float).idxmin()]
-                                            st.info(f"""
-                                            **🛡️ Estrategia de Menor Riesgo:** {min_vol['Estrategia']}
-                                            - Volatilidad: {min_vol['Volatilidad Anual']}
-                                            - Retorno: {min_vol['Retorno Anual']}
-                                            """)
-                                    
-                                    else:
-                                        st.warning("⚠️ No se pudo calcular la frontera eficiente para los activos actuales")
-                                        
-                                except Exception as e:
-                                    st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
-                                    import traceback
-                                    st.exception(e)
-                                
-                            else:
-                                st.error("❌ Error en el rebalanceo")
-                                st.session_state.rebalanceo_resultado = None
-                        else:
-                            st.error("❌ No se pudieron cargar los datos históricos")
-                            st.session_state.rebalanceo_resultado = None
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error durante el rebalanceo: {str(e)}")
-                        st.session_state.rebalanceo_resultado = None
-                    
-                    finally:
-                        st.session_state.procesando = False
-        
-        else:  # Modo aleatorio
-            st.session_state.procesando = True
-            with st.spinner("Ejecutando rebalanceo aleatorio..."):
-                try:
-                    # Obtener tickers por panel
-                    tickers_por_panel, tickers_df = obtener_tickers_por_panel(
-                        token_acceso, paneles_seleccionados, 'Argentina'
-                    )
-                    
-                    if not tickers_por_panel:
-                        st.error("❌ No se pudieron obtener tickers de los paneles seleccionados")
-                        return
-                    
-                    # Obtener series históricas aleatorias con control de capital
-                    series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
-                        tickers_por_panel, paneles_seleccionados, cantidad_activos,
-                        fecha_desde, fecha_hasta, "SinAjustar", token_acceso, capital_total
-                    )
-                    
-                    if series_historicas.empty:
-                        st.error("❌ No se pudieron obtener series históricas válidas")
-                        return
-                    
-                    st.success("✅ Rebalanceo aleatorio completado")
-                    
-                    # Mostrar activos seleccionados
-                    st.markdown("#### 🎲 Activos Seleccionados Aleatoriamente")
-                    
-                    for panel, simbolos in seleccion_final.items():
-                        st.info(f"**Panel {panel}:** {', '.join(simbolos)}")
-                    
-                    # Calcular portafolios valorizados
-                    portafolios_val = calcular_valorizado_portafolio(series_historicas, seleccion_final)
-                    
-                    if portafolios_val:
-                        st.markdown("#### 📈 Evolución de Portafolios Valorizados")
-                        
-                        # Crear gráfico de evolución
-                        fig_evolucion = go.Figure()
-                        
-                        for panel, serie_val in portafolios_val.items():
-                            fig_evolucion.add_trace(go.Scatter(
-                                x=serie_val.index,
-                                y=serie_val.values,
-                                mode='lines',
-                                name=f'Portafolio {panel}',
-                                line=dict(width=2)
-                            ))
-                        
-                        fig_evolucion.update_layout(
-                            title='Evolución de Portafolios Valorizados',
-                            xaxis_title='Fecha',
-                            yaxis_title='Valor del Portafolio',
-                            template='plotly_white',
-                            height=500
-                        )
-                        
-                        st.plotly_chart(fig_evolucion, use_container_width=True)
-                        
-                        # Calcular y mostrar indicadores técnicos
-                        st.markdown("#### 📊 Indicadores Técnicos")
-                        
-                        for panel, serie_val in portafolios_val.items():
-                            if len(serie_val) > 14:  # Necesitamos suficientes datos para RSI
-                                # Calcular RSI
-                                rsi = calcular_rsi(serie_val)
-                                
-                                # Calcular RVI
-                                rvi = calcular_rvi(serie_val)
-                                
-                                # Crear subplots para RSI y RVI
-                                fig_indicadores = make_subplots(
-                                    rows=2, cols=1,
-                                    subplot_titles=(f'RSI - {panel}', f'RVI - {panel}'),
-                                    vertical_spacing=0.1
-                                )
-                                
-                                # RSI
-                                fig_indicadores.add_trace(
-                                    go.Scatter(x=rsi.index, y=rsi.values, name='RSI', line=dict(color='blue')),
-                                    row=1, col=1
-                                )
-                                fig_indicadores.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
-                                fig_indicadores.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
-                                
-                                # RVI
-                                fig_indicadores.add_trace(
-                                    go.Scatter(x=rvi.index, y=rvi.values, name='RVI', line=dict(color='purple')),
-                                    row=2, col=1
-                                )
-                                fig_indicadores.add_hline(y=80, line_dash="dash", line_color="gray", row=2, col=1)
-                                fig_indicadores.add_hline(y=20, line_dash="dash", line_color="gray", row=2, col=1)
-                                
-                                fig_indicadores.update_layout(
-                                    title=f'Indicadores Técnicos - {panel}',
-                                    height=600,
-                                    template='plotly_white'
-                                )
-                                
-                                st.plotly_chart(fig_indicadores, use_container_width=True)
-                                
-                                # Análisis de señales
-                                ultimo_rsi = rsi.iloc[-1] if not rsi.empty else 50
-                                ultimo_rvi = rvi.iloc[-1] if not rvi.empty else 50
-                                
-                                st.markdown(f"#### 📊 Análisis de Señales - {panel}")
-                                
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.metric("RSI Actual", f"{ultimo_rsi:.1f}")
-                                    if ultimo_rsi > 70:
-                                        st.warning("⚠️ Sobrecomprado")
-                                    elif ultimo_rsi < 30:
-                                        st.success("✅ Sobreventido")
-                                    else:
-                                        st.info("ℹ️ Neutral")
-                                
-                                with col2:
-                                    st.metric("RVI Actual", f"{ultimo_rvi:.1f}")
-                                    if ultimo_rvi > 80:
-                                        st.warning("⚠️ Alta volatilidad")
-                                    elif ultimo_rvi < 20:
-                                        st.success("✅ Baja volatilidad")
-                                    else:
-                                        st.info("ℹ️ Volatilidad normal")
-                    
-                    else:
-                        st.warning("⚠️ No se pudieron calcular los portafolios valorizados")
-                    
-                    # Calcular y mostrar frontera eficiente para los activos seleccionados
-                    st.markdown("#### 📈 Análisis de Frontera Eficiente")
-                    
-                    try:
-                        # Preparar datos para optimización
-                        activos_optimizacion = []
-                        for panel, simbolos in seleccion_final.items():
-                            for simbolo in simbolos:
-                                activos_optimizacion.append({
-                                    'simbolo': simbolo,
-                                    'mercado': 'BCBA',  # Asumimos BCBA para todos
-                                    'tipo': panel
-                                })
-                        
-                        if activos_optimizacion:
-                            # Crear manager de portafolio con los activos seleccionados
-                            manager_inst = PortfolioManager(activos_optimizacion, token_acceso, fecha_desde, fecha_hasta)
-                            
-                            if manager_inst.load_data():
-                                st.success("✅ Datos cargados para análisis de frontera eficiente")
-                                
-                                # Calcular frontera eficiente
-                                portfolios, returns, volatilities, frontier_data = manager_inst.compute_efficient_frontier(
-                                    target_return=0.08, include_min_variance=True
-                                )
-                                
-                                if portfolios and returns and volatilities and frontier_data:
-                                    st.success("✅ Frontera eficiente calculada")
-                                    
-                                    # Crear visualizaciones avanzadas
-                                    figures = plot_advanced_efficient_frontier(
-                                        portfolios, returns, volatilities, frontier_data, 0.08
-                                    )
-                                    
-                                    # Mostrar gráficos en tabs
-                                    if figures:
-                                        tab_names = list(figures.keys())
-                                        tabs = st.tabs([f"📊 {name.title()}" for name in tab_names])
-                                        
-                                        for i, (name, fig) in enumerate(figures.items()):
-                                            with tabs[i]:
-                                                st.plotly_chart(fig, use_container_width=True)
-                                                
-                                                # Información adicional según el tipo de gráfico
-                                                if name == 'frontier':
-                                                    st.info("""
-                                                    **📈 Interpretación de la Frontera Eficiente:**
-                                                    - Cada punto representa un portafolio con diferentes pesos
-                                                    - La línea azul muestra la combinación óptima de riesgo-retorno
-                                                    - Los puntos de colores son estrategias específicas
-                                                    - El punto más alto en la línea es el portafolio de máximo Sharpe
-                                                    """)
-                                                elif name == 'weights':
-                                                    st.info("""
-                                                    **⚖️ Distribución de Pesos:**
-                                                    - Muestra cómo cambian los pesos de cada activo a lo largo de la frontera
-                                                    - Las líneas más estables indican activos más consistentes
-                                                    - Los cambios bruscos sugieren activos más volátiles
-                                                    """)
-                                                elif name == 'correlation':
-                                                    st.info("""
-                                                    **🔗 Matriz de Correlación:**
-                                                    - Rojo: Correlación positiva alta
-                                                    - Azul: Correlación negativa
-                                                    - Blanco: Poca correlación
-                                                    - Activos con baja correlación ofrecen mejor diversificación
-                                                    """)
-                                                elif name == 'sharpe':
-                                                    st.info("""
-                                                    **📊 Ratio de Sharpe:**
-                                                    - Mide el retorno ajustado por riesgo
-                                                    - El punto rojo marca el portafolio con máximo Sharpe
-                                                    - Valores más altos indican mejor rendimiento por unidad de riesgo
-                                                    """)
-                                    
-                                    # Tabla comparativa de estrategias
-                                    st.markdown("#### 📊 Comparación Detallada de Estrategias")
-                                    comparison_data = []
-                                    portfolio_labels = frontier_data.get('portfolio_labels', {})
-                                    
-                                    for label, portfolio in portfolios.items():
-                                        if portfolio is not None:
-                                            display_name = portfolio_labels.get(label, label)
-                                            comparison_data.append({
-                                                'Estrategia': display_name,
-                                                'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                                'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                                'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                                'VaR 95%': f"{portfolio.var_95:.4f}",
-                                                'Skewness': f"{portfolio.skewness:.4f}",
-                                                'Kurtosis': f"{portfolio.kurtosis:.4f}",
-                                                'Normalidad': "✅ Normal" if portfolio.is_normal else "❌ No Normal"
-                                            })
-                                    
-                                    if comparison_data:
-                                        df_comparison = pd.DataFrame(comparison_data)
-                                        df_comparison = df_comparison.sort_values('Sharpe Ratio', ascending=False)
-                                        st.dataframe(df_comparison, use_container_width=True)
-                                        
-                                        # Recomendaciones basadas en el análisis
-                                        st.markdown("#### 💡 Recomendaciones")
-                                        best_sharpe = df_comparison.iloc[0]
-                                        st.success(f"""
-                                        **🏆 Mejor Estrategia por Sharpe Ratio:** {best_sharpe['Estrategia']}
-                                        - Retorno: {best_sharpe['Retorno Anual']}
-                                        - Volatilidad: {best_sharpe['Volatilidad Anual']}
-                                        - Sharpe: {best_sharpe['Sharpe Ratio']}
-                                        """)
-                                        
-                                        # Análisis de riesgo
-                                        min_vol = df_comparison.loc[df_comparison['Volatilidad Anual'].str.rstrip('%').astype(float).idxmin()]
-                                        st.info(f"""
-                                        **🛡️ Estrategia de Menor Riesgo:** {min_vol['Estrategia']}
-                                        - Volatilidad: {min_vol['Volatilidad Anual']}
-                                        - Retorno: {min_vol['Retorno Anual']}
-                                        """)
-                                
-                                else:
-                                    st.warning("⚠️ No se pudo calcular la frontera eficiente para los activos seleccionados")
-                            else:
-                                st.error("❌ No se pudieron cargar los datos para el análisis de frontera eficiente")
-                        else:
-                            st.warning("⚠️ No hay activos seleccionados para el análisis de frontera eficiente")
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
-                        import traceback
-                        st.exception(e)
-                        
-                except Exception as e:
-                    st.error(f"❌ Error durante el rebalanceo aleatorio: {str(e)}")
-                    import traceback
-                    st.exception(e)
-                    st.session_state.rebalanceo_resultado = None
-                
-                finally:
-                    st.session_state.procesando = False
-
-def mostrar_optimizacion_completa(token_acceso, id_cliente):
-    """
-    Función para optimización completa del portafolio (método actual)
-    """
-    st.markdown("### 🚀 Optimización Completa de Portafolio")
+def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
+    st.markdown("### 🔄 Optimización de Portafolio")
     
     with st.spinner("Obteniendo portafolio..."):
         portafolio = obtener_portafolio(token_acceso, id_cliente)
@@ -3320,7 +2291,7 @@ def mostrar_optimizacion_completa(token_acceso, id_cliente):
     st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
     
     # Configuración de optimización extendida
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         estrategia = st.selectbox(
@@ -3342,23 +2313,17 @@ def mostrar_optimizacion_completa(token_acceso, id_cliente):
             help="Solo aplica para estrategia Markowitz"
         )
     
+    with col3:
+        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+    
     col1, col2 = st.columns(2)
     with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Completa", type="primary")
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
     with col2:
-        if st.button("🔄 Limpiar Cache", help="Reinicia los cálculos", key="limpiar_optimizacion"):
-            if 'optimizacion_resultado' in st.session_state:
-                del st.session_state.optimizacion_resultado
-            st.rerun()
+        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
     
     if ejecutar_optimizacion:
-        # Usar session state para evitar recargas
-        if 'optimizacion_resultado' not in st.session_state:
-            st.session_state.optimizacion_resultado = None
-        
-        if st.session_state.optimizacion_resultado is None:
-            st.session_state.procesando = True
-            with st.spinner("Ejecutando optimización..."):
+        with st.spinner("Ejecutando optimización..."):
             try:
                 # Crear manager de portafolio con la lista de activos (símbolo y mercado)
                 manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
@@ -3407,7 +2372,7 @@ def mostrar_optimizacion_completa(token_acceso, id_cliente):
                             st.plotly_chart(fig, use_container_width=True)
                         
                         # Gráfico de pesos
-                        if portfolio_result.weights is not None and portfolio_result.dataframe_allocation is not None:
+                        if portfolio_result.weights is not None:
                             st.markdown("#### 🥧 Distribución de Pesos")
                             fig_pie = go.Figure(data=[go.Pie(
                                 labels=portfolio_result.dataframe_allocation['rics'],
@@ -3422,131 +2387,90 @@ def mostrar_optimizacion_completa(token_acceso, id_cliente):
                             )
                             st.plotly_chart(fig_pie, use_container_width=True)
                         
-                        # Calcular y mostrar frontera eficiente automáticamente
-                        st.markdown("#### 📈 Análisis Avanzado de Frontera Eficiente")
-                        with st.spinner("Calculando frontera eficiente avanzada..."):
-                            try:
-                                portfolios, returns, volatilities, frontier_data = manager_inst.compute_efficient_frontier(
-                                    target_return=target_return, include_min_variance=True
-                                )
-                                
-                                if portfolios and returns and volatilities and frontier_data:
-                                    st.success("✅ Frontera eficiente avanzada calculada")
-                                    
-                                    # Crear visualizaciones avanzadas
-                                    figures = plot_advanced_efficient_frontier(
-                                        portfolios, returns, volatilities, frontier_data, target_return
-                                    )
-                                    
-                                    # Mostrar gráficos en tabs
-                                    if figures:
-                                        tab_names = list(figures.keys())
-                                        tabs = st.tabs([f"📊 {name.title()}" for name in tab_names])
-                                        
-                                        for i, (name, fig) in enumerate(figures.items()):
-                                            with tabs[i]:
-                                                st.plotly_chart(fig, use_container_width=True)
-                                                
-                                                # Información adicional según el tipo de gráfico
-                                                if name == 'frontier':
-                                                    st.info("""
-                                                    **📈 Interpretación de la Frontera Eficiente:**
-                                                    - Cada punto representa un portafolio con diferentes pesos
-                                                    - La línea azul muestra la combinación óptima de riesgo-retorno
-                                                    - Los puntos de colores son estrategias específicas
-                                                    - El punto más alto en la línea es el portafolio de máximo Sharpe
-                                                    """)
-                                                elif name == 'weights':
-                                                    st.info("""
-                                                    **⚖️ Distribución de Pesos:**
-                                                    - Muestra cómo cambian los pesos de cada activo a lo largo de la frontera
-                                                    - Las líneas más estables indican activos más consistentes
-                                                    - Los cambios bruscos sugieren activos más volátiles
-                                                    """)
-                                                elif name == 'correlation':
-                                                    st.info("""
-                                                    **🔗 Matriz de Correlación:**
-                                                    - Rojo: Correlación positiva alta
-                                                    - Azul: Correlación negativa
-                                                    - Blanco: Poca correlación
-                                                    - Activos con baja correlación ofrecen mejor diversificación
-                                                    """)
-                                                elif name == 'sharpe':
-                                                    st.info("""
-                                                    **📊 Ratio de Sharpe:**
-                                                    - Mide el retorno ajustado por riesgo
-                                                    - El punto rojo marca el portafolio con máximo Sharpe
-                                                    - Valores más altos indican mejor rendimiento por unidad de riesgo
-                                                    """)
-                                    
-                                    # Tabla comparativa mejorada
-                                    st.markdown("#### 📊 Comparación Detallada de Estrategias")
-                                    comparison_data = []
-                                    portfolio_labels = frontier_data.get('portfolio_labels', {})
-                                    
-                                    for label, portfolio in portfolios.items():
-                                        if portfolio is not None:
-                                            display_name = portfolio_labels.get(label, label)
-                                            comparison_data.append({
-                                                'Estrategia': display_name,
-                                                'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                                'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                                'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                                'VaR 95%': f"{portfolio.var_95:.4f}",
-                                                'Skewness': f"{portfolio.skewness:.4f}",
-                                                'Kurtosis': f"{portfolio.kurtosis:.4f}",
-                                                'Normalidad': "✅ Normal" if portfolio.is_normal else "❌ No Normal"
-                                            })
-                                    
-                                    if comparison_data:
-                                        df_comparison = pd.DataFrame(comparison_data)
-                                        df_comparison = df_comparison.sort_values('Sharpe Ratio', ascending=False)
-                                        st.dataframe(df_comparison, use_container_width=True)
-                                        
-                                        # Recomendaciones basadas en el análisis
-                                        st.markdown("#### 💡 Recomendaciones")
-                                        best_sharpe = df_comparison.iloc[0]
-                                        st.success(f"""
-                                        **🏆 Mejor Estrategia por Sharpe Ratio:** {best_sharpe['Estrategia']}
-                                        - Retorno: {best_sharpe['Retorno Anual']}
-                                        - Volatilidad: {best_sharpe['Volatilidad Anual']}
-                                        - Sharpe: {best_sharpe['Sharpe Ratio']}
-                                        """)
-                                        
-                                        # Análisis de riesgo
-                                        min_vol = df_comparison.loc[df_comparison['Volatilidad Anual'].str.rstrip('%').astype(float).idxmin()]
-                                        st.info(f"""
-                                        **🛡️ Estrategia de Menor Riesgo:** {min_vol['Estrategia']}
-                                        - Volatilidad: {min_vol['Volatilidad Anual']}
-                                        - Retorno: {min_vol['Retorno Anual']}
-                                        """)
-                                
-                                else:
-                                    st.warning("⚠️ No se pudo calcular la frontera eficiente avanzada")
-                            except Exception as e:
-                                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
-                                import traceback
-                                st.exception(e)
-                        
                     else:
                         st.error("❌ Error en la optimización")
-                                    else:
-                        st.error("❌ No se pudieron cargar los datos históricos")
-                        st.session_state.optimizacion_resultado = None
-                        
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
-                st.session_state.optimizacion_resultado = None
-            
-            finally:
-                st.session_state.procesando = False
-
     
-    # Botón para forzar recarga si hay problemas
-    if st.button("🔄 Forzar Recarga Completa", help="Reinicia toda la aplicación si hay problemas"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    if ejecutar_frontier and show_frontier:
+        with st.spinner("Calculando frontera eficiente..."):
+            try:
+                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
+                
+                if manager_inst.load_data():
+                    portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
+                        target_return=target_return, include_min_variance=True
+                    )
+                    
+                    if portfolios and returns and volatilities:
+                        st.success("✅ Frontera eficiente calculada")
+                        
+                        # Crear gráfico de frontera eficiente
+                        fig = go.Figure()
+                        
+                        # Línea de frontera eficiente
+                        fig.add_trace(go.Scatter(
+                            x=volatilities, y=returns,
+                            mode='lines+markers',
+                            name='Frontera Eficiente',
+                            line=dict(color='#0d6efd', width=3),
+                            marker=dict(size=6)
+                        ))
+                        
+                        # Portafolios especiales
+                        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
+                        
+                        for i, (label, portfolio) in enumerate(portfolios.items()):
+                            if portfolio is not None:
+                                fig.add_trace(go.Scatter(
+                                    x=[portfolio.volatility_annual], 
+                                    y=[portfolio.return_annual],
+                                    mode='markers',
+                                    name=labels[i] if i < len(labels) else label,
+                                    marker=dict(size=12, color=colors[i % len(colors)])
+                                ))
+                        
+                        fig.update_layout(
+                            title='Frontera Eficiente del Portafolio',
+                            xaxis_title='Volatilidad Anual',
+                            yaxis_title='Retorno Anual',
+                            showlegend=True,
+                            template='plotly_white',
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tabla comparativa de portafolios
+                        st.markdown("#### 📊 Comparación de Estrategias")
+                        comparison_data = []
+                        for label, portfolio in portfolios.items():
+                            if portfolio is not None:
+                                comparison_data.append({
+                                    'Estrategia': label,
+                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                    'VaR 95%': f"{portfolio.var_95:.4f}",
+                                    'Skewness': f"{portfolio.skewness:.4f}",
+                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                })
+                        
+                        if comparison_data:
+                            df_comparison = pd.DataFrame(comparison_data)
+                            st.dataframe(df_comparison, use_container_width=True)
+                    
+                    else:
+                        st.error("❌ No se pudo calcular la frontera eficiente")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
     
     # Información adicional extendida
     with st.expander("ℹ️ Información sobre las Estrategias"):
@@ -3804,73 +2728,23 @@ def mostrar_analisis_portafolio():
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
-def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
-    """
-    Función principal que divide las optimizaciones en dos categorías:
-    1. Rebalanceo con composición actual
-    2. Optimización completa
-    """
-    st.markdown("### 🔄 Optimización de Portafolio")
-    
-    # Crear tabs para las dos categorías
-    tab1, tab2 = st.tabs(["⚖️ Rebalanceo Actual", "🚀 Optimización Completa"])
-    
-    with tab1:
-        st.markdown("""
-        **⚖️ Rebalanceo con Composición Actual**
-        
-        Esta opción mantiene los activos que ya tienes en tu portafolio y optimiza 
-        únicamente los pesos de cada uno. Es ideal para:
-        - Mantener tu estrategia de inversión actual
-        - Mejorar la distribución sin cambiar activos
-        - Reducir costos de transacción
-        - Aplicar optimización gradual
-        """)
-        
-        if st.button("⚖️ Ir a Rebalanceo", type="primary", use_container_width=True):
-            mostrar_rebalanceo_composicion_actual(token_acceso, id_cliente)
-    
-    with tab2:
-        st.markdown("""
-        **🚀 Optimización Completa**
-        
-        Esta opción realiza una optimización completa del portafolio, considerando:
-        - Todos los activos disponibles en el mercado
-        - Frontera eficiente avanzada
-        - Múltiples estrategias de optimización
-        - Análisis de correlaciones y riesgo
-        - Recomendaciones detalladas
-        
-        Es ideal para:
-        - Revisión completa de estrategia
-        - Identificar nuevas oportunidades
-        - Optimización máxima de riesgo-retorno
-        """)
-        
-        if st.button("🚀 Ir a Optimización Completa", type="primary", use_container_width=True):
-            mostrar_optimizacion_completa(token_acceso, id_cliente)
-
 def main():
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
     
-    # Inicializar session state de manera más eficiente
-    session_keys = {
-        'token_acceso': None,
-        'refresh_token': None,
-        'clientes': [],
-        'cliente_seleccionado': None,
-        'fecha_desde': date.today() - timedelta(days=365),
-        'fecha_hasta': date.today(),
-        'rebalanceo_resultado': None,
-        'optimizacion_resultado': None,
-        'modo_rebalanceo_actual': None,
-        'procesando': False
-    }
-    
-    for key, default_value in session_keys.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_value
+    # Inicializar session state
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'refresh_token' not in st.session_state:
+        st.session_state.refresh_token = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=365)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
     
     # Barra lateral - Autenticación
     with st.sidebar:
@@ -3918,7 +2792,7 @@ def main():
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
             
-            # Obtener lista de clientes solo si es necesario
+            # Obtener lista de clientes
             if not st.session_state.clientes and st.session_state.token_acceso:
                 with st.spinner("Cargando clientes..."):
                     try:
@@ -3958,10 +2832,6 @@ def main():
             else:
                 st.warning("No se encontraron clientes")
 
-    # Indicador de estado
-    if 'procesando' in st.session_state and st.session_state.procesando:
-        st.info("🔄 Procesando... Por favor espere.")
-    
     # Contenido principal
     try:
         if st.session_state.token_acceso:
