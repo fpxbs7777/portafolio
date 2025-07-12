@@ -2425,8 +2425,251 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
-def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
-    st.markdown("### 🔄 Optimización de Portafolio")
+def mostrar_rebalanceo_composicion_actual(token_acceso, id_cliente):
+    """
+    Función para rebalanceo manteniendo la composición actual del portafolio
+    """
+    st.markdown("### ⚖️ Rebalanceo con Composición Actual")
+    
+    with st.spinner("Obteniendo portafolio..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    
+    if not portafolio:
+        st.warning("No se pudo obtener el portafolio del cliente")
+        return
+    
+    activos_raw = portafolio.get('activos', [])
+    if not activos_raw:
+        st.warning("El portafolio está vacío")
+        return
+    
+    # Extraer símbolos, mercados y tipos de activo
+    activos_para_optimizacion = []
+    for activo in activos_raw:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo')
+        mercado = titulo.get('mercado')
+        tipo = titulo.get('tipo')
+        if simbolo:
+            activos_para_optimizacion.append({'simbolo': simbolo,
+                                              'mercado': mercado,
+                                              'tipo': tipo})
+    
+    if not activos_para_optimizacion:
+        st.warning("No se encontraron activos con información de mercado válida para optimizar.")
+        return
+    
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
+    
+    st.info(f"Analizando {len(activos_para_optimizacion)} activos desde {fecha_desde} hasta {fecha_hasta}")
+    
+    # Mostrar composición actual
+    st.markdown("#### 📊 Composición Actual del Portafolio")
+    
+    # Calcular pesos actuales basados en valuación
+    pesos_actuales = {}
+    valor_total = 0
+    
+    for activo in activos_raw:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo')
+        cantidad = activo.get('cantidad', 0)
+        
+        # Calcular valuación
+        campos_valuacion = [
+            'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal', 
+            'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido',
+            'valorMercado', 'valorTotal', 'importe'
+        ]
+        
+        valuacion = 0
+        for campo in campos_valuacion:
+            if campo in activo and activo[campo] is not None:
+                try:
+                    val = float(activo[campo])
+                    if val > 0:
+                        valuacion = val
+                        break
+                except (ValueError, TypeError):
+                    continue
+        
+        if valuacion > 0:
+            pesos_actuales[simbolo] = valuacion
+            valor_total += valuacion
+    
+    # Mostrar pesos actuales
+    if pesos_actuales:
+        df_pesos_actuales = pd.DataFrame([
+            {'Símbolo': simbolo, 'Peso Actual (%)': (peso / valor_total * 100)}
+            for simbolo, peso in pesos_actuales.items()
+        ]).sort_values('Peso Actual (%)', ascending=False)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.dataframe(df_pesos_actuales, use_container_width=True)
+        
+        with col2:
+            # Gráfico de composición actual
+            fig_pie_actual = go.Figure(data=[go.Pie(
+                labels=df_pesos_actuales['Símbolo'],
+                values=df_pesos_actuales['Peso Actual (%)'],
+                textinfo='label+percent',
+                hole=0.4,
+                marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b'])
+            )])
+            fig_pie_actual.update_layout(
+                title="Composición Actual",
+                template='plotly_white'
+            )
+            st.plotly_chart(fig_pie_actual, use_container_width=True)
+    
+    # Configuración de rebalanceo
+    st.markdown("#### ⚙️ Configuración de Rebalanceo")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        estrategia = st.selectbox(
+            "Estrategia de Rebalanceo:",
+            options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
+            format_func=lambda x: {
+                'markowitz': 'Optimización de Markowitz',
+                'equi-weight': 'Pesos Iguales',
+                'min-variance-l1': 'Mínima Varianza L1',
+                'min-variance-l2': 'Mínima Varianza L2',
+                'long-only': 'Solo Posiciones Largas'
+            }[x]
+        )
+    
+    with col2:
+        target_return = st.number_input(
+            "Retorno Objetivo (anual):",
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+            help="Solo aplica para estrategia Markowitz"
+        )
+    
+    ejecutar_rebalanceo = st.button("⚖️ Ejecutar Rebalanceo", type="primary")
+    
+    if ejecutar_rebalanceo:
+        with st.spinner("Ejecutando rebalanceo..."):
+            try:
+                # Crear manager de portafolio con la lista de activos actuales
+                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
+                
+                # Cargar datos
+                if manager_inst.load_data():
+                    # Computar optimización
+                    use_target = target_return if estrategia == 'markowitz' else None
+                    portfolio_result = manager_inst.compute_portfolio(strategy=estrategia, target_return=use_target)
+                    
+                    if portfolio_result:
+                        st.success("✅ Rebalanceo completado")
+                        
+                        # Comparar pesos actuales vs optimizados
+                        st.markdown("#### 📊 Comparación: Actual vs Optimizado")
+                        
+                        if portfolio_result.dataframe_allocation is not None:
+                            # Crear DataFrame de comparación
+                            df_comparacion = portfolio_result.dataframe_allocation.copy()
+                            df_comparacion['Peso Optimizado (%)'] = df_comparacion['weights'] * 100
+                            
+                            # Agregar pesos actuales
+                            df_comparacion['Peso Actual (%)'] = df_comparacion['rics'].map(
+                                {simbolo: peso / valor_total * 100 for simbolo, peso in pesos_actuales.items()}
+                            ).fillna(0)
+                            
+                            # Calcular diferencia
+                            df_comparacion['Diferencia (%)'] = (
+                                df_comparacion['Peso Optimizado (%)'] - df_comparacion['Peso Actual (%)']
+                            )
+                            
+                            # Ordenar por diferencia absoluta
+                            df_comparacion = df_comparacion.sort_values('Diferencia (%)', key=abs, ascending=False)
+                            
+                            # Mostrar tabla de comparación
+                            st.dataframe(df_comparacion[['rics', 'Peso Actual (%)', 'Peso Optimizado (%)', 'Diferencia (%)']], 
+                                       use_container_width=True)
+                            
+                            # Gráfico de comparación
+                            fig_comparacion = go.Figure()
+                            
+                            fig_comparacion.add_trace(go.Bar(
+                                x=df_comparacion['rics'],
+                                y=df_comparacion['Peso Actual (%)'],
+                                name='Peso Actual',
+                                marker_color='#1f77b4'
+                            ))
+                            
+                            fig_comparacion.add_trace(go.Bar(
+                                x=df_comparacion['rics'],
+                                y=df_comparacion['Peso Optimizado (%)'],
+                                name='Peso Optimizado',
+                                marker_color='#ff7f0e'
+                            ))
+                            
+                            fig_comparacion.update_layout(
+                                title='Comparación de Pesos: Actual vs Optimizado',
+                                xaxis_title='Activos',
+                                yaxis_title='Peso (%)',
+                                barmode='group',
+                                template='plotly_white'
+                            )
+                            
+                            st.plotly_chart(fig_comparacion, use_container_width=True)
+                        
+                        # Mostrar métricas del portafolio optimizado
+                        st.markdown("#### 📈 Métricas del Portafolio Optimizado")
+                        metricas = portfolio_result.get_metrics_dict()
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Retorno Anual", f"{metricas['Annual Return']:.2%}")
+                            st.metric("Volatilidad Anual", f"{metricas['Annual Volatility']:.2%}")
+                            st.metric("Ratio de Sharpe", f"{metricas['Sharpe Ratio']:.4f}")
+                            st.metric("VaR 95%", f"{metricas['VaR 95%']:.4f}")
+                        with col2:
+                            st.metric("Skewness", f"{metricas['Skewness']:.4f}")
+                            st.metric("Kurtosis", f"{metricas['Kurtosis']:.4f}")
+                            st.metric("JB Statistic", f"{metricas['JB Statistic']:.4f}")
+                            normalidad = "✅ Normal" if metricas['Is Normal'] else "❌ No Normal"
+                            st.metric("Normalidad", normalidad)
+                        
+                        # Recomendaciones de rebalanceo
+                        st.markdown("#### 💡 Recomendaciones de Rebalanceo")
+                        
+                        # Identificar activos que necesitan ajuste
+                        if 'Diferencia (%)' in df_comparacion.columns:
+                            activos_aumentar = df_comparacion[df_comparacion['Diferencia (%)'] > 5]
+                            activos_reducir = df_comparacion[df_comparacion['Diferencia (%)'] < -5]
+                            
+                            if not activos_aumentar.empty:
+                                st.success("**📈 Activos a Aumentar:**")
+                                for _, row in activos_aumentar.iterrows():
+                                    st.write(f"- {row['rics']}: +{row['Diferencia (%)']:.1f}%")
+                            
+                            if not activos_reducir.empty:
+                                st.warning("**📉 Activos a Reducir:**")
+                                for _, row in activos_reducir.iterrows():
+                                    st.write(f"- {row['rics']}: {row['Diferencia (%)']:.1f}%")
+                            
+                            if activos_aumentar.empty and activos_reducir.empty:
+                                st.info("**✅ Portafolio Bien Balanceado** - No se requieren cambios significativos")
+                        
+                    else:
+                        st.error("❌ Error en el rebalanceo")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error durante el rebalanceo: {str(e)}")
+
+def mostrar_optimizacion_completa(token_acceso, id_cliente):
+    """
+    Función para optimización completa del portafolio (método actual)
+    """
+    st.markdown("### 🚀 Optimización Completa de Portafolio")
     
     with st.spinner("Obteniendo portafolio..."):
         portafolio = obtener_portafolio(token_acceso, id_cliente)
@@ -2484,7 +2727,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             help="Solo aplica para estrategia Markowitz"
         )
     
-    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización y Frontera Eficiente", type="primary")
+    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Completa", type="primary")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
@@ -2921,6 +3164,52 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+
+def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
+    """
+    Función principal que divide las optimizaciones en dos categorías:
+    1. Rebalanceo con composición actual
+    2. Optimización completa
+    """
+    st.markdown("### 🔄 Optimización de Portafolio")
+    
+    # Crear tabs para las dos categorías
+    tab1, tab2 = st.tabs(["⚖️ Rebalanceo Actual", "🚀 Optimización Completa"])
+    
+    with tab1:
+        st.markdown("""
+        **⚖️ Rebalanceo con Composición Actual**
+        
+        Esta opción mantiene los activos que ya tienes en tu portafolio y optimiza 
+        únicamente los pesos de cada uno. Es ideal para:
+        - Mantener tu estrategia de inversión actual
+        - Mejorar la distribución sin cambiar activos
+        - Reducir costos de transacción
+        - Aplicar optimización gradual
+        """)
+        
+        if st.button("⚖️ Ir a Rebalanceo", type="primary", use_container_width=True):
+            mostrar_rebalanceo_composicion_actual(token_acceso, id_cliente)
+    
+    with tab2:
+        st.markdown("""
+        **🚀 Optimización Completa**
+        
+        Esta opción realiza una optimización completa del portafolio, considerando:
+        - Todos los activos disponibles en el mercado
+        - Frontera eficiente avanzada
+        - Múltiples estrategias de optimización
+        - Análisis de correlaciones y riesgo
+        - Recomendaciones detalladas
+        
+        Es ideal para:
+        - Revisión completa de estrategia
+        - Identificar nuevas oportunidades
+        - Optimización máxima de riesgo-retorno
+        """)
+        
+        if st.button("🚀 Ir a Optimización Completa", type="primary", use_container_width=True):
+            mostrar_optimizacion_completa(token_acceso, id_cliente)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
