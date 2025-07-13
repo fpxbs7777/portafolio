@@ -2288,6 +2288,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             instrumentos_renta_fija = []
                             total_renta_fija = 0
                             
+                            # Analizar activos del portafolio
                             for activo in datos_activos:
                                 tipo = activo.get('Tipo', '').lower()
                                 simbolo = activo.get('Símbolo', '')
@@ -2310,6 +2311,36 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     })
                                     total_renta_fija += valuacion
                             
+                            # Obtener y analizar FCIs del estado de cuenta
+                            try:
+                                fondos_comunes = obtener_fondos_comunes(token_portador)
+                                if fondos_comunes and isinstance(fondos_comunes, list):
+                                    for fci in fondos_comunes:
+                                        if isinstance(fci, dict):
+                                            simbolo_fci = fci.get('simbolo', '')
+                                            saldo_pesos = fci.get('saldoPesos', 0)
+                                            saldo_dolares = fci.get('saldoDolares', 0)
+                                            
+                                            # Convertir saldo en dólares a pesos usando MEP aproximado
+                                            if saldo_dolares > 0:
+                                                # Usar cotización MEP aproximada (se puede mejorar)
+                                                cotizacion_mep_aproximada = 1000  # Valor aproximado
+                                                saldo_dolares_pesos = saldo_dolares * cotizacion_mep_aproximada
+                                                saldo_total_pesos = saldo_pesos + saldo_dolares_pesos
+                                            else:
+                                                saldo_total_pesos = saldo_pesos
+                                            
+                                            if saldo_total_pesos > 0:
+                                                instrumentos_renta_fija.append({
+                                                    'simbolo': simbolo_fci,
+                                                    'tipo': 'FCI',
+                                                    'valuacion': saldo_total_pesos,
+                                                    'peso': saldo_total_pesos / valor_total if valor_total > 0 else 0
+                                                })
+                                                total_renta_fija += saldo_total_pesos
+                            except Exception as e:
+                                st.warning(f"⚠️ No se pudieron obtener los FCIs: {str(e)}")
+                            
                             if instrumentos_renta_fija:
                                 peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
                                 
@@ -2317,6 +2348,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 col1.metric("Peso Renta Fija", f"{peso_renta_fija:.1%}")
                                 col2.metric("Valor Renta Fija", f"${total_renta_fija:,.2f}")
                                 col3.metric("Instrumentos", len(instrumentos_renta_fija))
+                                
+                                # Mostrar detalle de instrumentos de renta fija
+                                if st.checkbox("📋 Ver detalle de instrumentos de renta fija"):
+                                    df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
+                                    df_renta_fija = df_renta_fija.sort_values('valuacion', ascending=False)
+                                    df_renta_fija['Valuación'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
+                                    df_renta_fija['Peso (%)'] = (df_renta_fija['peso'] * 100).round(2)
+                                    st.dataframe(df_renta_fija[['simbolo', 'tipo', 'Valuación', 'Peso (%)']], 
+                                               use_container_width=True, height=200)
                                 
                                 # Recomendación compacta
                                 if peso_renta_fija < 0.2:
@@ -3339,8 +3379,9 @@ def mostrar_recomendaciones_asesor(token_acceso, id_cliente):
     if len(recomendaciones) == 0:
         st.success("✅ **Cliente en buen estado**: No se requieren acciones inmediatas")
     else:
-        for recomendacion in recomendaciones:
-            st.warning(recomendacion)
+        st.markdown("**🎯 Recomendaciones Prioritarias:**")
+        for i, recomendacion in enumerate(recomendaciones, 1):
+            st.markdown(f"{i}. {recomendacion}")
 
 def mostrar_reportes_asesor(token_acceso, id_cliente):
     """
@@ -3542,9 +3583,10 @@ def mostrar_reporte_recomendaciones(token_acceso, id_cliente):
     if len(recomendaciones) == 0:
         st.success("✅ **Cliente en buen estado**: No se requieren acciones inmediatas")
     else:
-                    st.markdown("**🎯 Recomendaciones Prioritarias:**")
-            for i, recomendacion in enumerate(recomendaciones, 1):
-                st.markdown(f"{i}. {recomendacion}")
+        st.markdown("**🎯 Recomendaciones Prioritarias:**")
+        for i, recomendacion in enumerate(recomendaciones, 1):
+            st.markdown(f"{i}. {recomendacion}")
+
 
 # === FUNCIONES DE APERTURA DE CUENTA ===
 
@@ -4124,15 +4166,50 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
         
         return
     
+    # Verificar que movimientos sea una lista válida
+    if not isinstance(movimientos, list):
+        st.error(f"❌ Error: Los movimientos no tienen el formato esperado. Tipo recibido: {type(movimientos)}")
+        if isinstance(movimientos, dict):
+            st.json(movimientos)  # Mostrar la respuesta para debugging
+        return
+    
+    if len(movimientos) == 0:
+        st.warning("⚠️ Se recibió una lista vacía de movimientos")
+        return
+    
     # Procesar movimientos
-    df_movimientos = pd.DataFrame(movimientos)
-    
-    # Convertir fechas
-    df_movimientos['fechaConcertacion'] = pd.to_datetime(df_movimientos['fechaConcertacion'])
-    df_movimientos['fechaLiquidacion'] = pd.to_datetime(df_movimientos['fechaLiquidacion'])
-    
-    # Ordenar por fecha
-    df_movimientos = df_movimientos.sort_values('fechaConcertacion')
+    try:
+        df_movimientos = pd.DataFrame(movimientos)
+        
+        # Mostrar información de debugging
+        st.info(f"📊 Datos recibidos: {len(df_movimientos)} movimientos")
+        st.info(f"📋 Columnas disponibles: {list(df_movimientos.columns)}")
+        
+        # Convertir fechas - verificar que existan las columnas
+        if 'fechaConcertacion' in df_movimientos.columns:
+            df_movimientos['fechaConcertacion'] = pd.to_datetime(df_movimientos['fechaConcertacion'])
+        else:
+            st.error("❌ Error: No se encontró la columna 'fechaConcertacion' en los datos")
+            st.info("Columnas disponibles:")
+            for col in df_movimientos.columns:
+                st.write(f"• {col}")
+            return
+        
+        if 'fechaLiquidacion' in df_movimientos.columns:
+            df_movimientos['fechaLiquidacion'] = pd.to_datetime(df_movimientos['fechaLiquidacion'])
+        else:
+            st.warning("⚠️ Advertencia: No se encontró la columna 'fechaLiquidacion' en los datos")
+            # Crear una columna dummy si no existe
+            df_movimientos['fechaLiquidacion'] = df_movimientos['fechaConcertacion']
+        
+        # Ordenar por fecha
+        df_movimientos = df_movimientos.sort_values('fechaConcertacion')
+        
+    except Exception as e:
+        st.error(f"❌ Error al procesar los datos de movimientos: {str(e)}")
+        st.info("Datos recibidos:")
+        st.json(movimientos[:3])  # Mostrar los primeros 3 elementos para debugging
+        return
     
     # === SECCIÓN 1: RESUMEN DE MOVIMIENTOS ===
     st.markdown("#### 📋 Resumen de Movimientos")
@@ -4146,35 +4223,39 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     # === SECCIÓN 2: ANÁLISIS POR TIPO DE MOVIMIENTO ===
     st.markdown("#### 🎯 Análisis por Tipo de Movimiento")
     
-    # Agrupar por tipo de movimiento
-    tipos_movimiento = df_movimientos['tipoMovimientoNombre'].value_counts()
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Gráfico de tipos de movimiento
-        fig_tipos = go.Figure(data=[go.Pie(
-            labels=tipos_movimiento.index,
-            values=tipos_movimiento.values,
-            textinfo='label+percent+value',
-            hole=0.4,
-            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-        )])
-        fig_tipos.update_layout(
-            title="Distribución por Tipo de Movimiento",
-            height=400
-        )
-        st.plotly_chart(fig_tipos, use_container_width=True)
-    
-    with col2:
-        # Tabla de resumen por tipo
-        resumen_tipos = df_movimientos.groupby('tipoMovimientoNombre').agg({
-            'monto': ['sum', 'mean', 'count'],
-            'fechaConcertacion': ['min', 'max']
-        }).round(2)
+    # Verificar que exista la columna tipoMovimientoNombre
+    if 'tipoMovimientoNombre' in df_movimientos.columns:
+        # Agrupar por tipo de movimiento
+        tipos_movimiento = df_movimientos['tipoMovimientoNombre'].value_counts()
         
-        resumen_tipos.columns = ['Monto Total', 'Monto Promedio', 'Cantidad', 'Primera Fecha', 'Última Fecha']
-        st.dataframe(resumen_tipos, use_container_width=True)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Gráfico de tipos de movimiento
+            fig_tipos = go.Figure(data=[go.Pie(
+                labels=tipos_movimiento.index,
+                values=tipos_movimiento.values,
+                textinfo='label+percent+value',
+                hole=0.4,
+                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+            )])
+            fig_tipos.update_layout(
+                title="Distribución por Tipo de Movimiento",
+                height=400
+            )
+            st.plotly_chart(fig_tipos, use_container_width=True)
+        
+        with col2:
+            # Tabla de resumen por tipo
+            resumen_tipos = df_movimientos.groupby('tipoMovimientoNombre').agg({
+                'monto': ['sum', 'mean', 'count'],
+                'fechaConcertacion': ['min', 'max']
+            }).round(2)
+            
+            resumen_tipos.columns = ['Monto Total', 'Monto Promedio', 'Cantidad', 'Primera Fecha', 'Última Fecha']
+            st.dataframe(resumen_tipos, use_container_width=True)
+    else:
+        st.warning("⚠️ No se encontró la columna 'tipoMovimientoNombre' en los datos")
     
     # === SECCIÓN 3: EVOLUCIÓN TEMPORAL DE MOVIMIENTOS ===
     st.markdown("#### 📈 Evolución Temporal de Movimientos")
@@ -4182,7 +4263,7 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     # Agrupar movimientos por fecha
     movimientos_por_fecha = df_movimientos.groupby(df_movimientos['fechaConcertacion'].dt.date).agg({
         'monto': 'sum',
-        'tipoMovimientoNombre': 'count'
+        'tipoMovimientoNombre': 'count' if 'tipoMovimientoNombre' in df_movimientos.columns else 'size'
     }).reset_index()
     movimientos_por_fecha.columns = ['fecha', 'monto_total', 'cantidad_movimientos']
     
@@ -4241,36 +4322,46 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     st.markdown("#### 💰 Análisis de Flujo de Fondos")
     
     # Separar depósitos y extracciones
-    depositos = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Depo', case=False, na=False)]
-    extracciones = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Extra', case=False, na=False)]
+    if 'tipoMovimientoNombre' in df_movimientos.columns:
+        depositos = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Depo', case=False, na=False)]
+        extracciones = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Extra', case=False, na=False)]
+    else:
+        depositos = pd.DataFrame()
+        extracciones = pd.DataFrame()
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Total Depósitos", f"${depositos['monto'].sum():,.2f}")
+        st.metric("Total Depósitos", f"${depositos['monto'].sum():,.2f}" if len(depositos) > 0 else "$0")
         st.metric("Cantidad Depósitos", len(depositos))
         if len(depositos) > 0:
             st.metric("Promedio Depósito", f"${depositos['monto'].mean():,.2f}")
     
     with col2:
-        st.metric("Total Extracciones", f"${extracciones['monto'].sum():,.2f}")
+        st.metric("Total Extracciones", f"${extracciones['monto'].sum():,.2f}" if len(extracciones) > 0 else "$0")
         st.metric("Cantidad Extracciones", len(extracciones))
         if len(extracciones) > 0:
             st.metric("Promedio Extracción", f"${extracciones['monto'].mean():,.2f}")
     
     with col3:
-        flujo_neto = depositos['monto'].sum() - extracciones['monto'].sum()
+        flujo_neto = (depositos['monto'].sum() if len(depositos) > 0 else 0) - (extracciones['monto'].sum() if len(extracciones) > 0 else 0)
         st.metric("Flujo Neto", f"${flujo_neto:,.2f}", 
                  delta=f"{'Positivo' if flujo_neto > 0 else 'Negativo'}")
+        extracciones_sum = extracciones['monto'].sum() if len(extracciones) > 0 else 0
+        depositos_sum = depositos['monto'].sum() if len(depositos) > 0 else 0
         st.metric("Ratio Depósito/Extracción", 
-                 f"{depositos['monto'].sum() / extracciones['monto'].sum():.2f}" if extracciones['monto'].sum() > 0 else "N/A")
+                 f"{depositos_sum / extracciones_sum:.2f}" if extracciones_sum > 0 else "N/A")
     
     # === SECCIÓN 5: ANÁLISIS DE ROTACIÓN DE ACTIVOS ===
     st.markdown("#### 🔄 Análisis de Rotación de Activos")
     
     # Identificar operaciones de compra y venta
-    compras = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Compra', case=False, na=False)]
-    ventas = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Venta', case=False, na=False)]
+    if 'tipoMovimientoNombre' in df_movimientos.columns:
+        compras = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Compra', case=False, na=False)]
+        ventas = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Venta', case=False, na=False)]
+    else:
+        compras = pd.DataFrame()
+        ventas = pd.DataFrame()
     
     if len(compras) > 0 or len(ventas) > 0:
         col1, col2 = st.columns(2)
@@ -4311,31 +4402,34 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     # === SECCIÓN 6: ANÁLISIS DE ESTADOS ===
     st.markdown("#### ✅ Análisis de Estados")
     
-    estados = df_movimientos['estado'].value_counts()
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Gráfico de estados
-        fig_estados = go.Figure(data=[go.Pie(
-            labels=estados.index,
-            values=estados.values,
-            textinfo='label+percent+value',
-            hole=0.4,
-            marker=dict(colors=['#28a745', '#ffc107', '#dc3545', '#6c757d'])
-        )])
-        fig_estados.update_layout(
-            title="Distribución por Estado",
-            height=400
-        )
-        st.plotly_chart(fig_estados, use_container_width=True)
-    
-    with col2:
-        # Métricas de estados
-        for estado, cantidad in estados.items():
-            monto_estado = df_movimientos[df_movimientos['estado'] == estado]['monto'].sum()
-            st.metric(f"{estado.title()}", f"{cantidad} movimientos", 
-                     delta=f"${monto_estado:,.2f}")
+    if 'estado' in df_movimientos.columns:
+        estados = df_movimientos['estado'].value_counts()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Gráfico de estados
+            fig_estados = go.Figure(data=[go.Pie(
+                labels=estados.index,
+                values=estados.values,
+                textinfo='label+percent+value',
+                hole=0.4,
+                marker=dict(colors=['#28a745', '#ffc107', '#dc3545', '#6c757d'])
+            )])
+            fig_estados.update_layout(
+                title="Distribución por Estado",
+                height=400
+            )
+            st.plotly_chart(fig_estados, use_container_width=True)
+        
+        with col2:
+            # Métricas de estados
+            for estado, cantidad in estados.items():
+                monto_estado = df_movimientos[df_movimientos['estado'] == estado]['monto'].sum()
+                st.metric(f"{estado.title()}", f"{cantidad} movimientos", 
+                         delta=f"${monto_estado:,.2f}")
+    else:
+        st.warning("⚠️ No se encontró la columna 'estado' en los datos")
     
     # === SECCIÓN 7: ANÁLISIS DE MONEDAS ===
     st.markdown("#### 💱 Análisis por Moneda")
@@ -4367,6 +4461,8 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
             }).round(2)
             resumen_monedas.columns = ['Monto Total', 'Monto Promedio', 'Cantidad']
             st.dataframe(resumen_monedas, use_container_width=True)
+    else:
+        st.warning("⚠️ No se encontró la columna 'monedaShort' en los datos")
     
     # === SECCIÓN 8: DETALLE DE MOVIMIENTOS ===
     st.markdown("#### 📋 Detalle de Movimientos")
