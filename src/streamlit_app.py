@@ -2175,6 +2175,186 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             )
             st.plotly_chart(fig_pie, use_container_width=True)
         
+        # Histograma del portafolio total valorizado
+        st.subheader("📈 Histograma del Portafolio Total Valorizado")
+        
+        if st.button("🔄 Generar Histograma del Portafolio"):
+            with st.spinner("Obteniendo series históricas y calculando valorización del portafolio..."):
+                try:
+                    # Obtener fechas para el histórico
+                    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+                    fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
+                    # Preparar datos para obtener series históricas
+                    activos_para_historico = []
+                    for activo in datos_activos:
+                        simbolo = activo['Símbolo']
+                        if simbolo != 'N/A':
+                            # Intentar obtener el mercado del activo original
+                            mercado = 'BCBA'  # Default
+                            for activo_original in activos:
+                                if activo_original.get('titulo', {}).get('simbolo') == simbolo:
+                                    mercado = activo_original.get('titulo', {}).get('mercado', 'BCBA')
+                                    break
+                            
+                            activos_para_historico.append({
+                                'simbolo': simbolo,
+                                'mercado': mercado,
+                                'peso': activo['Valuación'] / valor_total if valor_total > 0 else 0
+                            })
+                    
+                    if len(activos_para_historico) > 0:
+                        # Obtener series históricas para cada activo
+                        series_historicas = {}
+                        activos_exitosos = []
+                        
+                        for activo_info in activos_para_historico:
+                            simbolo = activo_info['simbolo']
+                            mercado = activo_info['mercado']
+                            peso = activo_info['peso']
+                            
+                            if peso > 0:  # Solo procesar activos con peso significativo
+                                serie = obtener_serie_historica_iol(
+                                    token_portador,
+                                    mercado,
+                                    simbolo,
+                                    fecha_desde,
+                                    fecha_hasta
+                                )
+                                
+                                if serie is not None and not serie.empty:
+                                    series_historicas[simbolo] = serie
+                                    activos_exitosos.append({
+                                        'simbolo': simbolo,
+                                        'peso': peso,
+                                        'serie': serie
+                                    })
+                                    st.success(f"✅ {simbolo}: {len(serie)} puntos de datos")
+                                else:
+                                    st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+                        
+                        if len(activos_exitosos) > 0:
+                            # Crear DataFrame con todas las series alineadas
+                            df_portfolio = pd.DataFrame()
+                            
+                            for activo_info in activos_exitosos:
+                                simbolo = activo_info['simbolo']
+                                peso = activo_info['peso']
+                                serie = activo_info['serie']
+                                
+                                # Agregar serie ponderada al DataFrame
+                                df_portfolio[simbolo] = serie * peso
+                            
+                            # Calcular valor total del portafolio por fecha
+                            df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
+                            
+                            # Eliminar filas con valores NaN
+                            df_portfolio = df_portfolio.dropna()
+                            
+                            if len(df_portfolio) > 0:
+                                # Crear histograma del valor total del portafolio
+                                valores_portfolio = df_portfolio['Portfolio_Total'].values
+                                
+                                fig_hist = go.Figure(data=[go.Histogram(
+                                    x=valores_portfolio,
+                                    nbinsx=30,
+                                    name="Valor Total del Portafolio",
+                                    marker_color='#0d6efd',
+                                    opacity=0.7
+                                )])
+                                
+                                # Agregar líneas de métricas importantes
+                                media_valor = np.mean(valores_portfolio)
+                                mediana_valor = np.median(valores_portfolio)
+                                percentil_5 = np.percentile(valores_portfolio, 5)
+                                percentil_95 = np.percentile(valores_portfolio, 95)
+                                
+                                fig_hist.add_vline(x=media_valor, line_dash="dash", line_color="red", 
+                                                 annotation_text=f"Media: ${media_valor:,.2f}")
+                                fig_hist.add_vline(x=mediana_valor, line_dash="dash", line_color="green", 
+                                                 annotation_text=f"Mediana: ${mediana_valor:,.2f}")
+                                fig_hist.add_vline(x=percentil_5, line_dash="dash", line_color="orange", 
+                                                 annotation_text=f"P5: ${percentil_5:,.2f}")
+                                fig_hist.add_vline(x=percentil_95, line_dash="dash", line_color="purple", 
+                                                 annotation_text=f"P95: ${percentil_95:,.2f}")
+                                
+                                fig_hist.update_layout(
+                                    title="Distribución del Valor Total del Portafolio",
+                                    xaxis_title="Valor del Portafolio ($)",
+                                    yaxis_title="Frecuencia",
+                                    height=500,
+                                    showlegend=False,
+                                    template='plotly_white'
+                                )
+                                
+                                st.plotly_chart(fig_hist, use_container_width=True)
+                                
+                                # Mostrar estadísticas del histograma
+                                st.markdown("#### 📊 Estadísticas del Histograma")
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                col1.metric("Valor Promedio", f"${media_valor:,.2f}")
+                                col2.metric("Valor Mediano", f"${mediana_valor:,.2f}")
+                                col3.metric("Valor Mínimo (P5)", f"${percentil_5:,.2f}")
+                                col4.metric("Valor Máximo (P95)", f"${percentil_95:,.2f}")
+                                
+                                # Mostrar evolución temporal del portafolio
+                                st.markdown("#### 📈 Evolución Temporal del Portafolio")
+                                
+                                fig_evolucion = go.Figure()
+                                fig_evolucion.add_trace(go.Scatter(
+                                    x=df_portfolio.index,
+                                    y=df_portfolio['Portfolio_Total'],
+                                    mode='lines',
+                                    name='Valor Total del Portafolio',
+                                    line=dict(color='#0d6efd', width=2)
+                                ))
+                                
+                                fig_evolucion.update_layout(
+                                    title="Evolución del Valor del Portafolio en el Tiempo",
+                                    xaxis_title="Fecha",
+                                    yaxis_title="Valor del Portafolio ($)",
+                                    height=400,
+                                    template='plotly_white'
+                                )
+                                
+                                st.plotly_chart(fig_evolucion, use_container_width=True)
+                                
+                                # Mostrar contribución de cada activo
+                                st.markdown("#### 🥧 Contribución de Activos al Valor Total")
+                                
+                                contribucion_activos = {}
+                                for activo_info in activos_exitosos:
+                                    simbolo = activo_info['simbolo']
+                                    peso = activo_info['peso']
+                                    contribucion_activos[simbolo] = peso * valor_total
+                                
+                                if contribucion_activos:
+                                    fig_contribucion = go.Figure(data=[go.Pie(
+                                        labels=list(contribucion_activos.keys()),
+                                        values=list(contribucion_activos.values()),
+                                        textinfo='label+percent+value',
+                                        texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+                                        hole=0.4,
+                                        marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                    )])
+                                    fig_contribucion.update_layout(
+                                        title="Contribución de Activos al Valor Total del Portafolio",
+                                        height=400
+                                    )
+                                    st.plotly_chart(fig_contribucion, use_container_width=True)
+                                
+                            else:
+                                st.warning("⚠️ No hay datos suficientes para generar el histograma")
+                        else:
+                            st.warning("⚠️ No se pudieron obtener datos históricos para ningún activo")
+                    else:
+                        st.warning("⚠️ No hay activos válidos para generar el histograma")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error generando histograma del portafolio: {str(e)}")
+                    st.exception(e)
+        
         # Tabla de activos
         st.subheader("📋 Detalle de Activos")
         df_display = df_activos.copy()
