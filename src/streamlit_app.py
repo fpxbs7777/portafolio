@@ -2799,26 +2799,139 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             help="Intervalo de confianza para las proyecciones"
                                         )
                                     
-                                    # --- Simulación Monte Carlo para proyecciones ---
+                                    # --- NUEVO: Inputs para volatilidad y métricas de mercado ---
+                                    col_mc3, col_mc4 = st.columns(2)
+                                    with col_mc3:
+                                        ventana_volatilidad = st.number_input(
+                                            "Ventana volatilidad histórica (días)",
+                                            min_value=10, max_value=100, value=30, step=5,
+                                            help="Período para calcular volatilidad histórica móvil"
+                                        )
+                                    with col_mc4:
+                                        incluir_metricas_mercado = st.checkbox(
+                                            "Incluir métricas de mercado",
+                                            value=True,
+                                            help="Usar volumen, monto operado y spread para ajustar predicciones"
+                                        )
+                                    
+                                    # --- Simulación Monte Carlo mejorada ---
                                     if 'Portfolio_Total' in df_portfolio.columns:
                                         valores_portfolio = df_portfolio['Portfolio_Total'].values
                                         retornos_portfolio = pd.Series(valores_portfolio).pct_change().dropna()
                                         mean_return = retornos_portfolio.mean()
-                                        std_return = retornos_portfolio.std()
                                         valor_actual = valores_portfolio[-1]
                                         n_sim = int(n_simulaciones)
                                         conf = nivel_confianza / 100
                                         
-                                        # Simulación Monte Carlo
+                                        # --- NUEVO: Funciones para Monte Carlo mejorado ---
+                                        def calcular_volatilidad_esperada(retornos_historicos, ventana=30):
+                                            """Calcula volatilidad esperada usando ventana móvil histórica"""
+                                            if len(retornos_historicos) < ventana:
+                                                return retornos_historicos.std()
+                                            
+                                            volatilidad_historica = retornos_historicos.rolling(window=ventana).std()
+                                            vol_actual = volatilidad_historica.iloc[-1]
+                                            
+                                            # Predicción: tendencia + componente estocástico
+                                            if len(volatilidad_historica.dropna()) > 1:
+                                                tendencia_vol = volatilidad_historica.diff().mean()
+                                                vol_esperada = vol_actual * (1 + tendencia_vol + np.random.normal(0, 0.1))
+                                            else:
+                                                vol_esperada = vol_actual * (1 + np.random.normal(0, 0.1))
+                                            
+                                            return max(vol_esperada, vol_actual * 0.5)  # Límite mínimo
+                                        
+                                        def obtener_metricas_mercado_activo(token_portador, simbolo, mercado):
+                                            """Obtiene métricas de mercado para un activo"""
+                                            try:
+                                                # Intentar obtener datos de mercado desde la API
+                                                url_mercado = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                                                headers = {'Authorization': f'Bearer {token_portador}'}
+                                                response = requests.get(url_mercado, headers=headers, timeout=10)
+                                                
+                                                if response.status_code == 200:
+                                                    data = response.json()
+                                                    return {
+                                                        'volumen': data.get('volumen', 0),
+                                                        'monto_operado': data.get('montoOperado', 0),
+                                                        'spread': data.get('spread', 0),
+                                                        'liquidez': data.get('liquidez', 1)
+                                                    }
+                                            except:
+                                                pass
+                                            
+                                            # Valores por defecto si no se pueden obtener
+                                            return {
+                                                'volumen': 1000000,
+                                                'monto_operado': 500000,
+                                                'spread': 0.01,
+                                                'liquidez': 0.8
+                                            }
+                                        
+                                        def calcular_factor_liquidez(metricas_mercado):
+                                            """Ajusta retorno esperado basado en liquidez"""
+                                            liquidez = metricas_mercado.get('liquidez', 1)
+                                            volumen = metricas_mercado.get('volumen', 0)
+                                            
+                                            # Menor liquidez = mayor riesgo = mayor retorno esperado
+                                            factor_volumen = min(volumen / 1000000, 2)  # Normalizar volumen
+                                            factor_liquidez = 1 + (1 - liquidez) * 0.2  # Ajuste del 20%
+                                            
+                                            return factor_volumen * factor_liquidez
+                                        
+                                        def calcular_volatilidad_ajustada(vol_base, metricas_mercado):
+                                            """Ajusta volatilidad por spread y volumen"""
+                                            spread = metricas_mercado.get('spread', 0)
+                                            volumen = metricas_mercado.get('volumen', 0)
+                                            
+                                            # Mayor spread = mayor volatilidad
+                                            factor_spread = 1 + spread * 10  # Ajuste por spread
+                                            factor_volumen = 1 + (1 - min(volumen / 1000000, 1)) * 0.3  # Menor volumen = mayor vol
+                                            
+                                            return vol_base * factor_spread * factor_volumen
+                                        
+                                        # --- Simulación Monte Carlo mejorada ---
                                         simulaciones = []
+                                        
+                                        # Obtener métricas de mercado si está habilitado
+                                        metricas_mercado_totales = {}
+                                        if incluir_metricas_mercado:
+                                            for activo_info in activos_exitosos:
+                                                simbolo = activo_info['simbolo']
+                                                mercado = 'BCBA'  # Default, ajustar según necesidad
+                                                metricas = obtener_metricas_mercado_activo(token_portador, simbolo, mercado)
+                                                metricas_mercado_totales[simbolo] = metricas
+                                        
                                         for _ in range(n_sim):
-                                            # Simular retorno acumulado para el horizonte
-                                            retorno_sim = np.random.normal(mean_return, std_return, dias_analisis)
+                                            # 1. Calcular volatilidad esperada
+                                            vol_esperada = calcular_volatilidad_esperada(retornos_portfolio, ventana_volatilidad)
+                                            
+                                            # 2. Ajustar por métricas de mercado si está habilitado
+                                            if incluir_metricas_mercado and metricas_mercado_totales:
+                                                # Promedio ponderado de métricas de mercado
+                                                metricas_promedio = {
+                                                    'volumen': np.mean([m['volumen'] for m in metricas_mercado_totales.values()]),
+                                                    'miquidez': np.mean([m['liquidez'] for m in metricas_mercado_totales.values()]),
+                                                    'spread': np.mean([m['spread'] for m in metricas_mercado_totales.values()])
+                                                }
+                                                
+                                                factor_liquidez = calcular_factor_liquidez(metricas_promedio)
+                                                vol_ajustada = calcular_volatilidad_ajustada(vol_esperada, metricas_promedio)
+                                                
+                                                mean_return_ajustado = mean_return * factor_liquidez
+                                                vol_final = vol_ajustada
+                                            else:
+                                                mean_return_ajustado = mean_return
+                                                vol_final = vol_esperada
+                                            
+                                            # 3. Simular trayectoria con parámetros ajustados
+                                            retorno_sim = np.random.normal(mean_return_ajustado, vol_final, dias_analisis)
                                             retorno_acum = np.prod(1 + retorno_sim) - 1
                                             simulaciones.append(retorno_acum)
+                                        
                                         simulaciones = np.array(simulaciones)
                                         
-                                        # Métricas basadas en Monte Carlo
+                                        # Métricas basadas en Monte Carlo mejorado
                                         retorno_esperado_mc = np.mean(simulaciones)
                                         retorno_anualizado_ars = retorno_esperado_mc * (365 / dias_analisis)
                                         mean_return_annual_usd = df_portfolio_returns_usd.mean() * 252
@@ -2842,7 +2955,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         col1.metric(f"Intervalo de Confianza {nivel_confianza}% (ARS)", f"±{intervalo_confianza_ars:.2%}")
                                         col2.metric(f"Intervalo de Confianza {nivel_confianza}% (USD)", f"±{intervalo_confianza_usd:.2%}")
                                         
-                                        # Proyecciones de valor del portafolio basadas en Monte Carlo
+                                        # Proyecciones de valor del portafolio basadas en Monte Carlo mejorado
                                         st.markdown("#### 💰 Proyecciones de Valor del Portafolio")
                                         
                                         # Calcular proyecciones usando percentiles de Monte Carlo
@@ -2854,6 +2967,22 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         col1.metric("Proyección Esperada", f"${proyeccion_esperada:,.2f}")
                                         col2.metric("Proyección Optimista", f"${proyeccion_optimista:,.2f}")
                                         col3.metric("Proyección Pesimista", f"${proyeccion_pesimista:,.2f}")
+                                        
+                                        # --- NUEVO: Mostrar información de métricas de mercado ---
+                                        if incluir_metricas_mercado and metricas_mercado_totales:
+                                            st.markdown("#### 📊 Métricas de Mercado Utilizadas")
+                                            col1, col2, col3, col4 = st.columns(4)
+                                            
+                                            metricas_promedio = {
+                                                'volumen': np.mean([m['volumen'] for m in metricas_mercado_totales.values()]),
+                                                'liquidez': np.mean([m['liquidez'] for m in metricas_mercado_totales.values()]),
+                                                'spread': np.mean([m['spread'] for m in metricas_mercado_totales.values()])
+                                            }
+                                            
+                                            col1.metric("Volumen Promedio", f"${metricas_promedio['volumen']:,.0f}")
+                                            col2.metric("Liquidez Promedio", f"{metricas_promedio['liquidez']:.2f}")
+                                            col3.metric("Spread Promedio", f"{metricas_promedio['spread']:.4f}")
+                                            col4.metric("Activos Analizados", len(metricas_mercado_totales))
                                     
 
                                     
