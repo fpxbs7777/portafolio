@@ -1,18 +1,42 @@
 import streamlit as st
 import requests
-import plotly.graph_objects as go
 import pandas as pd
-from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
 import numpy as np
-import pandas as pd
-import yfinance as yf
-import scipy.optimize as op
-from scipy import stats
 import random
 import warnings
-import streamlit.components.v1 as components
-from scipy.stats import linregress
+
+# Try to import optional packages with error handling
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("⚠️ Plotly no está disponible. Los gráficos no se mostrarán.")
+
+try:
+    import yfinance as yf
+    YFINANCE_AVAILABLE = True
+except ImportError:
+    YFINANCE_AVAILABLE = False
+    st.warning("⚠️ yfinance no está disponible. Algunas funcionalidades pueden no funcionar.")
+
+try:
+    import scipy.optimize as op
+    from scipy import stats
+    from scipy.stats import linregress
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    st.warning("⚠️ SciPy no está disponible. La optimización de portafolio no funcionará.")
+
+try:
+    import streamlit.components.v1 as components
+    COMPONENTS_AVAILABLE = True
+except ImportError:
+    COMPONENTS_AVAILABLE = False
+    st.warning("⚠️ Streamlit components no está disponible.")
 
 warnings.filterwarnings('ignore')
 
@@ -1071,10 +1095,15 @@ class manager:
         for ric in self.rics:
             if ric in self.timeseries and self.timeseries[ric] is not None:
                 prices = self.timeseries[ric]
-                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+                if prices is not None and len(prices) > 1:
+                    returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
         
         # Convertir a DataFrame para alinear fechas
-        self.returns = pd.DataFrame(returns_matrix)
+        if returns_matrix:
+            self.returns = pd.DataFrame(returns_matrix)
+        else:
+            # Crear DataFrame vacío si no hay datos
+            self.returns = pd.DataFrame()
         
         # Calcular matriz de covarianza y retornos medios
         self.cov_matrix = self.returns.cov() * 252  # Anualizar
@@ -1181,10 +1210,27 @@ class output:
         self.volatility_daily = np.std(returns)
         self.sharpe_ratio = self.mean_daily / self.volatility_daily if self.volatility_daily > 0 else 0
         self.var_95 = np.percentile(returns, 5)
-        self.skewness = stats.skew(returns)
-        self.kurtosis = stats.kurtosis(returns)
-        self.jb_stat, self.p_value = stats.jarque_bera(returns)
-        self.is_normal = self.p_value > 0.05
+        
+        # Safe SciPy stats calculations
+        if SCIPY_AVAILABLE:
+            try:
+                self.skewness = stats.skew(returns)
+                self.kurtosis = stats.kurtosis(returns)
+                self.jb_stat, self.p_value = stats.jarque_bera(returns)
+                self.is_normal = self.p_value > 0.05
+            except Exception:
+                self.skewness = 0
+                self.kurtosis = 0
+                self.jb_stat = 0
+                self.p_value = 1
+                self.is_normal = False
+        else:
+            self.skewness = 0
+            self.kurtosis = 0
+            self.jb_stat = 0
+            self.p_value = 1
+            self.is_normal = False
+            
         self.decimals = 4
         self.str_title = 'Portfolio Returns'
         self.volatility_annual = self.volatility_daily * np.sqrt(252)
@@ -1212,6 +1258,10 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
+        if not PLOTLY_AVAILABLE:
+            st.warning("⚠️ Plotly no está disponible. No se puede mostrar el histograma.")
+            return None
+            
         if self.returns is None or len(self.returns) == 0:
             fig = go.Figure()
             fig.add_annotation(
@@ -1261,6 +1311,10 @@ def optimize_portfolio(returns, target_return=None):
     Returns:
         np.array: Pesos optimizados del portafolio
     """
+    if not SCIPY_AVAILABLE:
+        st.warning("⚠️ SciPy no está disponible. No se puede realizar optimización de portafolio.")
+        return None
+        
     if returns is None or returns.empty:
         return None
         
@@ -1276,46 +1330,50 @@ def optimize_portfolio(returns, target_return=None):
     # Restricciones
     bounds = tuple((0, 1) for _ in range(n_assets))
     
-    if target_return is not None:
-        # Optimización con retorno objetivo
-        constraints = [
-            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},  # Suma de pesos = 1
-            {'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return}  # Retorno objetivo
-        ]
+    try:
+        if target_return is not None:
+            # Optimización con retorno objetivo
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},  # Suma de pesos = 1
+                {'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return}  # Retorno objetivo
+            ]
+            
+            # Minimizar varianza
+            result = op.minimize(
+                lambda x: portfolio_variance(x, cov_matrix),
+                initial_weights,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
+        else:
+            # Maximizar Sharpe ratio
+            risk_free_rate = 0.40  # Tasa libre de riesgo para Argentina
+            
+            def neg_sharpe_ratio(weights):
+                port_return = np.sum(mean_returns * weights)
+                port_vol = np.sqrt(portfolio_variance(weights, cov_matrix))
+                if port_vol == 0:
+                    return np.inf
+                return -(port_return - risk_free_rate) / port_vol
+            
+            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+            
+            result = op.minimize(
+                neg_sharpe_ratio,
+                initial_weights,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints
+            )
         
-        # Minimizar varianza
-        result = op.minimize(
-            lambda x: portfolio_variance(x, cov_matrix),
-            initial_weights,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-    else:
-        # Maximizar Sharpe ratio
-        risk_free_rate = 0.40  # Tasa libre de riesgo para Argentina
-        
-        def neg_sharpe_ratio(weights):
-            port_return = np.sum(mean_returns * weights)
-            port_vol = np.sqrt(portfolio_variance(weights, cov_matrix))
-            if port_vol == 0:
-                return np.inf
-            return -(port_return - risk_free_rate) / port_vol
-        
-        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-        
-        result = op.minimize(
-            neg_sharpe_ratio,
-            initial_weights,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-    
-    if result.success:
-        return result.x
-    else:
-        # Si falla la optimización, usar pesos iguales
+        if result.success:
+            return result.x
+        else:
+            # Si falla la optimización, usar pesos iguales
+            return initial_weights
+    except Exception as e:
+        st.error(f"Error en optimización de portafolio: {str(e)}")
         return initial_weights
 
 def compute_efficient_frontier(rics, notional, target_return, include_min_variance, data):
@@ -3713,7 +3771,11 @@ def mostrar_movimientos_cliente_asesor(token_acceso, id_cliente):
                 # Preparar datos para mostrar
                 df_display = df_movimientos.copy()
                 if 'fechaConcertacion' in df_display.columns:
-                    df_display['fechaConcertacion'] = pd.to_datetime(df_display['fechaConcertacion']).dt.strftime('%Y-%m-%d')
+                    try:
+            df_display['fechaConcertacion'] = pd.to_datetime(df_display['fechaConcertacion']).dt.strftime('%Y-%m-%d')
+        except Exception:
+            # If strftime fails, keep as datetime
+            df_display['fechaConcertacion'] = pd.to_datetime(df_display['fechaConcertacion'])
                 df_display['monto'] = df_display['monto'].apply(lambda x: f"${x:,.2f}")
                 
                 # Seleccionar columnas relevantes
@@ -4679,8 +4741,28 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Movimientos", len(df_movimientos))
     col2.metric("Período Analizado", f"{fecha_desde} a {fecha_hasta}")
-    col3.metric("Primer Movimiento", df_movimientos['fechaConcertacion'].min().strftime('%Y-%m-%d'))
-    col4.metric("Último Movimiento", df_movimientos['fechaConcertacion'].max().strftime('%Y-%m-%d'))
+    
+    # Safe date formatting with error handling
+    try:
+        primer_movimiento = df_movimientos['fechaConcertacion'].min()
+        if pd.notna(primer_movimiento):
+            primer_movimiento_str = primer_movimiento.strftime('%Y-%m-%d')
+        else:
+            primer_movimiento_str = "N/A"
+    except Exception:
+        primer_movimiento_str = "N/A"
+    
+    try:
+        ultimo_movimiento = df_movimientos['fechaConcertacion'].max()
+        if pd.notna(ultimo_movimiento):
+            ultimo_movimiento_str = ultimo_movimiento.strftime('%Y-%m-%d')
+        else:
+            ultimo_movimiento_str = "N/A"
+    except Exception:
+        ultimo_movimiento_str = "N/A"
+    
+    col3.metric("Primer Movimiento", primer_movimiento_str)
+    col4.metric("Último Movimiento", ultimo_movimiento_str)
     
     # === SECCIÓN 2: ANÁLISIS POR TIPO DE MOVIMIENTO ===
     st.markdown("#### 🎯 Análisis por Tipo de Movimiento")
@@ -4694,18 +4776,26 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
         
         with col1:
             # Gráfico de tipos de movimiento
-            fig_tipos = go.Figure(data=[go.Pie(
-                labels=tipos_movimiento.index,
-                values=tipos_movimiento.values,
-                textinfo='label+percent+value',
-                hole=0.4,
-                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-            )])
-            fig_tipos.update_layout(
-                title="Distribución por Tipo de Movimiento",
-                height=400
-            )
-            st.plotly_chart(fig_tipos, use_container_width=True)
+            if PLOTLY_AVAILABLE:
+                try:
+                    fig_tipos = go.Figure(data=[go.Pie(
+                        labels=tipos_movimiento.index,
+                        values=tipos_movimiento.values,
+                        textinfo='label+percent+value',
+                        hole=0.4,
+                        marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                    )])
+                    fig_tipos.update_layout(
+                        title="Distribución por Tipo de Movimiento",
+                        height=400
+                    )
+                    st.plotly_chart(fig_tipos, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error al crear gráfico: {str(e)}")
+                    st.dataframe(tipos_movimiento, use_container_width=True)
+            else:
+                st.warning("⚠️ Plotly no está disponible. Mostrando datos en tabla.")
+                st.dataframe(tipos_movimiento, use_container_width=True)
         
         with col2:
             # Tabla de resumen por tipo
@@ -4714,8 +4804,14 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
                 'fechaConcertacion': ['min', 'max']
             }).round(2)
             
+                    # Safe date formatting for the summary table
+        try:
             resumen_tipos.columns = ['Monto Total', 'Monto Promedio', 'Cantidad', 'Primera Fecha', 'Última Fecha']
             st.dataframe(resumen_tipos, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error al mostrar tabla de resumen: {str(e)}")
+            # Show raw data if formatting fails
+            st.dataframe(df_movimientos.head(), use_container_width=True)
     else:
         st.warning("⚠️ No se encontró la columna 'tipoMovimientoNombre' en los datos")
     
@@ -4730,55 +4826,63 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     movimientos_por_fecha.columns = ['fecha', 'monto_total', 'cantidad_movimientos']
     
     # Crear gráfico de evolución
-    fig_evolucion = go.Figure()
-    
-    # Traza de montos
-    fig_evolucion.add_trace(go.Scatter(
-        x=movimientos_por_fecha['fecha'],
-        y=movimientos_por_fecha['monto_total'],
-        mode='lines+markers',
-        name='Monto Total',
-        line=dict(color='#28a745', width=2),
-        yaxis='y'
-    ))
-    
-    # Traza de cantidad de movimientos
-    fig_evolucion.add_trace(go.Scatter(
-        x=movimientos_por_fecha['fecha'],
-        y=movimientos_por_fecha['cantidad_movimientos'],
-        mode='lines+markers',
-        name='Cantidad Movimientos',
-        line=dict(color='#0d6efd', width=2, dash='dash'),
-        yaxis='y2'
-    ))
-    
-    fig_evolucion.update_layout(
-        title="Evolución de Movimientos en el Tiempo",
-        xaxis_title="Fecha",
-        yaxis=dict(
-            title=dict(
-                text="Monto Total ($)",
-                font=dict(color="#28a745")
-            ),
-            side="left",
-            tickfont=dict(color="#28a745")
-        ),
-        yaxis2=dict(
-            title=dict(
-                text="Cantidad Movimientos",
-                font=dict(color="#0d6efd")
-            ),
-            side="right",
-            tickfont=dict(color="#0d6efd"),
-            anchor="x",
-            overlaying="y"
-        ),
-        height=400,
-        template='plotly_white',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    
-    st.plotly_chart(fig_evolucion, use_container_width=True)
+    if PLOTLY_AVAILABLE:
+        try:
+            fig_evolucion = go.Figure()
+            
+            # Traza de montos
+            fig_evolucion.add_trace(go.Scatter(
+                x=movimientos_por_fecha['fecha'],
+                y=movimientos_por_fecha['monto_total'],
+                mode='lines+markers',
+                name='Monto Total',
+                line=dict(color='#28a745', width=2),
+                yaxis='y'
+            ))
+            
+            # Traza de cantidad de movimientos
+            fig_evolucion.add_trace(go.Scatter(
+                x=movimientos_por_fecha['fecha'],
+                y=movimientos_por_fecha['cantidad_movimientos'],
+                mode='lines+markers',
+                name='Cantidad Movimientos',
+                line=dict(color='#0d6efd', width=2, dash='dash'),
+                yaxis='y2'
+            ))
+            
+            fig_evolucion.update_layout(
+                title="Evolución de Movimientos en el Tiempo",
+                xaxis_title="Fecha",
+                yaxis=dict(
+                    title=dict(
+                        text="Monto Total ($)",
+                        font=dict(color="#28a745")
+                    ),
+                    side="left",
+                    tickfont=dict(color="#28a745")
+                ),
+                yaxis2=dict(
+                    title=dict(
+                        text="Cantidad Movimientos",
+                        font=dict(color="#0d6efd")
+                    ),
+                    side="right",
+                    tickfont=dict(color="#0d6efd"),
+                    anchor="x",
+                    overlaying="y"
+                ),
+                height=400,
+                template='plotly_white',
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig_evolucion, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error al crear gráfico de evolución: {str(e)}")
+            st.dataframe(movimientos_por_fecha, use_container_width=True)
+    else:
+        st.warning("⚠️ Plotly no está disponible. Mostrando datos en tabla.")
+        st.dataframe(movimientos_por_fecha, use_container_width=True)
     
     # === SECCIÓN 4: ANÁLISIS DE FLUJO DE FONDOS ===
     st.markdown("#### 💰 Análisis de Flujo de Fondos")
@@ -4931,7 +5035,11 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     
     # Preparar datos para mostrar
     df_display = df_movimientos.copy()
-    df_display['fechaConcertacion'] = df_display['fechaConcertacion'].dt.strftime('%Y-%m-%d')
+            try:
+            df_display['fechaConcertacion'] = df_display['fechaConcertacion'].dt.strftime('%Y-%m-%d')
+        except Exception:
+            # If strftime fails, keep as datetime
+            pass
     df_display['monto'] = df_display['monto'].apply(lambda x: f"${x:,.2f}")
     
     # Seleccionar columnas relevantes
