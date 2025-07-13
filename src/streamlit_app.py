@@ -2549,12 +2549,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     col3.metric("Valor Inicial (USD)", f"${valor_inicial_usd:,.2f}")
                                     col4.metric("Valor Final (USD)", f"${valor_final_usd:,.2f}")
                                     
-                                    col1, col2 = st.columns(2)
-                                                                            col1.metric("Retorno Total (ARS)", f"{retorno_total_real:+.2f}%")
-                                        col2.metric("Tasa MEP Utilizada", f"${tasa_mep:,.2f}")
-                                        
-                                        # Análisis de rendimiento extra asegurado de renta fija
-                                        st.markdown("#### 🏦 Análisis de Rendimiento Extra Asegurado")
+                                                                        col1, col2 = st.columns(2)
+                                    col1.metric("Retorno Total (ARS)", f"{retorno_total_real:+.2f}%")
+                                    col2.metric("Tasa MEP Utilizada", f"${tasa_mep:,.2f}")
+                                    
+                                    # Análisis de rendimiento extra asegurado de renta fija
+                                    st.markdown("#### 🏦 Análisis de Rendimiento Extra Asegurado")
                                         
                                         # Identificar instrumentos de renta fija
                                         instrumentos_renta_fija = []
