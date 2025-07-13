@@ -2556,54 +2556,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         col2.metric("Proyección Optimista", f"${proyeccion_optimista:,.2f}")
                                         col3.metric("Proyección Pesimista", f"${proyeccion_pesimista:,.2f}")
                                         
-                                        # Gráfico de proyecciones
-                                        fechas_proyeccion = pd.date_range(
-                                            start=df_portfolio.index[-1],
-                                            periods=dias_analisis + 1,
-                                            freq='D'
-                                        )
-                                        
-                                        fig_proyecciones = go.Figure()
-                                        
-                                        # Línea de valor actual
-                                        fig_proyecciones.add_trace(go.Scatter(
-                                            x=[df_portfolio.index[-1], fechas_proyeccion[-1]],
-                                            y=[valor_actual, proyeccion_esperada],
-                                            mode='lines',
-                                            name='Proyección Esperada',
-                                            line=dict(color='#0d6efd', width=3)
-                                        ))
-                                        
-                                        # Banda de confianza
-                                        fig_proyecciones.add_trace(go.Scatter(
-                                            x=fechas_proyeccion,
-                                            y=[valor_actual * (1 + retorno_esperado_horizonte + intervalo_confianza * (i/dias_analisis)) for i in range(dias_analisis + 1)],
-                                            mode='lines',
-                                            name='Límite Superior',
-                                            line=dict(color='#28a745', width=2, dash='dash'),
-                                            showlegend=False
-                                        ))
-                                        
-                                        fig_proyecciones.add_trace(go.Scatter(
-                                            x=fechas_proyeccion,
-                                            y=[valor_actual * (1 + retorno_esperado_horizonte - intervalo_confianza * (i/dias_analisis)) for i in range(dias_analisis + 1)],
-                                            mode='lines',
-                                            name='Límite Inferior',
-                                            line=dict(color='#dc3545', width=2, dash='dash'),
-                                            fill='tonexty',
-                                            fillcolor='rgba(220, 53, 69, 0.1)',
-                                            showlegend=False
-                                        ))
-                                        
-                                        fig_proyecciones.update_layout(
-                                            title=f"Proyección del Valor del Portafolio ({dias_analisis} días)",
-                                            xaxis_title="Fecha",
-                                            yaxis_title="Valor del Portafolio ($)",
-                                            height=400,
-                                            template='plotly_white'
-                                        )
-                                        
-                                        st.plotly_chart(fig_proyecciones, use_container_width=True)
+
                                         
                                         # Resumen de análisis
                                         st.markdown("#### 📋 Resumen del Análisis")
