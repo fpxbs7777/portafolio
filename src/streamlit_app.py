@@ -2971,12 +2971,64 @@ def obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_h
         'Content-Type': 'application/json'
     }
     
+    # Según la documentación de la API, necesitamos especificar al menos un tipo de cuenta
     payload = {
         "desde": fecha_desde,
         "hasta": fecha_hasta,
         "idTipo": "",
         "idEstado": "",
-        "tipoCuenta": ""
+        "tipoCuenta": "inversion_argentina_pesos"  # Especificar tipo de cuenta
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 400:
+            # Intentar con diferentes tipos de cuenta si el primero falla
+            tipos_cuenta = ["inversion_argentina_pesos", "inversion_argentina_dolares", "inversion_usa"]
+            for tipo_cuenta in tipos_cuenta:
+                payload["tipoCuenta"] = tipo_cuenta
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                if response.status_code == 200:
+                    return response.json()
+            
+            # Si todos fallan, intentar sin especificar tipo de cuenta
+            payload.pop("tipoCuenta", None)
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.error(f"Error al obtener movimientos: {response.status_code}")
+                st.info("Intentando con endpoint alternativo...")
+                
+                # Intentar con el endpoint de movimientos generales
+                return obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta)
+        else:
+            st.error(f"Error al obtener movimientos: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return []
+
+def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Método alternativo para obtener movimientos usando el endpoint general
+    """
+    url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        "clientes": [id_cliente],
+        "from": fecha_desde,
+        "to": fecha_hasta,
+        "dateType": "MOVIMIENTO",
+        "status": "APROBADO",
+        "country": "ARG",
+        "currency": "ARS"
     }
     
     try:
@@ -2984,10 +3036,10 @@ def obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_h
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error al obtener movimientos: {response.status_code}")
+            st.error(f"Error en endpoint alternativo: {response.status_code}")
             return []
     except Exception as e:
-        st.error(f"Error de conexión: {str(e)}")
+        st.error(f"Error de conexión en endpoint alternativo: {str(e)}")
         return []
 
 def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde, fecha_hasta):
@@ -3002,11 +3054,40 @@ def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde
     """
     st.markdown("#### 📊 Análisis de Performance Real del Portafolio")
     
+    # Mostrar información de depuración
+    st.info(f"🔍 Analizando movimientos para cliente {id_cliente} desde {fecha_desde} hasta {fecha_hasta}")
+    
     with st.spinner("Obteniendo movimientos históricos..."):
         movimientos = obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_hasta)
     
     if not movimientos:
-        st.warning("No se encontraron movimientos para el período seleccionado")
+        st.warning("⚠️ No se encontraron movimientos para el período seleccionado")
+        st.info("💡 Posibles causas:")
+        st.info("• El cliente no tiene movimientos en el período especificado")
+        st.info("• El ID del cliente puede ser incorrecto")
+        st.info("• El período de fechas puede estar fuera del rango disponible")
+        st.info("• Puede haber restricciones de acceso a los datos")
+        
+        # Mostrar opciones para el usuario
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Intentar con fechas más amplias"):
+                # Intentar con un período más amplio
+                fecha_desde_amplia = (pd.to_datetime(fecha_desde) - pd.Timedelta(days=365)).strftime('%Y-%m-%d')
+                st.info(f"Intentando con período amplio: {fecha_desde_amplia} a {fecha_hasta}")
+                movimientos_amplio = obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde_amplia, fecha_hasta)
+                if movimientos_amplio:
+                    st.success("✅ Se encontraron movimientos con período amplio")
+                    analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde_amplia, fecha_hasta)
+                else:
+                    st.error("❌ Tampoco se encontraron movimientos con período amplio")
+        
+        with col2:
+            if st.button("📋 Ver información del cliente"):
+                st.info(f"ID Cliente: {id_cliente}")
+                st.info(f"Período solicitado: {fecha_desde} a {fecha_hasta}")
+                st.info("Verifique que el cliente tenga movimientos en IOL")
+        
         return
     
     # Procesar movimientos
@@ -3325,6 +3406,10 @@ def mostrar_analisis_performance_real():
     cliente = st.session_state.cliente_seleccionado
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     
+    # Mostrar información del cliente
+    st.info(f"👤 Cliente seleccionado: {cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))}")
+    st.info(f"🆔 ID Cliente: {id_cliente}")
+    
     # Configuración de fechas
     col1, col2 = st.columns(2)
     with col1:
@@ -3340,14 +3425,55 @@ def mostrar_analisis_performance_real():
             max_value=date.today()
         )
     
+    # Validar fechas
+    if fecha_desde >= fecha_hasta:
+        st.error("❌ La fecha desde debe ser anterior a la fecha hasta")
+        return
+    
+    # Mostrar período seleccionado
+    st.info(f"📅 Período de análisis: {fecha_desde} a {fecha_hasta}")
+    
     # Botón para ejecutar análisis
-    if st.button("🚀 Analizar Performance Real", type="primary"):
-        analizar_performance_real_portafolio(
-            token_acceso,
-            id_cliente,
-            fecha_desde.strftime('%Y-%m-%d'),
-            fecha_hasta.strftime('%Y-%m-%d')
-        )
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🚀 Analizar Performance Real", type="primary"):
+            analizar_performance_real_portafolio(
+                token_acceso,
+                id_cliente,
+                fecha_desde.strftime('%Y-%m-%d'),
+                fecha_hasta.strftime('%Y-%m-%d')
+            )
+    
+    with col2:
+        if st.button("🔍 Verificar Cliente"):
+            st.info("Verificando acceso al cliente...")
+            # Intentar obtener portafolio para verificar acceso
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
+            if portafolio:
+                st.success("✅ Cliente accesible - Se puede obtener portafolio")
+            else:
+                st.warning("⚠️ Cliente no accesible - Verificar permisos")
+    
+    # Información adicional
+    with st.expander("ℹ️ Información sobre el análisis"):
+        st.markdown("""
+        **📊 Qué analiza este módulo:**
+        - Movimientos reales del cliente (depósitos, extracciones, compras, ventas)
+        - Flujo de fondos y patrones de acumulación
+        - Rotación de activos y frecuencia operativa
+        - Análisis por tipo de movimiento y estado
+        - Recomendaciones basadas en patrones reales
+        
+        **🔍 Requisitos:**
+        - Cliente debe tener movimientos en el período seleccionado
+        - Permisos de asesor para acceder a movimientos del cliente
+        - Token de autenticación válido
+        
+        **💡 Consejos:**
+        - Use períodos amplios para capturar más movimientos
+        - Verifique que el cliente tenga actividad en IOL
+        - Los movimientos pueden tardar en aparecer en el sistema
+        """)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
