@@ -2233,27 +2233,42 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             peso = activo_info['peso']
                             serie = activo_info['serie']
                             
-                            # Encontrar la cantidad real del activo en el portafolio
-                            cantidad_activo = 0
+                            # Encontrar la valuación real del activo en el portafolio
+                            valuacion_activo = 0
                             for activo_original in datos_activos:
                                 if activo_original['Símbolo'] == simbolo:
-                                    cantidad_activo = float(activo_original['Cantidad'])
+                                    valuacion_activo = float(activo_original['Valuación'])
                                     break
                             
                             # Filtrar la serie para usar solo las fechas comunes
                             serie_filtrada = serie.loc[fechas_comunes]
                             
                             # Agregar serie ponderada al DataFrame
-                            # Calcular el valor real del activo: cantidad * precio histórico
+                            # Usar la valuación real del activo y aplicar el retorno histórico
                             if 'precio' in serie_filtrada.columns:
-                                valores_precio = serie_filtrada['precio'].values
-                                df_portfolio[simbolo] = valores_precio * cantidad_activo
+                                # Calcular retornos históricos del activo
+                                precios = serie_filtrada['precio'].values
+                                if len(precios) > 1:
+                                    # Calcular retornos acumulados desde el primer precio
+                                    retornos_acumulados = precios / precios[0]
+                                    # Aplicar retornos a la valuación actual
+                                    df_portfolio[simbolo] = valuacion_activo * retornos_acumulados
+                                else:
+                                    # Si solo hay un precio, usar la valuación actual
+                                    df_portfolio[simbolo] = valuacion_activo
                             else:
                                 # Si no hay columna 'precio', intentar con la primera columna numérica
                                 columnas_numericas = serie_filtrada.select_dtypes(include=[np.number]).columns
                                 if len(columnas_numericas) > 0:
-                                    valores_precio = serie_filtrada[columnas_numericas[0]].values
-                                    df_portfolio[simbolo] = valores_precio * cantidad_activo
+                                    precios = serie_filtrada[columnas_numericas[0]].values
+                                    if len(precios) > 1:
+                                        # Calcular retornos acumulados desde el primer precio
+                                        retornos_acumulados = precios / precios[0]
+                                        # Aplicar retornos a la valuación actual
+                                        df_portfolio[simbolo] = valuacion_activo * retornos_acumulados
+                                    else:
+                                        # Si solo hay un precio, usar la valuación actual
+                                        df_portfolio[simbolo] = valuacion_activo
                                 else:
                                     st.warning(f"⚠️ No se encontraron valores numéricos para {simbolo}")
                                     continue
@@ -2508,14 +2523,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         title="Evolución del Valor Real del Portafolio (ARS y USD)",
                                         xaxis_title="Fecha",
                                         yaxis=dict(
-                                            title="Valor en ARS ($)",
-                                            titlefont=dict(color="#28a745"),
+                                            title=dict(
+                                                text="Valor en ARS ($)",
+                                                font=dict(color="#28a745")
+                                            ),
                                             tickfont=dict(color="#28a745"),
                                             side="left"
                                         ),
                                         yaxis2=dict(
-                                            title="Valor en USD ($)",
-                                            titlefont=dict(color="#0d6efd"),
+                                            title=dict(
+                                                text="Valor en USD ($)",
+                                                font=dict(color="#0d6efd")
+                                            ),
                                             tickfont=dict(color="#0d6efd"),
                                             anchor="x",
                                             overlaying="y",
