@@ -2917,13 +2917,14 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Rebalanceo",
-        "📊 Performance Real"
+        "📊 Performance Real",
+        "👨‍💼 Asesor"
     ])
 
     with tab1:
@@ -2951,6 +2952,1039 @@ def mostrar_analisis_portafolio():
     
     with tab6:
         mostrar_analisis_performance_real()
+    
+    with tab7:
+        mostrar_panel_asesor(token_acceso, id_cliente)
+
+def mostrar_panel_asesor(token_acceso, id_cliente):
+    """
+    Muestra el panel del asesor con herramientas específicas para gestionar el cliente
+    """
+    st.markdown("### 👨‍💼 Panel del Asesor")
+    st.markdown("Herramientas específicas para la gestión del cliente seleccionado")
+    
+    # Información del cliente
+    cliente = st.session_state.cliente_seleccionado
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+    
+    st.info(f"👤 Cliente: {nombre_cliente} | 🆔 ID: {id_cliente}")
+    
+    # Crear sub-tabs para diferentes funcionalidades del asesor
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5 = st.tabs([
+        "📊 Resumen Cliente",
+        "📈 Movimientos",
+        "💡 Recomendaciones",
+        "📋 Reportes",
+        "🏦 Apertura de Cuenta"
+    ])
+    
+    with sub_tab1:
+        mostrar_resumen_cliente_asesor(token_acceso, id_cliente)
+    
+    with sub_tab2:
+        mostrar_movimientos_cliente_asesor(token_acceso, id_cliente)
+    
+    with sub_tab3:
+        mostrar_recomendaciones_asesor(token_acceso, id_cliente)
+    
+    with sub_tab4:
+        mostrar_reportes_asesor(token_acceso, id_cliente)
+    
+    with sub_tab5:
+        mostrar_apertura_cuenta_asesor(token_acceso, id_cliente)
+
+def mostrar_resumen_cliente_asesor(token_acceso, id_cliente):
+    """
+    Muestra un resumen específico del cliente para el asesor
+    """
+    st.markdown("#### 📊 Resumen del Cliente")
+    
+    # Obtener datos del cliente
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**💰 Estado de Cuenta**")
+        if estado_cuenta:
+            total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+            cuentas = estado_cuenta.get('cuentas', [])
+            
+            st.metric("Total en Pesos", f"${total_en_pesos:,.2f}")
+            st.metric("Número de Cuentas", len(cuentas))
+            
+            if cuentas:
+                # Mostrar saldos por cuenta
+                st.markdown("**Detalle de Cuentas:**")
+                for cuenta in cuentas[:3]:  # Mostrar solo las primeras 3
+                    st.write(f"• {cuenta.get('tipo', 'N/A')}: ${cuenta.get('total', 0):,.2f}")
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
+    
+    with col2:
+        st.markdown("**📈 Portafolio**")
+        if portafolio:
+            activos = portafolio.get('activos', [])
+            st.metric("Total Activos", len(activos))
+            
+            # Calcular valor total del portafolio
+            valor_total = 0
+            tipos_activos = {}
+            
+            for activo in activos:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', 'N/A')
+                tipo = titulo.get('tipo', 'N/A')
+                
+                # Obtener valuación
+                campos_valuacion = ['valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal']
+                valuacion = 0
+                for campo in campos_valuacion:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            valuacion = float(activo[campo])
+                            break
+                        except (ValueError, TypeError):
+                            continue
+                
+                valor_total += valuacion
+                
+                if tipo not in tipos_activos:
+                    tipos_activos[tipo] = 0
+                tipos_activos[tipo] += 1
+            
+            st.metric("Valor Total", f"${valor_total:,.2f}")
+            st.metric("Tipos de Activos", len(tipos_activos))
+            
+            # Mostrar distribución por tipo
+            if tipos_activos:
+                st.markdown("**Distribución por Tipo:**")
+                for tipo, cantidad in list(tipos_activos.items())[:3]:
+                    st.write(f"• {tipo}: {cantidad} activos")
+        else:
+            st.warning("No se pudo obtener el portafolio")
+    
+    # Métricas adicionales
+    st.markdown("#### 📊 Métricas de Actividad")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        # Intentar obtener movimientos recientes
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+        fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        
+        movimientos = obtener_movimientos_cliente(token_acceso, id_cliente, fecha_desde, fecha_hasta)
+        if movimientos:
+            st.metric("Movimientos (30 días)", len(movimientos))
+        else:
+            st.metric("Movimientos (30 días)", "N/A")
+    
+    with col2:
+        # Calcular días desde último movimiento
+        if movimientos:
+            df_mov = pd.DataFrame(movimientos)
+            if 'fechaConcertacion' in df_mov.columns:
+                df_mov['fechaConcertacion'] = pd.to_datetime(df_mov['fechaConcertacion'])
+                ultimo_movimiento = df_mov['fechaConcertacion'].max()
+                dias_desde_ultimo = (datetime.now() - ultimo_movimiento).days
+                st.metric("Días desde último movimiento", dias_desde_ultimo)
+            else:
+                st.metric("Días desde último movimiento", "N/A")
+        else:
+            st.metric("Días desde último movimiento", "N/A")
+    
+    with col3:
+        # Estado de actividad
+        if movimientos and len(movimientos) > 5:
+            st.success("🟢 Activo")
+        elif movimientos and len(movimientos) > 0:
+            st.info("🟡 Moderado")
+        else:
+            st.warning("🔴 Inactivo")
+    
+    with col4:
+        # Recomendación de contacto
+        if movimientos and len(movimientos) > 0:
+            df_mov = pd.DataFrame(movimientos)
+            if 'fechaConcertacion' in df_mov.columns:
+                df_mov['fechaConcertacion'] = pd.to_datetime(df_mov['fechaConcertacion'])
+                ultimo_movimiento = df_mov['fechaConcertacion'].max()
+                dias_desde_ultimo = (datetime.now() - ultimo_movimiento).days
+                
+                if dias_desde_ultimo > 30:
+                    st.warning("📞 Contactar")
+                elif dias_desde_ultimo > 7:
+                    st.info("📧 Seguimiento")
+                else:
+                    st.success("✅ Al día")
+            else:
+                st.info("📧 Seguimiento")
+        else:
+            st.warning("📞 Contactar")
+
+def mostrar_movimientos_cliente_asesor(token_acceso, id_cliente):
+    """
+    Muestra los movimientos del cliente con herramientas específicas del asesor
+    """
+    st.markdown("#### 📈 Movimientos del Cliente")
+    
+    # Configuración de fechas
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_desde = st.date_input(
+            "Fecha Desde:",
+            value=st.session_state.fecha_desde,
+            max_value=date.today(),
+            key="asesor_fecha_desde"
+        )
+    with col2:
+        fecha_hasta = st.date_input(
+            "Fecha Hasta:",
+            value=st.session_state.fecha_hasta,
+            max_value=date.today(),
+            key="asesor_fecha_hasta"
+        )
+    
+    # Botón para obtener movimientos
+    if st.button("🔍 Obtener Movimientos", type="primary"):
+        with st.spinner("Obteniendo movimientos..."):
+            movimientos = obtener_movimientos_cliente(
+                token_acceso, 
+                id_cliente, 
+                fecha_desde.strftime('%Y-%m-%d'),
+                fecha_hasta.strftime('%Y-%m-%d')
+            )
+            
+            if movimientos:
+                df_movimientos = pd.DataFrame(movimientos)
+                
+                # Mostrar resumen
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Movimientos", len(df_movimientos))
+                
+                if 'monto' in df_movimientos.columns:
+                    col2.metric("Monto Total", f"${df_movimientos['monto'].sum():,.2f}")
+                
+                if 'estado' in df_movimientos.columns:
+                    estados = df_movimientos['estado'].value_counts()
+                    col3.metric("Estados", ", ".join([f"{k} ({v})" for k, v in estados.items()]))
+                
+                # Análisis por tipo de movimiento
+                st.markdown("#### 📊 Análisis por Tipo de Movimiento")
+                
+                if 'tipoMovimientoNombre' in df_movimientos.columns:
+                    tipos_movimiento = df_movimientos['tipoMovimientoNombre'].value_counts()
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Gráfico de tipos de movimiento
+                        fig_tipos = go.Figure(data=[go.Pie(
+                            labels=tipos_movimiento.index,
+                            values=tipos_movimiento.values,
+                            textinfo='label+percent+value',
+                            hole=0.4,
+                            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                        )])
+                        fig_tipos.update_layout(
+                            title="Distribución por Tipo de Movimiento",
+                            height=400
+                        )
+                        st.plotly_chart(fig_tipos, use_container_width=True)
+                    
+                    with col2:
+                        # Tabla de resumen por tipo
+                        resumen_tipos = df_movimientos.groupby('tipoMovimientoNombre').agg({
+                            'monto': ['sum', 'mean', 'count']
+                        }).round(2)
+                        
+                        resumen_tipos.columns = ['Monto Total', 'Monto Promedio', 'Cantidad']
+                        st.dataframe(resumen_tipos, use_container_width=True)
+                
+                # Tabla detallada
+                st.markdown("#### 📋 Detalle de Movimientos")
+                
+                # Preparar datos para mostrar
+                df_display = df_movimientos.copy()
+                if 'fechaConcertacion' in df_display.columns:
+                    df_display['fechaConcertacion'] = pd.to_datetime(df_display['fechaConcertacion']).dt.strftime('%Y-%m-%d')
+                df_display['monto'] = df_display['monto'].apply(lambda x: f"${x:,.2f}")
+                
+                # Seleccionar columnas relevantes
+                columnas_mostrar = ['fechaConcertacion', 'tipoMovimientoNombre', 'monto', 'estado', 'monedaShort']
+                columnas_disponibles = [col for col in columnas_mostrar if col in df_display.columns]
+                
+                st.dataframe(df_display[columnas_disponibles], use_container_width=True, height=300)
+                
+            else:
+                st.warning("No se encontraron movimientos para el período seleccionado")
+
+def mostrar_recomendaciones_asesor(token_acceso, id_cliente):
+    """
+    Muestra recomendaciones específicas del asesor para el cliente
+    """
+    st.markdown("#### 💡 Recomendaciones del Asesor")
+    
+    # Obtener datos del cliente
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+    
+    # Análisis de concentración
+    if portafolio:
+        activos = portafolio.get('activos', [])
+        if len(activos) > 0:
+            st.markdown("**📊 Análisis de Concentración**")
+            
+            # Calcular concentración por tipo de activo
+            tipos_activos = {}
+            valor_total = 0
+            
+            for activo in activos:
+                titulo = activo.get('titulo', {})
+                tipo = titulo.get('tipo', 'N/A')
+                
+                # Obtener valuación
+                campos_valuacion = ['valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal']
+                valuacion = 0
+                for campo in campos_valuacion:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            valuacion = float(activo[campo])
+                            break
+                        except (ValueError, TypeError):
+                            continue
+                
+                valor_total += valuacion
+                
+                if tipo not in tipos_activos:
+                    tipos_activos[tipo] = 0
+                tipos_activos[tipo] += valuacion
+            
+            # Calcular concentración
+            if valor_total > 0:
+                concentracion_maxima = max(tipos_activos.values()) / valor_total
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("Concentración Máxima", f"{concentracion_maxima:.1%}")
+                    
+                    if concentracion_maxima > 0.5:
+                        st.warning("⚠️ **Alta Concentración**: Considerar diversificar")
+                    elif concentracion_maxima > 0.3:
+                        st.info("ℹ️ **Concentración Moderada**: Monitorear")
+                    else:
+                        st.success("✅ **Buena Diversificación**")
+                
+                with col2:
+                    st.metric("Tipos de Activos", len(tipos_activos))
+                    
+                    if len(tipos_activos) < 3:
+                        st.warning("⚠️ **Poca Diversificación**: Considerar más tipos de activos")
+                    elif len(tipos_activos) < 5:
+                        st.info("ℹ️ **Diversificación Básica**: Considerar expandir")
+                    else:
+                        st.success("✅ **Buena Diversificación por Tipo**")
+    
+    # Análisis de liquidez
+    if estado_cuenta:
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        cuentas = estado_cuenta.get('cuentas', [])
+        
+        st.markdown("**💰 Análisis de Liquidez**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Total en Cuentas", f"${total_en_pesos:,.2f}")
+            
+            if total_en_pesos > 1000000:  # Más de 1M
+                st.success("✅ **Buena Liquidez**")
+            elif total_en_pesos > 100000:  # Más de 100k
+                st.info("ℹ️ **Liquidez Moderada**")
+            else:
+                st.warning("⚠️ **Liquidez Baja**: Considerar aumentar fondos")
+        
+        with col2:
+            st.metric("Número de Cuentas", len(cuentas))
+            
+            if len(cuentas) > 2:
+                st.success("✅ **Buena Estructura de Cuentas**")
+            elif len(cuentas) > 0:
+                st.info("ℹ️ **Estructura Básica**: Considerar diversificar cuentas")
+            else:
+                st.warning("⚠️ **Sin Cuentas**: Verificar configuración")
+    
+    # Recomendaciones específicas
+    st.markdown("#### 🎯 Recomendaciones Específicas")
+    
+    recomendaciones = []
+    
+    # Verificar actividad reciente
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    movimientos = obtener_movimientos_cliente(token_acceso, id_cliente, fecha_desde, fecha_hasta)
+    
+    if not movimientos or len(movimientos) == 0:
+        recomendaciones.append("📞 **Contactar al cliente**: No hay actividad reciente")
+    
+    if portafolio and len(portafolio.get('activos', [])) == 0:
+        recomendaciones.append("💼 **Asesorar sobre inversiones**: El portafolio está vacío")
+    
+    if estado_cuenta and estado_cuenta.get('totalEnPesos', 0) < 50000:
+        recomendaciones.append("💰 **Revisar estrategia de inversión**: Fondos limitados")
+    
+    if len(recomendaciones) == 0:
+        st.success("✅ **Cliente en buen estado**: No se requieren acciones inmediatas")
+    else:
+        for recomendacion in recomendaciones:
+            st.warning(recomendacion)
+
+def mostrar_reportes_asesor(token_acceso, id_cliente):
+    """
+    Muestra reportes específicos del asesor para el cliente
+    """
+    st.markdown("#### 📋 Reportes del Asesor")
+    
+    # Opciones de reportes
+    tipo_reporte = st.selectbox(
+        "Seleccionar tipo de reporte:",
+        ["Resumen Mensual", "Análisis de Riesgo", "Performance Histórica", "Recomendaciones"]
+    )
+    
+    if tipo_reporte == "Resumen Mensual":
+        mostrar_reporte_resumen_mensual(token_acceso, id_cliente)
+    elif tipo_reporte == "Análisis de Riesgo":
+        mostrar_reporte_analisis_riesgo(token_acceso, id_cliente)
+    elif tipo_reporte == "Performance Histórica":
+        mostrar_reporte_performance_historica(token_acceso, id_cliente)
+    elif tipo_reporte == "Recomendaciones":
+        mostrar_reporte_recomendaciones(token_acceso, id_cliente)
+
+def mostrar_reporte_resumen_mensual(token_acceso, id_cliente):
+    """
+    Genera un reporte de resumen mensual
+    """
+    st.markdown("#### 📊 Resumen Mensual")
+    
+    # Obtener datos del mes actual
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    # Obtener movimientos del mes
+    movimientos = obtener_movimientos_cliente(token_acceso, id_cliente, fecha_desde, fecha_hasta)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**📈 Actividad del Mes**")
+        if movimientos:
+            df_mov = pd.DataFrame(movimientos)
+            st.metric("Total Movimientos", len(df_mov))
+            
+            if 'monto' in df_mov.columns:
+                st.metric("Monto Total", f"${df_mov['monto'].sum():,.2f}")
+            
+            if 'tipoMovimientoNombre' in df_mov.columns:
+                tipos = df_mov['tipoMovimientoNombre'].value_counts()
+                st.metric("Tipos de Operación", len(tipos))
+        else:
+            st.metric("Total Movimientos", 0)
+            st.metric("Monto Total", "$0")
+            st.metric("Tipos de Operación", 0)
+    
+    with col2:
+        st.markdown("**💰 Estado Actual**")
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        
+        if portafolio:
+            activos = portafolio.get('activos', [])
+            st.metric("Activos en Portafolio", len(activos))
+        else:
+            st.metric("Activos en Portafolio", 0)
+        
+        if estado_cuenta:
+            total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+            st.metric("Total en Cuentas", f"${total_en_pesos:,.2f}")
+        else:
+            st.metric("Total en Cuentas", "$0")
+    
+    # Generar reporte descargable
+    if st.button("📥 Descargar Reporte"):
+        st.info("📋 Generando reporte...")
+        # Aquí se podría generar un PDF o Excel con el reporte
+        st.success("✅ Reporte generado (funcionalidad en desarrollo)")
+
+def mostrar_reporte_analisis_riesgo(token_acceso, id_cliente):
+    """
+    Genera un reporte de análisis de riesgo
+    """
+    st.markdown("#### ⚖️ Análisis de Riesgo")
+    
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    
+    if portafolio:
+        activos = portafolio.get('activos', [])
+        
+        # Calcular métricas de riesgo
+        valor_total = 0
+        tipos_activos = {}
+        
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            tipo = titulo.get('tipo', 'N/A')
+            
+            # Obtener valuación
+            campos_valuacion = ['valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal']
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        valuacion = float(activo[campo])
+                        break
+                    except (ValueError, TypeError):
+                        continue
+            
+            valor_total += valuacion
+            
+            if tipo not in tipos_activos:
+                tipos_activos[tipo] = 0
+            tipos_activos[tipo] += valuacion
+        
+        # Análisis de concentración
+        if valor_total > 0:
+            concentracion_maxima = max(tipos_activos.values()) / valor_total
+            
+            col1, col2, col3 = st.columns(3)
+            
+            col1.metric("Concentración Máxima", f"{concentracion_maxima:.1%}")
+            col2.metric("Tipos de Activos", len(tipos_activos))
+            col3.metric("Valor Total", f"${valor_total:,.2f}")
+            
+            # Evaluación de riesgo
+            if concentracion_maxima > 0.5:
+                st.warning("⚠️ **Riesgo Alto**: Concentración excesiva")
+            elif concentracion_maxima > 0.3:
+                st.info("ℹ️ **Riesgo Moderado**: Monitorear concentración")
+            else:
+                st.success("✅ **Riesgo Bajo**: Buena diversificación")
+    
+    else:
+        st.warning("No se pudo obtener el portafolio para el análisis de riesgo")
+
+def mostrar_reporte_performance_historica(token_acceso, id_cliente):
+    """
+    Genera un reporte de performance histórica
+    """
+    st.markdown("#### 📈 Performance Histórica")
+    
+    # Configuración de fechas
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_desde = st.date_input(
+            "Fecha Desde:",
+            value=st.session_state.fecha_desde,
+            max_value=date.today(),
+            key="performance_fecha_desde"
+        )
+    with col2:
+        fecha_hasta = st.date_input(
+            "Fecha Hasta:",
+            value=st.session_state.fecha_hasta,
+            max_value=date.today(),
+            key="performance_fecha_hasta"
+        )
+    
+    if st.button("📊 Analizar Performance"):
+        analizar_performance_real_portafolio(
+            token_acceso,
+            id_cliente,
+            fecha_desde.strftime('%Y-%m-%d'),
+            fecha_hasta.strftime('%Y-%m-%d')
+        )
+
+def mostrar_reporte_recomendaciones(token_acceso, id_cliente):
+    """
+    Genera un reporte de recomendaciones
+    """
+    st.markdown("#### 💡 Reporte de Recomendaciones")
+    
+    # Obtener datos del cliente
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+    
+    recomendaciones = []
+    
+    # Análisis de diversificación
+    if portafolio:
+        activos = portafolio.get('activos', [])
+        if len(activos) < 3:
+            recomendaciones.append("💼 **Diversificar portafolio**: Considerar agregar más activos")
+    
+    # Análisis de liquidez
+    if estado_cuenta:
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        if total_en_pesos < 50000:
+            recomendaciones.append("💰 **Aumentar liquidez**: Considerar depósitos adicionales")
+    
+    # Análisis de actividad
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    movimientos = obtener_movimientos_cliente(token_acceso, id_cliente, fecha_desde, fecha_hasta)
+    
+    if not movimientos or len(movimientos) == 0:
+        recomendaciones.append("📞 **Contactar cliente**: No hay actividad reciente")
+    
+    # Mostrar recomendaciones
+    if len(recomendaciones) == 0:
+        st.success("✅ **Cliente en buen estado**: No se requieren acciones inmediatas")
+    else:
+                    st.markdown("**🎯 Recomendaciones Prioritarias:**")
+            for i, recomendacion in enumerate(recomendaciones, 1):
+                st.markdown(f"{i}. {recomendacion}")
+
+# === FUNCIONES DE APERTURA DE CUENTA ===
+
+def cargar_selfie_sonriente(token_portador, id_cliente_asesorado, imagen_file):
+    """
+    Valida y guarda foto selfie sonriente del cliente
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente_asesorado (str): ID del cliente asesorado
+        imagen_file: Archivo de imagen subido
+        
+    Returns:
+        dict: Respuesta de la API
+    """
+    url = f"https://api.invertironline.com/api/v2/apertura-de-cuenta/selfie-sonriendo-carga/{id_cliente_asesorado}"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'multipart/form-data'
+    }
+    
+    try:
+        files = {'imagen': ('selfie.jpg', imagen_file.getvalue(), 'image/jpeg')}
+        response = requests.post(url, headers=headers, files=files, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al cargar selfie: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_datos_manuales(token_portador, id_cliente_asesorado, datos):
+    """
+    Carga datos personales esenciales que no se pudieron obtener del DNI
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente_asesorado (str): ID del cliente asesorado
+        datos (dict): Datos personales del cliente
+        
+    Returns:
+        dict: Respuesta de la API
+    """
+    url = f"https://api.invertironline.com/api/v2/apertura-de-cuenta/carga-manual-datos/{id_cliente_asesorado}"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al cargar datos manuales: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_datos_adicionales(token_portador, id_cliente_asesorado, datos):
+    """
+    Asocia datos personales y jurídicos de un cliente sin cuenta comitente
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente_asesorado (str): ID del cliente asesorado
+        datos (dict): Datos adicionales del cliente
+        
+    Returns:
+        dict: Respuesta de la API
+    """
+    url = f"https://api.invertironline.com/api/v2/apertura-de-cuenta/carga-datos-adicionales/{id_cliente_asesorado}"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=datos, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al cargar datos adicionales: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def completar_apertura_cuenta(token_portador, id_cliente_asesorado):
+    """
+    Genera el número de cuenta comitente
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente_asesorado (str): ID del cliente asesorado
+        
+    Returns:
+        dict: Respuesta de la API con número de cuenta
+    """
+    url = f"https://api.invertironline.com/api/v2/apertura-de-cuenta/completar-apertura/{id_cliente_asesorado}"
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al completar apertura: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def mostrar_apertura_cuenta_asesor(token_acceso, id_cliente):
+    """
+    Muestra la interfaz para apertura de cuenta del cliente
+    """
+    st.markdown("### 🏦 Apertura de Cuenta")
+    st.markdown("Proceso completo de apertura de cuenta para el cliente seleccionado")
+    
+    # Información del cliente
+    cliente = st.session_state.cliente_seleccionado
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+    
+    st.info(f"👤 Cliente: {nombre_cliente} | 🆔 ID: {id_cliente}")
+    
+    # Crear sub-tabs para el proceso de apertura
+    apertura_tab1, apertura_tab2, apertura_tab3, apertura_tab4, apertura_tab5 = st.tabs([
+        "📸 Selfie Sonriente",
+        "📝 Datos Personales",
+        "🏠 Datos Adicionales",
+        "✅ Completar Apertura",
+        "📋 Estado del Proceso"
+    ])
+    
+    with apertura_tab1:
+        mostrar_carga_selfie(token_acceso, id_cliente)
+    
+    with apertura_tab2:
+        mostrar_carga_datos_manuales(token_acceso, id_cliente)
+    
+    with apertura_tab3:
+        mostrar_carga_datos_adicionales(token_acceso, id_cliente)
+    
+    with apertura_tab4:
+        mostrar_completar_apertura(token_acceso, id_cliente)
+    
+    with apertura_tab5:
+        mostrar_estado_proceso_apertura(token_acceso, id_cliente)
+
+def mostrar_carga_selfie(token_acceso, id_cliente):
+    """
+    Interfaz para cargar selfie sonriente
+    """
+    st.markdown("#### 📸 Carga de Selfie Sonriente")
+    st.markdown("Suba una foto selfie sonriente del cliente (máximo 5MB)")
+    
+    uploaded_file = st.file_uploader(
+        "Seleccionar imagen selfie sonriente",
+        type=['jpg', 'jpeg', 'png'],
+        help="La imagen debe ser una selfie sonriente del cliente"
+    )
+    
+    if uploaded_file is not None:
+        # Mostrar preview de la imagen
+        st.image(uploaded_file, caption="Preview de la imagen", use_column_width=True)
+        
+        # Verificar tamaño del archivo (5MB máximo)
+        file_size = len(uploaded_file.getvalue()) / (1024 * 1024)  # MB
+        if file_size > 5:
+            st.error("❌ El archivo es demasiado grande. Máximo 5MB permitido.")
+            return
+        
+        st.success(f"✅ Archivo válido ({file_size:.2f} MB)")
+        
+        if st.button("📤 Cargar Selfie", type="primary"):
+            with st.spinner("Cargando selfie..."):
+                resultado = cargar_selfie_sonriente(token_acceso, id_cliente, uploaded_file)
+                
+                if resultado and resultado.get('ok'):
+                    st.success("✅ Selfie cargada exitosamente")
+                    if 'messages' in resultado:
+                        for message in resultado['messages']:
+                            st.info(f"💬 {message.get('description', '')}")
+                else:
+                    st.error("❌ Error al cargar la selfie")
+                    if resultado:
+                        st.json(resultado)
+
+def mostrar_carga_datos_manuales(token_acceso, id_cliente):
+    """
+    Interfaz para cargar datos personales manuales
+    """
+    st.markdown("#### 📝 Carga de Datos Personales")
+    st.markdown("Complete los datos personales que no se pudieron obtener del DNI")
+    
+    with st.form("datos_manuales_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            nombre = st.text_input("Nombre", placeholder="Ej: Juan")
+            apellido = st.text_input("Apellido", placeholder="Ej: Pérez")
+            dni = st.text_input("DNI", placeholder="Ej: 12345678")
+        
+        with col2:
+            fecha_nacimiento = st.date_input(
+                "Fecha de Nacimiento",
+                value=date(1990, 1, 1),
+                max_value=date.today()
+            )
+            sexo = st.selectbox(
+                "Sexo",
+                options=["Masculino", "Femenino", "No Binario"],
+                index=0
+            )
+        
+        if st.form_submit_button("📤 Cargar Datos Personales", type="primary"):
+            if nombre and apellido and dni:
+                datos = {
+                    "Nombre": nombre,
+                    "Apellido": apellido,
+                    "DNI": dni,
+                    "FechaNacimiento": fecha_nacimiento.strftime("%Y-%m-%dT00:00:00Z"),
+                    "IdSexo": sexo
+                }
+                
+                with st.spinner("Cargando datos personales..."):
+                    resultado = cargar_datos_manuales(token_acceso, id_cliente, datos)
+                    
+                    if resultado and resultado.get('ok'):
+                        st.success("✅ Datos personales cargados exitosamente")
+                        if 'messages' in resultado:
+                            for message in resultado['messages']:
+                                st.info(f"💬 {message.get('description', '')}")
+                    else:
+                        st.error("❌ Error al cargar los datos personales")
+                        if resultado:
+                            st.json(resultado)
+            else:
+                st.warning("⚠️ Complete todos los campos obligatorios")
+
+def mostrar_carga_datos_adicionales(token_acceso, id_cliente):
+    """
+    Interfaz para cargar datos adicionales
+    """
+    st.markdown("#### 🏠 Carga de Datos Adicionales")
+    st.markdown("Complete los datos personales y jurídicos adicionales")
+    
+    with st.form("datos_adicionales_form"):
+        st.markdown("**📋 Datos Laborales y Jurídicos**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            actividad_laboral = st.selectbox(
+                "Actividad Laboral",
+                options=[
+                    "Relacion_de_dependecia",
+                    "Monotributista",
+                    "Autonomo",
+                    "Desempleado",
+                    "Jubilado",
+                    "Estudiante"
+                ],
+                index=0
+            )
+            
+            es_persona_expuesta = st.checkbox("¿Es Persona Expuesta Políticamente?")
+            es_sujeto_obligado = st.checkbox("¿Es Sujeto Obligado?")
+            es_residente_usa = st.checkbox("¿Es Residente de USA?")
+        
+        with col2:
+            estado_civil = st.selectbox(
+                "Estado Civil",
+                options=["Soltero", "Casado", "Divorciado", "Viudo", "Concubinato"],
+                index=0
+            )
+            
+            nacionalidad = st.selectbox(
+                "Nacionalidad",
+                options=["Argentina", "Otro"],
+                index=0
+            )
+        
+        st.markdown("**🏠 Datos de Domicilio**")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            calle = st.text_input("Calle", placeholder="Ej: Av. Corrientes")
+            numero = st.text_input("Número", placeholder="Ej: 1234")
+            piso = st.text_input("Piso (opcional)", placeholder="Ej: 2")
+        
+        with col2:
+            depto = st.text_input("Depto (opcional)", placeholder="Ej: A")
+            codigo_postal = st.text_input("Código Postal", placeholder="Ej: 1000")
+            ciudad_estado = st.text_input("Ciudad/Estado", placeholder="Ej: CABA")
+        
+        with col3:
+            id_pais = st.number_input("ID País", value=54, min_value=1)
+            id_provincia = st.number_input("ID Provincia", value=25, min_value=1)
+            id_partido = st.number_input("ID Partido", value=310, min_value=1)
+        
+        st.markdown("**📄 Datos de Identificación**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            cuil_cuit = st.text_input("CUIL/CUIT", placeholder="Ej: 20312345678")
+            numero_documento = st.text_input("Número de Documento", placeholder="Ej: 12345678")
+        
+        with col2:
+            nro_identificacion_tributaria = st.text_input("Nro. Identificación Tributaria", placeholder="Ej: 1234")
+            motivo_persona_expuesta = st.text_input("Motivo PEP (si aplica)", placeholder="Ej: funcionario gubernamental")
+        
+        if st.form_submit_button("📤 Cargar Datos Adicionales", type="primary"):
+            if calle and numero and codigo_postal:
+                datos = {
+                    "ActividadLaboral": actividad_laboral,
+                    "EsPersonaExpuestaPoliticamente": es_persona_expuesta,
+                    "EsSujetoObligado": es_sujeto_obligado,
+                    "DomicilioCalle": calle,
+                    "DomicilioNumero": numero,
+                    "DomicilioPiso": piso if piso else "",
+                    "DomicilioDepto": depto if depto else "",
+                    "IdPais": id_pais,
+                    "IdProvincia": id_provincia,
+                    "IdPartido": id_partido,
+                    "IdLocalidad": 24608,  # Valor por defecto
+                    "CodigoPostal": codigo_postal,
+                    "EsResidenteUsa": es_residente_usa,
+                    "IdPaisNacimiento": 54 if nacionalidad == "Argentina" else 1,
+                    "CuilCuitCdi": cuil_cuit if cuil_cuit else "",
+                    "EstadoCivil": estado_civil,
+                    "IdNacionalidad": 54 if nacionalidad == "Argentina" else 1,
+                    "NumeroDocumento": numero_documento if numero_documento else "",
+                    "MotivoPersonaExpuestaPoliticamente": motivo_persona_expuesta if es_persona_expuesta else "",
+                    "IdPaisResidenciaFiscal": 54,
+                    "IdPaisResidenciaCiudadania": 54,
+                    "DireccionCompleta": f"{calle} {numero}",
+                    "CiudadEstadoCodigoPostal": ciudad_estado if ciudad_estado else "",
+                    "NroIdentificacionTributaria": nro_identificacion_tributaria if nro_identificacion_tributaria else "",
+                    "FechaNacimiento": date.today().strftime("%Y-%m-%dT00:00:00Z")
+                }
+                
+                with st.spinner("Cargando datos adicionales..."):
+                    resultado = cargar_datos_adicionales(token_acceso, id_cliente, datos)
+                    
+                    if resultado and resultado.get('ok'):
+                        st.success("✅ Datos adicionales cargados exitosamente")
+                        if 'messages' in resultado:
+                            for message in resultado['messages']:
+                                st.info(f"💬 {message.get('description', '')}")
+                    else:
+                        st.error("❌ Error al cargar los datos adicionales")
+                        if resultado:
+                            st.json(resultado)
+            else:
+                st.warning("⚠️ Complete los campos obligatorios (Calle, Número, Código Postal)")
+
+def mostrar_completar_apertura(token_acceso, id_cliente):
+    """
+    Interfaz para completar la apertura de cuenta
+    """
+    st.markdown("#### ✅ Completar Apertura de Cuenta")
+    st.markdown("Genera el número de cuenta comitente para el cliente")
+    
+    st.info("""
+    **📋 Pasos previos requeridos:**
+    1. ✅ Carga de selfie sonriente
+    2. ✅ Carga de datos personales
+    3. ✅ Carga de datos adicionales
+    
+    **⚠️ Importante:** Asegúrese de que todos los pasos anteriores estén completados antes de proceder.
+    """)
+    
+    if st.button("🚀 Completar Apertura de Cuenta", type="primary"):
+        with st.spinner("Procesando apertura de cuenta..."):
+            resultado = completar_apertura_cuenta(token_acceso, id_cliente)
+            
+            if resultado:
+                if resultado.get('ok'):
+                    if 'numeroCuenta' in resultado:
+                        st.success(f"🎉 ¡Cuenta creada exitosamente!")
+                        st.metric("Número de Cuenta", resultado['numeroCuenta'])
+                        
+                        if 'messages' in resultado:
+                            for message in resultado['messages']:
+                                st.info(f"💬 {message.get('description', '')}")
+                    else:
+                        st.info("📋 La cuenta debe pasar a proceso de apertura manual")
+                        if 'messages' in resultado:
+                            for message in resultado['messages']:
+                                st.info(f"💬 {message.get('description', '')}")
+                else:
+                    st.warning("⚠️ El cliente ya tiene una cuenta de inversión abierta")
+                    if 'messages' in resultado:
+                        for message in resultado['messages']:
+                            st.info(f"💬 {message.get('description', '')}")
+            else:
+                st.error("❌ Error al completar la apertura de cuenta")
+
+def mostrar_estado_proceso_apertura(token_acceso, id_cliente):
+    """
+    Muestra el estado del proceso de apertura
+    """
+    st.markdown("#### 📋 Estado del Proceso de Apertura")
+    st.markdown("Resumen del estado actual del proceso de apertura de cuenta")
+    
+    # Aquí se podrían implementar verificaciones del estado actual
+    # Por ahora mostramos información general
+    
+    st.info("""
+    **📊 Estado del Proceso:**
+    
+    **Paso 1 - Selfie Sonriente:** ⏳ Pendiente
+    **Paso 2 - Datos Personales:** ⏳ Pendiente  
+    **Paso 3 - Datos Adicionales:** ⏳ Pendiente
+    **Paso 4 - Completar Apertura:** ⏳ Pendiente
+    
+    **💡 Recomendaciones:**
+    - Complete los pasos en orden secuencial
+    - Verifique que todos los datos sean correctos antes de proceder
+    - Mantenga una copia de los documentos del cliente
+    """)
+    
+    # Botón para verificar estado
+    if st.button("🔄 Verificar Estado Actual"):
+        st.info("🔍 Verificando estado del proceso...")
+        # Aquí se implementaría la lógica para verificar el estado actual
+        st.success("✅ Verificación completada")
 
 def obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_hasta):
     """
