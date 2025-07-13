@@ -2233,26 +2233,39 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             peso = activo_info['peso']
                             serie = activo_info['serie']
                             
+                            # Encontrar la cantidad real del activo en el portafolio
+                            cantidad_activo = 0
+                            for activo_original in datos_activos:
+                                if activo_original['Símbolo'] == simbolo:
+                                    cantidad_activo = float(activo_original['Cantidad'])
+                                    break
+                            
                             # Filtrar la serie para usar solo las fechas comunes
                             serie_filtrada = serie.loc[fechas_comunes]
                             
                             # Agregar serie ponderada al DataFrame
-                            # Asegurarse de que solo se multipliquen los valores numéricos de la columna 'precio'
+                            # Calcular el valor real del activo: cantidad * precio histórico
                             if 'precio' in serie_filtrada.columns:
                                 valores_precio = serie_filtrada['precio'].values
-                                df_portfolio[simbolo] = valores_precio * peso
+                                df_portfolio[simbolo] = valores_precio * cantidad_activo
                             else:
                                 # Si no hay columna 'precio', intentar con la primera columna numérica
                                 columnas_numericas = serie_filtrada.select_dtypes(include=[np.number]).columns
                                 if len(columnas_numericas) > 0:
                                     valores_precio = serie_filtrada[columnas_numericas[0]].values
-                                    df_portfolio[simbolo] = valores_precio * peso
+                                    df_portfolio[simbolo] = valores_precio * cantidad_activo
                                 else:
                                     st.warning(f"⚠️ No se encontraron valores numéricos para {simbolo}")
                                     continue
                         
                         # Calcular valor total del portafolio por fecha
                         df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
+                        
+                        # Mostrar información de debug
+                        st.info(f"🔍 Debug: Valor total actual del portafolio: ${valor_total:,.2f}")
+                        st.info(f"🔍 Debug: Columnas en df_portfolio: {list(df_portfolio.columns)}")
+                        if len(df_portfolio) > 0:
+                            st.info(f"🔍 Debug: Último valor calculado: ${df_portfolio['Portfolio_Total'].iloc[-1]:,.2f}")
                         
                         # Eliminar filas con valores NaN
                         df_portfolio = df_portfolio.dropna()
@@ -2332,8 +2345,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             contribucion_activos = {}
                             for activo_info in activos_exitosos:
                                 simbolo = activo_info['simbolo']
-                                peso = activo_info['peso']
-                                contribucion_activos[simbolo] = peso * valor_total
+                                # Usar la valuación real del activo
+                                for activo_original in datos_activos:
+                                    if activo_original['Símbolo'] == simbolo:
+                                        contribucion_activos[simbolo] = activo_original['Valuación']
+                                        break
                             
                             if contribucion_activos:
                                 fig_contribucion = go.Figure(data=[go.Pie(
