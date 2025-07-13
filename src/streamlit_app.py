@@ -601,21 +601,663 @@ def procesar_respuesta_historico(data, tipo_activo):
         st.error(f"Error al procesar respuesta histórica: {str(e)}")
         return None
 
-def obtener_fondos_comunes(token_portador):
+# === FUNCIONES DE SIMULACIÓN MONTE CARLO ===
+
+def simular_monte_carlo_portafolio(activos_portafolio, valor_total, num_simulaciones=1000, dias_proyeccion=252):
     """
-    Obtiene la lista de fondos comunes de inversión disponibles
+    Realiza simulación de Monte Carlo para el portafolio actual incluyendo retornos fijos de renta fija
+    
+    Args:
+        activos_portafolio (list): Lista de activos con sus pesos y métricas
+        valor_total (float): Valor total del portafolio
+        num_simulaciones (int): Número de simulaciones a realizar
+        dias_proyeccion (int): Días para proyectar (default: 252 días = 1 año)
+        
+    Returns:
+        dict: Resultados de la simulación incluyendo retorno esperado y percentiles
     """
-    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    try:
+        # Extraer métricas de cada activo
+        retornos_medios = []
+        volatilidades = []
+        pesos = []
+        retornos_fijos = []
+        
+        for activo in activos_portafolio:
+            if 'retorno_medio' in activo and 'volatilidad' in activo and 'peso' in activo:
+                retornos_medios.append(activo['retorno_medio'])
+                volatilidades.append(activo['volatilidad'])
+                pesos.append(activo['peso'])
+                
+                # Obtener retorno fijo si es renta fija
+                retorno_fijo = activo.get('retorno_fijo', 0)
+                retornos_fijos.append(retorno_fijo)
+        
+        if not pesos:
+            return {
+                'retorno_esperado': 0,
+                'volatilidad_esperada': 0,
+                'percentil_5': 0,
+                'percentil_95': 0,
+                'probabilidad_ganancia': 0.5,
+                'valor_esperado': valor_total,
+                'valor_minimo': valor_total,
+                'valor_maximo': valor_total
+            }
+        
+        # Normalizar pesos
+        pesos = np.array(pesos)
+        pesos = pesos / np.sum(pesos)
+        
+        # Calcular retorno fijo total del portafolio
+        retorno_fijo_total = np.sum(np.array(retornos_fijos) * pesos)
+        
+        # Calcular retorno y volatilidad esperados del portafolio (solo componente variable)
+        retorno_variable_portafolio = np.sum(np.array(retornos_medios) * pesos)
+        volatilidad_esperada_portafolio = np.sqrt(np.sum((np.array(volatilidades) * pesos) ** 2))
+        
+        # Retorno total esperado = componente variable + componente fijo
+        retorno_esperado_portafolio = retorno_variable_portafolio + retorno_fijo_total
+        
+        # Simulación de Monte Carlo
+        valores_finales = []
+        retornos_simulados = []
+        
+        for _ in range(num_simulaciones):
+            # Simular retorno diario variable del portafolio
+            retorno_diario_variable = np.random.normal(
+                retorno_variable_portafolio / 252,  # Retorno diario variable esperado
+                volatilidad_esperada_portafolio / np.sqrt(252)  # Volatilidad diaria
+            )
+            
+            # Retorno diario fijo (constante)
+            retorno_diario_fijo = retorno_fijo_total / 252
+            
+            # Retorno diario total
+            retorno_diario_total = retorno_diario_variable + retorno_diario_fijo
+            
+            # Calcular retorno acumulado para el período
+            retorno_acumulado = (1 + retorno_diario_total) ** dias_proyeccion - 1
+            valor_final = valor_total * (1 + retorno_acumulado)
+            
+            valores_finales.append(valor_final)
+            retornos_simulados.append(retorno_acumulado)
+        
+        # Calcular estadísticas
+        valores_finales = np.array(valores_finales)
+        retornos_simulados = np.array(retornos_simulados)
+        
+        percentil_5 = np.percentile(valores_finales, 5)
+        percentil_95 = np.percentile(valores_finales, 95)
+        valor_esperado = np.mean(valores_finales)
+        valor_minimo = np.min(valores_finales)
+        valor_maximo = np.max(valores_finales)
+        
+        # Calcular probabilidades
+        probabilidad_ganancia = np.sum(retornos_simulados > 0) / num_simulaciones
+        probabilidad_perdida = np.sum(retornos_simulados < 0) / num_simulaciones
+        
+        return {
+            'retorno_esperado': retorno_esperado_portafolio,
+            'retorno_variable': retorno_variable_portafolio,
+            'retorno_fijo': retorno_fijo_total,
+            'volatilidad_esperada': volatilidad_esperada_portafolio,
+            'percentil_5': percentil_5,
+            'percentil_95': percentil_95,
+            'probabilidad_ganancia': probabilidad_ganancia,
+            'probabilidad_perdida': probabilidad_perdida,
+            'valor_esperado': valor_esperado,
+            'valor_minimo': valor_minimo,
+            'valor_maximo': valor_maximo,
+            'retornos_simulados': retornos_simulados,
+            'valores_finales': valores_finales
+        }
+        
+    except Exception as e:
+        st.error(f"Error en simulación Monte Carlo: {str(e)}")
+        return None
+
+def extraer_tasa_renta_fija(activo):
+    """
+    Extrae la tasa o cupón de un instrumento de renta fija
+    
+    Args:
+        activo (dict): Información del activo
+        
+    Returns:
+        float: Tasa anual en decimal (ej: 0.08 para 8%)
+    """
+    try:
+        titulo = activo.get('titulo', {})
+        descripcion = titulo.get('descripcion', '').lower()
+        simbolo = titulo.get('simbolo', '').lower()
+        tipo = titulo.get('tipo', '').lower()
+        
+        # Buscar patrones de tasas en la descripción
+        import re
+        
+        # Patrones comunes para tasas en descripciones
+        patrones_tasa = [
+            r'(\d+(?:\.\d+)?)\s*%',  # 8.5%
+            r'tasa\s*(\d+(?:\.\d+)?)',  # tasa 8.5
+            r'cupón\s*(\d+(?:\.\d+)?)',  # cupón 8.5
+            r'(\d+(?:\.\d+)?)\s*anual',  # 8.5 anual
+            r'(\d+(?:\.\d+)?)\s*pesos',  # 8.5 pesos
+        ]
+        
+        for patron in patrones_tasa:
+            match = re.search(patron, descripcion)
+            if match:
+                tasa = float(match.group(1)) / 100
+                return tasa
+        
+        # Buscar en el símbolo (algunos bonos tienen la tasa en el símbolo)
+        if 'al' in simbolo or 'gd' in simbolo:
+            # Bonos argentinos - buscar patrón de tasa
+            patron_bono = r'(\d{2,3})'
+            match = re.search(patron_bono, simbolo)
+            if match:
+                tasa_bono = float(match.group(1)) / 100
+                # Ajustar según el tipo de bono
+                if 'al' in simbolo:
+                    return tasa_bono * 0.8  # Aproximación para AL
+                elif 'gd' in simbolo:
+                    return tasa_bono * 0.7  # Aproximación para GD
+        
+        # Tasas por defecto según tipo de instrumento
+        if any(keyword in tipo for keyword in ['bono', 'titulo', 'publico']):
+            if 'al' in simbolo:
+                return 0.08  # 8% para bonos AL
+            elif 'gd' in simbolo:
+                return 0.07  # 7% para bonos GD
+            else:
+                return 0.06  # 6% para otros bonos
+        elif any(keyword in tipo for keyword in ['letra', 'lebac', 'leliq']):
+            return 0.05  # 5% para letras
+        elif any(keyword in tipo for keyword in ['fci', 'fondo']):
+            return 0.04  # 4% para FCIs
+        else:
+            return 0.0  # Sin retorno fijo para otros instrumentos
+            
+    except Exception as e:
+        st.warning(f"Error extrayendo tasa para {activo.get('titulo', {}).get('simbolo', 'N/A')}: {str(e)}")
+        return 0.0
+
+def mostrar_simulacion_monte_carlo(portafolio, token_portador):
+    """
+    Muestra la interfaz de simulación de Monte Carlo con barra interactiva
+    """
+    st.markdown("#### 🎲 Simulación de Monte Carlo")
+    st.markdown("Análisis probabilístico del portafolio usando simulación de Monte Carlo")
+    
+    # Configuración de la simulación
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        num_simulaciones = st.slider(
+            "Número de simulaciones:",
+            min_value=100,
+            max_value=10000,
+            value=1000,
+            step=100,
+            help="Más simulaciones = mayor precisión pero más tiempo de cálculo"
+        )
+    
+    with col2:
+        dias_proyeccion = st.slider(
+            "Días de proyección:",
+            min_value=30,
+            max_value=730,
+            value=252,
+            step=30,
+            help="Período para proyectar el portafolio (252 días = 1 año)"
+        )
+    
+    with col3:
+        if st.button("🎲 Ejecutar Simulación", type="primary"):
+            # Obtener datos del portafolio
+            activos = portafolio.get('activos', [])
+            valor_total = 0
+            activos_portafolio = []
+            
+            # Calcular valor total y preparar datos para simulación
+            for activo in activos:
+                try:
+                    titulo = activo.get('titulo', {})
+                    simbolo = titulo.get('simbolo', 'N/A')
+                    tipo = titulo.get('tipo', 'N/A')
+                    
+                    # Obtener valuación
+                    campos_valuacion = [
+                        'valuacionEnMonedaOriginal', 'valuacionActual', 
+                        'valorNominalEnMonedaOriginal', 'valorNominal',
+                        'valuacionDolar', 'valuacion', 'valorActual',
+                        'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
+                    ]
+                    
+                    valuacion = 0
+                    for campo in campos_valuacion:
+                        if campo in activo and activo[campo] is not None:
+                            try:
+                                val = float(activo[campo])
+                                if val > 0:
+                                    valuacion = val
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    if valuacion > 0:
+                        valor_total += valuacion
+                        
+                        # Obtener datos históricos para calcular métricas
+                        mercado = titulo.get('mercado', '')
+                        if mercado and simbolo != 'N/A':
+                            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+                            fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                            
+                            try:
+                                datos_historicos = obtener_serie_historica_iol(
+                                    token_portador, mercado, simbolo, fecha_desde, fecha_hasta
+                                )
+                                
+                                if datos_historicos is not None and len(datos_historicos) > 30:
+                                    # Calcular métricas
+                                    precios = datos_historicos['precio'].values
+                                    retornos = np.diff(np.log(precios))
+                                    
+                                    retorno_medio = np.mean(retornos) * 252  # Anualizado
+                                    volatilidad = np.std(retornos) * np.sqrt(252)  # Anualizado
+                                    peso = valuacion / valor_total if valor_total > 0 else 0
+                                    
+                                    # Extraer retorno fijo de renta fija
+                                    retorno_fijo = extraer_tasa_renta_fija(activo_original)
+                                    
+                                    activos_portafolio.append({
+                                        'simbolo': simbolo,
+                                        'tipo': tipo,
+                                        'valuacion': valuacion,
+                                        'peso': peso,
+                                        'retorno_medio': retorno_medio,
+                                        'volatilidad': volatilidad,
+                                        'retorno_fijo': retorno_fijo
+                                    })
+                                else:
+                                    # Extraer retorno fijo de renta fija
+                                    retorno_fijo = extraer_tasa_renta_fija(activo_original)
+                                    
+                                    # Usar valores por defecto si no hay datos históricos
+                                    activos_portafolio.append({
+                                        'simbolo': simbolo,
+                                        'tipo': tipo,
+                                        'valuacion': valuacion,
+                                        'peso': valuacion / valor_total if valor_total > 0 else 0,
+                                        'retorno_medio': 0.08,  # 8% anual por defecto
+                                        'volatilidad': 0.20,    # 20% anual por defecto
+                                        'retorno_fijo': retorno_fijo
+                                    })
+                                    
+                                                            except Exception as e:
+                                    st.warning(f"No se pudieron obtener datos históricos para {simbolo}: {str(e)}")
+                                    # Extraer retorno fijo de renta fija
+                                    retorno_fijo = extraer_tasa_renta_fija(activo_original)
+                                    
+                                    # Usar valores por defecto
+                                    activos_portafolio.append({
+                                        'simbolo': simbolo,
+                                        'tipo': tipo,
+                                        'valuacion': valuacion,
+                                        'peso': valuacion / valor_total if valor_total > 0 else 0,
+                                        'retorno_medio': 0.08,
+                                        'volatilidad': 0.20,
+                                        'retorno_fijo': retorno_fijo
+                                    })
+                
+                except Exception as e:
+                    st.warning(f"Error procesando activo: {str(e)}")
+                    continue
+            
+            if activos_portafolio and valor_total > 0:
+                with st.spinner(f"Ejecutando {num_simulaciones} simulaciones..."):
+                    resultados = simular_monte_carlo_portafolio(
+                        activos_portafolio, valor_total, num_simulaciones, dias_proyeccion
+                    )
+                
+                if resultados:
+                    # Mostrar resultados
+                    st.success("✅ Simulación completada exitosamente!")
+                    
+                    # Métricas principales
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric(
+                            "Retorno Total Esperado",
+                            f"{resultados['retorno_esperado']:.2%}",
+                            help="Retorno anual total esperado (variable + fijo)"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Retorno Fijo",
+                            f"{resultados['retorno_fijo']:.2%}",
+                            help="Componente fijo de renta fija"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Retorno Variable",
+                            f"{resultados['retorno_variable']:.2%}",
+                            help="Componente variable del portafolio"
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "Volatilidad",
+                            f"{resultados['volatilidad_esperada']:.2%}",
+                            help="Volatilidad anual esperada"
+                        )
+                    
+                    # Métricas adicionales
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric(
+                            "Probabilidad de Ganancia",
+                            f"{resultados['probabilidad_ganancia']:.1%}",
+                            help="Probabilidad de obtener retorno positivo"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Valor Esperado",
+                            f"${resultados['valor_esperado']:,.2f}",
+                            help="Valor esperado del portafolio al final del período"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Valor Mínimo",
+                            f"${resultados['valor_minimo']:,.2f}",
+                            help="Valor mínimo en las simulaciones"
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "Valor Máximo",
+                            f"${resultados['valor_maximo']:,.2f}",
+                            help="Valor máximo en las simulaciones"
+                        )
+                    
+                    # Proyecciones de valor
+                    st.markdown("#### 📊 Proyecciones de Valor")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            "Escenario Pesimista (5%)",
+                            f"${resultados['percentil_5']:,.2f}",
+                            delta=f"{(resultados['percentil_5'] - valor_total):,.2f}",
+                            delta_color="inverse"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Valor Actual",
+                            f"${valor_total:,.2f}",
+                            help="Valor actual del portafolio"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Escenario Optimista (95%)",
+                            f"${resultados['percentil_95']:,.2f}",
+                            delta=f"{(resultados['percentil_95'] - valor_total):,.2f}",
+                            delta_color="normal"
+                        )
+                    
+                    # Gráfico de distribución
+                    st.markdown("#### 📈 Distribución de Resultados")
+                    
+                    fig = go.Figure()
+                    
+                    # Histograma de valores finales
+                    fig.add_trace(go.Histogram(
+                        x=resultados['valores_finales'],
+                        nbinsx=50,
+                        name='Distribución de Valores',
+                        marker_color='lightblue',
+                        opacity=0.7
+                    ))
+                    
+                    # Líneas verticales para percentiles
+                    fig.add_vline(x=resultados['percentil_5'], line_dash="dash", line_color="red",
+                                annotation_text="5%", annotation_position="top right")
+                    fig.add_vline(x=valor_total, line_dash="dash", line_color="orange",
+                                annotation_text="Actual", annotation_position="top right")
+                    fig.add_vline(x=resultados['percentil_95'], line_dash="dash", line_color="green",
+                                annotation_text="95%", annotation_position="top right")
+                    
+                    fig.update_layout(
+                        title="Distribución de Valores del Portafolio",
+                        xaxis_title="Valor del Portafolio ($)",
+                        yaxis_title="Frecuencia",
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Tabla de activos utilizados
+                    st.markdown("#### 📋 Activos Considerados en la Simulación")
+                    
+                    df_activos = pd.DataFrame(activos_portafolio)
+                    df_activos['Valuación'] = df_activos['valuacion'].apply(lambda x: f"${x:,.2f}")
+                    df_activos['Peso (%)'] = (df_activos['peso'] * 100).round(2)
+                    df_activos['Retorno Variable (%)'] = (df_activos['retorno_medio'] * 100).round(2)
+                    df_activos['Retorno Fijo (%)'] = (df_activos['retorno_fijo'] * 100).round(2)
+                    df_activos['Volatilidad (%)'] = (df_activos['volatilidad'] * 100).round(2)
+                    
+                    st.dataframe(
+                        df_activos[['simbolo', 'tipo', 'Valuación', 'Peso (%)', 'Retorno Variable (%)', 'Retorno Fijo (%)', 'Volatilidad (%)']],
+                        use_container_width=True,
+                        height=300
+                    )
+                    
+                else:
+                    st.error("❌ Error en la simulación. Verifique los datos del portafolio.")
+            else:
+                st.warning("⚠️ No hay activos válidos para realizar la simulación.")
+    
+    # Información adicional
+    with st.expander("ℹ️ Información sobre la Simulación"):
+        st.markdown("""
+        **¿Qué es la simulación de Monte Carlo?**
+        
+        La simulación de Monte Carlo es una técnica matemática que utiliza números aleatorios 
+        para modelar la incertidumbre en sistemas complejos. En el contexto de inversiones:
+        
+        - **Retorno Total Esperado**: Suma del componente variable y fijo
+        - **Retorno Variable**: Basado en movimientos históricos de precios
+        - **Retorno Fijo**: Tasas o cupones de instrumentos de renta fija
+        - **Volatilidad**: Medida de la variabilidad de los retornos variables
+        - **Percentiles**: Valores que indican escenarios pesimistas (5%) y optimistas (95%)
+        - **Probabilidad de Ganancia**: Porcentaje de simulaciones que resultan en ganancia
+        
+        **Componentes del Retorno:**
+        - **Variable**: Depende de movimientos de mercado (acciones, bonos con riesgo)
+        - **Fijo**: Ingresos garantizados (cupones de bonos, tasas de FCIs)
+        
+        **Interpretación de los resultados:**
+        - El valor esperado representa el resultado promedio de todas las simulaciones
+        - Los percentiles 5% y 95% representan escenarios extremos pero posibles
+        - Mayor número de simulaciones = mayor precisión en los resultados
+        - Los retornos fijos reducen la volatilidad total del portafolio
+        """)
+
+# === FUNCIONES DE OPERATORIA FCI ===
+
+def suscribir_fci(token_portador, id_cliente, simbolo, monto, ref_id=None):
+    """
+    Suscribe a un cliente a un Fondo Común de Inversión
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (int): ID del cliente
+        simbolo (str): Símbolo del FCI
+        monto (float): Monto a suscribir
+        ref_id (str): ID de referencia opcional
+        
+    Returns:
+        dict: Respuesta de la API con número de operación
+    """
+    url = "https://api.invertironline.com/api/v2/Asesores/Suscripcion/FCI"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    if ref_id:
+        headers['refId'] = ref_id
+    
+    payload = {
+        "IdCliente": id_cliente,
+        "Simbolo": simbolo,
+        "Monto": monto
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al suscribir FCI: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado: {str(e)}")
+        return None
+
+def rescatar_fci(token_portador, id_cliente, simbolo, cantidad, ref_id=None):
+    """
+    Rescata de un Fondo Común de Inversión
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (int): ID del cliente
+        simbolo (str): Símbolo del FCI
+        cantidad (float): Cantidad a rescatar
+        ref_id (str): ID de referencia opcional
+        
+    Returns:
+        dict: Respuesta de la API con número de operación
+    """
+    url = "https://api.invertironline.com/api/v2/Asesores/Rescate/FCI"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    if ref_id:
+        headers['refId'] = ref_id
+    
+    payload = {
+        "IdCliente": id_cliente,
+        "Simbolo": simbolo,
+        "Cantidad": cantidad
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al rescatar FCI: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado: {str(e)}")
+        return None
+
+def cancelar_operacion_fci(token_portador, id_cliente_asesorado, id_transaccion):
+    """
+    Cancela una operación de FCI
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente_asesorado (int): ID del cliente asesorado
+        id_transaccion (int): ID de la transacción a cancelar
+        
+    Returns:
+        dict: Respuesta de la API
+    """
+    url = f"https://api.invertironline.com/api/v2/Asesores/Cancelar/FCI/{id_cliente_asesorado}/{id_transaccion}"
     headers = {
         'Authorization': f'Bearer {token_portador}'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.delete(url, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
+        st.error(f"Error al cancelar operación FCI: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado: {str(e)}")
+        return None
+
+def obtener_fondos_comunes(token_portador):
+    """
+    Obtiene la lista de fondos comunes de inversión con sus saldos
+    """
+    # Primero obtener la lista de FCIs disponibles
+    url_fcis = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url_fcis, headers=headers, timeout=30)
+        response.raise_for_status()
+        fcis_disponibles = response.json()
+        
+        # Ahora obtener los saldos de FCIs del cliente
+        url_saldos = 'https://api.invertironline.com/api/v2/estadocuenta'
+        response_saldos = requests.get(url_saldos, headers=headers, timeout=30)
+        response_saldos.raise_for_status()
+        estado_cuenta = response_saldos.json()
+        
+        fcis_con_saldos = []
+        
+        # Buscar FCIs en el estado de cuenta
+        if estado_cuenta and 'cuentas' in estado_cuenta:
+            for cuenta in estado_cuenta['cuentas']:
+                if cuenta.get('tipo') == 'FCI':
+                    fcis_con_saldos.append({
+                        'simbolo': cuenta.get('numero', 'FCI'),
+                        'saldoPesos': cuenta.get('saldo', 0),
+                        'saldoDolares': cuenta.get('saldoDolares', 0),
+                        'disponible': cuenta.get('disponible', 0),
+                        'total': cuenta.get('total', 0)
+                    })
+        
+        # Si no hay FCIs en estado de cuenta, devolver los disponibles
+        if not fcis_con_saldos and fcis_disponibles:
+            for fci in fcis_disponibles:
+                if isinstance(fci, dict):
+                    fcis_con_saldos.append({
+                        'simbolo': fci.get('simbolo', 'FCI'),
+                        'saldoPesos': 0,
+                        'saldoDolares': 0,
+                        'disponible': 0,
+                        'total': 0
+                    })
+        
+        return fcis_con_saldos
+        
+    except requests.exceptions.RequestException as e:
         st.error(f"Error al obtener fondos comunes: {str(e)}")
+        return []
+    except Exception as e:
+        st.warning(f"Error inesperado al obtener FCIs: {str(e)}")
         return []
 
 
@@ -2315,17 +2957,26 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             try:
                                 fondos_comunes = obtener_fondos_comunes(token_portador)
                                 if fondos_comunes and isinstance(fondos_comunes, list):
+                                    # Obtener cotización MEP para conversión de USD a ARS
+                                    cotizacion_mep = None
+                                    try:
+                                        # Intentar obtener cotización MEP de AL30
+                                        cotizacion_mep_data = obtener_cotizacion_mep(token_portador, "AL30", 1, 1)
+                                        if cotizacion_mep_data and 'precio' in cotizacion_mep_data:
+                                            cotizacion_mep = float(cotizacion_mep_data['precio'])
+                                    except:
+                                        # Si no se puede obtener MEP, usar valor aproximado
+                                        cotizacion_mep = 1000
+                                    
                                     for fci in fondos_comunes:
                                         if isinstance(fci, dict):
                                             simbolo_fci = fci.get('simbolo', '')
                                             saldo_pesos = fci.get('saldoPesos', 0)
                                             saldo_dolares = fci.get('saldoDolares', 0)
                                             
-                                            # Convertir saldo en dólares a pesos usando MEP aproximado
-                                            if saldo_dolares > 0:
-                                                # Usar cotización MEP aproximada (se puede mejorar)
-                                                cotizacion_mep_aproximada = 1000  # Valor aproximado
-                                                saldo_dolares_pesos = saldo_dolares * cotizacion_mep_aproximada
+                                            # Convertir saldo en dólares a pesos usando MEP
+                                            if saldo_dolares > 0 and cotizacion_mep:
+                                                saldo_dolares_pesos = saldo_dolares * cotizacion_mep
                                                 saldo_total_pesos = saldo_pesos + saldo_dolares_pesos
                                             else:
                                                 saldo_total_pesos = saldo_pesos
@@ -2335,9 +2986,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                                     'simbolo': simbolo_fci,
                                                     'tipo': 'FCI',
                                                     'valuacion': saldo_total_pesos,
-                                                    'peso': saldo_total_pesos / valor_total if valor_total > 0 else 0
+                                                    'peso': saldo_total_pesos / valor_total if valor_total > 0 else 0,
+                                                    'saldo_pesos': saldo_pesos,
+                                                    'saldo_dolares': saldo_dolares
                                                 })
                                                 total_renta_fija += saldo_total_pesos
+                                                
+                                                # Mostrar información del FCI si es significativo
+                                                if saldo_total_pesos > 10000:  # Solo mostrar FCIs con saldo significativo
+                                                    st.info(f"💰 FCI {simbolo_fci}: ${saldo_pesos:,.2f} ARS + ${saldo_dolares:,.2f} USD (Total: ${saldo_total_pesos:,.2f})")
                             except Exception as e:
                                 st.warning(f"⚠️ No se pudieron obtener los FCIs: {str(e)}")
                             
@@ -2355,7 +3012,16 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     df_renta_fija = df_renta_fija.sort_values('valuacion', ascending=False)
                                     df_renta_fija['Valuación'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
                                     df_renta_fija['Peso (%)'] = (df_renta_fija['peso'] * 100).round(2)
-                                    st.dataframe(df_renta_fija[['simbolo', 'tipo', 'Valuación', 'Peso (%)']], 
+                                    
+                                    # Agregar columnas para saldos de FCIs
+                                    if 'saldo_pesos' in df_renta_fija.columns:
+                                        df_renta_fija['Saldo ARS'] = df_renta_fija['saldo_pesos'].apply(lambda x: f"${x:,.2f}" if x > 0 else "-")
+                                        df_renta_fija['Saldo USD'] = df_renta_fija['saldo_dolares'].apply(lambda x: f"${x:,.2f}" if x > 0 else "-")
+                                        columnas_mostrar = ['simbolo', 'tipo', 'Valuación', 'Saldo ARS', 'Saldo USD', 'Peso (%)']
+                                    else:
+                                        columnas_mostrar = ['simbolo', 'tipo', 'Valuación', 'Peso (%)']
+                                    
+                                    st.dataframe(df_renta_fija[columnas_mostrar], 
                                                use_container_width=True, height=200)
                                 
                                 # Recomendación compacta
@@ -2399,9 +3065,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 # Resumen final compacto
                                 st.markdown("#### 📋 Resumen")
                                 if retorno_esperado_horizonte > 0:
-                                    st.success(f"✅ **Retorno Positivo**: {retorno_esperado_horizonte:.2%} en {horizonte_inversion} días")
+                                    st.success(f"✅ **Retorno Positivo**: {retorno_esperado_horizonte:.2%} en {int(horizonte_inversion)} días")
                                 else:
-                                    st.warning(f"⚠️ **Retorno Negativo**: {retorno_esperado_horizonte:.2%} en {horizonte_inversion} días")
+                                    st.warning(f"⚠️ **Retorno Negativo**: {retorno_esperado_horizonte:.2%} en {int(horizonte_inversion)} días")
                                 
                                 if sharpe_ratio > 1:
                                     st.success(f"✅ **Excelente Sharpe**: {sharpe_ratio:.2f}")
@@ -2957,13 +3623,14 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Rebalanceo",
         "📊 Performance Real",
+        "🎲 Monte Carlo",
         "👨‍💼 Asesor"
     ])
 
@@ -2994,6 +3661,13 @@ def mostrar_analisis_portafolio():
         mostrar_analisis_performance_real()
     
     with tab7:
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if portafolio:
+            mostrar_simulacion_monte_carlo(portafolio, token_acceso)
+        else:
+            st.warning("No se pudo obtener el portafolio del cliente para la simulación")
+    
+    with tab8:
         mostrar_panel_asesor(token_acceso, id_cliente)
 
 def mostrar_panel_asesor(token_acceso, id_cliente):
@@ -3010,12 +3684,13 @@ def mostrar_panel_asesor(token_acceso, id_cliente):
     st.info(f"👤 Cliente: {nombre_cliente} | 🆔 ID: {id_cliente}")
     
     # Crear sub-tabs para diferentes funcionalidades del asesor
-    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5 = st.tabs([
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6 = st.tabs([
         "📊 Resumen Cliente",
         "📈 Movimientos",
         "💡 Recomendaciones",
         "📋 Reportes",
-        "🏦 Apertura de Cuenta"
+        "🏦 Apertura de Cuenta",
+        "💰 Operatoria FCI"
     ])
     
     with sub_tab1:
@@ -3032,6 +3707,285 @@ def mostrar_panel_asesor(token_acceso, id_cliente):
     
     with sub_tab5:
         mostrar_apertura_cuenta_asesor(token_acceso, id_cliente)
+    
+    with sub_tab6:
+        mostrar_operatoria_fci_asesor(token_acceso, id_cliente)
+
+def mostrar_operatoria_fci_asesor(token_acceso, id_cliente):
+    """
+    Muestra la interfaz de operatoria FCI para el asesor
+    """
+    st.markdown("#### 💰 Operatoria de Fondos Comunes de Inversión")
+    st.markdown("Gestión completa de suscripciones y rescates de FCIs para el cliente")
+    
+    # Información del cliente
+    cliente = st.session_state.cliente_seleccionado
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+    
+    st.info(f"👤 Cliente: {nombre_cliente} | 🆔 ID: {id_cliente}")
+    
+    # Crear sub-tabs para diferentes operaciones
+    fci_tab1, fci_tab2, fci_tab3 = st.tabs([
+        "📈 Suscribir FCI",
+        "💰 Rescatar FCI", 
+        "❌ Cancelar Operación"
+    ])
+    
+    with fci_tab1:
+        mostrar_suscripcion_fci(token_acceso, id_cliente)
+    
+    with fci_tab2:
+        mostrar_rescate_fci(token_acceso, id_cliente)
+    
+    with fci_tab3:
+        mostrar_cancelacion_fci(token_acceso, id_cliente)
+
+def mostrar_suscripcion_fci(token_acceso, id_cliente):
+    """
+    Interfaz para suscribir a un FCI
+    """
+    st.markdown("##### 📈 Suscribir Fondo Común de Inversión")
+    st.markdown("Complete los datos para suscribir al cliente a un FCI")
+    
+    # Obtener lista de FCIs disponibles
+    with st.spinner("Obteniendo FCIs disponibles..."):
+        fcis_disponibles = obtener_fondos_comunes(token_acceso)
+    
+    if not fcis_disponibles:
+        st.warning("⚠️ No se pudieron obtener los FCIs disponibles")
+        return
+    
+    # Formulario de suscripción
+    with st.form("suscripcion_fci_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Selector de FCI
+            simbolos_fci = [fci.get('simbolo', 'N/A') for fci in fcis_disponibles if isinstance(fci, dict)]
+            simbolo_seleccionado = st.selectbox(
+                "Seleccionar FCI:",
+                options=simbolos_fci,
+                help="Seleccione el Fondo Común de Inversión"
+            )
+            
+            # Monto a suscribir
+            monto = st.number_input(
+                "Monto a suscribir ($):",
+                min_value=0.01,
+                value=1000.0,
+                step=0.01,
+                help="Ingrese el monto en pesos argentinos"
+            )
+        
+        with col2:
+            # ID de referencia (opcional)
+            ref_id = st.text_input(
+                "ID de Referencia (opcional):",
+                help="Identificador único para la operación"
+            )
+            
+            # Mostrar información del FCI seleccionado
+            if simbolo_seleccionado != "N/A":
+                fci_info = next((fci for fci in fcis_disponibles if fci.get('simbolo') == simbolo_seleccionado), None)
+                if fci_info:
+                    st.info(f"**FCI Seleccionado:** {simbolo_seleccionado}")
+                    if 'saldoPesos' in fci_info and fci_info['saldoPesos'] > 0:
+                        st.write(f"Saldo actual: ${fci_info['saldoPesos']:,.2f} ARS")
+                    if 'saldoDolares' in fci_info and fci_info['saldoDolares'] > 0:
+                        st.write(f"Saldo USD: ${fci_info['saldoDolares']:,.2f} USD")
+        
+        # Botón de suscripción
+        if st.form_submit_button("📈 Suscribir FCI", type="primary"):
+            if simbolo_seleccionado and simbolo_seleccionado != "N/A" and monto > 0:
+                with st.spinner("Procesando suscripción..."):
+                    resultado = suscribir_fci(
+                        token_acceso, 
+                        id_cliente, 
+                        simbolo_seleccionado, 
+                        monto, 
+                        ref_id if ref_id else None
+                    )
+                
+                if resultado and 'numeroOperacion' in resultado:
+                    st.success(f"✅ Suscripción exitosa! Número de operación: {resultado['numeroOperacion']}")
+                    st.info(f"📋 **Detalles de la operación:**")
+                    cliente = st.session_state.cliente_seleccionado
+                    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+                    st.write(f"• Cliente: {nombre_cliente}")
+                    st.write(f"• FCI: {simbolo_seleccionado}")
+                    st.write(f"• Monto: ${monto:,.2f}")
+                    st.write(f"• Número de operación: {resultado['numeroOperacion']}")
+                else:
+                    st.error("❌ Error en la suscripción. Verifique los datos e intente nuevamente.")
+            else:
+                st.warning("⚠️ Complete todos los campos requeridos")
+
+def mostrar_rescate_fci(token_acceso, id_cliente):
+    """
+    Interfaz para rescatar de un FCI
+    """
+    st.markdown("##### 💰 Rescatar Fondo Común de Inversión")
+    st.markdown("Complete los datos para rescatar del cliente de un FCI")
+    
+    # Obtener FCIs con saldos del cliente
+    with st.spinner("Obteniendo FCIs del cliente..."):
+        fcis_cliente = obtener_fondos_comunes(token_acceso)
+    
+    if not fcis_cliente:
+        st.warning("⚠️ No se pudieron obtener los FCIs del cliente")
+        return
+    
+    # Filtrar FCIs con saldos
+    fcis_con_saldo = [fci for fci in fcis_cliente if isinstance(fci, dict) and 
+                      (fci.get('saldoPesos', 0) > 0 or fci.get('saldoDolares', 0) > 0)]
+    
+    if not fcis_con_saldo:
+        st.info("ℹ️ El cliente no tiene saldos en FCIs para rescatar")
+        return
+    
+    # Formulario de rescate
+    with st.form("rescate_fci_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Selector de FCI con saldo
+            simbolos_con_saldo = [fci.get('simbolo', 'N/A') for fci in fcis_con_saldo]
+            simbolo_seleccionado = st.selectbox(
+                "Seleccionar FCI con saldo:",
+                options=simbolos_con_saldo,
+                help="Seleccione el FCI del cual rescatar"
+            )
+            
+            # Cantidad a rescatar
+            cantidad = st.number_input(
+                "Cantidad a rescatar:",
+                min_value=0.01,
+                value=100.0,
+                step=0.01,
+                help="Ingrese la cantidad a rescatar"
+            )
+        
+        with col2:
+            # ID de referencia (opcional)
+            ref_id = st.text_input(
+                "ID de Referencia (opcional):",
+                help="Identificador único para la operación"
+            )
+            
+            # Mostrar información del FCI seleccionado
+            if simbolo_seleccionado != "N/A":
+                fci_info = next((fci for fci in fcis_con_saldo if fci.get('simbolo') == simbolo_seleccionado), None)
+                if fci_info:
+                    st.info(f"**FCI Seleccionado:** {simbolo_seleccionado}")
+                    saldo_pesos = fci_info.get('saldoPesos', 0)
+                    saldo_dolares = fci_info.get('saldoDolares', 0)
+                    
+                    if saldo_pesos > 0:
+                        st.write(f"Saldo ARS: ${saldo_pesos:,.2f}")
+                    if saldo_dolares > 0:
+                        st.write(f"Saldo USD: ${saldo_dolares:,.2f}")
+                    
+                    # Validar cantidad
+                    saldo_total = saldo_pesos + saldo_dolares
+                    if cantidad > saldo_total:
+                        st.warning(f"⚠️ La cantidad excede el saldo disponible (${saldo_total:,.2f})")
+        
+        # Botón de rescate
+        if st.form_submit_button("💰 Rescatar FCI", type="primary"):
+            if simbolo_seleccionado and simbolo_seleccionado != "N/A" and cantidad > 0:
+                with st.spinner("Procesando rescate..."):
+                    resultado = rescatar_fci(
+                        token_acceso, 
+                        id_cliente, 
+                        simbolo_seleccionado, 
+                        cantidad, 
+                        ref_id if ref_id else None
+                    )
+                
+                if resultado and 'numeroOperacion' in resultado:
+                    st.success(f"✅ Rescate exitoso! Número de operación: {resultado['numeroOperacion']}")
+                    st.info(f"📋 **Detalles de la operación:**")
+                    cliente = st.session_state.cliente_seleccionado
+                    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+                    st.write(f"• Cliente: {nombre_cliente}")
+                    st.write(f"• FCI: {simbolo_seleccionado}")
+                    st.write(f"• Cantidad: {cantidad:,.2f}")
+                    st.write(f"• Número de operación: {resultado['numeroOperacion']}")
+                else:
+                    st.error("❌ Error en el rescate. Verifique los datos e intente nuevamente.")
+            else:
+                st.warning("⚠️ Complete todos los campos requeridos")
+
+def mostrar_cancelacion_fci(token_acceso, id_cliente):
+    """
+    Interfaz para cancelar operaciones de FCI
+    """
+    st.markdown("##### ❌ Cancelar Operación de FCI")
+    st.markdown("Ingrese los datos para cancelar una operación pendiente")
+    
+    # Formulario de cancelación
+    with st.form("cancelacion_fci_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # ID de transacción
+            id_transaccion = st.number_input(
+                "ID de Transacción:",
+                min_value=1,
+                value=1,
+                help="Número de transacción a cancelar"
+            )
+        
+        with col2:
+            # Información adicional
+            st.info("ℹ️ **Información:**")
+            st.write("• El ID de transacción se obtiene de las operaciones de suscripción/rescate")
+            st.write("• Solo se pueden cancelar operaciones pendientes")
+            st.write("• Consulte los movimientos del cliente para obtener el ID")
+        
+        # Botón de cancelación
+        if st.form_submit_button("❌ Cancelar Operación", type="primary"):
+            if id_transaccion > 0:
+                with st.spinner("Procesando cancelación..."):
+                    resultado = cancelar_operacion_fci(
+                        token_acceso, 
+                        id_cliente, 
+                        id_transaccion
+                    )
+                
+                if resultado and resultado.get('Ok'):
+                    st.success("✅ Operación cancelada exitosamente!")
+                    if 'Messages' in resultado:
+                        for msg in resultado['Messages']:
+                            if msg.get('Description'):
+                                st.info(f"ℹ️ {msg['Description']}")
+                else:
+                    st.error("❌ Error al cancelar la operación. Verifique el ID de transacción.")
+            else:
+                st.warning("⚠️ Ingrese un ID de transacción válido")
+    
+    # Mostrar movimientos recientes para referencia
+    st.markdown("#### 📋 Movimientos Recientes (para referencia)")
+    
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    
+    if st.button("🔄 Actualizar Movimientos"):
+        with st.spinner("Obteniendo movimientos..."):
+            movimientos = obtener_movimientos_cliente(token_acceso, id_cliente, fecha_desde, fecha_hasta)
+        
+        if movimientos:
+            df_mov = pd.DataFrame(movimientos)
+            # Filtrar operaciones de FCI
+            operaciones_fci = df_mov[df_mov['tipoOperacion'].str.contains('FCI', case=False, na=False)]
+            
+            if not operaciones_fci.empty:
+                st.dataframe(operaciones_fci[['fechaConcertacion', 'tipoOperacion', 'simbolo', 'cantidad', 'numeroOperacion']], 
+                           use_container_width=True, height=200)
+            else:
+                st.info("ℹ️ No hay operaciones de FCI en los últimos 7 días")
+        else:
+            st.warning("⚠️ No se pudieron obtener los movimientos")
 
 def mostrar_resumen_cliente_asesor(token_acceso, id_cliente):
     """
