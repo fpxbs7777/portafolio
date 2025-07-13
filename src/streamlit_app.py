@@ -2258,15 +2258,19 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 title="Evolución del Valor del Portafolio",
                                 xaxis_title="Fecha",
                                 yaxis=dict(
-                                    title="ARS",
+                                    title=dict(
+                                        text="ARS",
+                                        font=dict(color="#28a745")
+                                    ),
                                     side="left",
-                                    titlefont=dict(color="#28a745"),
                                     tickfont=dict(color="#28a745")
                                 ),
                                 yaxis2=dict(
-                                    title="USD",
+                                    title=dict(
+                                        text="USD",
+                                        font=dict(color="#0d6efd")
+                                    ),
                                     side="right",
-                                    titlefont=dict(color="#0d6efd"),
                                     tickfont=dict(color="#0d6efd"),
                                     anchor="x",
                                     overlaying="y"
@@ -2913,12 +2917,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "🔄 Rebalanceo",
+        "📊 Performance Real"
     ])
 
     with tab1:
@@ -2943,6 +2948,406 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+    
+    with tab6:
+        mostrar_analisis_performance_real()
+
+def obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Obtiene el histórico de movimientos de un cliente específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        fecha_desde (str): Fecha inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha fin (YYYY-MM-DD)
+        
+    Returns:
+        list: Lista de movimientos del cliente
+    """
+    url = f"https://api.invertironline.com/api/v2/Asesor/Movimiento/Historico/{id_cliente}"
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        "desde": fecha_desde,
+        "hasta": fecha_hasta,
+        "idTipo": "",
+        "idEstado": "",
+        "tipoCuenta": ""
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al obtener movimientos: {response.status_code}")
+            return []
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return []
+
+def analizar_performance_real_portafolio(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Analiza la performance real del portafolio basada en movimientos históricos
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        fecha_desde (str): Fecha inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha fin (YYYY-MM-DD)
+    """
+    st.markdown("#### 📊 Análisis de Performance Real del Portafolio")
+    
+    with st.spinner("Obteniendo movimientos históricos..."):
+        movimientos = obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_hasta)
+    
+    if not movimientos:
+        st.warning("No se encontraron movimientos para el período seleccionado")
+        return
+    
+    # Procesar movimientos
+    df_movimientos = pd.DataFrame(movimientos)
+    
+    # Convertir fechas
+    df_movimientos['fechaConcertacion'] = pd.to_datetime(df_movimientos['fechaConcertacion'])
+    df_movimientos['fechaLiquidacion'] = pd.to_datetime(df_movimientos['fechaLiquidacion'])
+    
+    # Ordenar por fecha
+    df_movimientos = df_movimientos.sort_values('fechaConcertacion')
+    
+    # === SECCIÓN 1: RESUMEN DE MOVIMIENTOS ===
+    st.markdown("#### 📋 Resumen de Movimientos")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Movimientos", len(df_movimientos))
+    col2.metric("Período Analizado", f"{fecha_desde} a {fecha_hasta}")
+    col3.metric("Primer Movimiento", df_movimientos['fechaConcertacion'].min().strftime('%Y-%m-%d'))
+    col4.metric("Último Movimiento", df_movimientos['fechaConcertacion'].max().strftime('%Y-%m-%d'))
+    
+    # === SECCIÓN 2: ANÁLISIS POR TIPO DE MOVIMIENTO ===
+    st.markdown("#### 🎯 Análisis por Tipo de Movimiento")
+    
+    # Agrupar por tipo de movimiento
+    tipos_movimiento = df_movimientos['tipoMovimientoNombre'].value_counts()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Gráfico de tipos de movimiento
+        fig_tipos = go.Figure(data=[go.Pie(
+            labels=tipos_movimiento.index,
+            values=tipos_movimiento.values,
+            textinfo='label+percent+value',
+            hole=0.4,
+            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+        )])
+        fig_tipos.update_layout(
+            title="Distribución por Tipo de Movimiento",
+            height=400
+        )
+        st.plotly_chart(fig_tipos, use_container_width=True)
+    
+    with col2:
+        # Tabla de resumen por tipo
+        resumen_tipos = df_movimientos.groupby('tipoMovimientoNombre').agg({
+            'monto': ['sum', 'mean', 'count'],
+            'fechaConcertacion': ['min', 'max']
+        }).round(2)
+        
+        resumen_tipos.columns = ['Monto Total', 'Monto Promedio', 'Cantidad', 'Primera Fecha', 'Última Fecha']
+        st.dataframe(resumen_tipos, use_container_width=True)
+    
+    # === SECCIÓN 3: EVOLUCIÓN TEMPORAL DE MOVIMIENTOS ===
+    st.markdown("#### 📈 Evolución Temporal de Movimientos")
+    
+    # Agrupar movimientos por fecha
+    movimientos_por_fecha = df_movimientos.groupby(df_movimientos['fechaConcertacion'].dt.date).agg({
+        'monto': 'sum',
+        'tipoMovimientoNombre': 'count'
+    }).reset_index()
+    movimientos_por_fecha.columns = ['fecha', 'monto_total', 'cantidad_movimientos']
+    
+    # Crear gráfico de evolución
+    fig_evolucion = go.Figure()
+    
+    # Traza de montos
+    fig_evolucion.add_trace(go.Scatter(
+        x=movimientos_por_fecha['fecha'],
+        y=movimientos_por_fecha['monto_total'],
+        mode='lines+markers',
+        name='Monto Total',
+        line=dict(color='#28a745', width=2),
+        yaxis='y'
+    ))
+    
+    # Traza de cantidad de movimientos
+    fig_evolucion.add_trace(go.Scatter(
+        x=movimientos_por_fecha['fecha'],
+        y=movimientos_por_fecha['cantidad_movimientos'],
+        mode='lines+markers',
+        name='Cantidad Movimientos',
+        line=dict(color='#0d6efd', width=2, dash='dash'),
+        yaxis='y2'
+    ))
+    
+    fig_evolucion.update_layout(
+        title="Evolución de Movimientos en el Tiempo",
+        xaxis_title="Fecha",
+        yaxis=dict(
+            title=dict(
+                text="Monto Total ($)",
+                font=dict(color="#28a745")
+            ),
+            side="left",
+            tickfont=dict(color="#28a745")
+        ),
+        yaxis2=dict(
+            title=dict(
+                text="Cantidad Movimientos",
+                font=dict(color="#0d6efd")
+            ),
+            side="right",
+            tickfont=dict(color="#0d6efd"),
+            anchor="x",
+            overlaying="y"
+        ),
+        height=400,
+        template='plotly_white',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig_evolucion, use_container_width=True)
+    
+    # === SECCIÓN 4: ANÁLISIS DE FLUJO DE FONDOS ===
+    st.markdown("#### 💰 Análisis de Flujo de Fondos")
+    
+    # Separar depósitos y extracciones
+    depositos = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Depo', case=False, na=False)]
+    extracciones = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Extra', case=False, na=False)]
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Depósitos", f"${depositos['monto'].sum():,.2f}")
+        st.metric("Cantidad Depósitos", len(depositos))
+        if len(depositos) > 0:
+            st.metric("Promedio Depósito", f"${depositos['monto'].mean():,.2f}")
+    
+    with col2:
+        st.metric("Total Extracciones", f"${extracciones['monto'].sum():,.2f}")
+        st.metric("Cantidad Extracciones", len(extracciones))
+        if len(extracciones) > 0:
+            st.metric("Promedio Extracción", f"${extracciones['monto'].mean():,.2f}")
+    
+    with col3:
+        flujo_neto = depositos['monto'].sum() - extracciones['monto'].sum()
+        st.metric("Flujo Neto", f"${flujo_neto:,.2f}", 
+                 delta=f"{'Positivo' if flujo_neto > 0 else 'Negativo'}")
+        st.metric("Ratio Depósito/Extracción", 
+                 f"{depositos['monto'].sum() / extracciones['monto'].sum():.2f}" if extracciones['monto'].sum() > 0 else "N/A")
+    
+    # === SECCIÓN 5: ANÁLISIS DE ROTACIÓN DE ACTIVOS ===
+    st.markdown("#### 🔄 Análisis de Rotación de Activos")
+    
+    # Identificar operaciones de compra y venta
+    compras = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Compra', case=False, na=False)]
+    ventas = df_movimientos[df_movimientos['tipoMovimientoNombre'].str.contains('Venta', case=False, na=False)]
+    
+    if len(compras) > 0 or len(ventas) > 0:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📈 Compras**")
+            if len(compras) > 0:
+                st.metric("Total Compras", f"${compras['monto'].sum():,.2f}")
+                st.metric("Cantidad Compras", len(compras))
+                st.metric("Promedio Compra", f"${compras['monto'].mean():,.2f}")
+            else:
+                st.info("No se registraron compras en el período")
+        
+        with col2:
+            st.markdown("**📉 Ventas**")
+            if len(ventas) > 0:
+                st.metric("Total Ventas", f"${ventas['monto'].sum():,.2f}")
+                st.metric("Cantidad Ventas", len(ventas))
+                st.metric("Promedio Venta", f"${ventas['monto'].mean():,.2f}")
+            else:
+                st.info("No se registraron ventas en el período")
+        
+        # Calcular ratio de rotación
+        if len(ventas) > 0 and len(compras) > 0:
+            ratio_rotacion = ventas['monto'].sum() / compras['monto'].sum()
+            st.markdown("#### 📊 Ratio de Rotación")
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Ratio Ventas/Compras", f"{ratio_rotacion:.2f}")
+            
+            if ratio_rotacion > 1:
+                col2.success("🔄 **Alta Rotación**: Más ventas que compras")
+            else:
+                col2.info("📈 **Acumulación**: Más compras que ventas")
+            
+            col3.metric("Frecuencia Operativa", f"{len(df_movimientos) / ((pd.to_datetime(fecha_hasta) - pd.to_datetime(fecha_desde)).days / 30):.1f} ops/mes")
+    
+    # === SECCIÓN 6: ANÁLISIS DE ESTADOS ===
+    st.markdown("#### ✅ Análisis de Estados")
+    
+    estados = df_movimientos['estado'].value_counts()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Gráfico de estados
+        fig_estados = go.Figure(data=[go.Pie(
+            labels=estados.index,
+            values=estados.values,
+            textinfo='label+percent+value',
+            hole=0.4,
+            marker=dict(colors=['#28a745', '#ffc107', '#dc3545', '#6c757d'])
+        )])
+        fig_estados.update_layout(
+            title="Distribución por Estado",
+            height=400
+        )
+        st.plotly_chart(fig_estados, use_container_width=True)
+    
+    with col2:
+        # Métricas de estados
+        for estado, cantidad in estados.items():
+            monto_estado = df_movimientos[df_movimientos['estado'] == estado]['monto'].sum()
+            st.metric(f"{estado.title()}", f"{cantidad} movimientos", 
+                     delta=f"${monto_estado:,.2f}")
+    
+    # === SECCIÓN 7: ANÁLISIS DE MONEDAS ===
+    st.markdown("#### 💱 Análisis por Moneda")
+    
+    if 'monedaShort' in df_movimientos.columns:
+        monedas = df_movimientos['monedaShort'].value_counts()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Gráfico de monedas
+            fig_monedas = go.Figure(data=[go.Pie(
+                labels=monedas.index,
+                values=monedas.values,
+                textinfo='label+percent+value',
+                hole=0.4,
+                marker=dict(colors=['#28a745', '#0d6efd', '#ffc107', '#dc3545'])
+            )])
+            fig_monedas.update_layout(
+                title="Distribución por Moneda",
+                height=400
+            )
+            st.plotly_chart(fig_monedas, use_container_width=True)
+        
+        with col2:
+            # Resumen por moneda
+            resumen_monedas = df_movimientos.groupby('monedaShort').agg({
+                'monto': ['sum', 'mean', 'count']
+            }).round(2)
+            resumen_monedas.columns = ['Monto Total', 'Monto Promedio', 'Cantidad']
+            st.dataframe(resumen_monedas, use_container_width=True)
+    
+    # === SECCIÓN 8: DETALLE DE MOVIMIENTOS ===
+    st.markdown("#### 📋 Detalle de Movimientos")
+    
+    # Preparar datos para mostrar
+    df_display = df_movimientos.copy()
+    df_display['fechaConcertacion'] = df_display['fechaConcertacion'].dt.strftime('%Y-%m-%d')
+    df_display['monto'] = df_display['monto'].apply(lambda x: f"${x:,.2f}")
+    
+    # Seleccionar columnas relevantes
+    columnas_mostrar = ['fechaConcertacion', 'tipoMovimientoNombre', 'monto', 'estado', 'monedaShort']
+    columnas_disponibles = [col for col in columnas_mostrar if col in df_display.columns]
+    
+    st.dataframe(df_display[columnas_disponibles], use_container_width=True, height=300)
+    
+    # === SECCIÓN 9: RECOMENDACIONES ===
+    st.markdown("#### 💡 Recomendaciones Basadas en Movimientos")
+    
+    # Análisis de patrones
+    total_movimientos = len(df_movimientos)
+    depositos_total = depositos['monto'].sum() if len(depositos) > 0 else 0
+    extracciones_total = extracciones['monto'].sum() if len(extracciones) > 0 else 0
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**📊 Patrones Identificados:**")
+        
+        if total_movimientos > 20:
+            st.success("✅ **Actividad Alta**: Más de 20 movimientos en el período")
+        elif total_movimientos > 10:
+            st.info("ℹ️ **Actividad Moderada**: Entre 10-20 movimientos")
+        else:
+            st.warning("⚠️ **Actividad Baja**: Menos de 10 movimientos")
+        
+        if depositos_total > extracciones_total:
+            st.success("✅ **Patrón de Acumulación**: Más depósitos que extracciones")
+        else:
+            st.warning("⚠️ **Patrón de Desacumulación**: Más extracciones que depósitos")
+    
+    with col2:
+        st.markdown("**🎯 Recomendaciones:**")
+        
+        if total_movimientos < 5:
+            st.info("💡 **Considerar aumentar actividad**: Pocos movimientos pueden indicar falta de diversificación")
+        
+        if depositos_total < extracciones_total:
+            st.warning("💡 **Revisar estrategia**: Más extracciones que depósitos puede indicar problemas de liquidez")
+        
+        if len(compras) > len(ventas) * 2:
+            st.success("💡 **Estrategia de acumulación**: Buena para largo plazo")
+        elif len(ventas) > len(compras) * 2:
+            st.info("💡 **Estrategia de trading**: Considerar optimizar timing de ventas")
+
+def mostrar_analisis_performance_real():
+    """
+    Función principal para mostrar el análisis de performance real
+    """
+    st.markdown("### 📊 Análisis de Performance Real del Portafolio")
+    st.markdown("Este análisis utiliza el histórico real de movimientos del cliente para calcular la performance real del portafolio.")
+    
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.error("Debe iniciar sesión primero")
+        return
+    
+    if 'cliente_seleccionado' not in st.session_state or not st.session_state.cliente_seleccionado:
+        st.error("Debe seleccionar un cliente primero")
+        return
+    
+    token_acceso = st.session_state.token_acceso
+    cliente = st.session_state.cliente_seleccionado
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    
+    # Configuración de fechas
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_desde = st.date_input(
+            "Fecha Desde:",
+            value=st.session_state.fecha_desde,
+            max_value=date.today()
+        )
+    with col2:
+        fecha_hasta = st.date_input(
+            "Fecha Hasta:",
+            value=st.session_state.fecha_hasta,
+            max_value=date.today()
+        )
+    
+    # Botón para ejecutar análisis
+    if st.button("🚀 Analizar Performance Real", type="primary"):
+        analizar_performance_real_portafolio(
+            token_acceso,
+            id_cliente,
+            fecha_desde.strftime('%Y-%m-%d'),
+            fecha_hasta.strftime('%Y-%m-%d')
+        )
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
