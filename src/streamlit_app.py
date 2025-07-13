@@ -2116,11 +2116,48 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Histograma del portafolio total valorizado
         st.subheader("📈 Histograma del Portafolio Total Valorizado")
         
-        with st.spinner("Obteniendo series históricas y calculando valorización del portafolio..."):
+        # Configuración del horizonte de inversión
+        col1, col2 = st.columns(2)
+        with col1:
+            horizonte_inversion = st.selectbox(
+                "Horizonte de Inversión:",
+                options=[
+                    ("30 días", 30),
+                    ("60 días", 60),
+                    ("90 días", 90),
+                    ("180 días", 180),
+                    ("365 días", 365),
+                    ("730 días", 730),
+                    ("1095 días", 1095)
+                ],
+                format_func=lambda x: x[0],
+                index=3,  # Por defecto 180 días
+                help="Seleccione el período de tiempo para el análisis de retornos"
+            )
+        
+        with col2:
+            intervalo_analisis = st.selectbox(
+                "Intervalo de Análisis:",
+                options=[
+                    ("Diario", "D"),
+                    ("Semanal", "W"),
+                    ("Mensual", "M"),
+                    ("Trimestral", "Q")
+                ],
+                format_func=lambda x: x[0],
+                index=0,  # Por defecto diario
+                help="Frecuencia de los datos para el análisis"
+            )
+        
+        # Extraer valores de las tuplas
+        dias_analisis = horizonte_inversion[1]
+        frecuencia = intervalo_analisis[1]
+        
+        with st.spinner(f"Obteniendo series históricas y calculando valorización del portafolio para {dias_analisis} días..."):
             try:
-                # Obtener fechas para el histórico
+                # Obtener fechas para el histórico basado en el horizonte seleccionado
                 fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-                fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                fecha_desde = (datetime.now() - timedelta(days=dias_analisis)).strftime('%Y-%m-%d')
                 
                 # Preparar datos para obtener series históricas
                 activos_para_historico = []
@@ -2174,29 +2211,45 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         # Crear DataFrame con todas las series alineadas
                         df_portfolio = pd.DataFrame()
                         
+                        # Primero, encontrar el rango de fechas común para todas las series
+                        fechas_comunes = None
+                        for activo_info in activos_exitosos:
+                            serie = activo_info['serie']
+                            if fechas_comunes is None:
+                                fechas_comunes = set(serie.index)
+                            else:
+                                fechas_comunes = fechas_comunes.intersection(set(serie.index))
+                        
+                        if not fechas_comunes:
+                            st.warning("⚠️ No hay fechas comunes entre las series históricas")
+                            return
+                        
+                        # Convertir a lista ordenada
+                        fechas_comunes = sorted(list(fechas_comunes))
+                        df_portfolio.index = fechas_comunes
+                        
                         for activo_info in activos_exitosos:
                             simbolo = activo_info['simbolo']
                             peso = activo_info['peso']
                             serie = activo_info['serie']
                             
+                            # Filtrar la serie para usar solo las fechas comunes
+                            serie_filtrada = serie.loc[fechas_comunes]
+                            
                             # Agregar serie ponderada al DataFrame
                             # Asegurarse de que solo se multipliquen los valores numéricos de la columna 'precio'
-                            if 'precio' in serie.columns:
-                                valores_precio = serie['precio'].values
+                            if 'precio' in serie_filtrada.columns:
+                                valores_precio = serie_filtrada['precio'].values
                                 df_portfolio[simbolo] = valores_precio * peso
                             else:
                                 # Si no hay columna 'precio', intentar con la primera columna numérica
-                                columnas_numericas = serie.select_dtypes(include=[np.number]).columns
+                                columnas_numericas = serie_filtrada.select_dtypes(include=[np.number]).columns
                                 if len(columnas_numericas) > 0:
-                                    valores_precio = serie[columnas_numericas[0]].values
+                                    valores_precio = serie_filtrada[columnas_numericas[0]].values
                                     df_portfolio[simbolo] = valores_precio * peso
                                 else:
                                     st.warning(f"⚠️ No se encontraron valores numéricos para {simbolo}")
                                     continue
-                            
-                            # Usar el índice de la primera serie como índice del DataFrame
-                            if df_portfolio.index.empty:
-                                df_portfolio.index = serie.index
                         
                         # Calcular valor total del portafolio por fecha
                         df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
@@ -2415,6 +2468,151 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     )
                                     
                                     st.plotly_chart(fig_cumulative, use_container_width=True)
+                                    
+                                    # Análisis de retorno esperado por horizonte de inversión
+                                    st.markdown("#### 📊 Análisis de Retorno Esperado")
+                                    
+                                    # Calcular retornos para diferentes horizontes
+                                    horizontes_analisis = [1, 7, 30, 90, 180, 365]
+                                    retornos_por_horizonte = {}
+                                    
+                                    for horizonte in horizontes_analisis:
+                                        if len(df_portfolio_returns) >= horizonte:
+                                            # Calcular retorno acumulado para el horizonte
+                                            retorno_acumulado = (1 + df_portfolio_returns.tail(horizonte)).prod() - 1
+                                            retornos_por_horizonte[horizonte] = retorno_acumulado
+                                    
+                                    if retornos_por_horizonte:
+                                        # Crear gráfico de retornos por horizonte
+                                        fig_horizontes = go.Figure()
+                                        
+                                        horizontes = list(retornos_por_horizonte.keys())
+                                        retornos = list(retornos_por_horizonte.values())
+                                        
+                                        fig_horizontes.add_trace(go.Bar(
+                                            x=[f"{h} días" for h in horizontes],
+                                            y=retornos,
+                                            name="Retorno Acumulado",
+                                            marker_color=['#28a745' if r >= 0 else '#dc3545' for r in retornos],
+                                            text=[f"{r:.2%}" for r in retornos],
+                                            textposition='auto'
+                                        ))
+                                        
+                                        fig_horizontes.update_layout(
+                                            title=f"Retornos Acumulados por Horizonte de Inversión",
+                                            xaxis_title="Horizonte de Inversión",
+                                            yaxis_title="Retorno Acumulado",
+                                            height=400,
+                                            template='plotly_white'
+                                        )
+                                        
+                                        st.plotly_chart(fig_horizontes, use_container_width=True)
+                                        
+                                        # Mostrar métricas de retorno esperado
+                                        st.markdown("#### 📈 Métricas de Retorno Esperado")
+                                        col1, col2, col3 = st.columns(3)
+                                        
+                                        # Calcular retorno esperado anualizado
+                                        retorno_anualizado = mean_return_annual
+                                        col1.metric("Retorno Esperado Anual", f"{retorno_anualizado:.2%}")
+                                        
+                                        # Calcular retorno esperado para el horizonte seleccionado
+                                        retorno_esperado_horizonte = retorno_anualizado * (dias_analisis / 365)
+                                        col2.metric(f"Retorno Esperado ({dias_analisis} días)", f"{retorno_esperado_horizonte:.2%}")
+                                        
+                                        # Calcular intervalo de confianza
+                                        z_score_95 = 1.96  # 95% de confianza
+                                        intervalo_confianza = z_score_95 * std_return_annual * np.sqrt(dias_analisis / 365)
+                                        col3.metric("Intervalo de Confianza 95%", f"±{intervalo_confianza:.2%}")
+                                        
+                                        # Proyecciones de valor del portafolio
+                                        st.markdown("#### 💰 Proyecciones de Valor del Portafolio")
+                                        
+                                        valor_actual = df_portfolio['Portfolio_Total'].iloc[-1]
+                                        
+                                        # Calcular proyecciones optimista, pesimista y esperada
+                                        proyeccion_esperada = valor_actual * (1 + retorno_esperado_horizonte)
+                                        proyeccion_optimista = valor_actual * (1 + retorno_esperado_horizonte + intervalo_confianza)
+                                        proyeccion_pesimista = valor_actual * (1 + retorno_esperado_horizonte - intervalo_confianza)
+                                        
+                                        col1, col2, col3 = st.columns(3)
+                                        col1.metric("Proyección Esperada", f"${proyeccion_esperada:,.2f}")
+                                        col2.metric("Proyección Optimista", f"${proyeccion_optimista:,.2f}")
+                                        col3.metric("Proyección Pesimista", f"${proyeccion_pesimista:,.2f}")
+                                        
+                                        # Gráfico de proyecciones
+                                        fechas_proyeccion = pd.date_range(
+                                            start=df_portfolio.index[-1],
+                                            periods=dias_analisis + 1,
+                                            freq='D'
+                                        )
+                                        
+                                        fig_proyecciones = go.Figure()
+                                        
+                                        # Línea de valor actual
+                                        fig_proyecciones.add_trace(go.Scatter(
+                                            x=[df_portfolio.index[-1], fechas_proyeccion[-1]],
+                                            y=[valor_actual, proyeccion_esperada],
+                                            mode='lines',
+                                            name='Proyección Esperada',
+                                            line=dict(color='#0d6efd', width=3)
+                                        ))
+                                        
+                                        # Banda de confianza
+                                        fig_proyecciones.add_trace(go.Scatter(
+                                            x=fechas_proyeccion,
+                                            y=[valor_actual * (1 + retorno_esperado_horizonte + intervalo_confianza * (i/dias_analisis)) for i in range(dias_analisis + 1)],
+                                            mode='lines',
+                                            name='Límite Superior',
+                                            line=dict(color='#28a745', width=2, dash='dash'),
+                                            showlegend=False
+                                        ))
+                                        
+                                        fig_proyecciones.add_trace(go.Scatter(
+                                            x=fechas_proyeccion,
+                                            y=[valor_actual * (1 + retorno_esperado_horizonte - intervalo_confianza * (i/dias_analisis)) for i in range(dias_analisis + 1)],
+                                            mode='lines',
+                                            name='Límite Inferior',
+                                            line=dict(color='#dc3545', width=2, dash='dash'),
+                                            fill='tonexty',
+                                            fillcolor='rgba(220, 53, 69, 0.1)',
+                                            showlegend=False
+                                        ))
+                                        
+                                        fig_proyecciones.update_layout(
+                                            title=f"Proyección del Valor del Portafolio ({dias_analisis} días)",
+                                            xaxis_title="Fecha",
+                                            yaxis_title="Valor del Portafolio ($)",
+                                            height=400,
+                                            template='plotly_white'
+                                        )
+                                        
+                                        st.plotly_chart(fig_proyecciones, use_container_width=True)
+                                        
+                                        # Resumen de análisis
+                                        st.markdown("#### 📋 Resumen del Análisis")
+                                        
+                                        if retorno_esperado_horizonte > 0:
+                                            st.success(f"✅ **Retorno Esperado Positivo**: Se espera un retorno de {retorno_esperado_horizonte:.2%} en {dias_analisis} días")
+                                        else:
+                                            st.warning(f"⚠️ **Retorno Esperado Negativo**: Se espera un retorno de {retorno_esperado_horizonte:.2%} en {dias_analisis} días")
+                                        
+                                        if sharpe_ratio > 1:
+                                            st.success(f"✅ **Excelente Ratio de Sharpe**: {sharpe_ratio:.2f} indica buenos retornos ajustados por riesgo")
+                                        elif sharpe_ratio > 0.5:
+                                            st.info(f"ℹ️ **Buen Ratio de Sharpe**: {sharpe_ratio:.2f} indica retornos razonables ajustados por riesgo")
+                                        else:
+                                            st.warning(f"⚠️ **Ratio de Sharpe Bajo**: {sharpe_ratio:.2f} indica retornos pobres ajustados por riesgo")
+                                        
+                                        # Recomendaciones basadas en el análisis
+                                        st.markdown("#### 💡 Recomendaciones")
+                                        
+                                        if retorno_esperado_horizonte > 0.05:  # 5% en el horizonte
+                                            st.success("🎯 **Mantener Posición**: El portafolio muestra buenas perspectivas de retorno")
+                                        elif retorno_esperado_horizonte < -0.05:  # -5% en el horizonte
+                                            st.warning("🔄 **Considerar Rebalanceo**: El portafolio podría beneficiarse de ajustes")
+                                        else:
+                                            st.info("📊 **Monitorear**: El portafolio muestra retornos moderados")
                                     
                                 else:
                                     st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
