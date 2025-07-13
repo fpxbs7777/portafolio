@@ -603,496 +603,11 @@ def procesar_respuesta_historico(data, tipo_activo):
 
 # === FUNCIONES DE SIMULACIÓN MONTE CARLO ===
 
-def simular_monte_carlo_portafolio(activos_portafolio, valor_total, num_simulaciones=1000, dias_proyeccion=252):
-    """
-    Realiza simulación de Monte Carlo para el portafolio actual incluyendo retornos fijos de renta fija
-    
-    Args:
-        activos_portafolio (list): Lista de activos con sus pesos y métricas
-        valor_total (float): Valor total del portafolio
-        num_simulaciones (int): Número de simulaciones a realizar
-        dias_proyeccion (int): Días para proyectar (default: 252 días = 1 año)
-        
-    Returns:
-        dict: Resultados de la simulación incluyendo retorno esperado y percentiles
-    """
-    try:
-        # Extraer métricas de cada activo
-        retornos_medios = []
-        volatilidades = []
-        pesos = []
-        retornos_fijos = []
-        
-        for activo in activos_portafolio:
-            if 'retorno_medio' in activo and 'volatilidad' in activo and 'peso' in activo:
-                retornos_medios.append(activo['retorno_medio'])
-                volatilidades.append(activo['volatilidad'])
-                pesos.append(activo['peso'])
-                
-                # Obtener retorno fijo si es renta fija
-                retorno_fijo = activo.get('retorno_fijo', 0)
-                retornos_fijos.append(retorno_fijo)
-        
-        if not pesos:
-            return {
-                'retorno_esperado': 0,
-                'volatilidad_esperada': 0,
-                'percentil_5': 0,
-                'percentil_95': 0,
-                'probabilidad_ganancia': 0.5,
-                'valor_esperado': valor_total,
-                'valor_minimo': valor_total,
-                'valor_maximo': valor_total
-            }
-        
-        # Normalizar pesos
-        pesos = np.array(pesos)
-        pesos = pesos / np.sum(pesos)
-        
-        # Calcular retorno fijo total del portafolio
-        retorno_fijo_total = np.sum(np.array(retornos_fijos) * pesos)
-        
-        # Calcular retorno y volatilidad esperados del portafolio (solo componente variable)
-        retorno_variable_portafolio = np.sum(np.array(retornos_medios) * pesos)
-        volatilidad_esperada_portafolio = np.sqrt(np.sum((np.array(volatilidades) * pesos) ** 2))
-        
-        # Retorno total esperado = componente variable + componente fijo
-        retorno_esperado_portafolio = retorno_variable_portafolio + retorno_fijo_total
-        
-        # Simulación de Monte Carlo
-        valores_finales = []
-        retornos_simulados = []
-        
-        for _ in range(num_simulaciones):
-            # Simular retorno diario variable del portafolio
-            retorno_diario_variable = np.random.normal(
-                retorno_variable_portafolio / 252,  # Retorno diario variable esperado
-                volatilidad_esperada_portafolio / np.sqrt(252)  # Volatilidad diaria
-            )
-            
-            # Retorno diario fijo (constante)
-            retorno_diario_fijo = retorno_fijo_total / 252
-            
-            # Retorno diario total
-            retorno_diario_total = retorno_diario_variable + retorno_diario_fijo
-            
-            # Calcular retorno acumulado para el período
-            retorno_acumulado = (1 + retorno_diario_total) ** dias_proyeccion - 1
-            valor_final = valor_total * (1 + retorno_acumulado)
-            
-            valores_finales.append(valor_final)
-            retornos_simulados.append(retorno_acumulado)
-        
-        # Calcular estadísticas
-        valores_finales = np.array(valores_finales)
-        retornos_simulados = np.array(retornos_simulados)
-        
-        percentil_5 = np.percentile(valores_finales, 5)
-        percentil_95 = np.percentile(valores_finales, 95)
-        valor_esperado = np.mean(valores_finales)
-        valor_minimo = np.min(valores_finales)
-        valor_maximo = np.max(valores_finales)
-        
-        # Calcular probabilidades
-        probabilidad_ganancia = np.sum(retornos_simulados > 0) / num_simulaciones
-        probabilidad_perdida = np.sum(retornos_simulados < 0) / num_simulaciones
-        
-        return {
-            'retorno_esperado': retorno_esperado_portafolio,
-            'retorno_variable': retorno_variable_portafolio,
-            'retorno_fijo': retorno_fijo_total,
-            'volatilidad_esperada': volatilidad_esperada_portafolio,
-            'percentil_5': percentil_5,
-            'percentil_95': percentil_95,
-            'probabilidad_ganancia': probabilidad_ganancia,
-            'probabilidad_perdida': probabilidad_perdida,
-            'valor_esperado': valor_esperado,
-            'valor_minimo': valor_minimo,
-            'valor_maximo': valor_maximo,
-            'retornos_simulados': retornos_simulados,
-            'valores_finales': valores_finales
-        }
-        
-    except Exception as e:
-        st.error(f"Error en simulación Monte Carlo: {str(e)}")
-        return None
+# Función eliminada - Simulación de Monte Carlo (datos ficticios)
 
-def extraer_tasa_renta_fija(activo):
-    """
-    Extrae la tasa o cupón de un instrumento de renta fija
-    
-    Args:
-        activo (dict): Información del activo
-        
-    Returns:
-        float: Tasa anual en decimal (ej: 0.08 para 8%)
-    """
-    try:
-        titulo = activo.get('titulo', {})
-        descripcion = titulo.get('descripcion', '').lower()
-        simbolo = titulo.get('simbolo', '').lower()
-        tipo = titulo.get('tipo', '').lower()
-        
-        # Buscar patrones de tasas en la descripción
-        import re
-        
-        # Patrones comunes para tasas en descripciones
-        patrones_tasa = [
-            r'(\d+(?:\.\d+)?)\s*%',  # 8.5%
-            r'tasa\s*(\d+(?:\.\d+)?)',  # tasa 8.5
-            r'cupón\s*(\d+(?:\.\d+)?)',  # cupón 8.5
-            r'(\d+(?:\.\d+)?)\s*anual',  # 8.5 anual
-            r'(\d+(?:\.\d+)?)\s*pesos',  # 8.5 pesos
-        ]
-        
-        for patron in patrones_tasa:
-            match = re.search(patron, descripcion)
-            if match:
-                tasa = float(match.group(1)) / 100
-                return tasa
-        
-        # Buscar en el símbolo (algunos bonos tienen la tasa en el símbolo)
-        if 'al' in simbolo or 'gd' in simbolo:
-            # Bonos argentinos - buscar patrón de tasa
-            patron_bono = r'(\d{2,3})'
-            match = re.search(patron_bono, simbolo)
-            if match:
-                tasa_bono = float(match.group(1)) / 100
-                # Ajustar según el tipo de bono
-                if 'al' in simbolo:
-                    return tasa_bono * 0.8  # Aproximación para AL
-                elif 'gd' in simbolo:
-                    return tasa_bono * 0.7  # Aproximación para GD
-        
-        # Tasas por defecto según tipo de instrumento
-        if any(keyword in tipo for keyword in ['bono', 'titulo', 'publico']):
-            if 'al' in simbolo:
-                return 0.08  # 8% para bonos AL
-            elif 'gd' in simbolo:
-                return 0.07  # 7% para bonos GD
-            else:
-                return 0.06  # 6% para otros bonos
-        elif any(keyword in tipo for keyword in ['letra', 'lebac', 'leliq']):
-            return 0.05  # 5% para letras
-        elif any(keyword in tipo for keyword in ['fci', 'fondo']):
-            return 0.04  # 4% para FCIs
-        else:
-            return 0.0  # Sin retorno fijo para otros instrumentos
-            
-    except Exception as e:
-        st.warning(f"Error extrayendo tasa para {activo.get('titulo', {}).get('simbolo', 'N/A')}: {str(e)}")
-        return 0.0
+# Función eliminada - Extracción de tasas ficticias
 
-def mostrar_simulacion_monte_carlo(portafolio, token_portador):
-    """
-    Muestra la interfaz de simulación de Monte Carlo con barra interactiva
-    """
-    st.markdown("#### 🎲 Simulación de Monte Carlo")
-    st.markdown("Análisis probabilístico del portafolio usando simulación de Monte Carlo")
-    
-    # Configuración de la simulación
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        num_simulaciones = st.slider(
-            "Número de simulaciones:",
-            min_value=100,
-            max_value=10000,
-            value=1000,
-            step=100,
-            help="Más simulaciones = mayor precisión pero más tiempo de cálculo"
-        )
-    
-    with col2:
-        dias_proyeccion = st.slider(
-            "Días de proyección:",
-            min_value=30,
-            max_value=730,
-            value=252,
-            step=30,
-            help="Período para proyectar el portafolio (252 días = 1 año)"
-        )
-    
-    with col3:
-        if st.button("🎲 Ejecutar Simulación", type="primary"):
-            # Obtener datos del portafolio
-            activos = portafolio.get('activos', [])
-            valor_total = 0
-            activos_portafolio = []
-            
-            # Calcular valor total y preparar datos para simulación
-            for activo in activos:
-                try:
-                    titulo = activo.get('titulo', {})
-                    simbolo = titulo.get('simbolo', 'N/A')
-                    tipo = titulo.get('tipo', 'N/A')
-                    
-                    # Obtener valuación
-                    campos_valuacion = [
-                        'valuacionEnMonedaOriginal', 'valuacionActual', 
-                        'valorNominalEnMonedaOriginal', 'valorNominal',
-                        'valuacionDolar', 'valuacion', 'valorActual',
-                        'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
-                    ]
-                    
-                    valuacion = 0
-                    for campo in campos_valuacion:
-                        if campo in activo and activo[campo] is not None:
-                            try:
-                                val = float(activo[campo])
-                                if val > 0:
-                                    valuacion = val
-                                    break
-                            except (ValueError, TypeError):
-                                continue
-                    
-                    if valuacion > 0:
-                        valor_total += valuacion
-                        
-                        # Obtener datos históricos para calcular métricas
-                        mercado = titulo.get('mercado', '')
-                        if mercado and simbolo != 'N/A':
-                            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-                            fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-                            
-                            try:
-                                datos_historicos = obtener_serie_historica_iol(
-                                    token_portador, mercado, simbolo, fecha_desde, fecha_hasta
-                                )
-                                
-                                if datos_historicos is not None and len(datos_historicos) > 30:
-                                    # Calcular métricas
-                                    precios = datos_historicos['precio'].values
-                                    retornos = np.diff(np.log(precios))
-                                    
-                                    retorno_medio = np.mean(retornos) * 252  # Anualizado
-                                    volatilidad = np.std(retornos) * np.sqrt(252)  # Anualizado
-                                    peso = valuacion / valor_total if valor_total > 0 else 0
-                                    
-                                    # Extraer retorno fijo de renta fija
-                                    retorno_fijo = extraer_tasa_renta_fija(activo_original)
-                                    
-                                    activos_portafolio.append({
-                                        'simbolo': simbolo,
-                                        'tipo': tipo,
-                                        'valuacion': valuacion,
-                                        'peso': peso,
-                                        'retorno_medio': retorno_medio,
-                                        'volatilidad': volatilidad,
-                                        'retorno_fijo': retorno_fijo
-                                    })
-                                else:
-                                    # Extraer retorno fijo de renta fija
-                                    retorno_fijo = extraer_tasa_renta_fija(activo_original)
-                                    
-                                    # Usar valores por defecto si no hay datos históricos
-                                    activos_portafolio.append({
-                                        'simbolo': simbolo,
-                                        'tipo': tipo,
-                                        'valuacion': valuacion,
-                                        'peso': valuacion / valor_total if valor_total > 0 else 0,
-                                        'retorno_medio': 0.08,  # 8% anual por defecto
-                                        'volatilidad': 0.20,    # 20% anual por defecto
-                                        'retorno_fijo': retorno_fijo
-                                    })
-                                    
-                                                            except Exception as e:
-                                    st.warning(f"No se pudieron obtener datos históricos para {simbolo}: {str(e)}")
-                                    # Extraer retorno fijo de renta fija
-                                    retorno_fijo = extraer_tasa_renta_fija(activo_original)
-                                    
-                                    # Usar valores por defecto
-                                    activos_portafolio.append({
-                                        'simbolo': simbolo,
-                                        'tipo': tipo,
-                                        'valuacion': valuacion,
-                                        'peso': valuacion / valor_total if valor_total > 0 else 0,
-                                        'retorno_medio': 0.08,
-                                        'volatilidad': 0.20,
-                                        'retorno_fijo': retorno_fijo
-                                    })
-                
-                except Exception as e:
-                    st.warning(f"Error procesando activo: {str(e)}")
-                    continue
-            
-            if activos_portafolio and valor_total > 0:
-                with st.spinner(f"Ejecutando {num_simulaciones} simulaciones..."):
-                    resultados = simular_monte_carlo_portafolio(
-                        activos_portafolio, valor_total, num_simulaciones, dias_proyeccion
-                    )
-                
-                if resultados:
-                    # Mostrar resultados
-                    st.success("✅ Simulación completada exitosamente!")
-                    
-                    # Métricas principales
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric(
-                            "Retorno Total Esperado",
-                            f"{resultados['retorno_esperado']:.2%}",
-                            help="Retorno anual total esperado (variable + fijo)"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Retorno Fijo",
-                            f"{resultados['retorno_fijo']:.2%}",
-                            help="Componente fijo de renta fija"
-                        )
-                    
-                    with col3:
-                        st.metric(
-                            "Retorno Variable",
-                            f"{resultados['retorno_variable']:.2%}",
-                            help="Componente variable del portafolio"
-                        )
-                    
-                    with col4:
-                        st.metric(
-                            "Volatilidad",
-                            f"{resultados['volatilidad_esperada']:.2%}",
-                            help="Volatilidad anual esperada"
-                        )
-                    
-                    # Métricas adicionales
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric(
-                            "Probabilidad de Ganancia",
-                            f"{resultados['probabilidad_ganancia']:.1%}",
-                            help="Probabilidad de obtener retorno positivo"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Valor Esperado",
-                            f"${resultados['valor_esperado']:,.2f}",
-                            help="Valor esperado del portafolio al final del período"
-                        )
-                    
-                    with col3:
-                        st.metric(
-                            "Valor Mínimo",
-                            f"${resultados['valor_minimo']:,.2f}",
-                            help="Valor mínimo en las simulaciones"
-                        )
-                    
-                    with col4:
-                        st.metric(
-                            "Valor Máximo",
-                            f"${resultados['valor_maximo']:,.2f}",
-                            help="Valor máximo en las simulaciones"
-                        )
-                    
-                    # Proyecciones de valor
-                    st.markdown("#### 📊 Proyecciones de Valor")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric(
-                            "Escenario Pesimista (5%)",
-                            f"${resultados['percentil_5']:,.2f}",
-                            delta=f"{(resultados['percentil_5'] - valor_total):,.2f}",
-                            delta_color="inverse"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Valor Actual",
-                            f"${valor_total:,.2f}",
-                            help="Valor actual del portafolio"
-                        )
-                    
-                    with col3:
-                        st.metric(
-                            "Escenario Optimista (95%)",
-                            f"${resultados['percentil_95']:,.2f}",
-                            delta=f"{(resultados['percentil_95'] - valor_total):,.2f}",
-                            delta_color="normal"
-                        )
-                    
-                    # Gráfico de distribución
-                    st.markdown("#### 📈 Distribución de Resultados")
-                    
-                    fig = go.Figure()
-                    
-                    # Histograma de valores finales
-                    fig.add_trace(go.Histogram(
-                        x=resultados['valores_finales'],
-                        nbinsx=50,
-                        name='Distribución de Valores',
-                        marker_color='lightblue',
-                        opacity=0.7
-                    ))
-                    
-                    # Líneas verticales para percentiles
-                    fig.add_vline(x=resultados['percentil_5'], line_dash="dash", line_color="red",
-                                annotation_text="5%", annotation_position="top right")
-                    fig.add_vline(x=valor_total, line_dash="dash", line_color="orange",
-                                annotation_text="Actual", annotation_position="top right")
-                    fig.add_vline(x=resultados['percentil_95'], line_dash="dash", line_color="green",
-                                annotation_text="95%", annotation_position="top right")
-                    
-                    fig.update_layout(
-                        title="Distribución de Valores del Portafolio",
-                        xaxis_title="Valor del Portafolio ($)",
-                        yaxis_title="Frecuencia",
-                        showlegend=False
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Tabla de activos utilizados
-                    st.markdown("#### 📋 Activos Considerados en la Simulación")
-                    
-                    df_activos = pd.DataFrame(activos_portafolio)
-                    df_activos['Valuación'] = df_activos['valuacion'].apply(lambda x: f"${x:,.2f}")
-                    df_activos['Peso (%)'] = (df_activos['peso'] * 100).round(2)
-                    df_activos['Retorno Variable (%)'] = (df_activos['retorno_medio'] * 100).round(2)
-                    df_activos['Retorno Fijo (%)'] = (df_activos['retorno_fijo'] * 100).round(2)
-                    df_activos['Volatilidad (%)'] = (df_activos['volatilidad'] * 100).round(2)
-                    
-                    st.dataframe(
-                        df_activos[['simbolo', 'tipo', 'Valuación', 'Peso (%)', 'Retorno Variable (%)', 'Retorno Fijo (%)', 'Volatilidad (%)']],
-                        use_container_width=True,
-                        height=300
-                    )
-                    
-                else:
-                    st.error("❌ Error en la simulación. Verifique los datos del portafolio.")
-            else:
-                st.warning("⚠️ No hay activos válidos para realizar la simulación.")
-    
-    # Información adicional
-    with st.expander("ℹ️ Información sobre la Simulación"):
-        st.markdown("""
-        **¿Qué es la simulación de Monte Carlo?**
-        
-        La simulación de Monte Carlo es una técnica matemática que utiliza números aleatorios 
-        para modelar la incertidumbre en sistemas complejos. En el contexto de inversiones:
-        
-        - **Retorno Total Esperado**: Suma del componente variable y fijo
-        - **Retorno Variable**: Basado en movimientos históricos de precios
-        - **Retorno Fijo**: Tasas o cupones de instrumentos de renta fija
-        - **Volatilidad**: Medida de la variabilidad de los retornos variables
-        - **Percentiles**: Valores que indican escenarios pesimistas (5%) y optimistas (95%)
-        - **Probabilidad de Ganancia**: Porcentaje de simulaciones que resultan en ganancia
-        
-        **Componentes del Retorno:**
-        - **Variable**: Depende de movimientos de mercado (acciones, bonos con riesgo)
-        - **Fijo**: Ingresos garantizados (cupones de bonos, tasas de FCIs)
-        
-        **Interpretación de los resultados:**
-        - El valor esperado representa el resultado promedio de todas las simulaciones
-        - Los percentiles 5% y 95% representan escenarios extremos pero posibles
-        - Mayor número de simulaciones = mayor precisión en los resultados
-        - Los retornos fijos reducen la volatilidad total del portafolio
-        """)
+# Función eliminada - Interfaz de simulación de Monte Carlo (datos ficticios)
 
 # === FUNCIONES DE OPERATORIA FCI ===
 
@@ -1401,7 +916,6 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         import traceback
         traceback.print_exc()
         st.error(error_msg)
-        return None
         return None
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
@@ -1865,7 +1379,7 @@ class PortfolioManager:
         self.data_loaded = False
         self.returns = None
         self.prices = None
-        self.notional = 100000  # Valor nominal por defecto
+        self.notional = 0  # Sin valor nominal ficticio
         self.manager = None
     
     def load_data(self):
@@ -2449,37 +1963,27 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         # Asegurar que la volatilidad sea un número finito
         if not np.isfinite(volatilidad_portafolio):
             print("Advertencia: Volatilidad no finita, usando valor por defecto")
-            volatilidad_portafolio = 0.2  # Valor por defecto razonable
+            volatilidad_portafolio = 0.0  # Sin datos reales
             
     except Exception as e:
         print(f"Error al calcular volatilidad del portafolio: {str(e)}")
         import traceback
         traceback.print_exc()
-        # Valor por defecto seguro
+        # Sin datos reales
         volatilidad_portafolio = sum(
             m['volatilidad'] * m['peso'] 
             for m in metricas_activos.values()
-        ) if metricas_activos else 0.2
+        ) if metricas_activos else 0.0
     
-    # Calcular percentiles para escenarios
-    retornos_simulados = []
-    for _ in range(1000):  # Simulación Monte Carlo simple
-        retorno_simulado = 0
-        for m in metricas_activos.values():
-            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
-        retornos_simulados.append(retorno_simulado * 252)  # Anualizado
+    # Sin simulación Monte Carlo (datos ficticios)
+    pl_esperado_min = 0.0
+    pl_esperado_max = 0.0
     
-    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
-    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
-    
-    # Calcular probabilidades basadas en los retornos simulados
-    retornos_simulados = np.array(retornos_simulados)
-    total_simulaciones = len(retornos_simulados)
-            
-    prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
-    prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
-    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
-    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
+    # Sin probabilidades simuladas
+    prob_ganancia = 0.0
+    prob_perdida = 0.0
+    prob_ganancia_10 = 0.0
+    prob_perdida_10 = 0.0
             
     # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
     alpha_beta_metrics = {}
@@ -3108,9 +2612,8 @@ def mostrar_estado_cuenta(estado_cuenta):
     total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
     cuentas = estado_cuenta.get('cuentas', [])
     
-    cols = st.columns(3)
+    cols = st.columns(2)
     cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-    cols[1].metric("Número de Cuentas", len(cuentas))
     
     if cuentas:
         st.subheader("📊 Detalle de Cuentas")
@@ -3661,13 +3164,6 @@ def mostrar_analisis_portafolio():
         mostrar_analisis_performance_real()
     
     with tab7:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if portafolio:
-            mostrar_simulacion_monte_carlo(portafolio, token_acceso)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente para la simulación")
-    
-    with tab8:
         mostrar_panel_asesor(token_acceso, id_cliente)
 
 def mostrar_panel_asesor(token_acceso, id_cliente):
@@ -4005,14 +3501,22 @@ def mostrar_resumen_cliente_asesor(token_acceso, id_cliente):
             total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
             cuentas = estado_cuenta.get('cuentas', [])
             
-            st.metric("Total en Pesos", f"${total_en_pesos:,.2f}")
-            st.metric("Número de Cuentas", len(cuentas))
+            # Convertir a float de forma segura
+            try:
+                total_en_pesos_float = float(total_en_pesos) if total_en_pesos is not None else 0.0
+                st.metric("Total en Pesos", f"${total_en_pesos_float:,.2f}")
+            except (ValueError, TypeError):
+                st.metric("Total en Pesos", f"${0.0:,.2f}")
             
             if cuentas:
                 # Mostrar saldos por cuenta
                 st.markdown("**Detalle de Cuentas:**")
                 for cuenta in cuentas[:3]:  # Mostrar solo las primeras 3
-                    st.write(f"• {cuenta.get('tipo', 'N/A')}: ${cuenta.get('total', 0):,.2f}")
+                    try:
+                        total_cuenta = float(cuenta.get('total', 0)) if cuenta.get('total') is not None else 0.0
+                        st.write(f"• {cuenta.get('tipo', 'N/A')}: ${total_cuenta:,.2f}")
+                    except (ValueError, TypeError):
+                        st.write(f"• {cuenta.get('tipo', 'N/A')}: $0.00")
         else:
             st.warning("No se pudo obtener el estado de cuenta")
     
@@ -4048,7 +3552,13 @@ def mostrar_resumen_cliente_asesor(token_acceso, id_cliente):
                     tipos_activos[tipo] = 0
                 tipos_activos[tipo] += 1
             
-            st.metric("Valor Total", f"${valor_total:,.2f}")
+            # Convertir valor total a float de forma segura
+            try:
+                valor_total_float = float(valor_total) if valor_total is not None else 0.0
+                st.metric("Valor Total", f"${valor_total_float:,.2f}")
+            except (ValueError, TypeError):
+                st.metric("Valor Total", f"${0.0:,.2f}")
+            
             st.metric("Tipos de Activos", len(tipos_activos))
             
             # Mostrar distribución por tipo
@@ -4302,14 +3812,12 @@ def mostrar_recomendaciones_asesor(token_acceso, id_cliente):
                 st.warning("⚠️ **Liquidez Baja**: Considerar aumentar fondos")
         
         with col2:
-            st.metric("Número de Cuentas", len(cuentas))
-            
-            if len(cuentas) > 2:
-                st.success("✅ **Buena Estructura de Cuentas**")
-            elif len(cuentas) > 0:
-                st.info("ℹ️ **Estructura Básica**: Considerar diversificar cuentas")
+            # Información adicional del cliente
+            if portafolio:
+                activos = portafolio.get('activos', [])
+                st.metric("Activos en Portafolio", len(activos))
             else:
-                st.warning("⚠️ **Sin Cuentas**: Verificar configuración")
+                st.metric("Activos en Portafolio", 0)
     
     # Recomendaciones específicas
     st.markdown("#### 🎯 Recomendaciones Específicas")
@@ -4878,7 +4386,7 @@ def mostrar_carga_datos_adicionales(token_acceso, id_cliente):
                     "IdPais": id_pais,
                     "IdProvincia": id_provincia,
                     "IdPartido": id_partido,
-                    "IdLocalidad": 24608,  # Valor por defecto
+                    "IdLocalidad": 0,  # Sin valor por defecto ficticio
                     "CodigoPostal": codigo_postal,
                     "EsResidenteUsa": es_residente_usa,
                     "IdPaisNacimiento": 54 if nacionalidad == "Argentina" else 1,
