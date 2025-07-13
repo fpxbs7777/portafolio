@@ -2159,40 +2159,21 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
-        col1, col2 = st.columns(2)
         
-        with col1:
-            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-                tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
-                fig_pie = go.Figure(data=[go.Pie(
-                    labels=tipo_stats['Tipo'],
-                    values=tipo_stats['Valuación'],
-                    textinfo='label+percent',
-                    hole=0.4,
-                    marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
-                )])
-                fig_pie.update_layout(
-                    title="Distribución por Tipo",
-                    height=400
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
-        
-        with col2:
-            if len(datos_activos) > 1:
-                valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
-                if valores_activos:
-                    fig_hist = go.Figure(data=[go.Histogram(
-                        x=valores_activos,
-                        nbinsx=min(20, len(valores_activos)),
-                        marker_color='#0d6efd'
-                    )])
-                    fig_hist.update_layout(
-                        title="Distribución de Valores",
-                        xaxis_title="Valor ($)",
-                        yaxis_title="Frecuencia",
-                        height=400
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
+        if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
+            tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=tipo_stats['Tipo'],
+                values=tipo_stats['Valuación'],
+                textinfo='label+percent',
+                hole=0.4,
+                marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+            )])
+            fig_pie.update_layout(
+                title="Distribución por Tipo",
+                height=400
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
         
         # Tabla de activos
         st.subheader("📋 Detalle de Activos")
