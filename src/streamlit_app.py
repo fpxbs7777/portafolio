@@ -2462,95 +2462,304 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     else:
                                         st.success("📊 Distribución mesocúrtica (normal)")
                                     
-                                    # Gráfico de evolución del valor real del portafolio
+                                    # Gráfico de evolución del valor real del portafolio en ARS y USD
                                     st.markdown("#### 📈 Evolución del Valor Real del Portafolio")
                                     
+                                    # Obtener cotización MEP para conversión
+                                    try:
+                                        # Intentar obtener cotización MEP (usar AL30 como proxy)
+                                        cotizacion_mep = obtener_cotizacion_mep(token_portador, "AL30", 1, 1)
+                                        if cotizacion_mep and cotizacion_mep.get('precio'):
+                                            tasa_mep = float(cotizacion_mep['precio'])
+                                        else:
+                                            # Si no hay MEP, usar tasa aproximada
+                                            tasa_mep = 1000  # Tasa aproximada
+                                            st.info("ℹ️ Usando tasa MEP aproximada para conversiones")
+                                    except:
+                                        tasa_mep = 1000
+                                        st.info("ℹ️ Usando tasa MEP aproximada para conversiones")
+                                    
+                                    # Crear figura con dos ejes Y
                                     fig_evolucion_real = go.Figure()
+                                    
+                                    # Traza en ARS (eje Y izquierdo)
                                     fig_evolucion_real.add_trace(go.Scatter(
                                         x=df_portfolio.index,
                                         y=df_portfolio['Portfolio_Total'],
                                         mode='lines',
-                                        name='Valor Real del Portafolio',
-                                        line=dict(color='#28a745', width=2)
+                                        name='Valor en ARS',
+                                        line=dict(color='#28a745', width=2),
+                                        yaxis='y'
                                     ))
                                     
+                                    # Traza en USD (eje Y derecho)
+                                    valores_usd = df_portfolio['Portfolio_Total'] / tasa_mep
+                                    fig_evolucion_real.add_trace(go.Scatter(
+                                        x=df_portfolio.index,
+                                        y=valores_usd,
+                                        mode='lines',
+                                        name='Valor en USD',
+                                        line=dict(color='#0d6efd', width=2, dash='dash'),
+                                        yaxis='y2'
+                                    ))
+                                    
+                                    # Configurar ejes
                                     fig_evolucion_real.update_layout(
-                                        title="Evolución del Valor Real del Portafolio en el Tiempo",
+                                        title="Evolución del Valor Real del Portafolio (ARS y USD)",
                                         xaxis_title="Fecha",
-                                        yaxis_title="Valor del Portafolio ($)",
-                                        height=400,
-                                        template='plotly_white'
+                                        yaxis=dict(
+                                            title="Valor en ARS ($)",
+                                            titlefont=dict(color="#28a745"),
+                                            tickfont=dict(color="#28a745"),
+                                            side="left"
+                                        ),
+                                        yaxis2=dict(
+                                            title="Valor en USD ($)",
+                                            titlefont=dict(color="#0d6efd"),
+                                            tickfont=dict(color="#0d6efd"),
+                                            anchor="x",
+                                            overlaying="y",
+                                            side="right"
+                                        ),
+                                        height=500,
+                                        template='plotly_white',
+                                        legend=dict(
+                                            orientation="h",
+                                            yanchor="bottom",
+                                            y=1.02,
+                                            xanchor="right",
+                                            x=1
+                                        )
                                     )
                                     
                                     st.plotly_chart(fig_evolucion_real, use_container_width=True)
                                     
-                                    # Mostrar estadísticas del valor real
+                                    # Mostrar estadísticas del valor real en ambas monedas
                                     st.markdown("#### 📊 Estadísticas del Valor Real")
-                                    col1, col2, col3 = st.columns(3)
+                                    col1, col2, col3, col4 = st.columns(4)
                                     
-                                    valor_inicial = df_portfolio['Portfolio_Total'].iloc[0]
-                                    valor_final = df_portfolio['Portfolio_Total'].iloc[-1]
-                                    retorno_total_real = (valor_final / valor_inicial - 1) * 100
+                                    valor_inicial_ars = df_portfolio['Portfolio_Total'].iloc[0]
+                                    valor_final_ars = df_portfolio['Portfolio_Total'].iloc[-1]
+                                    valor_inicial_usd = valor_inicial_ars / tasa_mep
+                                    valor_final_usd = valor_final_ars / tasa_mep
+                                    retorno_total_real = (valor_final_ars / valor_inicial_ars - 1) * 100
                                     
-                                    col1.metric("Valor Inicial", f"${valor_inicial:,.2f}")
-                                    col2.metric("Valor Final", f"${valor_final:,.2f}")
-                                    col3.metric("Retorno Total", f"{retorno_total_real:+.2f}%")
+                                    col1.metric("Valor Inicial (ARS)", f"${valor_inicial_ars:,.2f}")
+                                    col2.metric("Valor Final (ARS)", f"${valor_final_ars:,.2f}")
+                                    col3.metric("Valor Inicial (USD)", f"${valor_inicial_usd:,.2f}")
+                                    col4.metric("Valor Final (USD)", f"${valor_final_usd:,.2f}")
+                                    
+                                    col1, col2 = st.columns(2)
+                                                                            col1.metric("Retorno Total (ARS)", f"{retorno_total_real:+.2f}%")
+                                        col2.metric("Tasa MEP Utilizada", f"${tasa_mep:,.2f}")
+                                        
+                                        # Análisis de rendimiento extra asegurado de renta fija
+                                        st.markdown("#### 🏦 Análisis de Rendimiento Extra Asegurado")
+                                        
+                                        # Identificar instrumentos de renta fija
+                                        instrumentos_renta_fija = []
+                                        total_renta_fija = 0
+                                        
+                                        for activo in datos_activos:
+                                            tipo = activo.get('Tipo', '').lower()
+                                            simbolo = activo.get('Símbolo', '')
+                                            valuacion = activo.get('Valuación', 0)
+                                            
+                                            # Identificar FCIs, bonos y otros instrumentos de renta fija
+                                            if any(keyword in tipo for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra']):
+                                                instrumentos_renta_fija.append({
+                                                    'simbolo': simbolo,
+                                                    'tipo': tipo,
+                                                    'valuacion': valuacion,
+                                                    'peso': valuacion / valor_total if valor_total > 0 else 0
+                                                })
+                                                total_renta_fija += valuacion
+                                            
+                                            # También identificar por símbolo (FCIs suelen tener símbolos específicos)
+                                            elif any(keyword in simbolo.lower() for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg']):
+                                                instrumentos_renta_fija.append({
+                                                    'simbolo': simbolo,
+                                                    'tipo': tipo,
+                                                    'valuacion': valuacion,
+                                                    'peso': valuacion / valor_total if valor_total > 0 else 0
+                                                })
+                                                total_renta_fija += valuacion
+                                        
+                                        if instrumentos_renta_fija:
+                                            st.success(f"✅ Se identificaron {len(instrumentos_renta_fija)} instrumentos de renta fija")
+                                            
+                                            # Mostrar tabla de instrumentos de renta fija
+                                            df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
+                                            df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
+                                            df_renta_fija['Valuación ($)'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
+                                            
+                                            st.dataframe(
+                                                df_renta_fija[['simbolo', 'tipo', 'Valuación ($)', 'Peso (%)']],
+                                                use_container_width=True,
+                                                height=200
+                                            )
+                                            
+                                            # Calcular rendimiento extra asegurado
+                                            peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
+                                            
+                                            # Estimación de rendimiento extra (basado en tasas típicas)
+                                            rendimiento_extra_estimado = {
+                                                'FCI': 0.08,  # 8% anual típico para FCIs
+                                                'Bono': 0.12,  # 12% anual típico para bonos
+                                                'Titulo': 0.10,  # 10% anual típico para títulos públicos
+                                                'Letra': 0.15   # 15% anual típico para letras
+                                            }
+                                            
+                                            rendimiento_extra_total = 0
+                                            for instrumento in instrumentos_renta_fija:
+                                                tipo_instrumento = instrumento['tipo'].lower()
+                                                peso_instrumento = instrumento['peso']
+                                                
+                                                # Determinar tipo de rendimiento
+                                                if 'fci' in tipo_instrumento or 'fondo' in tipo_instrumento:
+                                                    rendimiento = rendimiento_extra_estimado['FCI']
+                                                elif 'bono' in tipo_instrumento:
+                                                    rendimiento = rendimiento_extra_estimado['Bono']
+                                                elif 'titulo' in tipo_instrumento or 'publico' in tipo_instrumento:
+                                                    rendimiento = rendimiento_extra_estimado['Titulo']
+                                                elif 'letra' in tipo_instrumento:
+                                                    rendimiento = rendimiento_extra_estimado['Letra']
+                                                else:
+                                                    rendimiento = rendimiento_extra_estimado['FCI']  # Default
+                                                
+                                                rendimiento_extra_total += rendimiento * peso_instrumento
+                                            
+                                            # Mostrar métricas de rendimiento extra
+                                            col1, col2, col3 = st.columns(3)
+                                            col1.metric("Peso Renta Fija", f"{peso_renta_fija:.1%}")
+                                            col2.metric("Rendimiento Extra Estimado", f"{rendimiento_extra_total:.1%}")
+                                            col3.metric("Valor Renta Fija", f"${total_renta_fija:,.2f}")
+                                            
+                                            # Gráfico de composición por tipo de instrumento
+                                            if len(instrumentos_renta_fija) > 1:
+                                                fig_renta_fija = go.Figure(data=[go.Pie(
+                                                    labels=[f"{row['simbolo']} ({row['tipo']})" for _, row in df_renta_fija.iterrows()],
+                                                    values=df_renta_fija['valuacion'],
+                                                    textinfo='label+percent+value',
+                                                    texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+                                                    hole=0.4,
+                                                    marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                                )])
+                                                fig_renta_fija.update_layout(
+                                                    title="Composición de Instrumentos de Renta Fija",
+                                                    height=400
+                                                )
+                                                st.plotly_chart(fig_renta_fija, use_container_width=True)
+                                            
+                                            # Recomendaciones específicas para renta fija
+                                            st.markdown("#### 💡 Recomendaciones Renta Fija")
+                                            
+                                            if peso_renta_fija < 0.2:
+                                                st.info("📈 **Considerar aumentar exposición a renta fija**: Menos del 20% del portafolio")
+                                            elif peso_renta_fija > 0.6:
+                                                st.warning("📉 **Considerar reducir exposición a renta fija**: Más del 60% del portafolio")
+                                            else:
+                                                st.success("✅ **Exposición equilibrada a renta fija**: Entre 20% y 60% del portafolio")
+                                            
+                                            if rendimiento_extra_total > 0.10:
+                                                st.success("🎯 **Excelente rendimiento extra estimado**: Más del 10% anual")
+                                            elif rendimiento_extra_total > 0.05:
+                                                st.info("📊 **Buen rendimiento extra estimado**: Entre 5% y 10% anual")
+                                            else:
+                                                st.warning("⚠️ **Rendimiento extra bajo**: Menos del 5% anual")
+                                        
+                                        else:
+                                            st.info("ℹ️ No se identificaron instrumentos de renta fija en el portafolio")
+                                            st.info("💡 **Recomendación**: Considerar agregar FCIs, bonos o títulos públicos para diversificar")
                                     
                                     # Análisis de retorno esperado por horizonte de inversión
                                     st.markdown("#### 📊 Análisis de Retorno Esperado")
                                     
-                                    # Calcular retornos para diferentes horizontes
+                                    # Calcular retornos en USD para diferentes horizontes
                                     horizontes_analisis = [1, 7, 30, 90, 180, 365]
-                                    retornos_por_horizonte = {}
+                                    retornos_ars_por_horizonte = {}
+                                    retornos_usd_por_horizonte = {}
+                                    
+                                    # Calcular retornos en USD
+                                    df_portfolio_usd = df_portfolio['Portfolio_Total'] / tasa_mep
+                                    df_portfolio_returns_usd = df_portfolio_usd.pct_change().dropna()
                                     
                                     for horizonte in horizontes_analisis:
                                         if len(df_portfolio_returns) >= horizonte:
-                                            # Calcular retorno acumulado para el horizonte
-                                            retorno_acumulado = (1 + df_portfolio_returns.tail(horizonte)).prod() - 1
-                                            retornos_por_horizonte[horizonte] = retorno_acumulado
+                                            # Retorno en ARS
+                                            retorno_ars = (1 + df_portfolio_returns.tail(horizonte)).prod() - 1
+                                            retornos_ars_por_horizonte[horizonte] = retorno_ars
+                                            
+                                            # Retorno en USD
+                                            retorno_usd = (1 + df_portfolio_returns_usd.tail(horizonte)).prod() - 1
+                                            retornos_usd_por_horizonte[horizonte] = retorno_usd
                                     
-                                    if retornos_por_horizonte:
-                                        # Crear gráfico de retornos por horizonte
+                                    if retornos_ars_por_horizonte and retornos_usd_por_horizonte:
+                                        # Crear gráfico de retornos por horizonte (ARS y USD)
                                         fig_horizontes = go.Figure()
                                         
-                                        horizontes = list(retornos_por_horizonte.keys())
-                                        retornos = list(retornos_por_horizonte.values())
+                                        horizontes = list(retornos_ars_por_horizonte.keys())
+                                        retornos_ars = list(retornos_ars_por_horizonte.values())
+                                        retornos_usd = list(retornos_usd_por_horizonte.values())
                                         
+                                        # Barras para ARS
                                         fig_horizontes.add_trace(go.Bar(
                                             x=[f"{h} días" for h in horizontes],
-                                            y=retornos,
-                                            name="Retorno Acumulado",
-                                            marker_color=['#28a745' if r >= 0 else '#dc3545' for r in retornos],
-                                            text=[f"{r:.2%}" for r in retornos],
+                                            y=retornos_ars,
+                                            name="Retorno ARS",
+                                            marker_color=['#28a745' if r >= 0 else '#dc3545' for r in retornos_ars],
+                                            text=[f"{r:.2%}" for r in retornos_ars],
+                                            textposition='auto'
+                                        ))
+                                        
+                                        # Barras para USD
+                                        fig_horizontes.add_trace(go.Bar(
+                                            x=[f"{h} días" for h in horizontes],
+                                            y=retornos_usd,
+                                            name="Retorno USD",
+                                            marker_color=['#0d6efd' if r >= 0 else '#ff6b6b' for r in retornos_usd],
+                                            text=[f"{r:.2%}" for r in retornos_usd],
                                             textposition='auto'
                                         ))
                                         
                                         fig_horizontes.update_layout(
-                                            title=f"Retornos Acumulados por Horizonte de Inversión",
+                                            title=f"Retornos Acumulados por Horizonte de Inversión (ARS y USD)",
                                             xaxis_title="Horizonte de Inversión",
                                             yaxis_title="Retorno Acumulado",
                                             height=400,
-                                            template='plotly_white'
+                                            template='plotly_white',
+                                            barmode='group'
                                         )
                                         
                                         st.plotly_chart(fig_horizontes, use_container_width=True)
                                         
-                                        # Mostrar métricas de retorno esperado
+                                        # Mostrar métricas de retorno esperado (ARS y USD)
                                         st.markdown("#### 📈 Métricas de Retorno Esperado")
-                                        col1, col2, col3 = st.columns(3)
+                                        col1, col2, col3, col4 = st.columns(4)
                                         
-                                        # Calcular retorno esperado anualizado
-                                        retorno_anualizado = mean_return_annual
-                                        col1.metric("Retorno Esperado Anual", f"{retorno_anualizado:.2%}")
+                                        # Calcular retorno esperado anualizado en ARS
+                                        retorno_anualizado_ars = mean_return_annual
+                                        col1.metric("Retorno Esperado Anual (ARS)", f"{retorno_anualizado_ars:.2%}")
+                                        
+                                        # Calcular retorno esperado anualizado en USD
+                                        mean_return_annual_usd = df_portfolio_returns_usd.mean() * 252
+                                        col2.metric("Retorno Esperado Anual (USD)", f"{mean_return_annual_usd:.2%}")
                                         
                                         # Calcular retorno esperado para el horizonte seleccionado
-                                        retorno_esperado_horizonte = retorno_anualizado * (dias_analisis / 365)
-                                        col2.metric(f"Retorno Esperado ({dias_analisis} días)", f"{retorno_esperado_horizonte:.2%}")
+                                        retorno_esperado_horizonte_ars = retorno_anualizado_ars * (dias_analisis / 365)
+                                        retorno_esperado_horizonte_usd = mean_return_annual_usd * (dias_analisis / 365)
+                                        col3.metric(f"Retorno Esperado ({dias_analisis} días) ARS", f"{retorno_esperado_horizonte_ars:.2%}")
+                                        col4.metric(f"Retorno Esperado ({dias_analisis} días) USD", f"{retorno_esperado_horizonte_usd:.2%}")
                                         
-                                        # Calcular intervalo de confianza
+                                        # Calcular intervalos de confianza
                                         z_score_95 = 1.96  # 95% de confianza
-                                        intervalo_confianza = z_score_95 * std_return_annual * np.sqrt(dias_analisis / 365)
-                                        col3.metric("Intervalo de Confianza 95%", f"±{intervalo_confianza:.2%}")
+                                        std_return_annual_usd = df_portfolio_returns_usd.std() * np.sqrt(252)
+                                        intervalo_confianza_ars = z_score_95 * std_return_annual * np.sqrt(dias_analisis / 365)
+                                        intervalo_confianza_usd = z_score_95 * std_return_annual_usd * np.sqrt(dias_analisis / 365)
+                                        
+                                        col1, col2 = st.columns(2)
+                                        col1.metric("Intervalo de Confianza 95% (ARS)", f"±{intervalo_confianza_ars:.2%}")
+                                        col2.metric("Intervalo de Confianza 95% (USD)", f"±{intervalo_confianza_usd:.2%}")
                                         
                                         # Proyecciones de valor del portafolio
                                         st.markdown("#### 💰 Proyecciones de Valor del Portafolio")
