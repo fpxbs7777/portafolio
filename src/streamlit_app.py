@@ -1954,6 +1954,37 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     except (ValueError, TypeError):
                         continue
             
+            # Corrección: Si es FCI y la valuación sigue en 0, buscar valor cuota parte y multiplicar por cantidad
+            if valuacion == 0 and cantidad and ("fci" in tipo.lower() or "fondo" in tipo.lower()):
+                campos_valor_cuota = [
+                    'valorCuota', 'valorCuotaparte', 'valorCuotaParte', 'ultimoValorCuotaParte',
+                    'valor_cuota', 'valor_cuotaparte', 'valor_cuotaparte_ultimo'
+                ]
+                valor_cuota = 0
+                for campo in campos_valor_cuota:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            valor = float(activo[campo])
+                            if valor > 0:
+                                valor_cuota = valor
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                    if campo in titulo and titulo[campo] is not None:
+                        try:
+                            valor = float(titulo[campo])
+                            if valor > 0:
+                                valor_cuota = valor
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                if valor_cuota > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        valuacion = cantidad_num * valor_cuota
+                    except (ValueError, TypeError):
+                        pass
+
             if valuacion == 0 and cantidad:
                 campos_precio = [
                     'precioPromedio',
@@ -2203,7 +2234,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     'peso': peso,
                                     'serie': serie
                                 })
-                                st.success(f"✅ {simbolo}: {len(serie)} puntos de datos")
+                                # st.success(f"✅ {simbolo}: {len(serie)} puntos de datos")
                             else:
                                 st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
                     
@@ -2277,10 +2308,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
                         
                         # Mostrar información de debug
-                        st.info(f"🔍 Debug: Valor total actual del portafolio: ${valor_total:,.2f}")
-                        st.info(f"🔍 Debug: Columnas en df_portfolio: {list(df_portfolio.columns)}")
-                        if len(df_portfolio) > 0:
-                            st.info(f"🔍 Debug: Último valor calculado: ${df_portfolio['Portfolio_Total'].iloc[-1]:,.2f}")
+                        # st.info(f"🔍 Debug: Valor total actual del portafolio: ${valor_total:,.2f}")
+                        # st.info(f"🔍 Debug: Columnas en df_portfolio: {list(df_portfolio.columns)}")
+                        # if len(df_portfolio) > 0:
+                        #     st.info(f"🔍 Debug: Último valor calculado: ${df_portfolio['Portfolio_Total'].iloc[-1]:,.2f}")
                         
                         # Eliminar filas con valores NaN
                         df_portfolio = df_portfolio.dropna()
@@ -2752,48 +2783,77 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     
                                     st.plotly_chart(fig_horizontes, use_container_width=True)
                                     
-                                    # Mostrar métricas de retorno esperado (ARS y USD)
+                                    # --- NUEVO: Inputs para Monte Carlo ---
                                     st.markdown("#### 📈 Métricas de Retorno Esperado")
-                                    col1, col2, col3, col4 = st.columns(4)
+                                    col_mc1, col_mc2 = st.columns(2)
+                                    with col_mc1:
+                                        n_simulaciones = st.number_input(
+                                            "Cantidad de simulaciones Monte Carlo",
+                                            min_value=1000, max_value=20000, value=5000, step=1000,
+                                            help="Cantidad de escenarios simulados para las proyecciones"
+                                        )
+                                    with col_mc2:
+                                        nivel_confianza = st.slider(
+                                            "Nivel de confianza (%)",
+                                            min_value=90, max_value=99, value=95, step=1,
+                                            help="Intervalo de confianza para las proyecciones"
+                                        )
                                     
-                                    # Calcular retorno esperado anualizado en ARS
-                                    retorno_anualizado_ars = mean_return_annual
-                                    col1.metric("Retorno Esperado Anual (ARS)", f"{retorno_anualizado_ars:.2%}")
-                                    
-                                    # Calcular retorno esperado anualizado en USD
-                                    mean_return_annual_usd = df_portfolio_returns_usd.mean() * 252
-                                    col2.metric("Retorno Esperado Anual (USD)", f"{mean_return_annual_usd:.2%}")
-                                    
-                                    # Calcular retorno esperado para el horizonte seleccionado
-                                    retorno_esperado_horizonte_ars = retorno_anualizado_ars * (dias_analisis / 365)
-                                    retorno_esperado_horizonte_usd = mean_return_annual_usd * (dias_analisis / 365)
-                                    col3.metric(f"Retorno Esperado ({dias_analisis} días) ARS", f"{retorno_esperado_horizonte_ars:.2%}")
-                                    col4.metric(f"Retorno Esperado ({dias_analisis} días) USD", f"{retorno_esperado_horizonte_usd:.2%}")
-                                    
-                                    # Calcular intervalos de confianza
-                                    z_score_95 = 1.96  # 95% de confianza
-                                    std_return_annual_usd = df_portfolio_returns_usd.std() * np.sqrt(252)
-                                    intervalo_confianza_ars = z_score_95 * std_return_annual * np.sqrt(dias_analisis / 365)
-                                    intervalo_confianza_usd = z_score_95 * std_return_annual_usd * np.sqrt(dias_analisis / 365)
-                                    
-                                    col1, col2 = st.columns(2)
-                                    col1.metric("Intervalo de Confianza 95% (ARS)", f"±{intervalo_confianza_ars:.2%}")
-                                    col2.metric("Intervalo de Confianza 95% (USD)", f"±{intervalo_confianza_usd:.2%}")
-                                    
-                                    # Proyecciones de valor del portafolio
-                                    st.markdown("#### 💰 Proyecciones de Valor del Portafolio")
-                                    
-                                    valor_actual = df_portfolio['Portfolio_Total'].iloc[-1]
-                                    
-                                    # Calcular proyecciones optimista, pesimista y esperada
-                                    proyeccion_esperada = valor_actual * (1 + retorno_esperado_horizonte_ars)
-                                    proyeccion_optimista = valor_actual * (1 + retorno_esperado_horizonte_ars + intervalo_confianza_ars)
-                                    proyeccion_pesimista = valor_actual * (1 + retorno_esperado_horizonte_ars - intervalo_confianza_ars)
-                                    
-                                    col1, col2, col3 = st.columns(3)
-                                    col1.metric("Proyección Esperada", f"${proyeccion_esperada:,.2f}")
-                                    col2.metric("Proyección Optimista", f"${proyeccion_optimista:,.2f}")
-                                    col3.metric("Proyección Pesimista", f"${proyeccion_pesimista:,.2f}")
+                                    # --- Simulación Monte Carlo para proyecciones ---
+                                    if 'Portfolio_Total' in df_portfolio.columns:
+                                        valores_portfolio = df_portfolio['Portfolio_Total'].values
+                                        retornos_portfolio = pd.Series(valores_portfolio).pct_change().dropna()
+                                        mean_return = retornos_portfolio.mean()
+                                        std_return = retornos_portfolio.std()
+                                        valor_actual = valores_portfolio[-1]
+                                        n_sim = int(n_simulaciones)
+                                        conf = nivel_confianza / 100
+                                        
+                                        # Simulación Monte Carlo
+                                        simulaciones = []
+                                        for _ in range(n_sim):
+                                            # Simular retorno acumulado para el horizonte
+                                            retorno_sim = np.random.normal(mean_return, std_return, dias_analisis)
+                                            retorno_acum = np.prod(1 + retorno_sim) - 1
+                                            simulaciones.append(retorno_acum)
+                                        simulaciones = np.array(simulaciones)
+                                        
+                                        # Métricas basadas en Monte Carlo
+                                        retorno_esperado_mc = np.mean(simulaciones)
+                                        retorno_anualizado_ars = retorno_esperado_mc * (365 / dias_analisis)
+                                        mean_return_annual_usd = df_portfolio_returns_usd.mean() * 252
+                                        retorno_esperado_horizonte_ars = retorno_esperado_mc
+                                        retorno_esperado_horizonte_usd = mean_return_annual_usd * (dias_analisis / 365)
+                                        
+                                        # Intervalos de confianza basados en Monte Carlo
+                                        percentil_inferior = np.percentile(simulaciones, (1 - conf) * 100)
+                                        percentil_superior = np.percentile(simulaciones, conf * 100)
+                                        intervalo_confianza_ars = (percentil_superior - percentil_inferior) / 2
+                                        intervalo_confianza_usd = intervalo_confianza_ars  # Aproximado
+                                        
+                                        # Mostrar métricas
+                                        col1, col2, col3, col4 = st.columns(4)
+                                        col1.metric("Retorno Esperado Anual (ARS)", f"{retorno_anualizado_ars:.2%}")
+                                        col2.metric("Retorno Esperado Anual (USD)", f"{mean_return_annual_usd:.2%}")
+                                        col3.metric(f"Retorno Esperado ({dias_analisis} días) ARS", f"{retorno_esperado_horizonte_ars:.2%}")
+                                        col4.metric(f"Retorno Esperado ({dias_analisis} días) USD", f"{retorno_esperado_horizonte_usd:.2%}")
+                                        
+                                        col1, col2 = st.columns(2)
+                                        col1.metric(f"Intervalo de Confianza {nivel_confianza}% (ARS)", f"±{intervalo_confianza_ars:.2%}")
+                                        col2.metric(f"Intervalo de Confianza {nivel_confianza}% (USD)", f"±{intervalo_confianza_usd:.2%}")
+                                        
+                                        # Proyecciones de valor del portafolio basadas en Monte Carlo
+                                        st.markdown("#### 💰 Proyecciones de Valor del Portafolio")
+                                        
+                                        # Calcular proyecciones usando percentiles de Monte Carlo
+                                        proyeccion_esperada = valor_actual * (1 + retorno_esperado_mc)
+                                        proyeccion_optimista = valor_actual * (1 + percentil_superior)
+                                        proyeccion_pesimista = valor_actual * (1 + percentil_inferior)
+                                        
+                                        col1, col2, col3 = st.columns(3)
+                                        col1.metric("Proyección Esperada", f"${proyeccion_esperada:,.2f}")
+                                        col2.metric("Proyección Optimista", f"${proyeccion_optimista:,.2f}")
+                                        col3.metric("Proyección Pesimista", f"${proyeccion_pesimista:,.2f}")
                                     
 
                                     
