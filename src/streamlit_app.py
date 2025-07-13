@@ -2285,6 +2285,132 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 )
                                 st.plotly_chart(fig_contribucion, use_container_width=True)
                             
+                            # Calcular y mostrar histograma de retornos del portafolio
+                            st.markdown("#### 📊 Histograma de Retornos del Portafolio")
+                            
+                            try:
+                                # Calcular retornos diarios del portafolio
+                                df_portfolio_returns = df_portfolio['Portfolio_Total'].pct_change().dropna()
+                                
+                                if len(df_portfolio_returns) > 10:  # Mínimo de datos para análisis
+                                    # Calcular métricas estadísticas de los retornos
+                                    mean_return = df_portfolio_returns.mean()
+                                    std_return = df_portfolio_returns.std()
+                                    skewness = stats.skew(df_portfolio_returns)
+                                    kurtosis = stats.kurtosis(df_portfolio_returns)
+                                    var_95 = np.percentile(df_portfolio_returns, 5)
+                                    var_99 = np.percentile(df_portfolio_returns, 1)
+                                    
+                                    # Calcular Jarque-Bera test para normalidad
+                                    jb_stat, jb_p_value = stats.jarque_bera(df_portfolio_returns)
+                                    is_normal = jb_p_value > 0.05
+                                    
+                                    # Crear histograma de retornos
+                                    fig_returns_hist = go.Figure(data=[go.Histogram(
+                                        x=df_portfolio_returns,
+                                        nbinsx=50,
+                                        name="Retornos del Portafolio",
+                                        marker_color='#28a745',
+                                        opacity=0.7
+                                    )])
+                                    
+                                    # Agregar líneas de métricas importantes
+                                    fig_returns_hist.add_vline(x=mean_return, line_dash="dash", line_color="red", 
+                                                             annotation_text=f"Media: {mean_return:.4f}")
+                                    fig_returns_hist.add_vline(x=var_95, line_dash="dash", line_color="orange", 
+                                                             annotation_text=f"VaR 95%: {var_95:.4f}")
+                                    fig_returns_hist.add_vline(x=var_99, line_dash="dash", line_color="darkred", 
+                                                             annotation_text=f"VaR 99%: {var_99:.4f}")
+                                    
+                                    fig_returns_hist.update_layout(
+                                        title="Distribución de Retornos Diarios del Portafolio",
+                                        xaxis_title="Retorno Diario",
+                                        yaxis_title="Frecuencia",
+                                        height=500,
+                                        showlegend=False,
+                                        template='plotly_white'
+                                    )
+                                    
+                                    st.plotly_chart(fig_returns_hist, use_container_width=True)
+                                    
+                                    # Mostrar estadísticas de retornos
+                                    st.markdown("#### 📈 Estadísticas de Retornos")
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    
+                                    col1.metric("Retorno Medio Diario", f"{mean_return:.4f}")
+                                    col2.metric("Volatilidad Diaria", f"{std_return:.4f}")
+                                    col3.metric("VaR 95%", f"{var_95:.4f}")
+                                    col4.metric("VaR 99%", f"{var_99:.4f}")
+                                    
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    col1.metric("Skewness", f"{skewness:.4f}")
+                                    col2.metric("Kurtosis", f"{kurtosis:.4f}")
+                                    col3.metric("JB Statistic", f"{jb_stat:.4f}")
+                                    normalidad = "✅ Normal" if is_normal else "❌ No Normal"
+                                    col4.metric("Normalidad", normalidad)
+                                    
+                                    # Calcular métricas anualizadas
+                                    mean_return_annual = mean_return * 252
+                                    std_return_annual = std_return * np.sqrt(252)
+                                    sharpe_ratio = mean_return_annual / std_return_annual if std_return_annual > 0 else 0
+                                    
+                                    st.markdown("#### 📊 Métricas Anualizadas")
+                                    col1, col2, col3 = st.columns(3)
+                                    col1.metric("Retorno Anual", f"{mean_return_annual:.2%}")
+                                    col2.metric("Volatilidad Anual", f"{std_return_annual:.2%}")
+                                    col3.metric("Ratio de Sharpe", f"{sharpe_ratio:.4f}")
+                                    
+                                    # Análisis de distribución
+                                    st.markdown("#### 📋 Análisis de la Distribución")
+                                    if is_normal:
+                                        st.success("✅ Los retornos siguen una distribución normal (p > 0.05)")
+                                    else:
+                                        st.warning("⚠️ Los retornos no siguen una distribución normal (p ≤ 0.05)")
+                                    
+                                    if skewness > 0.5:
+                                        st.info("📈 Distribución con sesgo positivo (cola derecha)")
+                                    elif skewness < -0.5:
+                                        st.info("📉 Distribución con sesgo negativo (cola izquierda)")
+                                    else:
+                                        st.success("📊 Distribución aproximadamente simétrica")
+                                    
+                                    if kurtosis > 3:
+                                        st.info("📊 Distribución leptocúrtica (colas pesadas)")
+                                    elif kurtosis < 3:
+                                        st.info("📊 Distribución platicúrtica (colas ligeras)")
+                                    else:
+                                        st.success("📊 Distribución mesocúrtica (normal)")
+                                    
+                                    # Gráfico de evolución de retornos acumulados
+                                    st.markdown("#### 📈 Evolución de Retornos Acumulados")
+                                    retornos_acumulados = (1 + df_portfolio_returns).cumprod()
+                                    
+                                    fig_cumulative = go.Figure()
+                                    fig_cumulative.add_trace(go.Scatter(
+                                        x=df_portfolio_returns.index,
+                                        y=retornos_acumulados,
+                                        mode='lines',
+                                        name='Retornos Acumulados',
+                                        line=dict(color='#28a745', width=2)
+                                    ))
+                                    
+                                    fig_cumulative.update_layout(
+                                        title="Evolución de Retornos Acumulados del Portafolio",
+                                        xaxis_title="Fecha",
+                                        yaxis_title="Retorno Acumulado",
+                                        height=400,
+                                        template='plotly_white'
+                                    )
+                                    
+                                    st.plotly_chart(fig_cumulative, use_container_width=True)
+                                    
+                                else:
+                                    st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
+                                st.exception(e)
+                            
                         else:
                             st.warning("⚠️ No hay datos suficientes para generar el histograma")
                     else:
