@@ -2462,28 +2462,39 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     else:
                                         st.success("📊 Distribución mesocúrtica (normal)")
                                     
-                                    # Gráfico de evolución de retornos acumulados
-                                    st.markdown("#### 📈 Evolución de Retornos Acumulados")
-                                    retornos_acumulados = (1 + df_portfolio_returns).cumprod()
+                                    # Gráfico de evolución del valor real del portafolio
+                                    st.markdown("#### 📈 Evolución del Valor Real del Portafolio")
                                     
-                                    fig_cumulative = go.Figure()
-                                    fig_cumulative.add_trace(go.Scatter(
-                                        x=df_portfolio_returns.index,
-                                        y=retornos_acumulados,
+                                    fig_evolucion_real = go.Figure()
+                                    fig_evolucion_real.add_trace(go.Scatter(
+                                        x=df_portfolio.index,
+                                        y=df_portfolio['Portfolio_Total'],
                                         mode='lines',
-                                        name='Retornos Acumulados',
+                                        name='Valor Real del Portafolio',
                                         line=dict(color='#28a745', width=2)
                                     ))
                                     
-                                    fig_cumulative.update_layout(
-                                        title="Evolución de Retornos Acumulados del Portafolio",
+                                    fig_evolucion_real.update_layout(
+                                        title="Evolución del Valor Real del Portafolio en el Tiempo",
                                         xaxis_title="Fecha",
-                                        yaxis_title="Retorno Acumulado",
+                                        yaxis_title="Valor del Portafolio ($)",
                                         height=400,
                                         template='plotly_white'
                                     )
                                     
-                                    st.plotly_chart(fig_cumulative, use_container_width=True)
+                                    st.plotly_chart(fig_evolucion_real, use_container_width=True)
+                                    
+                                    # Mostrar estadísticas del valor real
+                                    st.markdown("#### 📊 Estadísticas del Valor Real")
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    valor_inicial = df_portfolio['Portfolio_Total'].iloc[0]
+                                    valor_final = df_portfolio['Portfolio_Total'].iloc[-1]
+                                    retorno_total_real = (valor_final / valor_inicial - 1) * 100
+                                    
+                                    col1.metric("Valor Inicial", f"${valor_inicial:,.2f}")
+                                    col2.metric("Valor Final", f"${valor_final:,.2f}")
+                                    col3.metric("Retorno Total", f"{retorno_total_real:+.2f}%")
                                     
                                     # Análisis de retorno esperado por horizonte de inversión
                                     st.markdown("#### 📊 Análisis de Retorno Esperado")
