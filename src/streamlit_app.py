@@ -2180,7 +2180,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             serie = activo_info['serie']
                             
                             # Agregar serie ponderada al DataFrame
-                            df_portfolio[simbolo] = serie * peso
+                            # Multiplicar solo los valores, no el índice
+                            df_portfolio[simbolo] = serie.values * peso
+                            # Usar el índice de la primera serie como índice del DataFrame
+                            if df_portfolio.index.empty:
+                                df_portfolio.index = serie.index
                         
                         # Calcular valor total del portafolio por fecha
                         df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
