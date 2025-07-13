@@ -2093,69 +2093,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
             cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
             
-            # Análisis de Estrategia de Inversión
-            if 'analisis_estrategia' in metricas and metricas['analisis_estrategia']:
-                st.subheader("🔍 Análisis de Estrategia de Inversión")
-                
-                # Mostrar la estrategia principal
-                estrategia = metricas['analisis_estrategia']
-                
-                # Tarjeta de estrategia
-                st.markdown(f"""
-                <div style="background-color: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; 
-                            border-left: 5px solid #0d6efd;">
-                    <h4 style="margin-top: 0; color: #0d6efd;">🏦 {estrategia['estrategia']}</h4>
-                    <p>{estrategia['explicacion_estrategia']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Métricas clave
-                cols = st.columns(3)
-                cols[0].metric("Beta", f"{estrategia['beta']:.2f}", 
-                              help="Sensibilidad del portafolio respecto al mercado (1 = mismo riesgo que el mercado)")
-                cols[1].metric("Alpha Anualizado", f"{estrategia['alpha_anual']:+.2%}", 
-                              help="Rendimiento adicional sobre el mercado ajustado por riesgo")
-                cols[2].metric("Calidad de Cobertura", f"{estrategia['calidad_cobertura']}", 
-                              help=f"R² = {estrategia['r_cuadrado']:.2f}")
-                
-                # Explicación del rendimiento
-                st.markdown(f"""
-                <div style="background-color: #e8f4fd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #0a58ca;">📊 {estrategia['rendimiento']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_rendimiento']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Explicación de la cobertura
-                st.markdown(f"""
-                <div style="background-color: #fff3cd; border-radius: 10px; padding: 15px; margin: 10px 0;">
-                    <h5 style="margin-top: 0; color: #856404;">🛡️ Efectividad de Cobertura: {estrategia['calidad_cobertura']}</h5>
-                    <p style="margin-bottom: 0;">{estrategia['explicacion_cobertura']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Interpretación del Beta
-                st.markdown("#### 📈 Interpretación del Beta")
-                if estrategia['beta'] > 1.2:
-                    st.info("""
-                    **Alta volatilidad (β > 1.2)**  
-                    El portafolio es más volátil que el mercado. Espere mayores oscilaciones en el valor de su inversión.
-                    """)
-                elif estrategia['beta'] > 0.8:
-                    st.info("""
-                    **Volatilidad similar al mercado (0.8 < β < 1.2)**  
-                    El portafolio tiende a moverse en línea con el mercado general.
-                    """)
-                elif estrategia['beta'] > 0:
-                    st.info("""
-                    **Baja volatilidad (0 < β < 0.8)**  
-                    El portafolio es menos volátil que el mercado, con movimientos más suaves.
-                    """)
-                else:
-                    st.info("""
-                    **Correlación negativa (β < 0)**  
-                    El portafolio tiende a moverse en dirección opuesta al mercado. Útil para estrategias de cobertura.
-                    """)
+
         
         # Gráficos
         st.subheader("📊 Distribución de Activos")
