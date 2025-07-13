@@ -2180,8 +2180,20 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             serie = activo_info['serie']
                             
                             # Agregar serie ponderada al DataFrame
-                            # Multiplicar solo los valores, no el índice
-                            df_portfolio[simbolo] = serie.values * peso
+                            # Asegurarse de que solo se multipliquen los valores numéricos de la columna 'precio'
+                            if 'precio' in serie.columns:
+                                valores_precio = serie['precio'].values
+                                df_portfolio[simbolo] = valores_precio * peso
+                            else:
+                                # Si no hay columna 'precio', intentar con la primera columna numérica
+                                columnas_numericas = serie.select_dtypes(include=[np.number]).columns
+                                if len(columnas_numericas) > 0:
+                                    valores_precio = serie[columnas_numericas[0]].values
+                                    df_portfolio[simbolo] = valores_precio * peso
+                                else:
+                                    st.warning(f"⚠️ No se encontraron valores numéricos para {simbolo}")
+                                    continue
+                            
                             # Usar el índice de la primera serie como índice del DataFrame
                             if df_portfolio.index.empty:
                                 df_portfolio.index = serie.index
