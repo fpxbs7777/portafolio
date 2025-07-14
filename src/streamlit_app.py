@@ -3070,18 +3070,27 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             for a in activos_raw if a.get('titulo',{}).get('simbolo')
         ]
     else:
-        st.info("Seleccione el tipo y cantidad de activos para el universo aleatorio")
-        tipos = list(set([a.get('titulo',{}).get('tipo','Acción') for a in activos_raw]))
-        tipo_sel = st.multiselect("Tipos de activo", tipos, default=tipos)
-        cant = st.slider("Cantidad de activos aleatorios", 3, 15, 5)
-        # Simulación simple: tomar random de los tipos seleccionados
-        import random
-        universe_activos = random.sample([
-            {'simbolo': a.get('titulo',{}).get('simbolo'),
-             'mercado': a.get('titulo',{}).get('mercado'),
-             'tipo': a.get('titulo',{}).get('tipo')}
-            for a in activos_raw if a.get('titulo',{}).get('tipo') in tipo_sel
-        ], min(cant, len(activos_raw)))
+        st.info("Seleccione el universo aleatorio de mercado real")
+        paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
+        paneles_seleccionados = st.multiselect("Paneles de universo aleatorio", paneles, default=paneles)
+        cantidad_activos = st.slider("Cantidad de activos por panel", 2, 10, 5)
+        capital_ars = st.number_input("Capital disponible para universo aleatorio (ARS)", min_value=10000, value=100000)
+        fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
+        ajustada = "SinAjustar"
+        # Obtener tickers por panel
+        tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, paneles_seleccionados, 'Argentina')
+        # Obtener series históricas aleatorias
+        series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
+            tickers_por_panel, paneles_seleccionados, cantidad_activos,
+            fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars
+        )
+        # Construir universe_activos a partir de seleccion_final
+        universe_activos = []
+        for panel, simbolos in seleccion_final.items():
+            for simbolo in simbolos:
+                universe_activos.append({'simbolo': simbolo, 'mercado': 'BCBA', 'tipo': panel})
+        # Si no hay activos suficientes, advertir y salir
         if not universe_activos:
             st.warning("No hay suficientes activos para el universo aleatorio seleccionado.")
             return
