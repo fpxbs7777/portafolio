@@ -1400,96 +1400,19 @@ class PortfolioManager:
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
-        if not self.data_loaded or not self.manager or self.returns is None:
-            st.warning("No se pudieron cargar los datos necesarios para calcular la frontera eficiente.")
+        if not self.data_loaded or not self.manager:
             return None, None, None
         
         try:
-            # Usar los retornos ya calculados
-            if not self.returns.empty:
-                # Calcular la frontera eficiente usando los retornos
-                n_assets = len(self.returns.columns)
-                if n_assets < 2:
-                    st.warning("Se necesitan al menos 2 activos para calcular la frontera eficiente.")
-                    return None, None, None
-                    
-                # Calcular retornos esperados y matriz de covarianza
-                mean_returns = self.returns.mean()
-                cov_matrix = self.returns.cov()
-                
-                # Generar carteras aleatorias para la frontera
-                num_portfolios = 1000
-                results = np.zeros((3, num_portfolios))
-                weights_record = []
-                
-                for i in range(num_portfolios):
-                    # Generar pesos aleatorios
-                    weights = np.random.random(n_assets)
-                    weights /= np.sum(weights)
-                    weights_record.append(weights)
-                    
-                    # Calcular métricas del portafolio
-                    portfolio_return = np.sum(mean_returns * weights) * 252  # Anualizado
-                    portfolio_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))  # Anualizado
-                    
-                    # Almacenar resultados
-                    results[0, i] = portfolio_std_dev
-                    results[1, i] = portfolio_return
-                    results[2, i] = (portfolio_return - 0.40) / (portfolio_std_dev if portfolio_std_dev != 0 else 1)  # Sharpe ratio con tasa libre de riesgo del 40%
-                
-                # Convertir a arrays de numpy
-                returns = results[1]
-                volatilities = results[0]
-                
-                # Crear diccionario de portafolios especiales
-                portfolios = {}
-                
-                # Encontrar portafolio con mejor Sharpe
-                max_sharpe_idx = np.argmax(results[2])
-                portfolios['Mejor Sharpe'] = self._create_portfolio_result(
-                    weights_record[max_sharpe_idx], 
-                    mean_returns, 
-                    cov_matrix
+            if self.prices is not None:
+                portfolios, returns, volatilities = compute_efficient_frontier(
+                    self.manager.rics, self.notional, target_return, include_min_variance, 
+                    self.prices.to_dict('series')
                 )
-                
-                # Encontrar portafolio de mínima varianza
-                min_vol_idx = np.argmin(results[0])
-                portfolios['Mínima Varianza'] = self._create_portfolio_result(
-                    weights_record[min_vol_idx],
-                    mean_returns,
-                    cov_matrix
-                )
-                
-                # Encontrar portafolio con mejor retorno
-                max_ret_idx = np.argmax(results[1])
-                portfolios['Máximo Retorno'] = self._create_portfolio_result(
-                    weights_record[max_ret_idx],
-                    mean_returns,
-                    cov_matrix
-                )
-                
-                return portfolios, returns, volatilities
             else:
-                st.warning("No hay suficientes datos para calcular la frontera eficiente.")
-                return None, None, None
-                
+                portfolios, returns, volatilities = None, None, None
+            return portfolios, returns, volatilities
         except Exception as e:
-            st.error(f"Error al calcular la frontera eficiente: {str(e)}")
-            return None, None, None
-    
-    def _create_portfolio_result(self, weights, mean_returns, cov_matrix):
-        """Crea un objeto de resultado de portafolio a partir de pesos dados"""
-        # Calcular métricas del portafolio
-        portfolio_return = np.sum(mean_returns * weights) * 252  # Anualizado
-        portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))  # Anualizado
-        
-        # Crear objeto de salida
-        class PortfolioResult:
-            def __init__(self, returns, risk):
-                self.returns = returns
-                self.risk = risk
-        
-        return PortfolioResult(portfolio_return, portfolio_vol)
             return None, None, None
 
 # --- Historical Data Methods ---
@@ -3271,24 +3194,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             colores = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
             for i, (label, port) in enumerate(portfolios.items()):
                 if port and hasattr(port, 'risk') and hasattr(port, 'returns'):
-                    fig.add_trace(go.Scatter(
-                        x=[port.risk], 
-                        y=[port.returns], 
-                        mode='markers+text', 
-                        name=label, 
-                        marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), 
-                        text=[label], 
-                        textposition='top center'
-                    ))
-            fig.update_layout(
-                title='Frontera Eficiente del Portafolio', 
-                xaxis_title='Volatilidad Anual', 
-                yaxis_title='Retorno Anual', 
-                showlegend=True, 
-                template='plotly_white', 
-                height=500
-            )
-            st.plotly_chart(fig, use_container_width=True, key="efficient_frontier")
+                    fig.add_trace(go.Scatter(x=[port.risk], y=[port.returns], mode='markers+text', name=label, marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), text=[label], textposition='top center'))
+            fig.update_layout(title='Frontera Eficiente del Portafolio', xaxis_title='Volatilidad Anual', yaxis_title='Retorno Anual', showlegend=True, template='plotly_white', height=500)
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("No se pudo calcular la frontera eficiente.")
 
