@@ -4160,10 +4160,10 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-                    # Mostrar herramientas adicionales si están activadas
-        if st.session_state.mostrar_tasas:
-            st.session_state.mostrar_tasas = False  # Reset flag
-            mostrar_tasas_caucion(st.session_state.token_acceso)
+            # Mostrar herramientas adicionales si están activadas
+            if st.session_state.mostrar_tasas:
+                st.session_state.mostrar_tasas = False  # Reset flag
+                mostrar_tasas_caucion(st.session_state.token_acceso)
         elif st.session_state.mostrar_asesor:
             st.session_state.mostrar_asesor = False  # Reset flag
             mostrar_movimientos_asesor()
