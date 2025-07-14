@@ -4341,5 +4341,45 @@ def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_ra
         st.info("No hay datos suficientes para mostrar la evolución de pesos.")
 # --- FIN FUNCIONES ROBUSTAS ---
 
+def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
+    """
+    Selecciona aleatoriamente tickers de los paneles seleccionados, descarga sus series históricas y devuelve:
+    - series_historicas: dict[ticker] -> DataFrame de precios
+    - seleccion_final: dict[panel] -> lista de tickers seleccionados
+    Respeta la cantidad de activos por panel y el capital disponible.
+    """
+    import random
+    import yfinance as yf
+    import pandas as pd
+    series_historicas = {}
+    seleccion_final = {}
+    for panel in paneles_seleccionados:
+        tickers = tickers_por_panel.get(panel, [])
+        if not tickers:
+            continue
+        seleccionados = random.sample(tickers, min(cantidad_activos, len(tickers)))
+        seleccion_final[panel] = seleccionados
+        for ticker in seleccionados:
+            try:
+                # Preferir yfinance para tickers internacionales y Cedears
+                if panel.lower() in ['cedears', 'adrs'] or ticker.isalpha():
+                    df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)[['Close']]
+                    if not df.empty:
+                        df = df.rename(columns={'Close': 'precio'})
+                        df = df.reset_index().rename(columns={'Date': 'fecha'})
+                        series_historicas[ticker] = df
+                else:
+                    # Para acciones locales, usar la API de IOL si es necesario
+                    df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
+                    if df is not None and not df.empty:
+                        series_historicas[ticker] = df
+            except Exception as e:
+                continue
+    # Validar que haya suficientes series
+    total_activos = sum(len(v) for v in seleccion_final.values())
+    if total_activos == 0 or not series_historicas:
+        raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
+    return series_historicas, seleccion_final
+
 if __name__ == "__main__":
     main()
