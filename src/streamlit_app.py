@@ -3192,28 +3192,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 except Exception as e:
                                     st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
                             
-                            # Mostrar evolución temporal del portafolio
-                            st.markdown("#### 📈 Evolución Temporal del Portafolio")
-                            
-                            fig_evolucion = go.Figure()
-                            fig_evolucion.add_trace(go.Scatter(
-                                x=df_portfolio.index,
-                                y=df_portfolio['Portfolio_Total'],
-                                mode='lines',
-                                name='Valor Total del Portafolio',
-                                line=dict(color='#0d6efd', width=2)
-                            ))
-                            
-                            fig_evolucion.update_layout(
-                                title="Evolución del Valor del Portafolio en el Tiempo",
-                                xaxis_title="Fecha",
-                                yaxis_title="Valor del Portafolio ($)",
-                                height=400,
-                                template='plotly_white'
-                            )
-                            
-                            st.plotly_chart(fig_evolucion, use_container_width=True)
-                            
                             # Mostrar contribución de cada activo
                             st.markdown("#### 🥧 Contribución de Activos al Valor Total")
                             
