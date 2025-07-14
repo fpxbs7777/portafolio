@@ -4908,7 +4908,157 @@ def mostrar_rebalanceo_configurable(token_acceso, portafolio, estado_cuenta):
             )
             st.write("Activos seleccionados por panel:", seleccion_final)
             st.write("Series históricas:", series_historicas)
-            # Aquí puedes mostrar los gráficos y análisis como en mostrar_optimizacion_universo_activos
+            # --- NUEVO BLOQUE: Visualización y análisis igual a mostrar_optimizacion_universo_activos ---
+            # Preparar lista de activos para PortfolioManager
+            activos_para_optimizacion = []
+            for panel, simbolos in seleccion_final.items():
+                for simbolo in simbolos:
+                    activos_para_optimizacion.append({
+                        'simbolo': simbolo,
+                        'mercado': 'BCBA',
+                        'tipo': panel
+                    })
+            if activos_para_optimizacion:
+                st.markdown("#### 🚀 Optimización del Universo Seleccionado (Rebalanceo)")
+                fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+                fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
+                manager_universo = PortfolioManager(
+                    activos_para_optimizacion,
+                    token_acceso,
+                    fecha_desde_str,
+                    fecha_hasta_str
+                )
+                if manager_universo.load_data():
+                    estrategia_universo = st.selectbox(
+                        "Estrategia de Optimización:",
+                        options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
+                        format_func=lambda x: {
+                            'markowitz': 'Optimización de Markowitz',
+                            'equi-weight': 'Pesos Iguales',
+                            'min-variance-l1': 'Mínima Varianza L1',
+                            'min-variance-l2': 'Mínima Varianza L2',
+                            'long-only': 'Solo Posiciones Largas'
+                        }[x],
+                        key="estrategia_rebalanceo"
+                    )
+                    target_return_universo = st.number_input(
+                        "Retorno Objetivo (anual):",
+                        min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+                        help="Solo aplica para estrategia Markowitz",
+                        key="target_return_rebalanceo"
+                    )
+                    show_frontier_universo = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier_rebalanceo")
+                    ejecutar_optimizacion_universo = st.button("🚀 Optimizar Universo Seleccionado (Rebalanceo)", key="btn_opt_rebalanceo")
+                    ejecutar_frontier_universo = st.button("📈 Calcular Frontera Eficiente del Universo (Rebalanceo)", key="btn_frontier_rebalanceo")
+                    if ejecutar_optimizacion_universo:
+                        use_target = target_return_universo if estrategia_universo == 'markowitz' else None
+                        portfolio_result_universo = manager_universo.compute_portfolio(
+                            strategy=estrategia_universo,
+                            target_return=use_target
+                        )
+                        if portfolio_result_universo:
+                            st.success("✅ Optimización del universo completada")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("#### 📊 Pesos Optimizados del Universo")
+                                if portfolio_result_universo.dataframe_allocation is not None:
+                                    weights_df_universo = portfolio_result_universo.dataframe_allocation.copy()
+                                    weights_df_universo['Peso (%)'] = weights_df_universo['weights'] * 100
+                                    weights_df_universo = weights_df_universo.sort_values('Peso (%)', ascending=False)
+                                    st.dataframe(weights_df_universo[['rics', 'Peso (%)']], use_container_width=True)
+                            with col2:
+                                st.markdown("#### 📈 Métricas del Portafolio Optimizado")
+                                metricas_universo = portfolio_result_universo.get_metrics_dict()
+                                col_a, col_b = st.columns(2)
+                                with col_a:
+                                    st.metric("Retorno Anual", f"{metricas_universo['Annual Return']:.2%}")
+                                    st.metric("Volatilidad Anual", f"{metricas_universo['Annual Volatility']:.2%}")
+                                    st.metric("Ratio de Sharpe", f"{metricas_universo['Sharpe Ratio']:.4f}")
+                                    st.metric("VaR 95%", f"{metricas_universo['VaR 95%']:.4f}")
+                                with col_b:
+                                    st.metric("Skewness", f"{metricas_universo['Skewness']:.4f}")
+                                    st.metric("Kurtosis", f"{metricas_universo['Kurtosis']:.4f}")
+                                    st.metric("JB Statistic", f"{metricas_universo['JB Statistic']:.4f}")
+                                    normalidad_universo = "✅ Normal" if metricas_universo['Is Normal'] else "❌ No Normal"
+                                    st.metric("Normalidad", normalidad_universo)
+                                if portfolio_result_universo.returns is not None:
+                                    st.markdown("#### 📊 Distribución de Retornos del Universo Optimizado")
+                                    fig_universo = portfolio_result_universo.plot_histogram_streamlit(
+                                        title="Distribución de Retornos del Universo Optimizado"
+                                    )
+                                    st.plotly_chart(fig_universo, use_container_width=True)
+                                if portfolio_result_universo.weights is not None:
+                                    st.markdown("#### 🥧 Distribución de Pesos del Universo")
+                                    if portfolio_result_universo.dataframe_allocation is not None:
+                                        fig_pie_universo = go.Figure(data=[go.Pie(
+                                            labels=portfolio_result_universo.dataframe_allocation['rics'],
+                                            values=portfolio_result_universo.weights,
+                                            textinfo='label+percent',
+                                            hole=0.4,
+                                            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                        )])
+                                    else:
+                                        fig_pie_universo = go.Figure(data=[go.Pie(
+                                            labels=[f'Activo {i+1}' for i in range(len(portfolio_result_universo.weights))],
+                                            values=portfolio_result_universo.weights,
+                                            textinfo='label+percent',
+                                            hole=0.4,
+                                            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                        )])
+                                    fig_pie_universo.update_layout(
+                                        title="Distribución Optimizada del Universo de Activos",
+                                        template='plotly_white'
+                                    )
+                                    st.plotly_chart(fig_pie_universo, use_container_width=True)
+                    if ejecutar_frontier_universo and show_frontier_universo:
+                        portfolios_frontier, returns_frontier, volatilities_frontier = manager_universo.compute_efficient_frontier(
+                            target_return=target_return_universo, include_min_variance=True
+                        )
+                        if portfolios_frontier and returns_frontier and volatilities_frontier:
+                            st.success("✅ Frontera eficiente del universo calculada")
+                            fig_frontier_universo = go.Figure()
+                            fig_frontier_universo.add_trace(go.Scatter(
+                                x=volatilities_frontier, y=returns_frontier,
+                                mode='lines+markers',
+                                name='Frontera Eficiente del Universo',
+                                line=dict(color='#0d6efd', width=3),
+                                marker=dict(size=6)
+                            ))
+                            colors_frontier = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+                            labels_frontier = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
+                            for i, (label, portfolio) in enumerate(portfolios_frontier.items()):
+                                if portfolio is not None:
+                                    fig_frontier_universo.add_trace(go.Scatter(
+                                        x=[portfolio.volatility_annual],
+                                        y=[portfolio.return_annual],
+                                        mode='markers',
+                                        name=labels_frontier[i] if i < len(labels_frontier) else label,
+                                        marker=dict(size=12, color=colors_frontier[i % len(colors_frontier)])
+                                    ))
+                            fig_frontier_universo.update_layout(
+                                title='Frontera Eficiente del Universo de Activos',
+                                xaxis_title='Volatilidad Anual',
+                                yaxis_title='Retorno Anual',
+                                showlegend=True,
+                                template='plotly_white',
+                                height=500
+                            )
+                            st.plotly_chart(fig_frontier_universo, use_container_width=True)
+                            comparison_data_frontier = []
+                            for label, portfolio in portfolios_frontier.items():
+                                if portfolio is not None:
+                                    comparison_data_frontier.append({
+                                        'Estrategia': label,
+                                        'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                        'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                        'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                        'VaR 95%': f"{portfolio.var_95:.4f}",
+                                        'Skewness': f"{portfolio.skewness:.4f}",
+                                        'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                    })
+                            if comparison_data_frontier:
+                                df_comparison_frontier = pd.DataFrame(comparison_data_frontier)
+                                st.dataframe(df_comparison_frontier, use_container_width=True)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
