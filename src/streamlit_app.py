@@ -618,6 +618,53 @@ def obtener_fondos_comunes(token_portador):
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
 
+def obtener_valor_fci_actual(token_portador, simbolo_fci):
+    """
+    Obtiene el valor actual de un Fondo Común de Inversión específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo_fci (str): Símbolo del FCI
+        
+    Returns:
+        float: Valor de la cuota parte o None si no se puede obtener
+    """
+    try:
+        # Intentar obtener el valor desde la API específica del FCI
+        url_fci = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo_fci}/Cotizacion"
+        headers = {'Authorization': f'Bearer {token_portador}'}
+        response = requests.get(url_fci, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            fci_data = response.json()
+            
+            # Buscar el valor de cuota en diferentes campos posibles
+            campos_valor = [
+                'ultimoValorCuotaParte', 'valorCuotaParte', 'valorCuota', 
+                'ultimoOperado', 'valorCuotaActual', 'ultimoValorCuota'
+            ]
+            
+            for campo in campos_valor:
+                if campo in fci_data and fci_data[campo] is not None:
+                    try:
+                        valor = float(fci_data[campo])
+                        if valor > 0:
+                            print(f"FCI {simbolo_fci}: Valor obtenido desde API[{campo}] = {valor}")
+                            return valor
+                    except (ValueError, TypeError):
+                        continue
+            
+            print(f"FCI {simbolo_fci}: No se encontró valor válido en la respuesta API")
+            return None
+            
+        else:
+            print(f"FCI {simbolo_fci}: Error HTTP {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"Error obteniendo valor FCI {simbolo_fci}: {str(e)}")
+        return None
+
 
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
@@ -912,17 +959,24 @@ class manager:
         self.synchronise_timeseries()
         # Calcular retornos logarítmicos
         returns_matrix = {}
-        for ric in self.rics:
-            if ric in self.timeseries and self.timeseries[ric] is not None:
-                prices = self.timeseries[ric]
-                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+        if self.timeseries is not None:
+            for ric in self.rics:
+                if ric in self.timeseries and self.timeseries[ric] is not None:
+                    prices = self.timeseries[ric]
+                    returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
         
         # Convertir a DataFrame para alinear fechas
         self.returns = pd.DataFrame(returns_matrix)
         
         # Calcular matriz de covarianza y retornos medios
-        self.cov_matrix = self.returns.cov() * 252  # Anualizar
-        self.mean_returns = self.returns.mean() * 252  # Anualizar
+        if not self.returns.empty:
+            self.cov_matrix = self.returns.cov() * 252  # Anualizar
+            self.mean_returns = self.returns.mean() * 252  # Anualizar
+        else:
+            # Crear matrices por defecto si no hay datos
+            n_assets = len(self.rics)
+            self.cov_matrix = np.eye(n_assets) * 0.1  # Matriz de identidad con volatilidad del 10%
+            self.mean_returns = pd.Series([0.05] * n_assets, index=self.rics)  # Retorno del 5%
         
         return self.cov_matrix, self.mean_returns
 
@@ -1750,7 +1804,12 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             'pl_esperado_min': 0,
             'pl_esperado_max': 0,
             'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
-            'riesgo_anual': 0
+            'riesgo_anual': 0,
+            'alpha': 0,
+            'beta': 0,
+            'r_cuadrado': 0,
+            'tracking_error': 0,
+            'information_ratio': 0
         }
     else:
         print(f"\nMétricas calculadas para {len(metricas_activos)} activos")
@@ -1911,11 +1970,40 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     if 'observations' in alpha_beta_metrics:
         resultados['observaciones'] = alpha_beta_metrics['observations']
     
+    # Asegurar que todas las claves necesarias estén presentes
+    claves_requeridas = {
+        'concentracion': 0,
+        'std_dev_activo': 0,
+        'retorno_esperado_anual': 0,
+        'pl_esperado_min': 0,
+        'pl_esperado_max': 0,
+        'probabilidades': {'perdida': 0, 'ganancia': 0, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
+        'riesgo_anual': 0,
+        'alpha': 0,
+        'beta': 0,
+        'r_cuadrado': 0,
+        'tracking_error': 0,
+        'information_ratio': 0
+    }
+    
+    # Asegurar que todas las claves estén presentes
+    for clave, valor_por_defecto in claves_requeridas.items():
+        if clave not in resultados:
+            resultados[clave] = valor_por_defecto
+    
     return resultados
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
+    
+    # Crear tabs para organizar mejor la información
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Resumen General", 
+        "⚖️ Análisis de Riesgo", 
+        "📈 Proyecciones", 
+        "📋 Detalle de Activos"
+    ])
     
     activos = portafolio.get('activos', [])
     datos_activos = []
@@ -1958,32 +2046,52 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0 and cantidad and ("fci" in tipo.lower() or "fondo" in tipo.lower()):
                 campos_valor_cuota = [
                     'valorCuota', 'valorCuotaparte', 'valorCuotaParte', 'ultimoValorCuotaParte',
-                    'valor_cuota', 'valor_cuotaparte', 'valor_cuotaparte_ultimo'
+                    'valor_cuota', 'valor_cuotaparte', 'valor_cuotaparte_ultimo', 'valorCuotaParte',
+                    'ultimoValorCuota', 'valorCuotaUltimo', 'valorCuotaActual'
                 ]
                 valor_cuota = 0
+                
+                # Buscar en el activo primero
                 for campo in campos_valor_cuota:
                     if campo in activo and activo[campo] is not None:
                         try:
                             valor = float(activo[campo])
                             if valor > 0:
                                 valor_cuota = valor
+                                print(f"FCI {simbolo}: Valor cuota encontrado en activo[{campo}] = {valor}")
                                 break
                         except (ValueError, TypeError):
                             continue
-                    if campo in titulo and titulo[campo] is not None:
-                        try:
-                            valor = float(titulo[campo])
-                            if valor > 0:
-                                valor_cuota = valor
-                                break
-                        except (ValueError, TypeError):
-                            continue
-                if valor_cuota > 0:
+                
+                # Si no se encontró, buscar en el título
+                if valor_cuota == 0:
+                    for campo in campos_valor_cuota:
+                        if campo in titulo and titulo[campo] is not None:
+                            try:
+                                valor = float(titulo[campo])
+                                if valor > 0:
+                                    valor_cuota = valor
+                                    print(f"FCI {simbolo}: Valor cuota encontrado en titulo[{campo}] = {valor}")
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                
+                # Si aún no se encontró, intentar obtener el valor actual vía API
+                if valor_cuota == 0:
+                    valor_cuota = obtener_valor_fci_actual(token_portador, simbolo)
+                    if valor_cuota is not None:
+                        print(f"FCI {simbolo}: Valor cuota obtenido vía función especializada = {valor_cuota}")
+                
+                # Calcular la valuación final
+                if valor_cuota is not None and valor_cuota > 0:
                     try:
                         cantidad_num = float(cantidad)
                         valuacion = cantidad_num * valor_cuota
-                    except (ValueError, TypeError):
-                        pass
+                        print(f"FCI {simbolo}: Valuación calculada = {cantidad_num} * {valor_cuota} = {valuacion}")
+                    except (ValueError, TypeError) as e:
+                        print(f"Error calculando valuación FCI {simbolo}: {str(e)}")
+                else:
+                    print(f"FCI {simbolo}: No se pudo obtener valor de cuota")
 
             if valuacion == 0 and cantidad:
                 campos_precio = [
@@ -2058,131 +2166,177 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General
-        cols = st.columns(4)
-        cols[0].metric("Total de Activos", len(datos_activos))
-        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        try:
+            metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
+            if metricas is None:
+                st.warning("⚠️ No se pudieron calcular las métricas del portafolio")
+                metricas = {}
+        except Exception as e:
+            st.error(f"❌ Error al calcular métricas: {str(e)}")
+            metricas = {}
         
-        if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
-            cols = st.columns(3)
-            
-            # Mostrar concentración como porcentaje
-            concentracion_pct = metricas['concentracion'] * 100
-            cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.1f}%",
-                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
-            
-            # Mostrar volatilidad como porcentaje anual
-            volatilidad_pct = metricas['std_dev_activo'] * 100
-            cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.1f}%",
-                         help="Riesgo medido como desviación estándar de retornos anuales")
-            
-            # Nivel de concentración con colores
-            if metricas['concentracion'] < 0.3:
-                concentracion_status = "🟢 Baja"
-            elif metricas['concentracion'] < 0.6:
-                concentracion_status = "🟡 Media"
-            else:
-                concentracion_status = "🔴 Alta"
-                
-            cols[2].metric("Nivel Concentración", concentracion_status)
-            
-            # Proyecciones
-            st.subheader("📈 Proyecciones de Rendimiento")
-            cols = st.columns(3)
-            
-            # Mostrar retornos como porcentaje del portafolio
-            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-            cols[0].metric("Retorno Esperado Anual", 
-                         f"{retorno_anual_pct:+.1f}%",
-                         help="Retorno anual esperado basado en datos históricos")
-            
-            # Mostrar escenarios como porcentaje del portafolio
-            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
-            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
-            
-            cols[1].metric("Escenario Optimista (95%)", 
-                         f"{optimista_pct:+.1f}%",
-                         help="Mejor escenario con 95% de confianza")
-            cols[2].metric("Escenario Pesimista (5%)", 
-                         f"{pesimista_pct:+.1f}%",
-                         help="Peor escenario con 5% de confianza")
-            
-            # Probabilidades
-            st.subheader("🎯 Probabilidades")
+        # Tab 1: Resumen General
+        with tab1:
+            st.subheader("📊 Información General")
             cols = st.columns(4)
-            probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+            cols[0].metric("Total de Activos", len(datos_activos))
+            cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+            cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
+            cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+            
+            # Gráfico de distribución por tipo
+            if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
+                st.subheader("📊 Distribución por Tipo de Activo")
+                tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
+                fig_pie = go.Figure(data=[go.Pie(
+                    labels=tipo_stats['Tipo'],
+                    values=tipo_stats['Valuación'],
+                    textinfo='label+percent',
+                    hole=0.4,
+                    marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+                )])
+                fig_pie.update_layout(
+                    title="Distribución por Tipo",
+                    height=400
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Tab 2: Análisis de Riesgo
+        with tab2:
+            if metricas and isinstance(metricas, dict):
+                st.subheader("⚖️ Análisis de Riesgo")
+                cols = st.columns(3)
+                
+                # Mostrar concentración como porcentaje
+                concentracion = metricas.get('concentracion', 0)
+                concentracion_pct = concentracion * 100
+                cols[0].metric("Concentración", 
+                             f"{concentracion_pct:.1f}%",
+                             help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+                
+                # Mostrar volatilidad como porcentaje anual
+                volatilidad = metricas.get('std_dev_activo', 0)
+                volatilidad_pct = volatilidad * 100
+                cols[1].metric("Volatilidad Anual", 
+                             f"{volatilidad_pct:.1f}%",
+                             help="Riesgo medido como desviación estándar de retornos anuales")
+                
+                # Nivel de concentración con colores
+                if concentracion < 0.3:
+                    concentracion_status = "🟢 Baja"
+                elif concentracion < 0.6:
+                    concentracion_status = "🟡 Media"
+                else:
+                    concentracion_status = "🔴 Alta"
+                    
+                cols[2].metric("Nivel Concentración", concentracion_status)
+                
+                # Probabilidades
+                st.subheader("🎯 Probabilidades")
+                cols = st.columns(4)
+                probs = metricas.get('probabilidades', {})
+                cols[0].metric("Ganancia", f"{probs.get('ganancia', 0)*100:.1f}%")
+                cols[1].metric("Pérdida", f"{probs.get('perdida', 0)*100:.1f}%")
+                cols[2].metric("Ganancia >10%", f"{probs.get('ganancia_mayor_10', 0)*100:.1f}%")
+                cols[3].metric("Pérdida >10%", f"{probs.get('perdida_mayor_10', 0)*100:.1f}")
+                
+                # Recomendaciones de riesgo
+                st.subheader("💡 Recomendaciones de Riesgo")
+                if concentracion > 0.5:
+                    st.warning("""
+                    **⚠️ Portafolio Altamente Concentrado**  
+                    Considere diversificar sus inversiones para reducir el riesgo.
+                    """)
+                elif concentracion > 0.25:
+                    st.info("""
+                    **ℹ️ Concentración Moderada**  
+                    Podría mejorar su diversificación para optimizar el riesgo.
+                    """)
+                else:
+                    st.success("""
+                    **✅ Buena Diversificación**  
+                    Su portafolio está bien diversificado.
+                    """)
+                
+                ratio_riesgo_retorno = metricas.get('retorno_esperado_anual', 0) / metricas.get('riesgo_anual', 1) if metricas.get('riesgo_anual', 0) > 0 else 0
+                if ratio_riesgo_retorno > 0.5:
+                    st.success("""
+                    **✅ Buen Balance Riesgo-Retorno**  
+                    La relación entre riesgo y retorno es favorable.
+                    """)
+                else:
+                    st.warning("""
+                    **⚠️ Revisar Balance Riesgo-Retorno**  
+                    El riesgo podría ser alto en relación al retorno esperado.
+                    """)
+        
+        # Tab 3: Proyecciones
+        with tab3:
+            if metricas and isinstance(metricas, dict):
+                st.subheader("📈 Proyecciones de Rendimiento")
+                cols = st.columns(3)
+                
+                # Mostrar retornos como porcentaje del portafolio
+                retorno_esperado = metricas.get('retorno_esperado_anual', 0)
+                retorno_anual_pct = retorno_esperado * 100
+                cols[0].metric("Retorno Esperado Anual", 
+                             f"{retorno_anual_pct:+.1f}%",
+                             help="Retorno anual esperado basado en datos históricos")
+                
+                # Mostrar escenarios como porcentaje del portafolio
+                pl_max = metricas.get('pl_esperado_max', 0)
+                pl_min = metricas.get('pl_esperado_min', 0)
+                optimista_pct = (pl_max / valor_total) * 100 if valor_total > 0 else 0
+                pesimista_pct = (pl_min / valor_total) * 100 if valor_total > 0 else 0
+                
+                cols[1].metric("Escenario Optimista (95%)", 
+                             f"{optimista_pct:+.1f}%",
+                             help="Mejor escenario con 95% de confianza")
+                cols[2].metric("Escenario Pesimista (5%)", 
+                             f"{pesimista_pct:+.1f}%",
+                             help="Peor escenario con 5% de confianza")
             
 
         
-        # Gráficos
-        st.subheader("📊 Distribución de Activos")
-        
-        if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-            tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
-            fig_pie = go.Figure(data=[go.Pie(
-                labels=tipo_stats['Tipo'],
-                values=tipo_stats['Valuación'],
-                textinfo='label+percent',
-                hole=0.4,
-                marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
-            )])
-            fig_pie.update_layout(
-                title="Distribución por Tipo",
-                height=400
+        # Tab 4: Detalle de Activos
+        with tab4:
+            st.subheader("📋 Detalle de Activos")
+            df_display = df_activos.copy()
+            df_display['Valuación'] = df_display['Valuación'].apply(
+                lambda x: f"${x:,.2f}" if x > 0 else "N/A"
             )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
+            df_display = df_display.sort_values('Peso (%)', ascending=False)
+            
+            st.dataframe(df_display, use_container_width=True, height=400)
         
         # Histograma del portafolio total valorizado
         st.subheader("📈 Histograma del Portafolio Total Valorizado")
         
         # Configuración del horizonte de inversión
-        col1, col2 = st.columns(2)
-        with col1:
-            horizonte_inversion = st.selectbox(
-                "Horizonte de Inversión:",
-                options=[
-                    ("30 días", 30),
-                    ("60 días", 60),
-                    ("90 días", 90),
-                    ("180 días", 180),
-                    ("365 días", 365),
-                    ("730 días", 730),
-                    ("1095 días", 1095)
-                ],
-                format_func=lambda x: x[0],
-                index=3,  # Por defecto 180 días
-                help="Seleccione el período de tiempo para el análisis de retornos"
-            )
-        
-        with col2:
-            intervalo_analisis = st.selectbox(
-                "Intervalo de Análisis:",
-                options=[
-                    ("Diario", "D"),
-                    ("Semanal", "W"),
-                    ("Mensual", "M"),
-                    ("Trimestral", "Q")
-                ],
-                format_func=lambda x: x[0],
-                index=0,  # Por defecto diario
-                help="Frecuencia de los datos para el análisis"
-            )
+        horizonte_inversion = st.selectbox(
+            "Horizonte de Inversión:",
+            options=[
+                ("30 días", 30),
+                ("60 días", 60),
+                ("90 días", 90),
+                ("180 días", 180),
+                ("365 días", 365),
+                ("730 días", 730),
+                ("1095 días", 1095)
+            ],
+            format_func=lambda x: x[0],
+            index=3,  # Por defecto 180 días
+            help="Seleccione el período de tiempo para el análisis de retornos"
+        )
         
         # Extraer valores de las tuplas
         dias_analisis = horizonte_inversion[1]
-        frecuencia = intervalo_analisis[1]
+        frecuencia = "D"  # Siempre diario ya que es lo único disponible en la API
+        
+        # Información sobre la frecuencia de datos
+        st.info("ℹ️ **Nota**: Los datos se obtienen en frecuencia diaria desde la API de IOL")
         
         with st.spinner(f"Obteniendo series históricas y calculando valorización del portafolio para {dias_analisis} días..."):
             try:
@@ -2616,17 +2770,23 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         valuacion = activo.get('Valuación', 0)
                                         
                                         # Identificar FCIs, bonos y otros instrumentos de renta fija
-                                        if any(keyword in tipo for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra']):
-                                            instrumentos_renta_fija.append({
-                                                'simbolo': simbolo,
-                                                'tipo': tipo,
-                                                'valuacion': valuacion,
-                                                'peso': valuacion / valor_total if valor_total > 0 else 0
-                                            })
-                                            total_renta_fija += valuacion
+                                        es_renta_fija = False
                                         
-                                        # También identificar por símbolo (FCIs suelen tener símbolos específicos)
-                                        elif any(keyword in simbolo.lower() for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg']):
+                                        # Verificar por tipo de activo
+                                        if any(keyword in tipo.lower() for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra', 'caucion']):
+                                            es_renta_fija = True
+                                        
+                                        # Verificar por símbolo (FCIs y bonos suelen tener símbolos específicos)
+                                        elif any(keyword in simbolo.lower() for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg', 'adba', 'prcp', 'caucion']):
+                                            es_renta_fija = True
+                                        
+                                        # Verificar por descripción
+                                        elif 'descripcion' in activo:
+                                            descripcion = activo['descripcion'].lower()
+                                            if any(keyword in descripcion for keyword in ['fondo', 'fci', 'bono', 'caucion']):
+                                                es_renta_fija = True
+                                        
+                                        if es_renta_fija:
                                             instrumentos_renta_fija.append({
                                                 'simbolo': simbolo,
                                                 'tipo': tipo,
@@ -2634,9 +2794,29 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                                 'peso': valuacion / valor_total if valor_total > 0 else 0
                                             })
                                             total_renta_fija += valuacion
+                                            print(f"Renta fija identificada: {simbolo} ({tipo}) - Valuación: ${valuacion:,.2f}")
                                     
                                     if instrumentos_renta_fija:
                                         st.success(f"✅ Se identificaron {len(instrumentos_renta_fija)} instrumentos de renta fija")
+                                        
+                                        # Mostrar información detallada de cada instrumento
+                                        st.markdown("#### 📋 Detalle de Instrumentos de Renta Fija")
+                                        
+                                        for instrumento in instrumentos_renta_fija:
+                                            simbolo = instrumento['simbolo']
+                                            tipo = instrumento['tipo']
+                                            valuacion = instrumento['valuacion']
+                                            peso = instrumento['peso']
+                                            
+                                            # Obtener información adicional si es un FCI
+                                            if 'fci' in tipo.lower() or 'fondo' in tipo.lower():
+                                                valor_actual = obtener_valor_fci_actual(token_portador, simbolo)
+                                                if valor_actual:
+                                                    st.info(f"**{simbolo}** ({tipo}): ${valuacion:,.2f} - Valor cuota actual: ${valor_actual:.4f}")
+                                                else:
+                                                    st.warning(f"**{simbolo}** ({tipo}): ${valuacion:,.2f} - No se pudo obtener valor actual")
+                                            else:
+                                                st.info(f"**{simbolo}** ({tipo}): ${valuacion:,.2f}")
                                             
                                         # Mostrar tabla de instrumentos de renta fija
                                         df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
@@ -2651,6 +2831,44 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         
                                         # Calcular rendimiento extra asegurado
                                         peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
+                                        
+                                        # Botón para recalcular valuación de FCIs
+                                        if st.button("🔄 Recalcular Valuación de FCIs", type="secondary"):
+                                            st.info("Recalculando valuación de FCIs...")
+                                            total_renta_fija_actualizado = 0
+                                            
+                                            for instrumento in instrumentos_renta_fija:
+                                                simbolo = instrumento['simbolo']
+                                                tipo = instrumento['tipo']
+                                                
+                                                if 'fci' in tipo.lower() or 'fondo' in tipo.lower():
+                                                    # Obtener valor actual del FCI
+                                                    valor_actual = obtener_valor_fci_actual(token_portador, simbolo)
+                                                    if valor_actual:
+                                                        # Buscar la cantidad en los datos originales
+                                                        cantidad = 0
+                                                        for activo in datos_activos:
+                                                            if activo['Símbolo'] == simbolo:
+                                                                cantidad = float(activo['Cantidad'])
+                                                                break
+                                                        
+                                                        if cantidad > 0:
+                                                            valuacion_actualizada = cantidad * valor_actual
+                                                            instrumento['valuacion'] = valuacion_actualizada
+                                                            total_renta_fija_actualizado += valuacion_actualizada
+                                                            st.success(f"✅ {simbolo}: ${valuacion_actualizada:,.2f} (valor actualizado)")
+                                                        else:
+                                                            total_renta_fija_actualizado += instrumento['valuacion']
+                                                    else:
+                                                        total_renta_fija_actualizado += instrumento['valuacion']
+                                                        st.warning(f"⚠️ {simbolo}: No se pudo obtener valor actual")
+                                                else:
+                                                    total_renta_fija_actualizado += instrumento['valuacion']
+                                            
+                                            # Actualizar total de renta fija
+                                            total_renta_fija = total_renta_fija_actualizado
+                                            peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
+                                            st.success(f"✅ Valuación actualizada: ${total_renta_fija:,.2f}")
                                         
                                         # Estimación de rendimiento extra (basado en tasas típicas)
                                         rendimiento_extra_estimado = {
@@ -2684,6 +2902,41 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         col1.metric("Peso Renta Fija", f"{peso_renta_fija:.1%}")
                                         col2.metric("Rendimiento Extra Estimado", f"{rendimiento_extra_total:.1%}")
                                         col3.metric("Valor Renta Fija", f"${total_renta_fija:,.2f}")
+                                        
+                                        # Mostrar desglose detallado de FCIs
+                                        if st.checkbox("📊 Mostrar desglose detallado de FCIs"):
+                                            st.markdown("#### 📋 Desglose Detallado de FCIs")
+                                            
+                                            fcis_detalle = []
+                                            for instrumento in instrumentos_renta_fija:
+                                                if 'fci' in instrumento['tipo'].lower() or 'fondo' in instrumento['tipo'].lower():
+                                                    simbolo = instrumento['simbolo']
+                                                    tipo = instrumento['tipo']
+                                                    valuacion = instrumento['valuacion']
+                                                    
+                                                    # Obtener cantidad y valor actual
+                                                    cantidad = 0
+                                                    for activo in datos_activos:
+                                                        if activo['Símbolo'] == simbolo:
+                                                            cantidad = float(activo['Cantidad'])
+                                                            break
+                                                    
+                                                    valor_actual = obtener_valor_fci_actual(token_portador, simbolo)
+                                                    
+                                                    fcis_detalle.append({
+                                                        'Símbolo': simbolo,
+                                                        'Tipo': tipo,
+                                                        'Cantidad': f"{cantidad:,.2f}",
+                                                        'Valor Cuota': f"${valor_actual:.4f}" if valor_actual else "N/A",
+                                                        'Valuación': f"${valuacion:,.2f}",
+                                                        'Peso (%)': f"{instrumento['peso']*100:.1f}%"
+                                                    })
+                                            
+                                            if fcis_detalle:
+                                                df_fcis = pd.DataFrame(fcis_detalle)
+                                                st.dataframe(df_fcis, use_container_width=True, height=300)
+                                            else:
+                                                st.info("No se encontraron FCIs en el portafolio")
                                         
                                         # Gráfico de composición por tipo de instrumento
                                         if len(instrumentos_renta_fija) > 1:
@@ -2844,16 +3097,41 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         def obtener_metricas_mercado_activo(token_portador, simbolo, mercado):
                                             """Obtiene métricas de mercado para un activo usando la API correcta de IOL"""
                                             try:
-                                                # Usar el endpoint correcto según la documentación de IOL
-                                                if mercado.upper() == 'BCBA':
-                                                    # Para acciones argentinas
-                                                    url_mercado = f"https://api.invertironline.com/api/v2/BCBA/Titulos/{simbolo}/Cotizacion"
+                                                # Determinar el endpoint correcto basado en el símbolo y mercado
+                                                if mercado.upper() == 'FCI':
+                                                    # Para fondos comunes de inversión
+                                                    url_mercado = f"https://api.invertironline.com/api/v2/Titulos/FCI"
+                                                    # Buscar el FCI específico en la lista
+                                                    headers = {'Authorization': f'Bearer {token_portador}'}
+                                                    response = requests.get(url_mercado, headers=headers, timeout=10)
+                                                    if response.status_code == 200:
+                                                        fci_list = response.json()
+                                                        fci_data = next((fci for fci in fci_list if fci.get('simbolo') == simbolo), None)
+                                                        if fci_data:
+                                                            ultimo_precio = fci_data.get('ultimoOperado', 0)
+                                                            volumen = fci_data.get('volumen', 0)
+                                                            return {
+                                                                'volumen': volumen,
+                                                                'monto_operado': volumen * ultimo_precio if ultimo_precio > 0 else 0,
+                                                                'spread': 0.001,  # Spread típico para FCIs
+                                                                'liquidez': 0.9,  # Alta liquidez para FCIs
+                                                                'ultimo_precio': ultimo_precio,
+                                                                'apertura': ultimo_precio,
+                                                                'maximo': ultimo_precio,
+                                                                'minimo': ultimo_precio
+                                                            }
                                                 elif mercado.upper() in ['NYSE', 'NASDAQ', 'AMEX']:
                                                     # Para acciones estadounidenses
                                                     url_mercado = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                                                elif mercado.upper() == 'BCBA':
+                                                    # Para acciones argentinas
+                                                    url_mercado = f"https://api.invertironline.com/api/v2/BCBA/Titulos/{simbolo}/Cotizacion"
+                                                elif mercado.upper() == 'BONOS':
+                                                    # Para bonos argentinos
+                                                    url_mercado = f"https://api.invertironline.com/api/v2/Bonos/Titulos/{simbolo}/Cotizacion"
                                                 else:
-                                                    # Para otros mercados
-                                                    url_mercado = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                                                    # Intentar con BCBA como fallback
+                                                    url_mercado = f"https://api.invertironline.com/api/v2/BCBA/Titulos/{simbolo}/Cotizacion"
                                                 
                                                 headers = {'Authorization': f'Bearer {token_portador}'}
                                                 response = requests.get(url_mercado, headers=headers, timeout=10)
@@ -2861,40 +3139,55 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                                 if response.status_code == 200:
                                                     data = response.json()
                                                     
-                                                    # Extraer métricas según la estructura de respuesta de IOL
-                                                    volumen = data.get('volumen', 0)
-                                                    ultimo_precio = data.get('ultimoPrecio', 0)
-                                                    apertura = data.get('apertura', 0)
-                                                    maximo = data.get('maximo', 0)
-                                                    minimo = data.get('minimo', 0)
+                                                    # Manejar diferentes estructuras de respuesta
+                                                    if isinstance(data, list) and len(data) > 0:
+                                                        # Si es una lista, tomar el primer elemento
+                                                        data = data[0]
                                                     
-                                                    # Calcular spread aproximado si hay puntas
-                                                    spread = 0
-                                                    if 'puntas' in data:
-                                                        puntas = data['puntas']
-                                                        precio_compra = puntas.get('precioCompra', 0)
-                                                        precio_venta = puntas.get('precioVenta', 0)
-                                                        if precio_compra > 0 and precio_venta > 0:
-                                                            spread = (precio_venta - precio_compra) / precio_compra
+                                                    # Asegurarse de que data es un diccionario
+                                                    if isinstance(data, dict):
+                                                        # Extraer métricas según la estructura de respuesta de IOL
+                                                        volumen = data.get('volumen', 0)
+                                                        ultimo_precio = data.get('ultimoPrecio', data.get('ultimoOperado', 0))
+                                                        apertura = data.get('apertura', ultimo_precio)
+                                                        maximo = data.get('maximo', ultimo_precio)
+                                                        minimo = data.get('minimo', ultimo_precio)
+                                                        
+                                                        # Calcular spread aproximado si hay puntas
+                                                        spread = 0.01  # Spread por defecto
+                                                        if 'puntas' in data:
+                                                            puntas = data['puntas']
+                                                            if isinstance(puntas, dict):
+                                                                precio_compra = puntas.get('precioCompra', 0)
+                                                                precio_venta = puntas.get('precioVenta', 0)
+                                                                if precio_compra > 0 and precio_venta > 0:
+                                                                    spread = (precio_venta - precio_compra) / precio_compra
                                                     
                                                     # Calcular liquidez basada en volumen y precio
-                                                    liquidez = 1.0
+                                                    liquidez = 0.8  # Liquidez por defecto
                                                     if ultimo_precio > 0 and volumen > 0:
                                                         # Liquidez basada en volumen relativo al precio
                                                         liquidez = min(volumen / (ultimo_precio * 1000), 1.0)
                                                     
+                                                    # Asegurar que los valores sean números válidos
+                                                    volumen_val = float(volumen) if volumen is not None else 0
+                                                    ultimo_precio_val = float(ultimo_precio) if ultimo_precio is not None and ultimo_precio > 0 else 0
+                                                    
                                                     return {
-                                                        'volumen': volumen,
-                                                        'monto_operado': volumen * ultimo_precio if ultimo_precio > 0 else 0,
+                                                        'volumen': volumen_val,
+                                                        'monto_operado': volumen_val * ultimo_precio_val,
                                                         'spread': spread,
                                                         'liquidez': liquidez,
-                                                        'ultimo_precio': ultimo_precio,
+                                                        'ultimo_precio': ultimo_precio_val,
                                                         'apertura': apertura,
                                                         'maximo': maximo,
                                                         'minimo': minimo
                                                     }
+                                                else:
+                                                    print(f"Error HTTP {response.status_code} para {simbolo} en {mercado}")
+                                                    
                                             except Exception as e:
-                                                print(f"Error obteniendo métricas para {simbolo}: {str(e)}")
+                                                print(f"Error obteniendo métricas para {simbolo} en {mercado}: {str(e)}")
                                             
                                             # Valores por defecto si no se pueden obtener
                                             return {
@@ -2939,26 +3232,40 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             with st.spinner("Obteniendo métricas de mercado..."):
                                                 for activo_info in activos_exitosos:
                                                     simbolo = activo_info['simbolo']
-                                                    # Determinar mercado basado en el tipo de activo
+                                                    # Determinar mercado basado en el símbolo y tipo de activo
                                                     mercado = 'BCBA'  # Default
                                                     tipo_activo = activo_info.get('tipo', '').lower()
                                                     
-                                                    # Ajustar mercado según el tipo de activo
-                                                    if any(keyword in tipo_activo for keyword in ['nyse', 'nasdaq', 'amex']):
+                                                    # Detectar mercado por símbolo primero
+                                                    simbolo_upper = simbolo.upper()
+                                                    if any(keyword in simbolo_upper for keyword in ['GOOGL', 'INTC', 'NVDA', 'AAPL', 'MSFT', 'AMZN', 'TSLA']):
+                                                        mercado = 'NYSE'  # Acciones estadounidenses conocidas
+                                                    elif any(keyword in simbolo_upper for keyword in ['FCI', 'FONDO', 'ADBA', 'PRCP']):
+                                                        mercado = 'FCI'  # Fondos comunes
+                                                    elif any(keyword in simbolo_upper for keyword in ['AL', 'GD', 'GG', 'BONO']):
+                                                        mercado = 'BONOS'  # Bonos argentinos
+                                                    elif any(keyword in tipo_activo for keyword in ['nyse', 'nasdaq', 'amex']):
                                                         mercado = 'NYSE'  # Para acciones estadounidenses
                                                     elif any(keyword in tipo_activo for keyword in ['fci', 'fondo']):
                                                         mercado = 'FCI'  # Para fondos comunes
                                                     elif any(keyword in tipo_activo for keyword in ['bono', 'titulo']):
-                                                        mercado = 'Bonos'  # Para bonos
+                                                        mercado = 'BONOS'  # Para bonos
                                                     
+                                                    # Intentar obtener métricas con el mercado detectado
                                                     metricas = obtener_metricas_mercado_activo(token_portador, simbolo, mercado)
+                                                    
+                                                    # Si no hay datos, intentar con BCBA como fallback
+                                                    if metricas['ultimo_precio'] == 0 and mercado != 'BCBA':
+                                                        print(f"Reintentando {simbolo} con BCBA...")
+                                                        metricas = obtener_metricas_mercado_activo(token_portador, simbolo, 'BCBA')
+                                                    
                                                     metricas_mercado_totales[simbolo] = metricas
                                                     
                                                     # Mostrar progreso
                                                     if metricas['ultimo_precio'] > 0:
-                                                        st.success(f"✅ {simbolo}: ${metricas['ultimo_precio']:.2f} - Vol: {metricas['volumen']:,.0f}")
+                                                        st.success(f"✅ {simbolo} ({mercado}): ${metricas['ultimo_precio']:.2f} - Vol: {metricas['volumen']:,.0f}")
                                                     else:
-                                                        st.warning(f"⚠️ {simbolo}: Sin datos de mercado")
+                                                        st.warning(f"⚠️ {simbolo} ({mercado}): Sin datos de mercado")
                                         
                                         for _ in range(n_sim):
                                             # 1. Calcular volatilidad esperada
@@ -3113,47 +3420,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 st.error(f"❌ Error generando histograma del portafolio: {str(e)}")
                 st.exception(e)
         
-        # Tabla de activos
-        st.subheader("📋 Detalle de Activos")
-        df_display = df_activos.copy()
-        df_display['Valuación'] = df_display['Valuación'].apply(
-            lambda x: f"${x:,.2f}" if x > 0 else "N/A"
-        )
-        df_display['Peso (%)'] = (df_activos['Valuación'] / valor_total * 100).round(2)
-        df_display = df_display.sort_values('Peso (%)', ascending=False)
-        
-        st.dataframe(df_display, use_container_width=True, height=400)
-        
-        # Recomendaciones
-        st.subheader("💡 Recomendaciones")
-        if metricas:
-            if metricas['concentracion'] > 0.5:
-                st.warning("""
-                **⚠️ Portafolio Altamente Concentrado**  
-                Considere diversificar sus inversiones para reducir el riesgo.
-                """)
-            elif metricas['concentracion'] > 0.25:
-                st.info("""
-                **ℹ️ Concentración Moderada**  
-                Podría mejorar su diversificación para optimizar el riesgo.
-                """)
-            else:
-                st.success("""
-                **✅ Buena Diversificación**  
-                Su portafolio está bien diversificado.
-                """)
-            
-            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
-            if ratio_riesgo_retorno > 0.5:
-                st.success("""
-                **✅ Buen Balance Riesgo-Retorno**  
-                La relación entre riesgo y retorno es favorable.
-                """)
-            else:
-                st.warning("""
-                **⚠️ Revisar Balance Riesgo-Retorno**  
-                El riesgo podría ser alto en relación al retorno esperado.
-                """)
     else:
         st.warning("No se encontraron activos en el portafolio")
 
