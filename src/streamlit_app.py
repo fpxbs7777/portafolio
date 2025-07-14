@@ -1059,8 +1059,12 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
-        # Asegura que self.returns sea un array o serie, no un escalar
-        if self.returns is None or (hasattr(self.returns, '__len__') and len(self.returns) == 0) or (not hasattr(self.returns, '__len__') and not hasattr(self.returns, 'shape')):
+        # Asegura que self.returns sea una secuencia (array, lista, o pandas Series), no un escalar
+        import numpy as np
+        import pandas as pd
+        returns = self.returns
+        # Si es None o vacío
+        if returns is None or (hasattr(returns, '__len__') and len(returns) == 0):
             fig = go.Figure()
             fig.add_annotation(
                 text="No hay datos suficientes para mostrar",
@@ -1069,20 +1073,38 @@ class output:
             )
             fig.update_layout(title=title)
             return fig
-        
+        # Si es un escalar (float, int, numpy.float, numpy.int)
+        if isinstance(returns, (float, int, np.floating, np.integer)):
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        # Si es un array/serie de un solo valor, también evitar graficar
+        if hasattr(returns, '__len__') and len(returns) <= 1:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+
         fig = go.Figure(data=[go.Histogram(
-            x=self.returns,
+            x=returns,
             nbinsx=30,
             name="Retornos del Portafolio",
             marker_color='#0d6efd'
         )])
-        
         # Agregar líneas de métricas importantes
         fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
                      annotation_text=f"Media: {self.mean_daily:.4f}")
         fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
                      annotation_text=f"VaR 95%: {self.var_95:.4f}")
-        
         fig.update_layout(
             title=f"{title}",
             xaxis_title="Retorno",
@@ -1090,7 +1112,6 @@ class output:
             showlegend=False,
             template='plotly_white'
         )
-        
         return fig
 
 def portfolio_variance(x, mtx_var_covar):
