@@ -518,6 +518,89 @@ def obtener_opciones(token_portador, pais):
         st.error(f'Error de conexión al obtener cotizaciones de opciones de {pais}: {str(e)}')
         return None
 
+def obtener_tickers_cauciones(token_portador):
+    """
+    Obtiene los tickers de cauciones disponibles
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        list: Lista de tickers de cauciones
+    """
+    # Usar la función existente de tasas de caución para obtener los símbolos
+    tasas_caucion = obtener_tasas_caucion(token_portador)
+    
+    if tasas_caucion is not None and not tasas_caucion.empty:
+        # Extraer los símbolos de las cauciones
+        tickers = tasas_caucion['simbolo'].tolist() if 'simbolo' in tasas_caucion.columns else []
+        return tickers
+    else:
+        st.error("No se pudieron obtener los tickers de cauciones")
+        return []
+
+def obtener_serie_historica_caucion(token_portador, simbolo, fecha_desde, fecha_hasta):
+    """
+    Obtiene serie histórica de una caución específica
+    
+    Args:
+        token_portador (str): Token de autenticación
+        simbolo (str): Símbolo de la caución
+        fecha_desde (str): Fecha de inicio
+        fecha_hasta (str): Fecha de fin
+        
+    Returns:
+        pd.DataFrame: Serie histórica de la caución
+    """
+    # Para cauciones, usamos un enfoque diferente ya que no tienen series históricas tradicionales
+    # Podemos crear una serie sintética basada en la tasa actual
+    try:
+        # Obtener la tasa actual de la caución
+        tasas_caucion = obtener_tasas_caucion(token_portador)
+        
+        if tasas_caucion is not None and not tasas_caucion.empty:
+            # Buscar la caución específica
+            caución_data = tasas_caucion[tasas_caucion['simbolo'] == simbolo]
+            
+            if not caución_data.empty:
+                # Obtener la tasa actual
+                tasa_actual = caución_data['tasa'].iloc[0] if 'tasa' in caución_data.columns else 0
+                
+                # Crear fechas para el período
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                
+                # Crear serie sintética basada en la tasa (simulación de crecimiento)
+                # Para cauciones, asumimos un crecimiento constante basado en la tasa
+                dias = len(fechas)
+                crecimiento_diario = tasa_actual / 365 / 100  # Convertir tasa anual a diaria
+                
+                # Crear serie de precios sintética
+                precios = [100]  # Precio inicial
+                for i in range(1, dias):
+                    precio_anterior = precios[i-1]
+                    nuevo_precio = precio_anterior * (1 + crecimiento_diario)
+                    precios.append(nuevo_precio)
+                
+                # Crear DataFrame
+                df = pd.DataFrame({
+                    'fecha': fechas,
+                    'ultimoPrecio': precios,
+                    'simbolo': simbolo,
+                    'panel': 'cauciones'
+                })
+                
+                return df
+            else:
+                st.warning(f"No se encontró la caución {simbolo}")
+                return None
+        else:
+            st.error("No se pudieron obtener las tasas de caución")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error al obtener serie histórica de caución {simbolo}: {str(e)}")
+        return None
+
 def calcular_indicadores_tecnicos_avanzados(serie_precios, periodos=[14, 20, 50]):
     """
     Calcula indicadores técnicos avanzados
@@ -731,25 +814,33 @@ def obtener_tickers_por_panel(token_portador, paneles, pais):
     tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
     
     for panel in paneles:
-        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
-        params = {
-            'cotizacionInstrumentoModel.instrumento': panel,
-            'cotizacionInstrumentoModel.pais': pais.lower()
-        }
-        encabezados = obtener_encabezado_autorizacion(token_portador)
-        
-        try:
-            respuesta = requests.get(url, headers=encabezados, params=params, timeout=15)
-            if respuesta.status_code == 200:
-                datos = respuesta.json()
-                tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+        # Manejo especial para cauciones
+        if panel == 'cauciones':
+            tickers = obtener_tickers_cauciones(token_portador)
+            if tickers:
                 tickers_por_panel[panel] = tickers
                 panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
                 tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
-            else:
-                st.warning(f'Error en la solicitud para {panel}: {respuesta.status_code}')
-        except Exception as e:
-            st.error(f'Error al obtener tickers para {panel}: {str(e)}')
+        else:
+            url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+            params = {
+                'cotizacionInstrumentoModel.instrumento': panel,
+                'cotizacionInstrumentoModel.pais': pais.lower()
+            }
+            encabezados = obtener_encabezado_autorizacion(token_portador)
+            
+            try:
+                respuesta = requests.get(url, headers=encabezados, params=params, timeout=15)
+                if respuesta.status_code == 200:
+                    datos = respuesta.json()
+                    tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+                    tickers_por_panel[panel] = tickers
+                    panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
+                    tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
+                else:
+                    st.warning(f'Error en la solicitud para {panel}: {respuesta.status_code}')
+            except Exception as e:
+                st.error(f'Error al obtener tickers para {panel}: {str(e)}')
     
     return tickers_por_panel, tickers_df
 
@@ -772,8 +863,12 @@ def obtener_series_historicas_aleatorias_con_capital(
             seleccionados = []
             
             for simbolo in tickers:
-                mercado = 'BCBA'
-                serie = obtener_serie_historica_iol(bearer_token, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+                # Manejo especial para cauciones
+                if panel == 'cauciones':
+                    serie = obtener_serie_historica_caucion(bearer_token, simbolo, fecha_desde, fecha_hasta)
+                else:
+                    mercado = 'BCBA'
+                    serie = obtener_serie_historica_iol(bearer_token, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
                 
                 if serie is not None and not serie.empty:
                     # Buscar columna de precio
@@ -3850,13 +3945,14 @@ def mostrar_optimizacion_universo_activos(token_acceso):
     st.markdown("#### 🌐 Selección de Universo de Activos")
     
     # Definir paneles disponibles
-    paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
+    paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables', 'cauciones']
     nombres_paneles = {
         'acciones': 'Acciones',
         'cedears': 'CEDEARs',
         'aDRs': 'ADRs',
         'titulosPublicos': 'Títulos Públicos',
-        'obligacionesNegociables': 'Obligaciones Negociables'
+        'obligacionesNegociables': 'Obligaciones Negociables',
+        'cauciones': 'Cauciones'
     }
     
     # Configuración del universo
@@ -3870,6 +3966,16 @@ def mostrar_optimizacion_universo_activos(token_acceso):
             default=['acciones', 'cedears'],
             format_func=lambda x: nombres_paneles.get(x, x)
         )
+        
+        # Información sobre cauciones
+        if 'cauciones' in paneles_seleccionados:
+            st.info("""
+            **💡 Información sobre Cauciones:**
+            - Las cauciones son instrumentos de corto plazo con tasas fijas
+            - Se generan series históricas sintéticas basadas en las tasas actuales
+            - Son ideales para diversificación y estabilidad del portafolio
+            - Las tasas se obtienen en tiempo real desde la API de IOL
+            """)
         
         cantidad_activos = st.number_input(
             "Cantidad de activos por panel:",
@@ -3971,6 +4077,60 @@ def mostrar_optimizacion_universo_activos(token_acceso):
                 
                 df_seleccion = pd.DataFrame(activos_seleccionados)
                 st.dataframe(df_seleccion, use_container_width=True)
+                
+                # Mostrar información específica de cauciones si están incluidas
+                if 'cauciones' in seleccion_final:
+                    st.markdown("#### 🏦 Información de Cauciones Seleccionadas")
+                    
+                    # Obtener tasas actuales de las cauciones seleccionadas
+                    tasas_caucion = obtener_tasas_caucion(token_acceso)
+                    if tasas_caucion is not None and not tasas_caucion.empty:
+                        cauciones_seleccionadas = tasas_caucion[
+                            tasas_caucion['simbolo'].isin(seleccion_final['cauciones'])
+                        ]
+                        
+                        if not cauciones_seleccionadas.empty:
+                            # Mostrar métricas de las cauciones
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                if 'tasa' in cauciones_seleccionadas.columns:
+                                    tasa_promedio = cauciones_seleccionadas['tasa'].mean()
+                                    st.metric("Tasa Promedio", f"{tasa_promedio:.2f}%")
+                            
+                            with col2:
+                                if 'tasa' in cauciones_seleccionadas.columns:
+                                    tasa_maxima = cauciones_seleccionadas['tasa'].max()
+                                    st.metric("Tasa Máxima", f"{tasa_maxima:.2f}%")
+                            
+                            with col3:
+                                if 'tasa' in cauciones_seleccionadas.columns:
+                                    tasa_minima = cauciones_seleccionadas['tasa'].min()
+                                    st.metric("Tasa Mínima", f"{tasa_minima:.2f}%")
+                            
+                            with col4:
+                                st.metric("Cantidad de Cauciones", len(cauciones_seleccionadas))
+                            
+                            # Mostrar tabla detallada de cauciones
+                            columnas_mostrar = ['simbolo', 'tasa']
+                            if 'bid' in cauciones_seleccionadas.columns:
+                                columnas_mostrar.append('bid')
+                            if 'offer' in cauciones_seleccionadas.columns:
+                                columnas_mostrar.append('offer')
+                            
+                            st.dataframe(
+                                cauciones_seleccionadas[columnas_mostrar].rename(columns={
+                                    'simbolo': 'Símbolo',
+                                    'tasa': 'Tasa (%)',
+                                    'bid': 'Bid',
+                                    'offer': 'Offer'
+                                }),
+                                use_container_width=True
+                            )
+                        else:
+                            st.warning("No se encontraron datos de tasas para las cauciones seleccionadas")
+                    else:
+                        st.warning("No se pudieron obtener las tasas de caución")
                 
                 # Calcular portafolios valorizados
                 st.markdown("#### 💰 Análisis de Portafolios")
