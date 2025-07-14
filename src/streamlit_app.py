@@ -3537,7 +3537,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             st.warning(f"No se pudo obtener el ranking sectorial: {e}")
 
     # --- Diagnóstico IA de ciclo económico y sugerencia de sectores ---
-    def diagnostico_ciclo_y_sugerencia(all_variables_data, gemini_api_key):
+    def diagnostico_ciclo_y_sugerencia(all_variables_data, gemini_api_key, sectores_arg=None):
         """
         Usa IA para diagnosticar el ciclo económico y sugerir sectores/activos de Argentina y EEUU.
         """
@@ -3548,17 +3548,32 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             resumen.append(
                 f"{nombre}: Actual={m.get('valor_actual', 0):.2f}, Cambio={m.get('cambio_porcentual', 0):+.1f}%, VolATR={m.get('volatilidad_atr', 0):.2f}%, Tend={m.get('tendencia_direccion', 'N/A')}"
             )
+        # --- Sectores argentinos relevantes ---
+        sectores_arg = sectores_arg or {
+            'Bancos': ['GGAL', 'BMA', 'SUPV', 'BBAR'],
+            'Energía': ['YPFD', 'PAMP', 'CEPU', 'TGSU2'],
+            'Consumo': ['SUPV', 'EDN', 'ALUA'],
+            'Materiales': ['TXAR', 'ALUA'],
+            'Tecnología': ['MELI'],
+            'Servicios Públicos': ['EDN', 'TGSU2', 'CEPU'],
+            'Agro': ['AGRO'],
+            'Telecomunicaciones': ['TECO2'],
+            'Industriales': ['TRAN', 'TGNO4'],
+        }
+        sectores_arg_str = "\n".join([f"- {k}: {', '.join(v)}" for k, v in sectores_arg.items()])
         prompt = f"""
 Actúa como economista jefe. Analiza el siguiente resumen de variables macroeconómicas argentinas y de EEUU:
 
 {chr(10).join(resumen)}
 
-1. Diagnostica el ciclo económico actual de Argentina y global (expansión, recesión, etc.).
-2. Sugiere 2-3 sectores o tipos de activos argentinos y 2-3 de EEUU que suelen rendir mejor en este ciclo, usando factores de Intermarket (ITM) y momentum si es relevante.
-3. Fundamenta brevemente cada sugerencia.
+Sectores argentinos relevantes y sus principales tickers:
+{sectores_arg_str}
 
-Responde en español, en formato claro y ejecutivo. Enumera los sectores sugeridos en una lista separada al final bajo el título "SUGERENCIA DE SECTORES".
-"""
+1. Diagnostica el ciclo económico actual de Argentina y global (expansión, recesión, etc.).
+2. Sugiere 2-3 sectores o tipos de activos argentinos (de la lista) y 2-3 de EEUU que suelen rendir mejor en este ciclo, usando factores de Intermarket (ITM), momentum y variables macro si es relevante.
+3. Fundamenta brevemente cada sugerencia, explicando por qué esos sectores son los más adecuados según el contexto y los factores de ITM.
+
+Responde en español, en formato claro y ejecutivo. Enumera los sectores sugeridos en una lista separada al final bajo el título "SUGERENCIA DE SECTORES ARGENTINA" y otra bajo "SUGERENCIA DE SECTORES EEUU".\n\nEjemplo de formato de respuesta:\n\nDiagnóstico: ...\nExplicación: ...\nSUGERENCIA DE SECTORES ARGENTINA:\n- ...\n- ...\nSUGERENCIA DE SECTORES EEUU:\n- ...\n- ...\n"""
         genai.configure(api_key=gemini_api_key)
         model = genai.GenerativeModel(
             'gemini-1.5-flash',
@@ -3632,23 +3647,37 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
                         }
             except Exception as e:
                 st.warning(f"No se pudieron obtener variables de EEUU: {e}")
-            # Puedes agregar aquí más variables macro de Argentina (reservas, inflación, etc.)
-            # all_variables_data['Reservas'] = {'metrics': {...}}
+            # --- Sectores argentinos relevantes ---
+            sectores_arg = {
+                'Bancos': ['GGAL', 'BMA', 'SUPV', 'BBAR'],
+                'Energía': ['YPFD', 'PAMP', 'CEPU', 'TGSU2'],
+                'Consumo': ['SUPV', 'EDN', 'ALUA'],
+                'Materiales': ['TXAR', 'ALUA'],
+                'Tecnología': ['MELI'],
+                'Servicios Públicos': ['EDN', 'TGSU2', 'CEPU'],
+                'Agro': ['AGRO'],
+                'Telecomunicaciones': ['TECO2'],
+                'Industriales': ['TRAN', 'TGNO4'],
+            }
             with st.spinner("Consultando IA..."):
-                diagnostico = diagnostico_ciclo_y_sugerencia(all_variables_data, st.session_state.GEMINI_API_KEY)
+                diagnostico = diagnostico_ciclo_y_sugerencia(all_variables_data, st.session_state.GEMINI_API_KEY, sectores_arg)
             st.markdown(diagnostico)
             # Extraer sectores sugeridos
             import re
-            sugeridos = []
-            match = re.search(r"SUGERENCIA DE SECTORES\s*[:\-]*\s*(.*)", diagnostico, re.IGNORECASE | re.DOTALL)
-            if match:
-                sugeridos = re.findall(r"(?:\-|\d+\.)\s*([^\n]+)", match.group(1))
-            if sugeridos:
-                st.success(f"Sectores sugeridos por IA: {', '.join(sugeridos)}")
-                st.session_state['sectores_sugeridos_ia'] = sugeridos
-            else:
-                st.session_state['sectores_sugeridos_ia'] = []
-    # --- FIN BLOQUE DIAGNÓSTICO IA ---
+            sugeridos_arg = []
+            sugeridos_usa = []
+            match_arg = re.search(r"SUGERENCIA DE SECTORES ARGENTINA\s*[:\-]*\s*(.*?)(?:SUGERENCIA DE SECTORES EEUU|$)", diagnostico, re.IGNORECASE | re.DOTALL)
+            if match_arg:
+                sugeridos_arg = re.findall(r"(?:\-|\d+\.)\s*([^\n]+)", match_arg.group(1))
+            match_usa = re.search(r"SUGERENCIA DE SECTORES EEUU\s*[:\-]*\s*(.*)", diagnostico, re.IGNORECASE | re.DOTALL)
+            if match_usa:
+                sugeridos_usa = re.findall(r"(?:\-|\d+\.)\s*([^\n]+)", match_usa.group(1))
+            st.session_state['sectores_sugeridos_ia_arg'] = sugeridos_arg
+            st.session_state['sectores_sugeridos_ia_usa'] = sugeridos_usa
+            if sugeridos_arg:
+                st.success(f"Sectores argentinos sugeridos por IA: {', '.join(sugeridos_arg)}")
+            if sugeridos_usa:
+                st.success(f"Sectores EEUU sugeridos por IA: {', '.join(sugeridos_usa)}")
 
     # --- Función auxiliar para calcular drawdown ---
     def calcular_drawdown(serie_valores):
@@ -4215,6 +4244,102 @@ def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
             tickers[panel] = []
             descripciones[panel] = []
     return tickers, descripciones
+
+# --- Función: calcular retornos y covarianza con ventana móvil ---
+def calcular_estadisticas_ventana_movil(precios, ventana=252):
+    """
+    Calcula retornos esperados y matriz de covarianza usando una ventana móvil.
+    precios: DataFrame de precios (columnas=activos, filas=fechas)
+    ventana: días para la ventana móvil (por defecto 1 año)
+    Devuelve: retornos esperados anualizados, covarianza anualizada
+    """
+    retornos = precios.pct_change().dropna()
+    retornos_ventana = retornos.iloc[-ventana:]
+    mean_ret = retornos_ventana.mean() * 252
+    cov = retornos_ventana.cov() * 252
+    return mean_ret, cov
+
+# --- Función: optimización Markowitz (max Sharpe) ---
+def optimizar_markowitz(mean_ret, cov, risk_free_rate=0.0):
+    """
+    Devuelve los pesos óptimos de Markowitz (max Sharpe, long-only)
+    """
+    import numpy as np
+    import scipy.optimize as op
+    n = len(mean_ret)
+    bounds = tuple((0, 1) for _ in range(n))
+    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},)
+    def neg_sharpe(x):
+        port_ret = np.dot(mean_ret, x)
+        port_vol = np.sqrt(np.dot(x, np.dot(cov, x)))
+        if port_vol == 0:
+            return 1e6
+        return -(port_ret - risk_free_rate) / port_vol
+    x0 = np.ones(n) / n
+    res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints)
+    if res.success:
+        return res.x
+    else:
+        return x0
+
+# --- Función: backtest con rebalanceo periódico ---
+def backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+    """
+    Simula la evolución de un portafolio Markowitz con rebalanceo periódico.
+    precios: DataFrame de precios (columnas=activos, filas=fechas)
+    ventana: días para estimar retornos/covarianza
+    rebalanceo: cada cuántos días rebalancear (63 = 3 meses aprox)
+    Devuelve: fechas, valores del portafolio, lista de pesos, fechas de rebalanceo
+    """
+    import numpy as np
+    fechas = precios.index
+    n_activos = precios.shape[1]
+    portafolio_valor = [1.0]
+    pesos_hist = []
+    fechas_reb = []
+    pesos_actual = np.ones(n_activos) / n_activos
+    for i in range(ventana, len(fechas)-1, rebalanceo):
+        precios_window = precios.iloc[i-ventana:i]
+        mean_ret, cov = calcular_estadisticas_ventana_movil(precios_window, ventana)
+        pesos_actual = optimizar_markowitz(mean_ret, cov, risk_free_rate)
+        pesos_hist.append(pesos_actual)
+        fechas_reb.append(fechas[i])
+        # Simular evolución hasta el próximo rebalanceo
+        for j in range(i, min(i+rebalanceo, len(fechas)-1)):
+            ret = (precios.iloc[j+1] / precios.iloc[j] - 1).values
+            portafolio_valor.append(portafolio_valor[-1] * (1 + np.dot(pesos_actual, ret)))
+    # Completar hasta el final con los últimos pesos
+    while len(portafolio_valor) < len(fechas):
+        portafolio_valor.append(portafolio_valor[-1])
+    return fechas, portafolio_valor, pesos_hist, fechas_reb
+
+# --- Función: visualización de backtest y pesos ---
+def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+    """
+    Visualiza la evolución del portafolio Markowitz con rebalanceo periódico.
+    """
+    import plotly.graph_objects as go
+    fechas, portafolio_valor, pesos_hist, fechas_reb = backtest_markowitz(precios, ventana, rebalanceo, risk_free_rate)
+    import streamlit as st
+    st.subheader("📈 Evolución del Portafolio Markowitz (Backtest)")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=fechas, y=portafolio_valor, mode='lines', name='Valor Portafolio'))
+    fig.update_layout(title="Backtest Markowitz con rebalanceo", xaxis_title="Fecha", yaxis_title="Valor acumulado", template="plotly_white")
+    st.plotly_chart(fig, use_container_width=True)
+    # Mostrar evolución de pesos
+    st.subheader("🔄 Evolución de Pesos por Activo")
+    if pesos_hist:
+        import numpy as np
+        activos = precios.columns
+        pesos_array = np.array(pesos_hist)
+        fig2 = go.Figure()
+        for idx, activo in enumerate(activos):
+            fig2.add_trace(go.Scatter(x=fechas_reb, y=pesos_array[:, idx], mode='lines+markers', name=activo))
+        fig2.update_layout(title="Pesos óptimos en cada rebalanceo", xaxis_title="Fecha de rebalanceo", yaxis_title="Peso", template="plotly_white")
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("No hay datos suficientes para mostrar la evolución de pesos.")
+# --- FIN FUNCIONES ROBUSTAS ---
 
 if __name__ == "__main__":
     main()
