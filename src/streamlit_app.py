@@ -3073,10 +3073,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 continue
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
-                cols[0].metric("Retorno Esperado", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
-            cols[1].metric("Riesgo (Volatilidad)", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
+    cols[0].metric("Retorno Esperado", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
+    cols[1].metric("Riesgo (Volatilidad)", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
     cols[2].metric("Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-                cols[3].metric("Concentración", f"{(metricas_actual.get('concentracion',0) or 0)*100:.1f}%")
+    cols[3].metric("Concentración", f"{(metricas_actual.get('concentracion',0) or 0)*100:.1f}%")
 
     st.markdown("---")
     st.subheader("⚙️ Configuración de Universo de Optimización")
@@ -3192,8 +3192,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     cols = st.columns(len(estrategias)+1)
     # Métricas del portafolio actual
     cols[0].metric("Actual: Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-                cols[0].metric("Actual: Retorno", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
-            cols[0].metric("Actual: Riesgo", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
+    cols[0].metric("Actual: Retorno", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
+    cols[0].metric("Actual: Riesgo", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
     for i, (clave, nombre) in enumerate(estrategias):
         res, sharpe, ret = resultados.get(clave, (None, None, None))
         if res:
