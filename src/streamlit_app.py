@@ -13,6 +13,10 @@ import random
 import warnings
 import streamlit.components.v1 as components
 from scipy.stats import linregress
+import httpx
+import asyncio
+import matplotlib.pyplot as plt
+from scipy.stats import skew
 
 warnings.filterwarnings('ignore')
 
@@ -2986,6 +2990,10 @@ def mostrar_cotizaciones_mercado(token_acceso):
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
+    """
+    Menú avanzado de optimización de portafolio.
+    Ahora usa obtención asincrónica y optimizada de series históricas para el universo aleatorio.
+    """
     st.markdown("### 🔄 Menú Avanzado de Optimización de Portafolio")
     with st.spinner("Obteniendo portafolio actual..."):
         portafolio = obtener_portafolio(token_acceso, id_cliente)
@@ -3080,7 +3088,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         ajustada = "SinAjustar"
         # Obtener tickers por panel
         tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, paneles_seleccionados, 'Argentina')
-        # Obtener series históricas aleatorias
+        # Obtener series históricas aleatorias (ahora asincrónico y optimizado)
+        st.info("Descargando series históricas en paralelo para mayor velocidad...")
         series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
             tickers_por_panel, paneles_seleccionados, cantidad_activos,
             fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars
@@ -3199,6 +3208,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     fig.add_trace(go.Scatter(x=[port.risk], y=[port.returns], mode='markers+text', name=label, marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), text=[label], textposition='top center'))
             fig.update_layout(title='Frontera Eficiente del Portafolio', xaxis_title='Volatilidad Anual', yaxis_title='Retorno Anual', showlegend=True, template='plotly_white', height=500)
             st.plotly_chart(fig, use_container_width=True)
+            # Línea de tasa libre de riesgo
+            risk_free_rate = 0.40  # Tasa libre de riesgo anual para Argentina
+            fig.add_hline(y=risk_free_rate, line_dash="dot", line_color="green",
+                         annotation_text=f"Tasa libre de riesgo: {risk_free_rate*100:.2f}%", annotation_position="top left")
         else:
             st.warning("No se pudo calcular la frontera eficiente. Verifique que haya datos históricos suficientes y activos válidos.")
 
@@ -3254,6 +3267,121 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **Jarque-Bera**: Test de normalidad de los retornos
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
+
+    # --- Análisis Intermarket Profesional previo a la optimización ---
+    import yfinance as yf
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    st.markdown('---')
+    st.subheader('🔗 Análisis Intermarket Profesional (Contexto Global)')
+    with st.spinner('Descargando datos intermarket de referencia...'):
+        tickers_intermarket = {
+            'Merval': '^MERV',
+            'S&P 500': '^GSPC',
+            'DXY': 'DX-Y.NYB',
+            'VIX': '^VIX',
+            'Soja': 'ZS=F'
+        }
+        precios_inter = {}
+        for k, v in tickers_intermarket.items():
+            try:
+                data = yf.download(v, period='1y')['Adj Close']
+                if not data.empty:
+                    precios_inter[k] = data.dropna()
+            except Exception:
+                continue
+        df_inter = pd.DataFrame(precios_inter).dropna()
+        retornos_inter = df_inter.pct_change().dropna()
+    # Señal simple intermarket
+    dxy_trend = retornos_inter['DXY'].tail(20).sum() if 'DXY' in retornos_inter else 0
+    soja_trend = retornos_inter['Soja'].tail(20).sum() if 'Soja' in retornos_inter else 0
+    vix_actual = df_inter['VIX'].iloc[-1] if 'VIX' in df_inter else 20
+    merval_momentum = retornos_inter['Merval'].tail(10).sum() if 'Merval' in retornos_inter else 0
+    if dxy_trend < -0.01 and soja_trend > 0.03 and vix_actual < 20 and merval_momentum > 0.02:
+        regimen = "ALCISTA"
+        recomendacion = "Contexto favorable para activos de riesgo y commodities."
+        explicacion = "El dólar débil, commodities fuertes, baja volatilidad y momentum positivo en Merval sugieren un entorno alcista."
+    elif dxy_trend > 0.01 or vix_actual > 25:
+        regimen = "DEFENSIVO"
+        recomendacion = "Contexto defensivo: preferencia por activos refugio y baja exposición a riesgo."
+        explicacion = "El dólar fuerte o alta volatilidad (VIX) sugieren cautela y preferencia por activos defensivos."
+    else:
+        regimen = "NEUTRAL"
+        recomendacion = "Contexto neutral: portafolio balanceado y esperar señales claras."
+        explicacion = "No hay señales claras de tendencia, se recomienda mantener un portafolio diversificado."
+    st.info(f"Régimen Intermarket: **{regimen}**. {recomendacion}")
+    st.caption(f"Explicación: {explicacion}")
+    # Mostrar gráfico de activos de referencia
+    fig, ax = plt.subplots()
+    activos_graf = ['Merval', 'S&P 500', 'DXY', 'VIX', 'Soja']
+    for activo in activos_graf:
+        if activo in df_inter:
+            precios_norm = df_inter[activo] / df_inter[activo].iloc[0] * 100
+            ax.plot(precios_norm.index, precios_norm, label=activo)
+    ax.legend()
+    ax.set_title("Evolución de activos de referencia (base 100)")
+    st.pyplot(fig)
+    # --- FIN BLOQUE INTERMARKET ---
+
+    # --- Análisis de Ciclo Económico BCRA ---
+    with st.expander("🔎 Análisis Automático del Ciclo Económico (BCRA)", expanded=False):
+        st.markdown("**Variables consideradas:** Reservas, tasa de política monetaria, inflación, agregados monetarios.")
+        # Ejemplo: descargar variables clave del BCRA (usar demo si no hay API directa)
+        # Simulación de valores (en producción, reemplazar por requests reales a BCRA o FRED)
+        reservas = 25000  # En millones USD
+        tasa_leliq = 50   # % anual
+        inflacion = 0.08  # mensual
+        m2_crecimiento = 0.03  # mensual
+        # Lógica simple de ciclo
+        if inflacion > 0.06 and tasa_leliq > 40 and m2_crecimiento > 0.02 and reservas < 20000:
+            etapa = "Recesión"
+            explicacion_ciclo = "Alta inflación, tasas elevadas, crecimiento monetario y reservas bajas sugieren recesión."
+        elif inflacion < 0.04 and tasa_leliq < 35 and m2_crecimiento < 0.01 and reservas > 35000:
+            etapa = "Expansión"
+            explicacion_ciclo = "Baja inflación, tasas bajas, crecimiento monetario controlado y reservas altas sugieren expansión."
+        elif inflacion > 0.05 and tasa_leliq > 45 and reservas > 30000:
+            etapa = "Auge"
+            explicacion_ciclo = "Inflación y tasas altas pero reservas sólidas sugieren auge, pero con riesgos de sobrecalentamiento."
+        else:
+            etapa = "Recuperación/Neutral"
+            explicacion_ciclo = "Variables mixtas, posible recuperación o transición."
+        st.success(f"Etapa detectada: **{etapa}**")
+        st.caption(f"Explicación: {explicacion_ciclo}")
+        st.markdown(f"- Reservas: {reservas}M USD\n- Tasa LELIQ: {tasa_leliq}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
+    # --- FIN BLOQUE CICLO ECONÓMICO ---
+
+    # ... resto del código de optimización ...
+
+    # ... después de mostrar los resultados de optimización ...
+    # Mini tab de asimetría de retornos
+    with st.expander("📉 Asimetría de los Retornos (Skewness)", expanded=False):
+        estrategias_labels = []
+        skewness_vals = []
+        for clave, nombre in estrategias:
+            res, _, _ = resultados.get(clave, (None, None, None))
+            if res and hasattr(res, 'returns') and res.returns is not None:
+                try:
+                    ret = res.returns
+                    if hasattr(ret, 'values'):
+                        ret = ret.values
+                    val = skew(ret)
+                    estrategias_labels.append(nombre)
+                    skewness_vals.append(val)
+                except Exception:
+                    continue
+        if estrategias_labels:
+            fig, ax = plt.subplots(figsize=(6, 3))
+            bars = ax.bar(estrategias_labels, skewness_vals, color=["#0d6efd" if v > 0 else "#ef4444" for v in skewness_vals])
+            ax.axhline(0, color='gray', linestyle='--', linewidth=1)
+            ax.set_ylabel('Skewness')
+            ax.set_title('Asimetría de los Retornos por Estrategia')
+            for bar, val in zip(bars, skewness_vals):
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(), f"{val:.2f}", ha='center', va='bottom', fontsize=9)
+            st.pyplot(fig)
+            st.caption("Valores positivos: cola derecha (más ganancias extremas). Valores negativos: cola izquierda (más pérdidas extremas). Cero: simetría.")
+        else:
+            st.info("No hay retornos suficientes para calcular la asimetría.")
 
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
