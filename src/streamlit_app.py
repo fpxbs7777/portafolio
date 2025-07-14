@@ -1465,6 +1465,44 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         """)
 
 
+def mostrar_resumen_portafolio(portafolio, token_acceso):
+    """
+    Muestra un resumen básico del portafolio del cliente.
+    """
+    st.subheader("📈 Resumen del Portafolio")
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.info("El portafolio está vacío.")
+        return
+
+    # Tabla de activos
+    data = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', 'N/A')
+        tipo = titulo.get('tipo', 'N/A')
+        mercado = titulo.get('mercado', 'N/A')
+        cantidad = activo.get('cantidad', 0)
+        valuacion = activo.get('valuacionEnMonedaOriginal') or activo.get('valuacionActual') or activo.get('valorNominalEnMonedaOriginal') or activo.get('valorNominal') or 0
+        data.append({
+            'Símbolo': simbolo,
+            'Tipo': tipo,
+            'Mercado': mercado,
+            'Cantidad': cantidad,
+            'Valuación': valuacion
+        })
+    df = pd.DataFrame(data)
+    st.dataframe(df, use_container_width=True)
+
+    # Pie chart de distribución por tipo
+    if not df.empty and 'Tipo' in df.columns and 'Valuación' in df.columns:
+        tipo_group = df.groupby('Tipo')['Valuación'].sum()
+        if not tipo_group.empty:
+            import plotly.graph_objects as go
+            fig = go.Figure(data=[go.Pie(labels=tipo_group.index, values=tipo_group.values, hole=0.4)])
+            fig.update_layout(title="Distribución por Tipo de Activo", template='plotly_white')
+            st.plotly_chart(fig, use_container_width=True)
+
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
