@@ -4381,5 +4381,50 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
 
+# --- Función robusta para histogramas de retornos ---
+def plot_histogram_streamlit(retornos, title="Distribución de Retornos"):
+    import numpy as np
+    import plotly.graph_objects as go
+    import streamlit as st
+    if retornos is None or len(retornos) == 0 or np.all(np.isnan(retornos)) or np.all(retornos == 0):
+        st.warning("No hay datos suficientes para mostrar el histograma de retornos.")
+        return
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(x=retornos, nbinsx=50))
+    fig.update_layout(title=title, xaxis_title="Retorno", yaxis_title="Frecuencia")
+    st.plotly_chart(fig, use_container_width=True)
+
+# --- Refuerzo en create_professional_chart ---
+def create_professional_chart(data, title, variable_name):
+    if data is None or data.empty or 'Valor' not in data.columns or 'Fecha' not in data.columns:
+        st.warning("No hay datos suficientes para mostrar el gráfico o análisis.")
+        return go.Figure(), 0, 0, 0, 0, 0
+    # ... resto del código original ...
+
+# --- En los tabs de visualización y análisis, antes de graficar o mostrar métricas ---
+# Ejemplo en tab1 (Visualización):
+# (Este patrón debe estar en todos los tabs que muestran gráficos o análisis)
+if analyze_clicked and selected_serie is not None:
+    serie_id = selected_serie.get('Serie ID', '')
+    if serie_id:
+        with st.spinner(f'📊 Obteniendo datos históricos de {selected_var}...'):
+            historical_data = get_historical_data(
+                serie_id, 
+                start_date.strftime('%Y-%m-%d'), 
+                end_date.strftime('%Y-%m-%d')
+            )
+        if not historical_data.empty:
+            fig, current_val, change, change_pct, max_val, min_val = create_professional_chart(
+                historical_data, 
+                f"Evolución de {selected_var}", 
+                selected_var
+            )
+            # ... mostrar métricas y gráfico ...
+        else:
+            st.warning("⚠️ No se encontraron datos históricos para esta variable en el período seleccionado.")
+    else:
+        st.error("❌ Serie ID no disponible para esta variable.")
+# Repetir patrón en los otros tabs y funciones de análisis.
+
 if __name__ == "__main__":
     main()
