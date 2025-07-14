@@ -4592,7 +4592,7 @@ def mostrar_optimizacion_universo_activos(token_acceso):
                                         # Tabla comparativa de portafolios del universo
                                         st.markdown("#### 📊 Comparación de Estrategias del Universo")
                                         comparison_data_frontier = []
-                                        for label, portfolio in portfolios_frontier.items()):
+                                        for label, portfolio in portfolios_frontier.items():
                                             if portfolio is not None:
                                                 comparison_data_frontier.append({
                                                     'Estrategia': label,
