@@ -583,7 +583,7 @@ def procesar_respuesta_historico(data, tipo_activo):
                 except (ValueError, AttributeError) as e:
                     continue
             
-            if len(precios) > 0 and len(fechas) > 0:
+            if precios and fechas:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
                 # Eliminar duplicados manteniendo el último
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
@@ -713,7 +713,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                     print(f"  - Error inesperado al procesar item: {e}")
                     continue
             
-            if len(fechas) > 0 and len(precios) > 0:
+            if fechas and precios:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
                 # Eliminar duplicados manteniendo el último
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
@@ -813,7 +813,7 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
                 except (ValueError, TypeError, AttributeError) as e:
                     continue
             
-            if len(fechas) > 0 and len(precios) > 0:
+            if fechas and precios:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
@@ -1019,7 +1019,7 @@ class manager:
 
 class output:
     def __init__(self, returns, notional):
-        self.returns = returns  # <- Mantener la serie de retornos diarios
+        self.returns = returns
         self.notional = notional
         self.mean_daily = np.mean(returns)
         self.volatility_daily = np.std(returns)
@@ -1033,12 +1033,13 @@ class output:
         self.str_title = 'Portfolio Returns'
         self.volatility_annual = self.volatility_daily * np.sqrt(252)
         self.return_annual = self.mean_daily * 252
+        
         # Placeholders que serán actualizados por el manager
         self.weights = None
         self.dataframe_allocation = None
         # Compatibilidad: alias para risk y returns (usados en la interfaz)
         self.risk = self.volatility_annual
-        self.returns_annual = self.return_annual  # <- Si se necesita el valor anualizado
+        self.returns = self.return_annual
 
     def get_metrics_dict(self):
         """Retorna métricas del portafolio en formato diccionario"""
@@ -1058,11 +1059,12 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
+        # Asegura que self.returns sea una secuencia (array, lista, o pandas Series), no un escalar
         import numpy as np
         import pandas as pd
         returns = self.returns
         # Si es None o vacío
-        if returns is None or (isinstance(returns, pd.Series) and returns.empty) or (hasattr(returns, '__len__') and len(returns) == 0):
+        if returns is None or (hasattr(returns, '__len__') and len(returns) == 0):
             fig = go.Figure()
             fig.add_annotation(
                 text="No hay datos suficientes para mostrar",
@@ -1082,7 +1084,7 @@ class output:
             fig.update_layout(title=title)
             return fig
         # Si es un array/serie de un solo valor, también evitar graficar
-        if (isinstance(returns, pd.Series) and len(returns) <= 1) or (hasattr(returns, '__len__') and len(returns) <= 1):
+        if hasattr(returns, '__len__') and len(returns) <= 1:
             fig = go.Figure()
             fig.add_annotation(
                 text="No hay datos suficientes para mostrar",
@@ -1091,6 +1093,7 @@ class output:
             )
             fig.update_layout(title=title)
             return fig
+
         fig = go.Figure(data=[go.Histogram(
             x=returns,
             nbinsx=30,
@@ -1127,7 +1130,7 @@ def optimize_portfolio(returns, target_return=None):
     Returns:
         np.array: Pesos optimizados del portafolio
     """
-    if returns is None or (hasattr(returns, "empty") and returns.empty):
+    if returns is None or returns.empty:
         return None
         
     n_assets = len(returns.columns)
@@ -2798,33 +2801,25 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     
                                     # Resumen de análisis
                                     st.markdown("#### 📋 Resumen del Análisis")
-                                    # --- CORRECCIÓN: asegurar que retorno_esperado_horizonte_ars y sharpe_ratio sean escalares ---
-                                    retorno_esperado_horizonte_ars_val = retorno_esperado_horizonte_ars
-                                    if hasattr(retorno_esperado_horizonte_ars, 'item') and retorno_esperado_horizonte_ars.size == 1:
-                                        retorno_esperado_horizonte_ars_val = float(retorno_esperado_horizonte_ars.item())
-                                    elif isinstance(retorno_esperado_horizonte_ars, (list, np.ndarray)) and len(retorno_esperado_horizonte_ars) == 1:
-                                        retorno_esperado_horizonte_ars_val = float(retorno_esperado_horizonte_ars[0])
-                                    sharpe_ratio_val = sharpe_ratio
-                                    if hasattr(sharpe_ratio, 'item') and getattr(sharpe_ratio, 'size', 1) == 1:
-                                        sharpe_ratio_val = float(sharpe_ratio.item())
-                                    elif isinstance(sharpe_ratio, (list, np.ndarray)) and len(sharpe_ratio) == 1:
-                                        sharpe_ratio_val = float(sharpe_ratio[0])
-                                    # --- FIN CORRECCIÓN ---
-                                    if retorno_esperado_horizonte_ars_val > 0:
-                                        st.success(f"✅ **Retorno Esperado Positivo**: Se espera un retorno de {retorno_esperado_horizonte_ars_val:.2%} en {dias_analisis} días")
+                                    
+                                    if retorno_esperado_horizonte_ars > 0:
+                                        st.success(f"✅ **Retorno Esperado Positivo**: Se espera un retorno de {retorno_esperado_horizonte_ars:.2%} en {dias_analisis} días")
                                     else:
-                                        st.warning(f"⚠️ **Retorno Esperado Negativo**: Se espera un retorno de {retorno_esperado_horizonte_ars_val:.2%} en {dias_analisis} días")
-                                    if sharpe_ratio_val > 1:
-                                        st.success(f"✅ **Excelente Ratio de Sharpe**: {sharpe_ratio_val:.2f} indica buenos retornos ajustados por riesgo")
-                                    elif sharpe_ratio_val > 0.5:
-                                        st.info(f"ℹ️ **Buen Ratio de Sharpe**: {sharpe_ratio_val:.2f} indica retornos razonables ajustados por riesgo")
+                                        st.warning(f"⚠️ **Retorno Esperado Negativo**: Se espera un retorno de {retorno_esperado_horizonte_ars:.2%} en {dias_analisis} días")
+                                    
+                                    if sharpe_ratio > 1:
+                                        st.success(f"✅ **Excelente Ratio de Sharpe**: {sharpe_ratio:.2f} indica buenos retornos ajustados por riesgo")
+                                    elif sharpe_ratio > 0.5:
+                                        st.info(f"ℹ️ **Buen Ratio de Sharpe**: {sharpe_ratio:.2f} indica retornos razonables ajustados por riesgo")
                                     else:
-                                        st.warning(f"⚠️ **Ratio de Sharpe Bajo**: {sharpe_ratio_val:.2f} indica retornos pobres ajustados por riesgo")
+                                        st.warning(f"⚠️ **Ratio de Sharpe Bajo**: {sharpe_ratio:.2f} indica retornos pobres ajustados por riesgo")
+                                    
                                     # Recomendaciones basadas en el análisis
                                     st.markdown("#### 💡 Recomendaciones")
-                                    if retorno_esperado_horizonte_ars_val > 0.05:  # 5% en el horizonte
+                                    
+                                    if retorno_esperado_horizonte_ars > 0.05:  # 5% en el horizonte
                                         st.success("🎯 **Mantener Posición**: El portafolio muestra buenas perspectivas de retorno")
-                                    elif retorno_esperado_horizonte_ars_val < -0.05:  # -5% en el horizonte
+                                    elif retorno_esperado_horizonte_ars < -0.05:  # -5% en el horizonte
                                         st.warning("🔄 **Considerar Rebalanceo**: El portafolio podría beneficiarse de ajustes")
                                     else:
                                         st.info("📊 **Monitorear**: El portafolio muestra retornos moderados")
@@ -3183,7 +3178,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.subheader("📈 Frontera Eficiente y Portafolios Especiales")
     if st.checkbox("Mostrar Frontera Eficiente", value=True):
         portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(target_return=0.08, include_min_variance=True)
-        if portfolios is not None and returns is not None and volatilities is not None and len(returns) > 0 and len(volatilities) > 0:
+        if portfolios and returns and volatilities and len(returns) > 0 and len(volatilities) > 0:
             import plotly.graph_objects as go
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=volatilities, y=returns, mode='lines+markers', name='Frontera Eficiente', line=dict(color='#0d6efd', width=3), marker=dict(size=6)))
