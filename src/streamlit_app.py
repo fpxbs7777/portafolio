@@ -3327,28 +3327,105 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     # --- Análisis de Ciclo Económico BCRA ---
     with st.expander("🔎 Análisis Automático del Ciclo Económico (BCRA)", expanded=False):
         st.markdown("**Variables consideradas:** Reservas, tasa de política monetaria, inflación, agregados monetarios.")
-        # Ejemplo: descargar variables clave del BCRA (usar demo si no hay API directa)
-        # Simulación de valores (en producción, reemplazar por requests reales a BCRA o FRED)
-        reservas = 25000  # En millones USD
-        tasa_leliq = 50   # % anual
-        inflacion = 0.08  # mensual
-        m2_crecimiento = 0.03  # mensual
-        # Lógica simple de ciclo
-        if inflacion > 0.06 and tasa_leliq > 40 and m2_crecimiento > 0.02 and reservas < 20000:
-            etapa = "Recesión"
-            explicacion_ciclo = "Alta inflación, tasas elevadas, crecimiento monetario y reservas bajas sugieren recesión."
-        elif inflacion < 0.04 and tasa_leliq < 35 and m2_crecimiento < 0.01 and reservas > 35000:
+        # Obtener datos reales del BCRA
+        try:
+            # Reservas internacionales (último dato)
+            url_reservas = "https://api.estadisticasbcra.com/reservas"
+            url_leliq = "https://api.estadisticasbcra.com/leliq"
+            url_inflacion = "https://api.estadisticasbcra.com/inflacion_mensual_oficial"
+            url_m2 = "https://api.estadisticasbcra.com/base_monetaria"
+            headers = {"Authorization": "Bearer TU_API_KEY_BCRA"}
+            reservas = requests.get(url_reservas, headers=headers).json()[-1]["valor"]
+            tasa_leliq = requests.get(url_leliq, headers=headers).json()[-1]["valor"]
+            inflacion = requests.get(url_inflacion, headers=headers).json()[-1]["valor"] / 100
+            m2 = requests.get(url_m2, headers=headers).json()
+            m2_crecimiento = (m2[-1]["valor"] - m2[-22]["valor"]) / m2[-22]["valor"] if len(m2) > 22 else None
+        except Exception as e:
+            st.warning(f"No se pudieron obtener datos reales del BCRA: {e}. Se usarán valores simulados.")
+            reservas = 25000
+            tasa_leliq = 50
+            inflacion = 0.08
+            m2_crecimiento = None
+        # Lógica simple de etapa
+        if reservas > 35000 and inflacion < 0.05 and tasa_leliq < 60:
             etapa = "Expansión"
-            explicacion_ciclo = "Baja inflación, tasas bajas, crecimiento monetario controlado y reservas altas sugieren expansión."
-        elif inflacion > 0.05 and tasa_leliq > 45 and reservas > 30000:
+            explicacion_ciclo = "Reservas altas, inflación baja y tasas moderadas: contexto favorable para activos de riesgo."
+            sugerencia = "Portafolio agresivo: sobreponderar acciones, cíclicos y emergentes."
+        elif inflacion > 0.10 or tasa_leliq > 80:
+            etapa = "Recesión"
+            explicacion_ciclo = "Inflación/tasas muy altas: contexto defensivo, preferir liquidez y renta fija."
+            sugerencia = "Portafolio defensivo: priorizar bonos, FCIs de money market y activos refugio."
+        elif reservas > 30000 and inflacion < 0.08:
             etapa = "Auge"
-            explicacion_ciclo = "Inflación y tasas altas pero reservas sólidas sugieren auge, pero con riesgos de sobrecalentamiento."
+            explicacion_ciclo = "Reservas sólidas y baja inflación: buen momento para balancear riesgo y retorno."
+            sugerencia = "Portafolio balanceado: combinar acciones, bonos y algo de liquidez."
         else:
             etapa = "Recuperación/Neutral"
             explicacion_ciclo = "Variables mixtas, posible recuperación o transición."
+            sugerencia = "Portafolio diversificado: mantener exposición equilibrada y flexibilidad."
         st.success(f"Etapa detectada: **{etapa}**")
         st.caption(f"Explicación: {explicacion_ciclo}")
-        st.markdown(f"- Reservas: {reservas}M USD\n- Tasa LELIQ: {tasa_leliq}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
+        st.markdown(f"- Reservas: {reservas:,.0f}M USD\n- Tasa LELIQ: {tasa_leliq:.2f}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
+        # --- SUGERENCIA DE ESTRATEGIA SEGÚN CICLO ---
+        st.markdown(f"""
+        <div style='background:#eaf6fb;border-left:6px solid #007cf0;padding:1.2em 1.5em;margin:1.2em 0 1.5em 0;border-radius:10px;'>
+        <b>💡 Sugerencia de Estrategia de Optimización:</b><br>
+        <span style='font-size:1.15em;font-weight:700;color:#0056b3'>{sugerencia}</span><br>
+        <span style='color:#007cf0;font-size:1em;'>{explicacion_ciclo}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # --- Análisis de Ciclo Económico BCRA ---
+    with st.expander("🔎 Análisis Automático del Ciclo Económico (BCRA)", expanded=False):
+        st.markdown("**Variables consideradas:** Reservas, tasa de política monetaria, inflación, agregados monetarios.")
+        # Obtener datos reales del BCRA
+        try:
+            # Reservas internacionales (último dato)
+            url_reservas = "https://api.estadisticasbcra.com/reservas"
+            url_leliq = "https://api.estadisticasbcra.com/leliq"
+            url_inflacion = "https://api.estadisticasbcra.com/inflacion_mensual_oficial"
+            url_m2 = "https://api.estadisticasbcra.com/base_monetaria"
+            headers = {"Authorization": "BEARER TU_API_KEY_BCRA"}  # Reemplazar por tu API KEY de estadisticasbcra.com
+            # Reservas
+            reservas_df = pd.DataFrame(requests.get(url_reservas, headers=headers).json())
+            reservas = reservas_df.iloc[-1]['valor'] if not reservas_df.empty else None
+            # Tasa LELIQ
+            leliq_df = pd.DataFrame(requests.get(url_leliq, headers=headers).json())
+            tasa_leliq = leliq_df.iloc[-1]['valor'] if not leliq_df.empty else None
+            # Inflación mensual
+            inflacion_df = pd.DataFrame(requests.get(url_inflacion, headers=headers).json())
+            inflacion = inflacion_df.iloc[-1]['valor']/100 if not inflacion_df.empty else None
+            # M2 (usamos base monetaria como proxy)
+            m2_df = pd.DataFrame(requests.get(url_m2, headers=headers).json())
+            if len(m2_df) > 1:
+                m2_crecimiento = (m2_df.iloc[-1]['valor'] - m2_df.iloc[-2]['valor']) / m2_df.iloc[-2]['valor']
+            else:
+                m2_crecimiento = None
+        except Exception as e:
+            st.warning(f"No se pudieron obtener datos reales del BCRA: {e}. Se usarán valores simulados.")
+            reservas = 25000
+            tasa_leliq = 50
+            inflacion = 0.08
+            m2_crecimiento = 0.03
+        # Lógica simple de ciclo
+        if inflacion is not None and tasa_leliq is not None and m2_crecimiento is not None and reservas is not None:
+            if inflacion > 0.06 and tasa_leliq > 40 and m2_crecimiento > 0.02 and reservas < 20000:
+                etapa = "Recesión"
+                explicacion_ciclo = "Alta inflación, tasas elevadas, crecimiento monetario y reservas bajas sugieren recesión."
+            elif inflacion < 0.04 and tasa_leliq < 35 and m2_crecimiento < 0.01 and reservas > 35000:
+                etapa = "Expansión"
+                explicacion_ciclo = "Baja inflación, tasas bajas, crecimiento monetario controlado y reservas altas sugieren expansión."
+            elif inflacion > 0.05 and tasa_leliq > 45 and reservas > 30000:
+                etapa = "Auge"
+                explicacion_ciclo = "Inflación y tasas altas pero reservas sólidas sugieren auge, pero con riesgos de sobrecalentamiento."
+            else:
+                etapa = "Recuperación/Neutral"
+                explicacion_ciclo = "Variables mixtas, posible recuperación o transición."
+            st.success(f"Etapa detectada: **{etapa}**")
+            st.caption(f"Explicación: {explicacion_ciclo}")
+            st.markdown(f"- Reservas: {reservas:,.0f}M USD\n- Tasa LELIQ: {tasa_leliq:.2f}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
+        else:
+            st.warning("No se pudieron obtener todas las variables para el análisis de ciclo económico.")
     # --- FIN BLOQUE CICLO ECONÓMICO ---
 
     # ... resto del código de optimización ...
@@ -3382,6 +3459,44 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             st.caption("Valores positivos: cola derecha (más ganancias extremas). Valores negativos: cola izquierda (más pérdidas extremas). Cero: simetría.")
         else:
             st.info("No hay retornos suficientes para calcular la asimetría.")
+
+    # --- Análisis Sectorial Básico previo a la optimización ---
+    with st.expander("🔎 Análisis Sectorial Básico (Momentum por Sector)", expanded=False):
+        st.markdown("**Se analizan los principales ETFs sectoriales globales para identificar los sectores con mejor momentum reciente.**")
+        sector_etfs = {
+            'Tecnología': 'XLK',
+            'Financieros': 'XLF',
+            'Salud': 'XLV',
+            'Energía': 'XLE',
+            'Industrial': 'XLI',
+            'Comunicación': 'XLC',
+            'Consumo Discrecional': 'XLY',
+            'Consumo Básico': 'XLP',
+            'Materiales': 'XLB',
+            'Bienes Raíces': 'XLRE',
+            'Servicios Públicos': 'XLU'
+        }
+        import yfinance as yf
+        import pandas as pd
+        import plotly.graph_objects as go
+        try:
+            precios = yf.download(list(sector_etfs.values()), period="6mo", interval="1d", progress=False)["Adj Close"]
+            rendimientos = precios.iloc[-1] / precios.iloc[0] - 1
+            ranking = rendimientos.sort_values(ascending=False)
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=[k for k,v in sector_etfs.items() if v in ranking.index],
+                y=ranking.values*100,
+                marker_color=["#2ecc71" if v==ranking.index[0] else "#3498db" for v in ranking.index],
+                text=[f"{v}: {ranking[v]*100:.2f}%" for v in ranking.index],
+                textposition="auto"
+            ))
+            fig.update_layout(title="Ranking de Sectores por Momentum (6 meses)", yaxis_title="Rendimiento (%)", xaxis_title="Sector", template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True)
+            st.success(f"Sector destacado: {ranking.index[0]} ({ranking.values[0]*100:.2f}%)")
+            st.markdown(f"**Recomendación:** Priorizar activos del sector **{[k for k,v in sector_etfs.items() if v==ranking.index[0]][0]}** para optimizaciones si es coherente con tu perfil de riesgo.")
+        except Exception as e:
+            st.warning(f"No se pudo obtener el ranking sectorial: {e}")
 
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
