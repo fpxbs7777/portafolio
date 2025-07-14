@@ -3003,6 +3003,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
                     
                     if len(activos_exitosos) > 0:
+                        # --- CORRECCIÓN: Asegurar que el índice de cada serie sea la columna 'fecha' y de tipo datetime ---
+                        for activo_info in activos_exitosos:
+                            serie = activo_info['serie']
+                            if 'fecha' in serie.columns:
+                                serie['fecha'] = pd.to_datetime(serie['fecha'])
+                                serie.set_index('fecha', inplace=True)
+                            elif not pd.api.types.is_datetime64_any_dtype(serie.index):
+                                serie.index = pd.to_datetime(serie.index)
+                        # -------------------------------------------------------------------------
                         # Crear DataFrame con todas las series alineadas
                         df_portfolio = pd.DataFrame()
                         
