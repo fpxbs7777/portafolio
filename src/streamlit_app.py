@@ -255,6 +255,416 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
         st.error(f'Error al obtener cotización MEP: {str(e)}')
         return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
+def obtener_cotizaciones_panel(token_portador, instrumento, panel, pais):
+    """
+    Obtiene cotizaciones de un panel específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        instrumento (str): Tipo de instrumento [Acciones, Bonos, Opciones, Monedas, Cauciones, CHPD, Futuros, ADRs]
+        panel (str): Panel específico [Panel%20General, Burcap, Todas]
+        pais (str): País [Argentina, Estados_Unidos]
+        
+    Returns:
+        dict: Datos de cotizaciones del panel
+    """
+    url = f'https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener cotizaciones del panel {panel}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener cotizaciones del panel {panel}: {str(e)}')
+        return None
+
+def obtener_serie_historica_cotizacion(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene serie histórica de cotizaciones
+    
+    Args:
+        token_portador (str): Token de autenticación
+        mercado (str): Mercado [BCBA, NYSE, NASDAQ, AMEX, BCS, ROFX]
+        simbolo (str): Símbolo del instrumento
+        fecha_desde (str): Fecha de inicio
+        fecha_hasta (str): Fecha de fin
+        ajustada (str): Tipo de ajuste [Ajustada, SinAjustar]
+        
+    Returns:
+        pd.DataFrame: Serie histórica de cotizaciones
+    """
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            datos = respuesta.json()
+            if isinstance(datos, list) and len(datos) > 0:
+                df = pd.DataFrame(datos)
+                df['fecha'] = pd.to_datetime(df['fecha'])
+                df = df.sort_values('fecha')
+                return df
+            else:
+                st.warning(f'No se encontraron datos históricos para {simbolo}')
+                return None
+        else:
+            st.error(f'Error al obtener serie histórica de {simbolo}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener serie histórica de {simbolo}: {str(e)}')
+        return None
+
+def obtener_cotizacion_detalle(token_portador, mercado, simbolo):
+    """
+    Obtiene cotización detallada de un instrumento
+    
+    Args:
+        token_portador (str): Token de autenticación
+        mercado (str): Mercado
+        simbolo (str): Símbolo del instrumento
+        
+    Returns:
+        dict: Cotización detallada
+    """
+    url = f'https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener cotización detallada de {simbolo}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener cotización detallada de {simbolo}: {str(e)}')
+        return None
+
+def obtener_administradoras_fci(token_portador):
+    """
+    Obtiene el listado de administradoras de FCI
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        list: Lista de administradoras
+    """
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener administradoras FCI: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener administradoras FCI: {str(e)}')
+        return None
+
+def obtener_listado_fci(token_portador):
+    """
+    Obtiene el listado completo de Fondos Comunes de Inversión
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        list: Lista de FCI
+    """
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener listado FCI: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener listado FCI: {str(e)}')
+        return None
+
+def obtener_tipos_fondos_por_administradora(token_portador, administradora):
+    """
+    Obtiene los tipos de fondos por administradora
+    
+    Args:
+        token_portador (str): Token de autenticación
+        administradora (str): Nombre de la administradora
+        
+    Returns:
+        list: Lista de tipos de fondos
+    """
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras/{administradora}/Tipo Fondos'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener tipos de fondos de {administradora}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener tipos de fondos de {administradora}: {str(e)}')
+        return None
+
+def obtener_titulos_fci_por_administradora(token_portador, administradora):
+    """
+    Obtiene los títulos FCI por administradora
+    
+    Args:
+        token_portador (str): Token de autenticación
+        administradora (str): Nombre de la administradora
+        
+    Returns:
+        list: Lista de títulos FCI
+    """
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras/{administradora}/Titulos'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener títulos FCI de {administradora}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener títulos FCI de {administradora}: {str(e)}')
+        return None
+
+def obtener_titulos_por_tipo_fondo(token_portador, tipo_fondo):
+    """
+    Obtiene los títulos por tipo de fondo
+    
+    Args:
+        token_portador (str): Token de autenticación
+        tipo_fondo (str): Tipo de fondo
+        
+    Returns:
+        list: Lista de títulos
+    """
+    url = f'https://api.invertironline.com/api/v2/Titulos/FCI/Tipo Fondos/{tipo_fondo}'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener títulos del tipo {tipo_fondo}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener títulos del tipo {tipo_fondo}: {str(e)}')
+        return None
+
+def obtener_cotizaciones_titulos(token_portador, pais):
+    """
+    Obtiene cotizaciones de títulos por país
+    
+    Args:
+        token_portador (str): Token de autenticación
+        pais (str): País [Argentina, Estados_Unidos]
+        
+    Returns:
+        list: Lista de cotizaciones de títulos
+    """
+    url = f'https://api.invertironline.com/api/v2/{pais}/Titulos/Cotizacion'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener cotizaciones de títulos de {pais}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener cotizaciones de títulos de {pais}: {str(e)}')
+        return None
+
+def obtener_opciones(token_portador, pais):
+    """
+    Obtiene cotizaciones de opciones por país
+    
+    Args:
+        token_portador (str): Token de autenticación
+        pais (str): País [Argentina, Estados_Unidos]
+        
+    Returns:
+        list: Lista de cotizaciones de opciones
+    """
+    url = f'https://api.invertironline.com/api/v2/{pais}/Titulos/Opciones'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f'Error al obtener cotizaciones de opciones de {pais}: {respuesta.status_code}')
+            return None
+    except Exception as e:
+        st.error(f'Error de conexión al obtener cotizaciones de opciones de {pais}: {str(e)}')
+        return None
+
+def calcular_indicadores_tecnicos_avanzados(serie_precios, periodos=[14, 20, 50]):
+    """
+    Calcula indicadores técnicos avanzados
+    
+    Args:
+        serie_precios (pd.Series): Serie de precios
+        periodos (list): Lista de períodos para los indicadores
+        
+    Returns:
+        dict: Diccionario con todos los indicadores calculados
+    """
+    if serie_precios.empty:
+        return {}
+    
+    indicadores = {}
+    
+    # RSI para diferentes períodos
+    for periodo in periodos:
+        indicadores[f'rsi_{periodo}'] = calcular_rsi(serie_precios, periodo)
+    
+    # RVI
+    indicadores['rvi'] = calcular_rvi(serie_precios)
+    
+    # Medias móviles
+    for periodo in periodos:
+        indicadores[f'sma_{periodo}'] = serie_precios.rolling(window=periodo).mean()
+        indicadores[f'ema_{periodo}'] = serie_precios.ewm(span=periodo).mean()
+    
+    # Bandas de Bollinger (20 períodos)
+    sma_20 = serie_precios.rolling(window=20).mean()
+    std_20 = serie_precios.rolling(window=20).std()
+    indicadores['bb_superior'] = sma_20 + (std_20 * 2)
+    indicadores['bb_inferior'] = sma_20 - (std_20 * 2)
+    indicadores['bb_media'] = sma_20
+    
+    # MACD
+    ema_12 = serie_precios.ewm(span=12).mean()
+    ema_26 = serie_precios.ewm(span=26).mean()
+    indicadores['macd'] = ema_12 - ema_26
+    indicadores['macd_signal'] = indicadores['macd'].ewm(span=9).mean()
+    indicadores['macd_histogram'] = indicadores['macd'] - indicadores['macd_signal']
+    
+    # Estocástico
+    def calcular_estocastico(serie, periodo=14):
+        low_min = serie.rolling(window=periodo).min()
+        high_max = serie.rolling(window=periodo).max()
+        k = 100 * ((serie - low_min) / (high_max - low_min))
+        d = k.rolling(window=3).mean()
+        return k, d
+    
+    indicadores['stoch_k'], indicadores['stoch_d'] = calcular_estocastico(serie_precios)
+    
+    # Williams %R
+    def calcular_williams_r(serie, periodo=14):
+        low_min = serie.rolling(window=periodo).min()
+        high_max = serie.rolling(window=periodo).max()
+        return -100 * ((high_max - serie) / (high_max - low_min))
+    
+    indicadores['williams_r'] = calcular_williams_r(serie_precios)
+    
+    # ATR (Average True Range)
+    def calcular_atr(serie, periodo=14):
+        high = serie  # Simplificado, normalmente necesitarías high, low, close
+        low = serie
+        close = serie
+        
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return tr.rolling(window=periodo).mean()
+    
+    indicadores['atr'] = calcular_atr(serie_precios)
+    
+    return indicadores
+
+def generar_analisis_mercado_completo(token_acceso):
+    """
+    Genera un análisis completo del mercado con múltiples fuentes de datos
+    
+    Args:
+        token_acceso (str): Token de autenticación
+        
+    Returns:
+        dict: Análisis completo del mercado
+    """
+    analisis = {
+        'fecha_analisis': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'resumen_mercado': {},
+        'indicadores_principales': {},
+        'tendencias_sectoriales': {},
+        'recomendaciones': []
+    }
+    
+    try:
+        # Obtener cotizaciones de diferentes instrumentos
+        instrumentos = ["Acciones", "Bonos", "Monedas"]
+        paises = ["Argentina", "Estados_Unidos"]
+        
+        for instrumento in instrumentos:
+            for pais in paises:
+                cotizaciones = obtener_cotizaciones_panel(token_acceso, instrumento, "Panel%20General", pais)
+                if cotizaciones and 'titulos' in cotizaciones:
+                    df_cot = pd.DataFrame(cotizaciones['titulos'])
+                    if not df_cot.empty:
+                        # Calcular estadísticas básicas
+                        if 'variacionPorcentual' in df_cot.columns:
+                            variaciones = df_cot['variacionPorcentual'].dropna()
+                            if not variaciones.empty:
+                                analisis['resumen_mercado'][f'{instrumento}_{pais}'] = {
+                                    'total_instrumentos': len(df_cot),
+                                    'promedio_variacion': variaciones.mean(),
+                                    'maxima_variacion': variaciones.max(),
+                                    'minima_variacion': variaciones.min(),
+                                    'instrumentos_positivos': len(variaciones[variaciones > 0]),
+                                    'instrumentos_negativos': len(variaciones[variaciones < 0])
+                                }
+        
+        # Obtener tasas de caución
+        tasas_caucion = obtener_tasas_caucion(token_acceso)
+        if tasas_caucion is not None and not tasas_caucion.empty:
+            df_tasas = pd.DataFrame(tasas_caucion)
+            if 'tasa' in df_tasas.columns:
+                analisis['indicadores_principales']['tasas_caucion'] = {
+                    'promedio_tasa': df_tasas['tasa'].mean(),
+                    'maxima_tasa': df_tasas['tasa'].max(),
+                    'minima_tasa': df_tasas['tasa'].min(),
+                    'total_instrumentos': len(df_tasas)
+                }
+        
+        # Generar recomendaciones básicas
+        if 'resumen_mercado' in analisis:
+            for mercado, datos in analisis['resumen_mercado'].items():
+                if datos['promedio_variacion'] > 1:
+                    analisis['recomendaciones'].append(f"📈 Mercado {mercado} muestra tendencia alcista")
+                elif datos['promedio_variacion'] < -1:
+                    analisis['recomendaciones'].append(f"📉 Mercado {mercado} muestra tendencia bajista")
+                else:
+                    analisis['recomendaciones'].append(f"➡️ Mercado {mercado} muestra tendencia lateral")
+        
+        return analisis
+        
+    except Exception as e:
+        st.error(f"Error en análisis de mercado: {str(e)}")
+        return analisis
+
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
@@ -2681,7 +3091,13 @@ def mostrar_estado_cuenta(estado_cuenta):
 def mostrar_cotizaciones_mercado(token_acceso):
     st.markdown("### 💱 Cotizaciones y Mercado")
     
-    with st.expander("💰 Cotización MEP", expanded=True):
+    # Tabs para organizar las diferentes secciones de cotizaciones
+    tab_mep, tab_paneles, tab_historicas, tab_fci, tab_detalles, tab_analisis = st.tabs([
+        "💰 MEP", "📊 Paneles", "📈 Históricas", "🏦 FCI", "🔍 Detalles", "📊 Análisis"
+    ])
+    
+    # Tab 1: Cotización MEP
+    with tab_mep:
         with st.form("mep_form"):
             col1, col2, col3 = st.columns(3)
             simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
@@ -2702,8 +3118,56 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
     
-    with st.expander("🏦 Tasas de Caución", expanded=True):
-        if st.button("🔄 Actualizar Tasas"):
+    # Tab 2: Paneles de Cotizaciones
+    with tab_paneles:
+        st.markdown("#### 📊 Cotizaciones por Panel")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            instrumento = st.selectbox(
+                "Instrumento:",
+                ["Acciones", "Bonos", "Opciones", "Monedas", "Cauciones", "CHPD", "Futuros", "ADRs"],
+                help="Tipo de instrumento a consultar"
+            )
+        with col2:
+            panel = st.selectbox(
+                "Panel:",
+                ["Panel%20General", "Burcap", "Todas"],
+                help="Panel específico de cotizaciones"
+            )
+        with col3:
+            pais = st.selectbox(
+                "País:",
+                ["Argentina", "Estados_Unidos"],
+                help="País del mercado"
+            )
+        
+        if st.button("🔍 Consultar Panel"):
+            with st.spinner(f"Consultando cotizaciones de {instrumento}..."):
+                cotizaciones = obtener_cotizaciones_panel(token_acceso, instrumento, panel, pais)
+                
+                if cotizaciones and 'titulos' in cotizaciones:
+                    df_cotizaciones = pd.DataFrame(cotizaciones['titulos'])
+                    
+                    if not df_cotizaciones.empty:
+                        st.success(f"✅ Se obtuvieron {len(df_cotizaciones)} cotizaciones")
+                        
+                        # Mostrar columnas relevantes
+                        columnas_relevantes = ['simbolo', 'ultimoPrecio', 'variacionPorcentual', 'volumen']
+                        columnas_disponibles = [col for col in columnas_relevantes if col in df_cotizaciones.columns]
+                        
+                        if columnas_disponibles:
+                            st.dataframe(df_cotizaciones[columnas_disponibles].head(20), use_container_width=True)
+                        else:
+                            st.dataframe(df_cotizaciones.head(20), use_container_width=True)
+                    else:
+                        st.warning("No se encontraron cotizaciones para los parámetros seleccionados")
+                else:
+                    st.error("❌ No se pudieron obtener las cotizaciones del panel")
+        
+        # Sección de tasas de caución
+        st.markdown("#### 🏦 Tasas de Caución")
+        if st.button("🔄 Actualizar Tasas de Caución"):
             with st.spinner("Consultando tasas de caución..."):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
             
@@ -2718,6 +3182,392 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     st.dataframe(df_tasas.head(10))
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
+    
+    # Tab 3: Series Históricas
+    with tab_historicas:
+        st.markdown("#### 📈 Series Históricas de Cotizaciones")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            mercado = st.selectbox(
+                "Mercado:",
+                ["BCBA", "NYSE", "NASDAQ", "AMEX", "BCS", "ROFX"],
+                help="Mercado donde cotiza el instrumento"
+            )
+        with col2:
+            simbolo_historico = st.text_input("Símbolo:", value="GGAL", help="Símbolo del instrumento")
+        with col3:
+            ajustada = st.selectbox(
+                "Ajuste:",
+                ["SinAjustar", "Ajustada"],
+                help="Tipo de ajuste de la serie histórica"
+            )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde_hist = st.date_input("Fecha Desde:", value=date.today() - timedelta(days=30))
+        with col2:
+            fecha_hasta_hist = st.date_input("Fecha Hasta:", value=date.today())
+        
+        if st.button("📊 Obtener Serie Histórica"):
+            if simbolo_historico:
+                with st.spinner("Consultando serie histórica..."):
+                    serie_historica = obtener_serie_historica_cotizacion(
+                        token_acceso, mercado, simbolo_historico, 
+                        fecha_desde_hist.strftime('%Y-%m-%d'), 
+                        fecha_hasta_hist.strftime('%Y-%m-%d'), 
+                        ajustada
+                    )
+                
+                if serie_historica is not None and not serie_historica.empty:
+                    st.success(f"✅ Serie histórica obtenida para {simbolo_historico}")
+                    
+                    # Gráfico de la serie histórica
+                    fig = go.Figure()
+                    
+                    # Buscar columna de precio
+                    col_precio = None
+                    for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                        if c in serie_historica.columns:
+                            col_precio = c
+                            break
+                    
+                    if col_precio:
+                        fig.add_trace(go.Scatter(
+                            x=serie_historica['fecha'],
+                            y=serie_historica[col_precio],
+                            mode='lines',
+                            name=f'{simbolo_historico} - {col_precio}',
+                            line=dict(color='#1f77b4')
+                        ))
+                        
+                        fig.update_layout(
+                            title=f"Evolución Histórica - {simbolo_historico}",
+                            xaxis_title="Fecha",
+                            yaxis_title="Precio",
+                            template='plotly_white'
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Mostrar estadísticas
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Precio Actual", f"${serie_historica[col_precio].iloc[-1]:.2f}")
+                        with col2:
+                            st.metric("Precio Máximo", f"${serie_historica[col_precio].max():.2f}")
+                        with col3:
+                            st.metric("Precio Mínimo", f"${serie_historica[col_precio].min():.2f}")
+                        with col4:
+                            variacion = ((serie_historica[col_precio].iloc[-1] - serie_historica[col_precio].iloc[0]) / serie_historica[col_precio].iloc[0]) * 100
+                            st.metric("Variación Total", f"{variacion:.2f}%")
+                    else:
+                        st.dataframe(serie_historica.head(10))
+                else:
+                    st.error("❌ No se pudo obtener la serie histórica")
+            else:
+                st.warning("Por favor ingrese un símbolo válido")
+    
+    # Tab 4: Fondos Comunes de Inversión
+    with tab_fci:
+        st.markdown("#### 🏦 Fondos Comunes de Inversión")
+        
+        # Sub-tabs para FCI
+        tab_fci_listado, tab_fci_admin, tab_fci_tipos = st.tabs(["📋 Listado Completo", "🏢 Por Administradora", "📊 Por Tipo"])
+        
+        with tab_fci_listado:
+            if st.button("📋 Obtener Listado Completo FCI"):
+                with st.spinner("Consultando listado de FCI..."):
+                    listado_fci = obtener_listado_fci(token_acceso)
+                
+                if listado_fci:
+                    df_fci = pd.DataFrame(listado_fci)
+                    st.success(f"✅ Se obtuvieron {len(df_fci)} fondos")
+                    
+                    # Mostrar columnas relevantes
+                    columnas_relevantes = ['simbolo', 'descripcion', 'ultimoOperado', 'variacion', 'tipoFondo']
+                    columnas_disponibles = [col for col in columnas_relevantes if col in df_fci.columns]
+                    
+                    if columnas_disponibles:
+                        st.dataframe(df_fci[columnas_disponibles].head(20), use_container_width=True)
+                    else:
+                        st.dataframe(df_fci.head(20), use_container_width=True)
+                else:
+                    st.error("❌ No se pudo obtener el listado de FCI")
+        
+        with tab_fci_admin:
+            if st.button("🏢 Obtener Administradoras"):
+                with st.spinner("Consultando administradoras..."):
+                    administradoras = obtener_administradoras_fci(token_acceso)
+                
+                if administradoras:
+                    df_admin = pd.DataFrame(administradoras)
+                    st.success(f"✅ Se obtuvieron {len(df_admin)} administradoras")
+                    st.dataframe(df_admin, use_container_width=True)
+                    
+                    # Permitir consultar títulos por administradora
+                    if not df_admin.empty:
+                        administradora_seleccionada = st.selectbox(
+                            "Seleccionar Administradora:",
+                            df_admin['nombre'].tolist()
+                        )
+                        
+                        if st.button(f"📊 Obtener Títulos de {administradora_seleccionada}"):
+                            with st.spinner(f"Consultando títulos de {administradora_seleccionada}..."):
+                                titulos_admin = obtener_titulos_fci_por_administradora(token_acceso, administradora_seleccionada)
+                            
+                            if titulos_admin:
+                                df_titulos = pd.DataFrame(titulos_admin)
+                                st.success(f"✅ Se obtuvieron {len(df_titulos)} títulos")
+                                st.dataframe(df_titulos.head(20), use_container_width=True)
+                            else:
+                                st.error("❌ No se pudieron obtener los títulos")
+                else:
+                    st.error("❌ No se pudieron obtener las administradoras")
+        
+        with tab_fci_tipos:
+            if st.button("📊 Obtener Tipos de Fondos"):
+                with st.spinner("Consultando tipos de fondos..."):
+                    # Primero obtener administradoras para mostrar tipos
+                    administradoras = obtener_administradoras_fci(token_acceso)
+                
+                if administradoras and len(administradoras) > 0:
+                    administradora_tipos = st.selectbox(
+                        "Seleccionar Administradora para Tipos:",
+                        [admin['nombre'] for admin in administradoras]
+                    )
+                    
+                    if st.button(f"📋 Obtener Tipos de {administradora_tipos}"):
+                        with st.spinner(f"Consultando tipos de {administradora_tipos}..."):
+                            tipos_fondos = obtener_tipos_fondos_por_administradora(token_acceso, administradora_tipos)
+                        
+                        if tipos_fondos:
+                            df_tipos = pd.DataFrame(tipos_fondos)
+                            st.success(f"✅ Se obtuvieron {len(df_tipos)} tipos de fondos")
+                            st.dataframe(df_tipos, use_container_width=True)
+                        else:
+                            st.error("❌ No se pudieron obtener los tipos de fondos")
+                else:
+                    st.error("❌ No se pudieron obtener las administradoras")
+    
+    # Tab 5: Cotizaciones Detalladas
+    with tab_detalles:
+        st.markdown("#### 🔍 Cotizaciones Detalladas")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            mercado_detalle = st.selectbox(
+                "Mercado:",
+                ["BCBA", "NYSE", "NASDAQ", "AMEX", "BCS", "ROFX"],
+                key="mercado_detalle"
+            )
+        with col2:
+            simbolo_detalle = st.text_input("Símbolo:", value="GGAL", key="simbolo_detalle")
+        
+        if st.button("🔍 Obtener Cotización Detallada"):
+            if simbolo_detalle:
+                with st.spinner("Consultando cotización detallada..."):
+                    cotizacion_detalle = obtener_cotizacion_detalle(token_acceso, mercado_detalle, simbolo_detalle)
+                
+                if cotizacion_detalle:
+                    st.success(f"✅ Cotización detallada obtenida para {simbolo_detalle}")
+                    
+                    # Mostrar información en formato de métricas
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        if 'ultimoPrecio' in cotizacion_detalle:
+                            st.metric("Último Precio", f"${cotizacion_detalle['ultimoPrecio']}")
+                    with col2:
+                        if 'variacionPorcentual' in cotizacion_detalle:
+                            st.metric("Variación %", f"{cotizacion_detalle['variacionPorcentual']:.2f}%")
+                    with col3:
+                        if 'volumen' in cotizacion_detalle:
+                            st.metric("Volumen", f"{cotizacion_detalle['volumen']:,.0f}")
+                    with col4:
+                        if 'apertura' in cotizacion_detalle:
+                            st.metric("Apertura", f"${cotizacion_detalle['apertura']}")
+                    
+                    # Mostrar datos completos
+                    st.json(cotizacion_detalle)
+                else:
+                    st.error("❌ No se pudo obtener la cotización detallada")
+            else:
+                st.warning("Por favor ingrese un símbolo válido")
+    
+    # Tab 6: Análisis Completo del Mercado
+    with tab_analisis:
+        st.markdown("#### 📊 Análisis Completo del Mercado")
+        
+        if st.button("🚀 Generar Análisis de Mercado"):
+            with st.spinner("Generando análisis completo del mercado..."):
+                analisis_mercado = generar_analisis_mercado_completo(token_acceso)
+            
+            if analisis_mercado:
+                st.success("✅ Análisis de mercado generado exitosamente")
+                
+                # Mostrar fecha del análisis
+                st.info(f"📅 Análisis generado el: {analisis_mercado.get('fecha_analisis', 'N/A')}")
+                
+                # Resumen del mercado
+                if analisis_mercado.get('resumen_mercado'):
+                    st.markdown("#### 📈 Resumen del Mercado")
+                    
+                    for mercado, datos in analisis_mercado['resumen_mercado'].items():
+                        with st.expander(f"📊 {mercado}", expanded=True):
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("Total Instrumentos", datos['total_instrumentos'])
+                            with col2:
+                                st.metric("Promedio Variación", f"{datos['promedio_variacion']:.2f}%")
+                            with col3:
+                                st.metric("Máxima Variación", f"{datos['maxima_variacion']:.2f}%")
+                            with col4:
+                                st.metric("Mínima Variación", f"{datos['minima_variacion']:.2f}%")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Instrumentos Positivos", datos['instrumentos_positivos'])
+                            with col2:
+                                st.metric("Instrumentos Negativos", datos['instrumentos_negativos'])
+                
+                # Indicadores principales
+                if analisis_mercado.get('indicadores_principales'):
+                    st.markdown("#### 📊 Indicadores Principales")
+                    
+                    for indicador, datos in analisis_mercado['indicadores_principales'].items():
+                        with st.expander(f"📈 {indicador.replace('_', ' ').title()}", expanded=True):
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("Promedio", f"{datos['promedio_tasa']:.2f}")
+                            with col2:
+                                st.metric("Máxima", f"{datos['maxima_tasa']:.2f}")
+                            with col3:
+                                st.metric("Mínima", f"{datos['minima_tasa']:.2f}")
+                            with col4:
+                                st.metric("Total", datos['total_instrumentos'])
+                
+                # Recomendaciones
+                if analisis_mercado.get('recomendaciones'):
+                    st.markdown("#### 💡 Recomendaciones")
+                    
+                    for recomendacion in analisis_mercado['recomendaciones']:
+                        st.info(recomendacion)
+                
+                # Mostrar datos completos en formato JSON
+                with st.expander("📋 Datos Completos del Análisis"):
+                    st.json(analisis_mercado)
+            else:
+                st.error("❌ No se pudo generar el análisis de mercado")
+        
+        # Sección para análisis técnico avanzado
+        st.markdown("#### 🔬 Análisis Técnico Avanzado")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            simbolo_analisis = st.text_input("Símbolo para Análisis:", value="GGAL", key="simbolo_analisis")
+        with col2:
+            periodo_analisis = st.selectbox("Período de Análisis:", [14, 20, 50], key="periodo_analisis")
+        
+        if st.button("🔬 Generar Análisis Técnico"):
+            if simbolo_analisis:
+                with st.spinner("Generando análisis técnico..."):
+                    # Obtener serie histórica
+                    fecha_desde_analisis = date.today() - timedelta(days=100)
+                    serie_historica = obtener_serie_historica_cotizacion(
+                        token_acceso, "BCBA", simbolo_analisis,
+                        fecha_desde_analisis.strftime('%Y-%m-%d'),
+                        date.today().strftime('%Y-%m-%d'),
+                        "SinAjustar"
+                    )
+                
+                if serie_historica is not None and not serie_historica.empty:
+                    # Buscar columna de precio
+                    col_precio = None
+                    for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                        if c in serie_historica.columns:
+                            col_precio = c
+                            break
+                    
+                    if col_precio:
+                        # Calcular indicadores técnicos
+                        indicadores = calcular_indicadores_tecnicos_avanzados(
+                            serie_historica[col_precio], [periodo_analisis]
+                        )
+                        
+                        st.success(f"✅ Análisis técnico generado para {simbolo_analisis}")
+                        
+                        # Mostrar gráfico con indicadores
+                        fig = make_subplots(
+                            rows=3, cols=1,
+                            subplot_titles=('Precio y Bandas de Bollinger', 'RSI', 'MACD'),
+                            vertical_spacing=0.1
+                        )
+                        
+                        # Precio y bandas de Bollinger
+                        fig.add_trace(
+                            go.Scatter(x=serie_historica['fecha'], y=serie_historica[col_precio],
+                                      name='Precio', line=dict(color='blue')), row=1, col=1)
+                        
+                        if 'bb_superior' in indicadores:
+                            fig.add_trace(
+                                go.Scatter(x=serie_historica['fecha'], y=indicadores['bb_superior'],
+                                          name='BB Superior', line=dict(color='red', dash='dash')), row=1, col=1)
+                            fig.add_trace(
+                                go.Scatter(x=serie_historica['fecha'], y=indicadores['bb_inferior'],
+                                          name='BB Inferior', line=dict(color='red', dash='dash')), row=1, col=1)
+                        
+                        # RSI
+                        if f'rsi_{periodo_analisis}' in indicadores:
+                            fig.add_trace(
+                                go.Scatter(x=serie_historica['fecha'], y=indicadores[f'rsi_{periodo_analisis}'],
+                                          name='RSI', line=dict(color='purple')), row=2, col=1)
+                            
+                            # Líneas de referencia RSI
+                            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+                            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+                        
+                        # MACD
+                        if 'macd' in indicadores:
+                            fig.add_trace(
+                                go.Scatter(x=serie_historica['fecha'], y=indicadores['macd'],
+                                          name='MACD', line=dict(color='blue')), row=3, col=1)
+                            fig.add_trace(
+                                go.Scatter(x=serie_historica['fecha'], y=indicadores['macd_signal'],
+                                          name='Señal MACD', line=dict(color='red')), row=3, col=1)
+                        
+                        fig.update_layout(height=800, title_text=f"Análisis Técnico - {simbolo_analisis}")
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Mostrar valores actuales de los indicadores
+                        st.markdown("#### 📊 Valores Actuales de Indicadores")
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            if f'rsi_{periodo_analisis}' in indicadores:
+                                rsi_actual = indicadores[f'rsi_{periodo_analisis}'].iloc[-1]
+                                st.metric("RSI", f"{rsi_actual:.2f}")
+                        with col2:
+                            if 'macd' in indicadores:
+                                macd_actual = indicadores['macd'].iloc[-1]
+                                st.metric("MACD", f"{macd_actual:.4f}")
+                        with col3:
+                            if 'williams_r' in indicadores:
+                                williams_actual = indicadores['williams_r'].iloc[-1]
+                                st.metric("Williams %R", f"{williams_actual:.2f}")
+                        with col4:
+                            if 'atr' in indicadores:
+                                atr_actual = indicadores['atr'].iloc[-1]
+                                st.metric("ATR", f"{atr_actual:.4f}")
+                    else:
+                        st.error("No se pudo identificar la columna de precios en los datos")
+                else:
+                    st.error("❌ No se pudo obtener la serie histórica para el análisis")
+            else:
+                st.warning("Por favor ingrese un símbolo válido")
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
@@ -3200,6 +4050,285 @@ def mostrar_optimizacion_universo_activos(token_acceso):
                 
                 else:
                     st.warning("⚠️ No se pudieron calcular los portafolios valorizados")
+                
+                # Sección de optimización con el universo seleccionado
+                st.markdown("#### 🚀 Optimización del Universo Seleccionado")
+                
+                # Configuración de optimización
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    estrategia_universo = st.selectbox(
+                        "Estrategia de Optimización:",
+                        options=['markowitz', 'equi-weight', 'min-variance-l1', 'min-variance-l2', 'long-only'],
+                        format_func=lambda x: {
+                            'markowitz': 'Optimización de Markowitz',
+                            'equi-weight': 'Pesos Iguales',
+                            'min-variance-l1': 'Mínima Varianza L1',
+                            'min-variance-l2': 'Mínima Varianza L2',
+                            'long-only': 'Solo Posiciones Largas'
+                        }[x],
+                        key="estrategia_universo"
+                    )
+                
+                with col2:
+                    target_return_universo = st.number_input(
+                        "Retorno Objetivo (anual):",
+                        min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+                        help="Solo aplica para estrategia Markowitz",
+                        key="target_return_universo"
+                    )
+                
+                with col3:
+                    show_frontier_universo = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier_universo")
+                
+                # Botón para ejecutar optimización
+                col1, col2 = st.columns(2)
+                with col1:
+                    ejecutar_optimizacion_universo = st.button("🚀 Optimizar Universo Seleccionado", type="primary")
+                with col2:
+                    ejecutar_frontier_universo = st.button("📈 Calcular Frontera Eficiente del Universo")
+                
+                if ejecutar_optimizacion_universo:
+                    with st.spinner("Optimizando universo de activos..."):
+                        try:
+                            # Preparar activos para optimización
+                            activos_para_optimizacion = []
+                            for panel, simbolos in seleccion_final.items():
+                                for simbolo in simbolos:
+                                    activos_para_optimizacion.append({
+                                        'simbolo': simbolo,
+                                        'mercado': 'BCBA',  # Por defecto BCBA
+                                        'tipo': panel
+                                    })
+                            
+                            if activos_para_optimizacion:
+                                # Crear manager de portafolio con el universo seleccionado
+                                manager_universo = PortfolioManager(
+                                    activos_para_optimizacion, 
+                                    token_acceso, 
+                                    fecha_desde.strftime('%Y-%m-%d'), 
+                                    fecha_hasta.strftime('%Y-%m-%d')
+                                )
+                                
+                                # Cargar datos
+                                if manager_universo.load_data():
+                                    # Computar optimización
+                                    use_target = target_return_universo if estrategia_universo == 'markowitz' else None
+                                    portfolio_result_universo = manager_universo.compute_portfolio(
+                                        strategy=estrategia_universo, 
+                                        target_return=use_target
+                                    )
+                                    
+                                    if portfolio_result_universo:
+                                        st.success("✅ Optimización del universo completada")
+                                        
+                                        # Mostrar resultados de optimización
+                                        col1, col2 = st.columns(2)
+                                        
+                                        with col1:
+                                            st.markdown("#### 📊 Pesos Optimizados del Universo")
+                                            if portfolio_result_universo.dataframe_allocation is not None:
+                                                weights_df_universo = portfolio_result_universo.dataframe_allocation.copy()
+                                                weights_df_universo['Peso (%)'] = weights_df_universo['weights'] * 100
+                                                weights_df_universo = weights_df_universo.sort_values('Peso (%)', ascending=False)
+                                                st.dataframe(weights_df_universo[['rics', 'Peso (%)']], use_container_width=True)
+                                        
+                                        with col2:
+                                            st.markdown("#### 📈 Métricas del Portafolio Optimizado")
+                                            metricas_universo = portfolio_result_universo.get_metrics_dict()
+                                            
+                                            col_a, col_b = st.columns(2)
+                                            with col_a:
+                                                st.metric("Retorno Anual", f"{metricas_universo['Annual Return']:.2%}")
+                                                st.metric("Volatilidad Anual", f"{metricas_universo['Annual Volatility']:.2%}")
+                                                st.metric("Ratio de Sharpe", f"{metricas_universo['Sharpe Ratio']:.4f}")
+                                                st.metric("VaR 95%", f"{metricas_universo['VaR 95%']:.4f}")
+                                            with col_b:
+                                                st.metric("Skewness", f"{metricas_universo['Skewness']:.4f}")
+                                                st.metric("Kurtosis", f"{metricas_universo['Kurtosis']:.4f}")
+                                                st.metric("JB Statistic", f"{metricas_universo['JB Statistic']:.4f}")
+                                                normalidad_universo = "✅ Normal" if metricas_universo['Is Normal'] else "❌ No Normal"
+                                                st.metric("Normalidad", normalidad_universo)
+                                        
+                                        # Gráfico de distribución de retornos del universo optimizado
+                                        if portfolio_result_universo.returns is not None:
+                                            st.markdown("#### 📊 Distribución de Retornos del Universo Optimizado")
+                                            fig_universo = portfolio_result_universo.plot_histogram_streamlit(
+                                                title="Distribución de Retornos del Universo Optimizado"
+                                            )
+                                            st.plotly_chart(fig_universo, use_container_width=True)
+                                        
+                                        # Gráfico de pesos del universo optimizado
+                                        if portfolio_result_universo.weights is not None:
+                                            st.markdown("#### 🥧 Distribución de Pesos del Universo")
+                                            if portfolio_result_universo.dataframe_allocation is not None:
+                                                fig_pie_universo = go.Figure(data=[go.Pie(
+                                                    labels=portfolio_result_universo.dataframe_allocation['rics'],
+                                                    values=portfolio_result_universo.weights,
+                                                    textinfo='label+percent',
+                                                    hole=0.4,
+                                                    marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                                )])
+                                            else:
+                                                fig_pie_universo = go.Figure(data=[go.Pie(
+                                                    labels=[f'Activo {i+1}' for i in range(len(portfolio_result_universo.weights))],
+                                                    values=portfolio_result_universo.weights,
+                                                    textinfo='label+percent',
+                                                    hole=0.4,
+                                                    marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                                )])
+                                            fig_pie_universo.update_layout(
+                                                title="Distribución Optimizada del Universo de Activos",
+                                                template='plotly_white'
+                                            )
+                                            st.plotly_chart(fig_pie_universo, use_container_width=True)
+                                        
+                                        # Comparación con portafolios valorizados
+                                        st.markdown("#### 📊 Comparación: Optimizado vs Valorizado")
+                                        
+                                        if portafolios_val:
+                                            # Calcular métricas de los portafolios valorizados
+                                            metricas_valorizados = {}
+                                            for panel, serie_val in portafolios_val.items():
+                                                if not serie_val.empty:
+                                                    returns_val = serie_val.pct_change().dropna()
+                                                    metricas_valorizados[panel] = {
+                                                        'Retorno Anual': returns_val.mean() * 252,
+                                                        'Volatilidad Anual': returns_val.std() * np.sqrt(252),
+                                                        'Sharpe Ratio': (returns_val.mean() * 252) / (returns_val.std() * np.sqrt(252)) if returns_val.std() > 0 else 0
+                                                    }
+                                            
+                                            # Crear tabla comparativa
+                                            comparacion_data = []
+                                            
+                                            # Agregar portafolio optimizado
+                                            comparacion_data.append({
+                                                'Portafolio': 'Universo Optimizado',
+                                                'Retorno Anual': f"{metricas_universo['Annual Return']:.2%}",
+                                                'Volatilidad Anual': f"{metricas_universo['Annual Volatility']:.2%}",
+                                                'Sharpe Ratio': f"{metricas_universo['Sharpe Ratio']:.4f}"
+                                            })
+                                            
+                                            # Agregar portafolios valorizados
+                                            for panel, metricas in metricas_valorizados.items():
+                                                panel_nombre = nombres_paneles.get(panel, panel)
+                                                comparacion_data.append({
+                                                    'Portafolio': f'{panel_nombre} (Valorizado)',
+                                                    'Retorno Anual': f"{metricas['Retorno Anual']:.2%}",
+                                                    'Volatilidad Anual': f"{metricas['Volatilidad Anual']:.2%}",
+                                                    'Sharpe Ratio': f"{metricas['Sharpe Ratio']:.4f}"
+                                                })
+                                            
+                                            df_comparacion = pd.DataFrame(comparacion_data)
+                                            st.dataframe(df_comparacion, use_container_width=True)
+                                        
+                                    else:
+                                        st.error("❌ Error en la optimización del universo")
+                                else:
+                                    st.error("❌ No se pudieron cargar los datos históricos del universo")
+                            else:
+                                st.warning("⚠️ No hay activos válidos para optimizar")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error durante la optimización del universo: {str(e)}")
+                            st.exception(e)
+                
+                if ejecutar_frontier_universo and show_frontier_universo:
+                    with st.spinner("Calculando frontera eficiente del universo..."):
+                        try:
+                            # Preparar activos para frontera eficiente
+                            activos_para_frontier = []
+                            for panel, simbolos in seleccion_final.items():
+                                for simbolo in simbolos:
+                                    activos_para_frontier.append({
+                                        'simbolo': simbolo,
+                                        'mercado': 'BCBA',
+                                        'tipo': panel
+                                    })
+                            
+                            if activos_para_frontier:
+                                manager_frontier = PortfolioManager(
+                                    activos_para_frontier,
+                                    token_acceso,
+                                    fecha_desde.strftime('%Y-%m-%d'),
+                                    fecha_hasta.strftime('%Y-%m-%d')
+                                )
+                                
+                                if manager_frontier.load_data():
+                                    portfolios_frontier, returns_frontier, volatilities_frontier = manager_frontier.compute_efficient_frontier(
+                                        target_return=target_return_universo, include_min_variance=True
+                                    )
+                                    
+                                    if portfolios_frontier and returns_frontier and volatilities_frontier:
+                                        st.success("✅ Frontera eficiente del universo calculada")
+                                        
+                                        # Crear gráfico de frontera eficiente del universo
+                                        fig_frontier_universo = go.Figure()
+                                        
+                                        # Línea de frontera eficiente
+                                        fig_frontier_universo.add_trace(go.Scatter(
+                                            x=volatilities_frontier, y=returns_frontier,
+                                            mode='lines+markers',
+                                            name='Frontera Eficiente del Universo',
+                                            line=dict(color='#0d6efd', width=3),
+                                            marker=dict(size=6)
+                                        ))
+                                        
+                                        # Portafolios especiales
+                                        colors_frontier = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+                                        labels_frontier = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
+                                        
+                                        for i, (label, portfolio) in enumerate(portfolios_frontier.items()):
+                                            if portfolio is not None:
+                                                fig_frontier_universo.add_trace(go.Scatter(
+                                                    x=[portfolio.volatility_annual], 
+                                                    y=[portfolio.return_annual],
+                                                    mode='markers',
+                                                    name=labels_frontier[i] if i < len(labels_frontier) else label,
+                                                    marker=dict(size=12, color=colors_frontier[i % len(colors_frontier)])
+                                                ))
+                                        
+                                        fig_frontier_universo.update_layout(
+                                            title='Frontera Eficiente del Universo de Activos',
+                                            xaxis_title='Volatilidad Anual',
+                                            yaxis_title='Retorno Anual',
+                                            showlegend=True,
+                                            template='plotly_white',
+                                            height=500
+                                        )
+                                        
+                                        st.plotly_chart(fig_frontier_universo, use_container_width=True)
+                                        
+                                        # Tabla comparativa de portafolios del universo
+                                        st.markdown("#### 📊 Comparación de Estrategias del Universo")
+                                        comparison_data_frontier = []
+                                        for label, portfolio in portfolios_frontier.items():
+                                            if portfolio is not None:
+                                                comparison_data_frontier.append({
+                                                    'Estrategia': label,
+                                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                                    'VaR 95%': f"{portfolio.var_95:.4f}",
+                                                    'Skewness': f"{portfolio.skewness:.4f}",
+                                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                                })
+                                        
+                                        if comparison_data_frontier:
+                                            df_comparison_frontier = pd.DataFrame(comparison_data_frontier)
+                                            st.dataframe(df_comparison_frontier, use_container_width=True)
+                                    
+                                    else:
+                                        st.error("❌ No se pudo calcular la frontera eficiente del universo")
+                                else:
+                                    st.error("❌ No se pudieron cargar los datos históricos para la frontera eficiente")
+                            else:
+                                st.warning("⚠️ No hay activos válidos para calcular la frontera eficiente")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error calculando frontera eficiente del universo: {str(e)}")
+                            st.exception(e)
                 
             except Exception as e:
                 st.error(f"❌ Error al obtener universo de activos: {str(e)}")
