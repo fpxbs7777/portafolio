@@ -268,18 +268,78 @@ def obtener_cotizaciones_panel(token_portador, instrumento, panel, pais):
     Returns:
         dict: Datos de cotizaciones del panel
     """
-    url = f'https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}'
+    # Validar parámetros
+    if not token_portador:
+        st.error("Token de autenticación requerido")
+        return None
+    
+    # Manejo especial para cauciones
+    if instrumento == "Cauciones":
+        # Para cauciones, usar el endpoint específico
+        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/{pais.lower()}/Operables'
+        params = {
+            'cotizacionInstrumentoModel.instrumento': 'cauciones',
+            'cotizacionInstrumentoModel.pais': pais.lower()
+        }
+    else:
+        # Para otros instrumentos, usar el endpoint estándar
+        url = f'https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}'
+        params = {}
+    
     encabezados = obtener_encabezado_autorizacion(token_portador)
     
     try:
-        respuesta = requests.get(url, headers=encabezados, timeout=15)
+        respuesta = requests.get(url, headers=encabezados, params=params, timeout=15)
+        
         if respuesta.status_code == 200:
-            return respuesta.json()
+            datos = respuesta.json()
+            
+            # Manejo especial para cauciones
+            if instrumento == "Cauciones":
+                if 'titulos' in datos and isinstance(datos['titulos'], list):
+                    # Procesar datos de cauciones
+                    df_cauciones = pd.DataFrame(datos['titulos'])
+                    if not df_cauciones.empty:
+                        # Limpiar y procesar datos de cauciones
+                        df_cauciones = df_cauciones[df_cauciones['plazo'].notna()].copy()
+                        df_cauciones['plazo_dias'] = df_cauciones['plazo'].str.extract('(\d+)').astype(float)
+                        
+                        if 'ultimoPrecio' in df_cauciones.columns:
+                            df_cauciones['tasa_limpia'] = df_cauciones['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                        
+                        return {
+                            'titulos': df_cauciones.to_dict('records'),
+                            'tipo': 'cauciones',
+                            'total': len(df_cauciones)
+                        }
+                    else:
+                        st.warning("No se encontraron datos de cauciones")
+                        return None
+                else:
+                    st.warning("Formato de respuesta inesperado para cauciones")
+                    return None
+            else:
+                # Para otros instrumentos, devolver datos tal como vienen
+                return datos
+                
+        elif respuesta.status_code == 404:
+            st.error(f'Panel {panel} no encontrado para {instrumento} en {pais}')
+            return None
+        elif respuesta.status_code == 401:
+            st.error('Error de autenticación. Verifique su token de acceso.')
+            return None
         else:
             st.error(f'Error al obtener cotizaciones del panel {panel}: {respuesta.status_code}')
             return None
+            
+    except requests.exceptions.Timeout:
+        st.error(f'Timeout al obtener cotizaciones del panel {panel}')
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error(f'Error de conexión al obtener cotizaciones del panel {panel}')
+        return None
     except Exception as e:
-        st.error(f'Error de conexión al obtener cotizaciones del panel {panel}: {str(e)}')
+        st.error(f'Error inesperado al obtener cotizaciones del panel {panel}: {str(e)}')
         return None
 
 def obtener_serie_historica_cotizacion(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
@@ -564,7 +624,7 @@ def obtener_serie_historica_caucion(token_portador, simbolo, fecha_desde, fecha_
             
             if not caución_data.empty:
                 # Obtener la tasa actual
-                tasa_actual = caución_data['tasa'].iloc[0] if 'tasa' in caución_data.columns else 0
+                tasa_actual = caución_data['tasa_limpia'].iloc[0] if 'tasa_limpia' in caución_data.columns else 0
                 
                 # Crear fechas para el período
                 fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
@@ -575,11 +635,11 @@ def obtener_serie_historica_caucion(token_portador, simbolo, fecha_desde, fecha_
                 crecimiento_diario = tasa_actual / 365 / 100  # Convertir tasa anual a diaria
                 
                 # Crear serie de precios sintética
-                precios = [100]  # Precio inicial
+                precios = [100.0]  # Precio inicial como float
                 for i in range(1, dias):
                     precio_anterior = precios[i-1]
                     nuevo_precio = precio_anterior * (1 + crecimiento_diario)
-                    precios.append(nuevo_precio)
+                    precios.append(float(nuevo_precio))  # Asegurar que sea float
                 
                 # Crear DataFrame
                 df = pd.DataFrame({
@@ -971,6 +1031,7 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
+    # Usar el endpoint correcto para cauciones
     url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
     params = {
         'cotizacionInstrumentoModel.instrumento': 'cauciones',
@@ -990,7 +1051,7 @@ def obtener_tasas_caucion(token_portador):
             if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
                 df = pd.DataFrame(data['titulos'])
                 
-                # Filtrar solo las cauciónes y limpiar los datos
+                # Filtrar solo las cauciones y limpiar los datos
                 df = df[df['plazo'].notna()].copy()
                 
                 # Extraer el plazo en días
@@ -1019,7 +1080,9 @@ def obtener_tasas_caucion(token_portador):
         elif response.status_code == 401:
             st.error("Error de autenticación. Por favor, verifique su token de acceso.")
             return None
-            
+        elif response.status_code == 404:
+            st.error("Endpoint de cauciones no encontrado. Verifique la configuración de la API.")
+            return None
         else:
             error_msg = f"Error {response.status_code} al obtener tasas de caución"
             try:
@@ -1548,106 +1611,194 @@ class manager:
         self.rics = rics
         self.notional = notional
         self.data = data
-        self.timeseries = None
+        self.timeseries = {}
         self.returns = None
-        self.cov_matrix = None
+        self.covariance_matrix = None
         self.mean_returns = None
         self.risk_free_rate = 0.40  # Tasa libre de riesgo anual para Argentina
+        
+        # Inicializar series de tiempo
+        for ric in self.rics:
+            self.load_intraday_timeseries(ric)
+        
+        # Sincronizar series
+        self.synchronise_timeseries()
 
     def load_intraday_timeseries(self, ticker):
-        return self.data[ticker]
+        """Carga series de tiempo intradiarias para un ticker específico"""
+        try:
+            # Verificar si el ticker existe en los datos
+            if ticker in self.data and self.data[ticker] is not None:
+                self.timeseries[ticker] = self.data[ticker]
+            else:
+                st.warning(f"No se encontraron datos para {ticker}")
+                self.timeseries[ticker] = None
+        except Exception as e:
+            st.error(f"Error al cargar datos para {ticker}: {str(e)}")
+            self.timeseries[ticker] = None
 
     def synchronise_timeseries(self):
-        dic_timeseries = {}
-        for ric in self.rics:
-            if ric in self.data:
-                dic_timeseries[ric] = self.load_intraday_timeseries(ric)
-        self.timeseries = dic_timeseries
+        """Sincroniza las series de tiempo para alinear fechas"""
+        try:
+            # Filtrar solo las series que no son None
+            valid_series = {k: v for k, v in self.timeseries.items() if v is not None}
+            
+            if not valid_series:
+                st.warning("No hay series de tiempo válidas para sincronizar")
+                return
+            
+            # Obtener todas las fechas únicas
+            all_dates = set()
+            for series in valid_series.values():
+                if hasattr(series, 'index'):
+                    all_dates.update(series.index)
+            
+            if not all_dates:
+                st.warning("No se encontraron fechas válidas en las series")
+                return
+            
+            # Crear índice de fechas ordenadas
+            date_index = pd.DatetimeIndex(sorted(all_dates))
+            
+            # Reindexar todas las series
+            for ticker in valid_series:
+                if valid_series[ticker] is not None:
+                    self.timeseries[ticker] = valid_series[ticker].reindex(date_index, method='ffill')
+                    
+        except Exception as e:
+            st.error(f"Error al sincronizar series de tiempo: {str(e)}")
 
     def compute_covariance(self):
-        self.synchronise_timeseries()
-        # Calcular retornos logarítmicos
-        returns_matrix = {}
-        for ric in self.rics:
-            if ric in self.timeseries and self.timeseries[ric] is not None:
-                prices = self.timeseries[ric]
-                returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
-        
-        # Convertir a DataFrame para alinear fechas
-        self.returns = pd.DataFrame(returns_matrix)
-        
-        # Calcular matriz de covarianza y retornos medios
-        self.cov_matrix = self.returns.cov() * 252  # Anualizar
-        self.mean_returns = self.returns.mean() * 252  # Anualizar
-        
-        return self.cov_matrix, self.mean_returns
+        """Calcula la matriz de covarianza de los retornos"""
+        try:
+            # Filtrar series válidas
+            valid_series = {k: v for k, v in self.timeseries.items() if v is not None}
+            
+            if len(valid_series) < 2:
+                st.warning("Se necesitan al menos 2 series válidas para calcular covarianza")
+                return None
+            
+            # Calcular retornos logarítmicos
+            returns_matrix = {}
+            for ric in valid_series:
+                prices = valid_series[ric]
+                if prices is not None and len(prices) > 1:
+                    returns_matrix[ric] = np.log(prices / prices.shift(1)).dropna()
+            
+            if not returns_matrix:
+                st.warning("No se pudieron calcular retornos válidos")
+                return None
+            
+            # Convertir a DataFrame para alinear fechas
+            returns_df = pd.DataFrame(returns_matrix)
+            returns_df = returns_df.dropna()
+            
+            if returns_df.empty:
+                st.warning("No hay datos suficientes para calcular covarianza")
+                return None
+            
+            # Calcular matriz de covarianza
+            self.covariance_matrix = returns_df.cov()
+            return self.covariance_matrix
+            
+        except Exception as e:
+            st.error(f"Error al calcular matriz de covarianza: {str(e)}")
+            return None
 
     def compute_portfolio(self, portfolio_type=None, target_return=None):
-        if self.cov_matrix is None:
-            self.compute_covariance()
+        """Calcula el portafolio optimizado"""
+        try:
+            # Calcular matriz de covarianza
+            cov_matrix = self.compute_covariance()
+            if cov_matrix is None:
+                st.error("No se pudo calcular la matriz de covarianza")
+                return None
             
-        n_assets = len(self.rics)
-        bounds = tuple((0, 1) for _ in range(n_assets))
-        
-        if portfolio_type == 'min-variance-l1':
-            # Minimizar varianza con restricción L1
+            # Filtrar series válidas para calcular retornos medios
+            valid_series = {k: v for k, v in self.timeseries.items() if v is not None}
+            
+            if len(valid_series) < 2:
+                st.error("Se necesitan al menos 2 activos para optimizar el portafolio")
+                return None
+            
+            # Calcular retornos medios
+            returns_matrix = {}
+            for ric in valid_series:
+                prices = valid_series[ric]
+                if prices is not None and len(prices) > 1:
+                    returns = np.log(prices / prices.shift(1)).dropna()
+                    returns_matrix[ric] = returns.mean() * 252  # Anualizar
+            
+            if not returns_matrix:
+                st.error("No se pudieron calcular retornos medios")
+                return None
+            
+            mean_returns = pd.Series(returns_matrix)
+            
+            # Número de activos
+            n_assets = len(mean_returns)
+            
+            # Restricciones
+            bounds = tuple((0, 1) for _ in range(n_assets))
             constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(np.abs(x))}
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}  # Suma de pesos = 1
             ]
             
-        elif portfolio_type == 'min-variance-l2':
-            # Minimizar varianza con restricción L2
-            constraints = [
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                {'type': 'ineq', 'fun': lambda x: 1 - np.sum(x**2)}
-            ]
-            
-        elif portfolio_type == 'equi-weight':
-            # Pesos iguales
-            weights = np.ones(n_assets) / n_assets
-            return self._create_output(weights)
-            
-        elif portfolio_type == 'long-only':
-            # Optimización long-only estándar
-            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-            
-        elif portfolio_type == 'markowitz':
+            # Agregar restricción de retorno objetivo si se especifica
             if target_return is not None:
-                # Optimización con retorno objetivo
-                constraints = [
-                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
-                    {'type': 'eq', 'fun': lambda x: np.sum(self.mean_returns * x) - target_return}
-                ]
-            else:
-                # Maximizar Sharpe Ratio
-                constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-                def neg_sharpe_ratio(weights):
-                    port_ret = np.sum(self.mean_returns * weights)
-                    port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-                    if port_vol == 0:
-                        return np.inf
-                    return -(port_ret - self.risk_free_rate) / port_vol
+                constraints.append({
+                    'type': 'eq', 
+                    'fun': lambda x: np.sum(mean_returns * x) - target_return
+                })
+            
+            # Función objetivo según el tipo de portafolio
+            if portfolio_type == 'min_variance':
+                def objective(weights):
+                    return np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))
                 
-                result = op.minimize(
-                    neg_sharpe_ratio, 
-                    x0=np.ones(n_assets)/n_assets,
-                    method='SLSQP',
-                    bounds=bounds,
-                    constraints=constraints
-                )
-                return self._create_output(result.x)
-        
-        # Optimización general de varianza mínima
-        result = op.minimize(
-            lambda x: portfolio_variance(x, self.cov_matrix),
-            x0=np.ones(n_assets)/n_assets,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-        
-        return self._create_output(result.x)
+                result = op.minimize(objective, 
+                                   x0=np.array([1/n_assets] * n_assets),
+                                   method='SLSQP',
+                                   bounds=bounds,
+                                   constraints=constraints)
+                
+            elif portfolio_type == 'max_sharpe':
+                def neg_sharpe_ratio(weights):
+                    portfolio_return = np.sum(mean_returns * weights)
+                    portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))
+                    sharpe_ratio = (portfolio_return - self.risk_free_rate) / portfolio_vol
+                    return -sharpe_ratio
+                
+                result = op.minimize(neg_sharpe_ratio,
+                                   x0=np.array([1/n_assets] * n_assets),
+                                   method='SLSQP',
+                                   bounds=bounds,
+                                   constraints=constraints)
+                
+            else:  # Portafolio de igual peso
+                weights = np.array([1/n_assets] * n_assets)
+                result = type('obj', (), {'x': weights, 'success': True})()
+            
+            if result.success:
+                weights = result.x
+                portfolio_return = np.sum(mean_returns * weights)
+                portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))
+                sharpe_ratio = (portfolio_return - self.risk_free_rate) / portfolio_vol
+                
+                return {
+                    'weights': dict(zip(mean_returns.index, weights)),
+                    'return': portfolio_return,
+                    'volatility': portfolio_vol,
+                    'sharpe_ratio': sharpe_ratio,
+                    'type': portfolio_type
+                }
+            else:
+                st.error(f"Error en la optimización: {result.message}")
+                return None
+                
+        except Exception as e:
+            st.error(f"Error al calcular el portafolio: {str(e)}")
+            return None
 
     def _create_output(self, weights):
         """Crea un objeto output con los pesos optimizados"""
@@ -3247,8 +3398,12 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     if not df_cotizaciones.empty:
                         st.success(f"✅ Se obtuvieron {len(df_cotizaciones)} cotizaciones")
                         
-                        # Mostrar columnas relevantes
-                        columnas_relevantes = ['simbolo', 'ultimoPrecio', 'variacionPorcentual', 'volumen']
+                        # Mostrar columnas relevantes según el tipo de instrumento
+                        if instrumento == "Cauciones":
+                            columnas_relevantes = ['simbolo', 'plazo', 'ultimoPrecio', 'tasa_limpia', 'plazo_dias']
+                        else:
+                            columnas_relevantes = ['simbolo', 'ultimoPrecio', 'variacionPorcentual', 'volumen']
+                        
                         columnas_disponibles = [col for col in columnas_relevantes if col in df_cotizaciones.columns]
                         
                         if columnas_disponibles:
@@ -3260,23 +3415,61 @@ def mostrar_cotizaciones_mercado(token_acceso):
                 else:
                     st.error("❌ No se pudieron obtener las cotizaciones del panel")
         
-        # Sección de tasas de caución
-        st.markdown("#### 🏦 Tasas de Caución")
-        if st.button("🔄 Actualizar Tasas de Caución"):
-            with st.spinner("Consultando tasas de caución..."):
-                tasas_caucion = obtener_tasas_caucion(token_acceso)
-            
-            if tasas_caucion is not None and not tasas_caucion.empty:
-                df_tasas = pd.DataFrame(tasas_caucion)
-                columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
-                columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
+        # Sección de tasas de caución (solo si se seleccionó cauciones)
+        if instrumento == "Cauciones":
+            st.markdown("#### 🏦 Tasas de Caución")
+            if st.button("🔄 Actualizar Tasas de Caución"):
+                with st.spinner("Consultando tasas de caución..."):
+                    tasas_caucion = obtener_tasas_caucion(token_acceso)
                 
-                if columnas_disponibles:
-                    st.dataframe(df_tasas[columnas_disponibles].head(10))
+                if tasas_caucion is not None and not tasas_caucion.empty:
+                    st.success(f"✅ Se obtuvieron {len(tasas_caucion)} tasas de caución")
+                    
+                    # Mostrar tabla con las tasas
+                    columnas_mostrar = ['simbolo', 'plazo', 'ultimoPrecio', 'tasa_limpia', 'plazo_dias']
+                    columnas_disponibles = [col for col in columnas_mostrar if col in tasas_caucion.columns]
+                    
+                    if columnas_disponibles:
+                        st.dataframe(
+                            tasas_caucion[columnas_disponibles].rename(columns={
+                                'simbolo': 'Instrumento',
+                                'plazo': 'Plazo',
+                                'ultimoPrecio': 'Tasa (%)',
+                                'tasa_limpia': 'Tasa Limpia',
+                                'plazo_dias': 'Días'
+                            }),
+                            use_container_width=True
+                        )
+                        
+                        # Gráfico de curva de tasas
+                        if 'tasa_limpia' in tasas_caucion.columns and 'plazo_dias' in tasas_caucion.columns:
+                            fig = go.Figure()
+                            
+                            fig.add_trace(go.Scatter(
+                                x=tasas_caucion['plazo_dias'],
+                                y=tasas_caucion['tasa_limpia'],
+                                mode='lines+markers+text',
+                                name='Tasa',
+                                text=tasas_caucion['tasa_limpia'].round(2).astype(str) + '%',
+                                textposition='top center',
+                                line=dict(color='#1f77b4', width=2),
+                                marker=dict(size=10, color='#1f77b4')
+                            ))
+                            
+                            fig.update_layout(
+                                title='Curva de Tasas de Caución',
+                                xaxis_title='Plazo (días)',
+                                yaxis_title='Tasa Anual (%)',
+                                template='plotly_white',
+                                height=500,
+                                showlegend=False
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.dataframe(tasas_caucion.head(10))
                 else:
-                    st.dataframe(df_tasas.head(10))
-            else:
-                st.error("❌ No se pudieron obtener las tasas de caución")
+                    st.error("❌ No se pudieron obtener las tasas de caución")
     
     # Tab 3: Series Históricas
     with tab_historicas:
