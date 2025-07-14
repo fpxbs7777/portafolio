@@ -1127,7 +1127,7 @@ def optimize_portfolio(returns, target_return=None):
     Returns:
         np.array: Pesos optimizados del portafolio
     """
-    if returns is None or returns.empty:
+    if returns is None or (hasattr(returns, "empty") and returns.empty):
         return None
         
     n_assets = len(returns.columns)
