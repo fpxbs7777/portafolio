@@ -193,6 +193,25 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
         return None
 
+def mostrar_estado_cuenta(estado_cuenta):
+    """
+    Muestra un resumen básico del estado de cuenta del cliente.
+    """
+    st.subheader("💰 Estado de Cuenta")
+    if not estado_cuenta:
+        st.info("No hay información de estado de cuenta disponible.")
+        return
+
+    # Mostrar los saldos principales si existen
+    saldos = estado_cuenta.get('saldos', estado_cuenta)
+    if isinstance(saldos, dict):
+        saldos = [saldos]
+    if isinstance(saldos, list):
+        df = pd.DataFrame(saldos)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.json(estado_cuenta)
+
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
