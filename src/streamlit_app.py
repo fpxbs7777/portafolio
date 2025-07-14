@@ -4139,5 +4139,71 @@ def main():
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
+def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
+    """
+    Devuelve un diccionario con listas de tickers reales por panel para el universo aleatorio.
+    Si no hay API, usa listas fijas de tickers representativos.
+    Retorna: (dict panel->tickers, dict panel->descripciones)
+    """
+    tickers = {}
+    descripciones = {}
+    # Paneles y ejemplos (puedes reemplazar por consulta a la API de IOL si tienes endpoint)
+    paneles_dict = {
+        'acciones': [
+            ('GGAL', 'Grupo Financiero Galicia'),
+            ('YPFD', 'YPF S.A.'),
+            ('PAMP', 'Pampa Energía'),
+            ('BMA', 'Banco Macro'),
+            ('SUPV', 'Grupo Supervielle'),
+            ('CEPU', 'Central Puerto'),
+            ('TXAR', 'Ternium Argentina'),
+            ('ALUA', 'Aluar'),
+            ('TGSU2', 'Transportadora Gas del Sur'),
+            ('EDN', 'Edenor'),
+        ],
+        'cedears': [
+            ('AAPL', 'Apple'),
+            ('TSLA', 'Tesla'),
+            ('AMZN', 'Amazon'),
+            ('GOOGL', 'Alphabet'),
+            ('MSFT', 'Microsoft'),
+            ('KO', 'Coca-Cola'),
+            ('MELI', 'Mercado Libre'),
+            ('BABA', 'Alibaba'),
+            ('JNJ', 'Johnson & Johnson'),
+            ('PG', 'Procter & Gamble'),
+        ],
+        'aDRs': [
+            ('BBAR', 'BBVA Argentina'),
+            ('BMA', 'Banco Macro'),
+            ('GGAL', 'Grupo Galicia'),
+            ('PAM', 'Pampa Energia'),
+            ('SUPV', 'Supervielle'),
+        ],
+        'titulosPublicos': [
+            ('AL30', 'Bonar 2030'),
+            ('GD30', 'Global 2030'),
+            ('AL35', 'Bonar 2035'),
+            ('GD35', 'Global 2035'),
+            ('AL29', 'Bonar 2029'),
+            ('GD29', 'Global 2029'),
+        ],
+        'obligacionesNegociables': [
+            ('PBY22', 'Pampa Energía ON'),
+            ('CGC24', 'Compañía General de Combustibles ON'),
+            ('YPF23', 'YPF ON'),
+            ('TGSU2', 'Transportadora Gas del Sur ON'),
+        ]
+    }
+    for panel in paneles:
+        panel_l = panel.lower()
+        if panel_l in paneles_dict:
+            tickers[panel] = [t[0] for t in paneles_dict[panel_l]]
+            descripciones[panel] = [t[1] for t in paneles_dict[panel_l]]
+        else:
+            tickers[panel] = []
+            descripciones[panel] = []
+    return tickers, descripciones
+
 if __name__ == "__main__":
     main()
