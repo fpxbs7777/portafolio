@@ -2919,11 +2919,37 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         cotizacion_mep = obtener_cotizacion_mep(
                             token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
                         )
-                    
                     if cotizacion_mep:
                         st.success("✅ Cotización MEP obtenida")
-                        precio_mep = cotizacion_mep.get('precio', 'N/A')
-                        st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
+                        # Mostrar análisis completo en texto y tabla
+                        st.markdown("### 📊 Análisis Completo del Mercado")
+                        st.markdown(f"**Descripción:** {cotizacion_mep.get('descripcionTitulo','N/A')}")
+                        st.markdown(f"**Símbolo:** {simbolo_mep}")
+                        st.markdown(f"**Último Precio:** ${cotizacion_mep.get('ultimoPrecio','N/A')}")
+                        st.markdown(f"**Variación:** {cotizacion_mep.get('variacion','N/A')}%")
+                        st.markdown(f"**Apertura:** ${cotizacion_mep.get('apertura','N/A')}")
+                        st.markdown(f"**Máximo:** ${cotizacion_mep.get('maximo','N/A')}")
+                        st.markdown(f"**Mínimo:** ${cotizacion_mep.get('minimo','N/A')}")
+                        st.markdown(f"**Cierre Anterior:** ${cotizacion_mep.get('cierreAnterior','N/A')}")
+                        st.markdown(f"**Tendencia:** {cotizacion_mep.get('tendencia','N/A')}")
+                        st.markdown(f"**Monto Operado:** ${cotizacion_mep.get('montoOperado','N/A')}")
+                        st.markdown(f"**Volumen Nominal:** {cotizacion_mep.get('volumenNominal','N/A')}")
+                        st.markdown(f"**Cantidad de Operaciones:** {cotizacion_mep.get('cantidadOperaciones','N/A')}")
+                        st.markdown(f"**Moneda:** {cotizacion_mep.get('moneda','N/A')}")
+                        st.markdown(f"**Fecha/Hora:** {cotizacion_mep.get('fechaHora','N/A')}")
+                        # Mostrar puntas de compra/venta en tabla
+                        puntas = cotizacion_mep.get('puntas',[])
+                        if puntas:
+                            import pandas as pd
+                            df_puntas = pd.DataFrame(puntas)
+                            df_puntas = df_puntas.rename(columns={
+                                'cantidadCompra':'Cantidad Compra',
+                                'precioCompra':'Precio Compra',
+                                'precioVenta':'Precio Venta',
+                                'cantidadVenta':'Cantidad Venta'
+                            })
+                            st.markdown("**Puntas de Compra/Venta:**")
+                            st.dataframe(df_puntas, use_container_width=True)
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
     
@@ -2961,9 +2987,14 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo')
         tipo = titulo.get('tipo')
+        mercado = titulo.get('mercado', 'BCBA')
         valuacion = activo.get('valuacion', activo.get('valuacionActual', 0))
         if simbolo:
-            activos_dict[simbolo] = {'Valuación': valuacion, 'Tipo': tipo}
+            activos_dict[simbolo] = {
+                'Valuación': valuacion,
+                'Tipo': tipo,
+                'mercado': mercado
+            }
             valor_total += valuacion
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
