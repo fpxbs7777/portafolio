@@ -4401,30 +4401,7 @@ def create_professional_chart(data, title, variable_name):
         return go.Figure(), 0, 0, 0, 0, 0
     # ... resto del código original ...
 
-# --- En los tabs de visualización y análisis, antes de graficar o mostrar métricas ---
-# Ejemplo en tab1 (Visualización):
-# (Este patrón debe estar en todos los tabs que muestran gráficos o análisis)
-if analyze_clicked and selected_serie is not None:
-    serie_id = selected_serie.get('Serie ID', '')
-    if serie_id:
-        with st.spinner(f'📊 Obteniendo datos históricos de {selected_var}...'):
-            historical_data = get_historical_data(
-                serie_id, 
-                start_date.strftime('%Y-%m-%d'), 
-                end_date.strftime('%Y-%m-%d')
-            )
-        if not historical_data.empty:
-            fig, current_val, change, change_pct, max_val, min_val = create_professional_chart(
-                historical_data, 
-                f"Evolución de {selected_var}", 
-                selected_var
-            )
-            # ... mostrar métricas y gráfico ...
-        else:
-            st.warning("⚠️ No se encontraron datos históricos para esta variable en el período seleccionado.")
-    else:
-        st.error("❌ Serie ID no disponible para esta variable.")
-# Repetir patrón en los otros tabs y funciones de análisis.
+# --- FIN DEL ARCHIVO ---
 
 if __name__ == "__main__":
     main()
