@@ -1037,6 +1037,9 @@ class output:
         # Placeholders que serán actualizados por el manager
         self.weights = None
         self.dataframe_allocation = None
+        # Compatibilidad: alias para risk y returns (usados en la interfaz)
+        self.risk = self.volatility_annual
+        self.returns = self.return_annual
 
     def get_metrics_dict(self):
         """Retorna métricas del portafolio en formato diccionario"""
