@@ -1059,156 +1059,59 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
-        try:
-            # Verificar si hay datos para mostrar
-            if (not hasattr(self, 'returns') or 
-                self.returns is None or 
-                (hasattr(self.returns, 'empty') and self.returns.empty) or
-                (hasattr(self.returns, '__len__') and len(self.returns) <= 1)):
-                
-                # Si no hay datos, crear un gráfico vacío con un mensaje
-                fig = go.Figure()
-                fig.add_annotation(
-                    text="No hay suficientes datos para mostrar el histograma",
-                    xref="paper", yref="paper",
-                    x=0.5, y=0.5, showarrow=False,
-                    font=dict(size=14, color="gray")
-                )
-                fig.update_layout(
-                    title=title,
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)'
-                )
-                return fig
-            
-            # Convertir a array de numpy si es necesario
-            returns = np.array(self.returns) if not isinstance(self.returns, np.ndarray) else self.returns
-            
-            # Eliminar valores nulos o infinitos
-            returns = returns[~np.isnan(returns) & ~np.isinf(returns)]
-            
-            # Verificar si aún hay datos después de la limpieza
-            if len(returns) <= 1:
-                fig = go.Figure()
-                fig.add_annotation(
-                    text="No hay suficientes datos después de la limpieza",
-                    xref="paper", yref="paper",
-                    x=0.5, y=0.5, showarrow=False,
-                    font=dict(size=14, color="gray")
-                )
-                fig.update_layout(title=title)
-                return fig
-            
-            # Calcular métricas para el gráfico
-            mean_return = np.mean(returns)
-            std_return = np.std(returns)
-            var_95 = np.percentile(returns, 5)
-            
-            # Crear el histograma
-            fig = go.Figure()
-            
-            # Añadir histograma
-            fig.add_trace(go.Histogram(
-                x=returns,
-                nbinsx=min(30, len(returns)//5),  # Ajustar número de bins según la muestra
-                name="Retornos",
-                marker_color='#0d6efd',
-                opacity=0.75,
-                histnorm='probability density'
-            ))
-            
-            # Añadir líneas de referencia
-            fig.add_vline(
-                x=mean_return, 
-                line_dash="dash", 
-                line_color="red",
-                annotation_text=f"Media: {mean_return:.4f}",
-                annotation_position="top right"
-            )
-            
-            fig.add_vline(
-                x=var_95, 
-                line_dash="dash", 
-                line_color="orange",
-                annotation_text=f"VaR 95%: {var_95:.4f}",
-                annotation_position="bottom left"
-            )
-            
-            # Añadir línea de densidad (KDE)
-            if len(returns) > 10:  # Solo si hay suficientes puntos
-                from scipy.stats import gaussian_kde
-                try:
-                    kde = gaussian_kde(returns)
-                    x = np.linspace(returns.min(), returns.max(), 100)
-                    y = kde(x)
-                    fig.add_trace(go.Scatter(
-                        x=x, y=y, 
-                        mode='lines', 
-                        name='Densidad',
-                        line=dict(color='#ff7f0e', width=2)
-                    ))
-                except:
-                    pass
-            
-            # Actualizar diseño
-            fig.update_layout(
-                title=dict(
-                    text=title,
-                    x=0.5,
-                    xanchor='center',
-                    font=dict(size=16, color='#2c3e50')
-                ),
-                xaxis_title="Retorno",
-                yaxis_title="Densidad de Probabilidad",
-                showlegend=len(returns) > 10,  # Mostrar leyenda solo si hay KDE
-                template='plotly_white',
-                margin=dict(l=40, r=40, t=60, b=40),
-                hovermode='x unified',
-                plot_bgcolor='white',
-                paper_bgcolor='white',
-                xaxis=dict(
-                    showgrid=True, 
-                    gridwidth=1, 
-                    gridcolor='#f0f0f0',
-                    zeroline=True,
-                    zerolinewidth=1,
-                    zerolinecolor='#d3d3d3',
-                    showline=True,
-                    linewidth=1,
-                    linecolor='#d3d3d3',
-                    title_font=dict(size=12, color='#2c3e50'),
-                    tickfont=dict(size=10, color='#7f8c8d')
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='#f0f0f0',
-                    zeroline=True,
-                    zerolinewidth=1,
-                    zerolinecolor='#d3d3d3',
-                    showline=True,
-                    linewidth=1,
-                    linecolor='#d3d3d3',
-                    title_font=dict(size=12, color='#2c3e50'),
-                    tickfont=dict(size=10, color='#7f8c8d')
-                )
-            )
-            
-            return fig
-            
-        except Exception as e:
-            # En caso de error, devolver un gráfico con el mensaje de error
+        # Asegura que self.returns sea una secuencia (array, lista, o pandas Series), no un escalar
+        import numpy as np
+        import pandas as pd
+        returns = self.returns
+        # Si es None o vacío
+        if returns is None or (hasattr(returns, '__len__') and len(returns) == 0):
             fig = go.Figure()
             fig.add_annotation(
-                text=f"Error al generar el histograma: {str(e)}",
+                text="No hay datos suficientes para mostrar",
                 xref="paper", yref="paper",
-                x=0.5, y=0.5, showarrow=False,
-                font=dict(size=12, color="red")
+                x=0.5, y=0.5, showarrow=False
             )
             fig.update_layout(title=title)
             return fig
+        # Si es un escalar (float, int, numpy.float, numpy.int)
+        if isinstance(returns, (float, int, np.floating, np.integer)):
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+        # Si es un array/serie de un solo valor, también evitar graficar
+        if hasattr(returns, '__len__') and len(returns) <= 1:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No hay datos suficientes para mostrar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            fig.update_layout(title=title)
+            return fig
+
+        fig = go.Figure(data=[go.Histogram(
+            x=returns,
+            nbinsx=30,
+            name="Retornos del Portafolio",
+            marker_color='#0d6efd'
+        )])
+        # Agregar líneas de métricas importantes
+        fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
+                     annotation_text=f"Media: {self.mean_daily:.4f}")
+        fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
+                     annotation_text=f"VaR 95%: {self.var_95:.4f}")
+        fig.update_layout(
+            title=f"{title}",
+            xaxis_title="Retorno",
+            yaxis_title="Frecuencia",
+            showlegend=False,
+            template='plotly_white'
+        )
         return fig
 
 def portfolio_variance(x, mtx_var_covar):
@@ -1462,149 +1365,54 @@ class PortfolioManager:
             return False
     
     def compute_portfolio(self, strategy='markowitz', target_return=None):
-        if not self.data_loaded or self.returns is None or self.returns.empty:
-            st.warning("No hay datos de retornos disponibles para calcular el portafolio")
+        if not self.data_loaded or self.returns is None:
             return None
         
         try:
-            # Asegurarse de que hay al menos 2 activos para optimizar
-            if len(self.returns.columns) < 2:
-                st.warning("Se necesitan al menos 2 activos para la optimización")
-                return None
+            if self.manager:
+                # Usar el manager avanzado
+                portfolio_output = self.manager.compute_portfolio(strategy, target_return)
+                return portfolio_output
+            else:
+                # Fallback a optimización básica
+                n_assets = len(self.returns.columns)
                 
-            # Calcular pesos según la estrategia
-            if strategy == 'equi-weight':
-                weights = np.ones(len(self.returns.columns)) / len(self.returns.columns)
-            elif strategy == 'min-variance-l1':
-                weights = self._optimize_min_variance_l1()
-            elif strategy == 'min-variance-l2':
-                weights = self._optimize_min_variance_l2()
-            elif strategy == 'long-only':
-                weights = self._optimize_long_only()
-            else:  # 'markowitz' por defecto
-                weights = self._optimize_markowitz(target_return)
-            
-            if weights is None or len(weights) == 0:
-                st.warning("No se pudieron calcular los pesos del portafolio")
-                return None
-            
-            # Calcular retornos del portafolio
-            portfolio_returns = self.returns @ weights
-            
-            # Crear objeto de salida
-            portfolio_output = output(portfolio_returns, self.notional)
-            portfolio_output.weights = weights
-            
-            # Crear DataFrame con la asignación de activos
-            portfolio_output.dataframe_allocation = pd.DataFrame({
-                'rics': list(self.returns.columns),
-                'weights': weights,
-                'volatilities': self.returns.std().values * np.sqrt(252),  # Anualizado
-                'returns': self.returns.mean().values * 252  # Anualizado
-            })
-            
-            # Calcular métricas de riesgo/retorno
-            portfolio_output.risk = np.sqrt(np.dot(weights.T, np.dot(self.returns.cov() * 252, weights)))
-            portfolio_output.returns = (self.returns.mean() @ weights) * 252
-            
-            return portfolio_output
+                if strategy == 'equi-weight':
+                    weights = np.ones(n_assets) / n_assets
+                else:
+                    weights = optimize_portfolio(self.returns, target_return=target_return)
+                
+                # Crear objeto de resultado básico
+                portfolio_returns = (self.returns * weights).sum(axis=1)
+                portfolio_output = output(portfolio_returns, self.notional)
+                portfolio_output.weights = weights
+                portfolio_output.dataframe_allocation = pd.DataFrame({
+                    'rics': list(self.returns.columns),
+                    'weights': weights,
+                    'volatilities': self.returns.std().values,
+                    'returns': self.returns.mean().values
+                })
+                
+                return portfolio_output
             
         except Exception as e:
-            st.error(f"Error al calcular el portafolio: {str(e)}")
             return None
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
-        if not self.data_loaded or not self.manager or self.returns is None:
-            st.warning("No se pudieron cargar los datos necesarios para calcular la frontera eficiente.")
+        if not self.data_loaded or not self.manager:
             return None, None, None
         
         try:
-            # Usar los retornos ya calculados
-            if not self.returns.empty:
-                # Calcular la frontera eficiente usando los retornos
-                n_assets = len(self.returns.columns)
-                if n_assets < 2:
-                    st.warning("Se necesitan al menos 2 activos para calcular la frontera eficiente.")
-                    return None, None, None
-                    
-                # Calcular retornos esperados y matriz de covarianza
-                mean_returns = self.returns.mean()
-                cov_matrix = self.returns.cov()
-                
-                # Generar carteras aleatorias para la frontera
-                num_portfolios = 1000
-                results = np.zeros((3, num_portfolios))
-                weights_record = []
-                
-                for i in range(num_portfolios):
-                    # Generar pesos aleatorios
-                    weights = np.random.random(n_assets)
-                    weights /= np.sum(weights)
-                    weights_record.append(weights)
-                    
-                    # Calcular métricas del portafolio
-                    portfolio_return = np.sum(mean_returns * weights) * 252  # Anualizado
-                    portfolio_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))  # Anualizado
-                    
-                    # Almacenar resultados
-                    results[0, i] = portfolio_std_dev
-                    results[1, i] = portfolio_return
-                    results[2, i] = (portfolio_return - 0.40) / (portfolio_std_dev if portfolio_std_dev != 0 else 1)  # Sharpe ratio con tasa libre de riesgo del 40%
-                
-                # Convertir a arrays de numpy
-                returns = results[1]
-                volatilities = results[0]
-                
-                # Crear diccionario de portafolios especiales
-                portfolios = {}
-                
-                # Encontrar portafolio con mejor Sharpe
-                max_sharpe_idx = np.argmax(results[2])
-                portfolios['Mejor Sharpe'] = self._create_portfolio_result(
-                    weights_record[max_sharpe_idx], 
-                    mean_returns, 
-                    cov_matrix
+            if self.prices is not None:
+                portfolios, returns, volatilities = compute_efficient_frontier(
+                    self.manager.rics, self.notional, target_return, include_min_variance, 
+                    self.prices.to_dict('series')
                 )
-                
-                # Encontrar portafolio de mínima varianza
-                min_vol_idx = np.argmin(results[0])
-                portfolios['Mínima Varianza'] = self._create_portfolio_result(
-                    weights_record[min_vol_idx],
-                    mean_returns,
-                    cov_matrix
-                )
-                
-                # Encontrar portafolio con mejor retorno
-                max_ret_idx = np.argmax(results[1])
-                portfolios['Máximo Retorno'] = self._create_portfolio_result(
-                    weights_record[max_ret_idx],
-                    mean_returns,
-                    cov_matrix
-                )
-                
-                return portfolios, returns, volatilities
             else:
-                st.warning("No hay suficientes datos para calcular la frontera eficiente.")
-                return None, None, None
-                
+                portfolios, returns, volatilities = None, None, None
+            return portfolios, returns, volatilities
         except Exception as e:
-            st.error(f"Error al calcular la frontera eficiente: {str(e)}")
-            return None, None, None
-    
-    def _create_portfolio_result(self, weights, mean_returns, cov_matrix):
-        """Crea un objeto de resultado de portafolio a partir de pesos dados"""
-        # Calcular métricas del portafolio
-        portfolio_return = np.sum(mean_returns * weights) * 252  # Anualizado
-        portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))  # Anualizado
-        
-        # Crear objeto de salida
-        class PortfolioResult:
-            def __init__(self, returns, risk):
-                self.returns = returns
-                self.risk = risk
-        
-        return PortfolioResult(portfolio_return, portfolio_vol)
             return None, None, None
 
 # --- Historical Data Methods ---
@@ -3364,12 +3172,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             st.plotly_chart(fig, use_container_width=True, key=f"hist_{clave}")
         # Pie chart de pesos
         if hasattr(res, 'dataframe_allocation') and res.dataframe_allocation is not None:
-            st.markdown("**Distribución de Pesos**")
-            import plotly.graph_objects as go
             df = res.dataframe_allocation
-            fig_pie = go.Figure(data=[go.Pie(labels=df['rics'], values=df['weights'], textinfo='label+percent', hole=0.4)])
-            fig_pie.update_layout(title="Distribución Optimizada de Activos", template='plotly_white')
-            st.plotly_chart(fig_pie, use_container_width=True, key=f"pie_{clave}")
+            if not df.empty and 'rics' in df.columns and 'weights' in df.columns and df['weights'].sum() > 0:
+                st.markdown("**Distribución de Pesos**")
+                import plotly.graph_objects as go
+                fig_pie = go.Figure(data=[go.Pie(labels=df['rics'], values=df['weights'], textinfo='label+percent', hole=0.4)])
+                fig_pie.update_layout(title="Distribución Optimizada de Activos", template='plotly_white')
+                st.plotly_chart(fig_pie, use_container_width=True, key=f"pie_{clave}")
+            else:
+                st.info("No hay datos suficientes para mostrar la distribución de pesos.")
         # Métricas
         st.write(f"Retorno esperado: {getattr(res,'returns',0)*100:.2f}% | Riesgo: {getattr(res,'risk',0)*100:.2f}% | Sharpe: {sharpe:.2f}")
         st.markdown("---")
@@ -3378,7 +3189,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.subheader("📈 Frontera Eficiente y Portafolios Especiales")
     if st.checkbox("Mostrar Frontera Eficiente", value=True):
         portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(target_return=0.08, include_min_variance=True)
-        if portfolios and returns and volatilities:
+        if portfolios and returns and volatilities and len(returns) > 0 and len(volatilities) > 0:
             import plotly.graph_objects as go
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=volatilities, y=returns, mode='lines+markers', name='Frontera Eficiente', line=dict(color='#0d6efd', width=3), marker=dict(size=6)))
@@ -3386,26 +3197,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             colores = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
             for i, (label, port) in enumerate(portfolios.items()):
                 if port and hasattr(port, 'risk') and hasattr(port, 'returns'):
-                    fig.add_trace(go.Scatter(
-                        x=[port.risk], 
-                        y=[port.returns], 
-                        mode='markers+text', 
-                        name=label, 
-                        marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), 
-                        text=[label], 
-                        textposition='top center'
-                    ))
-            fig.update_layout(
-                title='Frontera Eficiente del Portafolio', 
-                xaxis_title='Volatilidad Anual', 
-                yaxis_title='Retorno Anual', 
-                showlegend=True, 
-                template='plotly_white', 
-                height=500
-            )
-            st.plotly_chart(fig, use_container_width=True, key="efficient_frontier")
+                    fig.add_trace(go.Scatter(x=[port.risk], y=[port.returns], mode='markers+text', name=label, marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), text=[label], textposition='top center'))
+            fig.update_layout(title='Frontera Eficiente del Portafolio', xaxis_title='Volatilidad Anual', yaxis_title='Retorno Anual', showlegend=True, template='plotly_white', height=500)
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("No se pudo calcular la frontera eficiente.")
+            st.warning("No se pudo calcular la frontera eficiente. Verifique que haya datos históricos suficientes y activos válidos.")
 
     # Comparación final
     st.subheader("🔬 Comparación Directa con Portafolio Actual")
