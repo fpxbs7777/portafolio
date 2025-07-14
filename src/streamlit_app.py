@@ -2798,25 +2798,33 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     
                                     # Resumen de análisis
                                     st.markdown("#### 📋 Resumen del Análisis")
-                                    
-                                    if retorno_esperado_horizonte_ars > 0:
-                                        st.success(f"✅ **Retorno Esperado Positivo**: Se espera un retorno de {retorno_esperado_horizonte_ars:.2%} en {dias_analisis} días")
+                                    # --- CORRECCIÓN: asegurar que retorno_esperado_horizonte_ars y sharpe_ratio sean escalares ---
+                                    retorno_esperado_horizonte_ars_val = retorno_esperado_horizonte_ars
+                                    if hasattr(retorno_esperado_horizonte_ars, 'item') and retorno_esperado_horizonte_ars.size == 1:
+                                        retorno_esperado_horizonte_ars_val = float(retorno_esperado_horizonte_ars.item())
+                                    elif isinstance(retorno_esperado_horizonte_ars, (list, np.ndarray)) and len(retorno_esperado_horizonte_ars) == 1:
+                                        retorno_esperado_horizonte_ars_val = float(retorno_esperado_horizonte_ars[0])
+                                    sharpe_ratio_val = sharpe_ratio
+                                    if hasattr(sharpe_ratio, 'item') and getattr(sharpe_ratio, 'size', 1) == 1:
+                                        sharpe_ratio_val = float(sharpe_ratio.item())
+                                    elif isinstance(sharpe_ratio, (list, np.ndarray)) and len(sharpe_ratio) == 1:
+                                        sharpe_ratio_val = float(sharpe_ratio[0])
+                                    # --- FIN CORRECCIÓN ---
+                                    if retorno_esperado_horizonte_ars_val > 0:
+                                        st.success(f"✅ **Retorno Esperado Positivo**: Se espera un retorno de {retorno_esperado_horizonte_ars_val:.2%} en {dias_analisis} días")
                                     else:
-                                        st.warning(f"⚠️ **Retorno Esperado Negativo**: Se espera un retorno de {retorno_esperado_horizonte_ars:.2%} en {dias_analisis} días")
-                                    
-                                    if sharpe_ratio > 1:
-                                        st.success(f"✅ **Excelente Ratio de Sharpe**: {sharpe_ratio:.2f} indica buenos retornos ajustados por riesgo")
-                                    elif sharpe_ratio > 0.5:
-                                        st.info(f"ℹ️ **Buen Ratio de Sharpe**: {sharpe_ratio:.2f} indica retornos razonables ajustados por riesgo")
+                                        st.warning(f"⚠️ **Retorno Esperado Negativo**: Se espera un retorno de {retorno_esperado_horizonte_ars_val:.2%} en {dias_analisis} días")
+                                    if sharpe_ratio_val > 1:
+                                        st.success(f"✅ **Excelente Ratio de Sharpe**: {sharpe_ratio_val:.2f} indica buenos retornos ajustados por riesgo")
+                                    elif sharpe_ratio_val > 0.5:
+                                        st.info(f"ℹ️ **Buen Ratio de Sharpe**: {sharpe_ratio_val:.2f} indica retornos razonables ajustados por riesgo")
                                     else:
-                                        st.warning(f"⚠️ **Ratio de Sharpe Bajo**: {sharpe_ratio:.2f} indica retornos pobres ajustados por riesgo")
-                                    
+                                        st.warning(f"⚠️ **Ratio de Sharpe Bajo**: {sharpe_ratio_val:.2f} indica retornos pobres ajustados por riesgo")
                                     # Recomendaciones basadas en el análisis
                                     st.markdown("#### 💡 Recomendaciones")
-                                    
-                                    if retorno_esperado_horizonte_ars > 0.05:  # 5% en el horizonte
+                                    if retorno_esperado_horizonte_ars_val > 0.05:  # 5% en el horizonte
                                         st.success("🎯 **Mantener Posición**: El portafolio muestra buenas perspectivas de retorno")
-                                    elif retorno_esperado_horizonte_ars < -0.05:  # -5% en el horizonte
+                                    elif retorno_esperado_horizonte_ars_val < -0.05:  # -5% en el horizonte
                                         st.warning("🔄 **Considerar Rebalanceo**: El portafolio podría beneficiarse de ajustes")
                                     else:
                                         st.info("📊 **Monitorear**: El portafolio muestra retornos moderados")
