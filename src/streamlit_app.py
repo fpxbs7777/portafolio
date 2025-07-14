@@ -3056,8 +3056,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     # --- NUEVO: Validar cantidad de activos válidos antes de seguir ---
     activos_validos = [a for a in activos_dict if activos_dict[a]['Valuación'] > 0]
     if len(activos_validos) < 2:
-        st.warning("El portafolio actual solo tiene 1 activo válido. Agregue más activos o cambie el universo para poder optimizar.")
+        st.warning("El portafolio actual solo tiene 1 activo válido (con símbolo y cantidad > 0). Agregue más activos o cambie el universo para poder optimizar.")
         return
+    # Advertir si hay activos con valuación cero
+    activos_con_valuacion_cero = [a for a in activos_validos if a.get('valuacionActual', a.get('valuacion', 0)) == 0]
+    if activos_con_valuacion_cero:
+        st.info(f"Hay {len(activos_con_valuacion_cero)} activos con valuación cero. Se intentará optimizar igualmente si hay series históricas disponibles.")
+    # Usar todos los activos válidos para la optimización
+    universe_activos = [
+        {'simbolo': a.get('titulo',{}).get('simbolo'),
+         'mercado': a.get('titulo',{}).get('mercado'),
+         'tipo': a.get('titulo',{}).get('tipo')}
+        for a in activos_validos
+    ]
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
     cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
@@ -3702,9 +3713,9 @@ def mostrar_conceptos_estadisticos():
     import plotly.graph_objects as go
     st.title("📚 Conceptos Estadísticos Básicos")
     st.markdown("""
-    Este módulo educativo explica y aplica los principales conceptos estadísticos usados en finanzas y gestión de carteras, con ejemplos y cálculos sobre tus propios activos o portafolio si hay datos disponibles.
+    Este módulo educativo explica y aplica los principales conceptos estadísticos usados en finanzas y gestión de carteras, con ejemplos teóricos y cálculos sobre tus propios activos o portafolio si hay datos disponibles.
     """)
-    fuente = st.radio("¿Sobre qué datos quieres ver los conceptos?", ["Portafolio actual", "Serie histórica de un ticker", "Ingresar datos manualmente", "Ejemplo precargado"])
+    fuente = st.radio("¿Sobre qué datos quieres ver los conceptos?", ["Portafolio actual", "Serie histórica de uno o más tickers", "Ingresar datos manualmente", "Ejemplo precargado"])
     datos_reales = None
     nombre_datos = ""
     # --- NUEVO: obtener portafolio real como DataFrame ---
@@ -3770,21 +3781,24 @@ def mostrar_conceptos_estadisticos():
                 st.info("No hay campos numéricos en el portafolio. Ingrese datos manualmente o seleccione otra opción.")
         else:
             st.info("El portafolio está vacío. Ingrese datos manualmente o seleccione otra opción.")
-    elif fuente == "Serie histórica de un ticker":
+    elif fuente == "Serie histórica de uno o más tickers":
         tickers = obtener_tickers_portafolio()
         if tickers:
-            ticker = st.selectbox("Selecciona un ticker del portafolio", tickers)
+            tickers_sel = st.multiselect("Selecciona uno o más tickers del portafolio", tickers)
             tipo_serie = st.radio("Tipo de serie a analizar", ["Precios históricos", "Retornos diarios"])
-            serie = obtener_serie_historica_ticker(ticker)
-            if serie is not None and len(serie) > 1:
-                if tipo_serie == "Retornos diarios":
-                    datos_reales = serie.pct_change().dropna().values
-                    nombre_datos = f"Retornos diarios de {ticker}"
-                else:
-                    datos_reales = serie.dropna().values
-                    nombre_datos = f"Precios históricos de {ticker}"
-            else:
-                st.info("No hay datos históricos suficientes para ese ticker. Ingrese datos manualmente o seleccione otra opción.")
+            series_dict = {}
+            for ticker in tickers_sel:
+                serie = obtener_serie_historica_ticker(ticker)
+                if serie is not None and len(serie) > 1:
+                    if tipo_serie == "Retornos diarios":
+                        datos = serie.pct_change().dropna().values
+                        nombre = f"Retornos diarios de {ticker}"
+                    else:
+                        datos = serie.dropna().values
+                        nombre = f"Precios históricos de {ticker}"
+                    series_dict[ticker] = (datos, nombre)
+            if not series_dict:
+                st.info("No hay datos históricos suficientes para los tickers seleccionados. Ingrese datos manualmente o seleccione otra opción.")
         else:
             st.info("No hay tickers en el portafolio. Ingrese datos manualmente o seleccione otra opción.")
     elif fuente == "Ingresar datos manualmente":
@@ -3799,10 +3813,14 @@ def mostrar_conceptos_estadisticos():
         datos_reales = np.array([30,30,32,40,45,50,52,40,50,32,45,40,32,32,40,50,40,45,40,45,50,45])
         nombre_datos = "Ejemplo: Edades"
     # --- Si no hay datos válidos, mostrar mensaje claro ---
-    if datos_reales is None or len(datos_reales) < 2:
+    if fuente == "Serie histórica de uno o más tickers":
+        if not tickers or not tickers_sel or not series_dict:
+            st.warning("No hay datos suficientes para mostrar los conceptos. Ingrese datos manualmente o seleccione otra opción.")
+            return
+    elif datos_reales is None or len(datos_reales) < 2:
         st.warning("No hay datos suficientes para mostrar los conceptos. Ingrese datos manualmente o seleccione otra opción.")
         return
-    # --- El resto del menú educativo sigue igual, pero todos los cálculos usan datos_reales ---
+    # --- Tabs con teoría, ejemplo y datos reales ---
     secciones = [
         "Tablas de Frecuencias",
         "Medidas de Tendencia Central",
@@ -3813,25 +3831,54 @@ def mostrar_conceptos_estadisticos():
         "Ejercicios Resueltos"
     ]
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(secciones)
+    # --- Ejemplo teórico para cada sección (resumido del manual) ---
+    ejemplo_tabla = np.array([30,30,32,40,45,50,52,40,50,32,45,40,32,32,40,50,40,45,40,45,50,45])
+    # --- Tablas de Frecuencias ---
     with tab1:
         st.header("1. Tablas de Frecuencias")
-        st.write(f"**Datos analizados:** {nombre_datos}")
-        df = pd.DataFrame(datos_reales, columns=["X"])
-        tabla = df["X"].value_counts().sort_index().reset_index()
-        tabla.columns = ["xi", "ni"]
-        tabla["Ni"] = tabla["ni"].cumsum()
-        N = tabla["ni"].sum()
-        tabla["hi"] = tabla["ni"] / N
-        tabla["Hi"] = tabla["Ni"] / N
-        st.dataframe(tabla)
-        st.markdown("**Definiciones:** xi: valor, ni: frecuencia absoluta, Ni: frecuencia absoluta acumulada, hi: frecuencia relativa, Hi: frecuencia relativa acumulada.")
-        fig1 = go.Figure([go.Bar(x=tabla["xi"], y=tabla["ni"], name="Frecuencia absoluta")])
-        fig1.update_layout(title="Diagrama de barras (Frecuencia absoluta)", xaxis_title="xi", yaxis_title="ni")
+        st.markdown("""
+        **Definición:** Una tabla de frecuencias organiza los valores de una variable y la cantidad de veces que se repite cada uno. Permite resumir y visualizar la información de manera clara.
+        """)
+        st.markdown("**Ejemplo teórico:** (Edades) 30/30/32/40/45/50/52/40/50/32/45/40/32/32/40/50/40/45/40/45/50/45")
+        df_ej = pd.DataFrame(ejemplo_tabla, columns=["X"])
+        tabla_ej = df_ej["X"].value_counts().sort_index().reset_index()
+        tabla_ej.columns = ["xi", "ni"]
+        tabla_ej["Ni"] = tabla_ej["ni"].cumsum()
+        N_ej = tabla_ej["ni"].sum()
+        tabla_ej["hi"] = tabla_ej["ni"] / N_ej
+        tabla_ej["Hi"] = tabla_ej["Ni"] / N_ej
+        st.dataframe(tabla_ej)
+        fig1 = go.Figure([go.Bar(x=tabla_ej["xi"], y=tabla_ej["ni"], name="Frecuencia absoluta")])
+        fig1.update_layout(title="Diagrama de barras (Ejemplo)", xaxis_title="xi", yaxis_title="ni")
         st.plotly_chart(fig1)
-        fig2 = go.Figure([go.Pie(labels=tabla["xi"], values=tabla["hi"], hole=0.3)])
-        fig2.update_layout(title="Diagrama circular (Frecuencia relativa)")
-        st.plotly_chart(fig2)
-        st.caption("Puedes comparar con tus propios datos si los has cargado.")
+        # --- Datos reales ---
+        if fuente == "Serie histórica de uno o más tickers":
+            for ticker, (datos, nombre) in series_dict.items():
+                st.markdown(f"**Datos analizados:** {nombre}")
+                df = pd.DataFrame(datos, columns=["X"])
+                tabla = df["X"].value_counts().sort_index().reset_index()
+                tabla.columns = ["xi", "ni"]
+                tabla["Ni"] = tabla["ni"].cumsum()
+                N = tabla["ni"].sum()
+                tabla["hi"] = tabla["ni"] / N
+                tabla["Hi"] = tabla["Ni"] / N
+                st.dataframe(tabla)
+                fig = go.Figure([go.Bar(x=tabla["xi"], y=tabla["ni"], name="Frecuencia absoluta")])
+                fig.update_layout(title=f"Diagrama de barras ({nombre})", xaxis_title="xi", yaxis_title="ni")
+                st.plotly_chart(fig)
+        elif datos_reales is not None:
+            st.markdown(f"**Datos analizados:** {nombre_datos}")
+            df = pd.DataFrame(datos_reales, columns=["X"])
+            tabla = df["X"].value_counts().sort_index().reset_index()
+            tabla.columns = ["xi", "ni"]
+            tabla["Ni"] = tabla["ni"].cumsum()
+            N = tabla["ni"].sum()
+            tabla["hi"] = tabla["ni"] / N
+            tabla["Hi"] = tabla["Ni"] / N
+            st.dataframe(tabla)
+            fig = go.Figure([go.Bar(x=tabla["xi"], y=tabla["ni"], name="Frecuencia absoluta")])
+            fig.update_layout(title=f"Diagrama de barras ({nombre_datos})", xaxis_title="xi", yaxis_title="ni")
+            st.plotly_chart(fig)
     with tab2:
         st.header("2. Medidas de Tendencia Central")
         media = np.mean(datos_reales)
