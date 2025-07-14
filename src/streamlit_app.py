@@ -2634,9 +2634,10 @@ def mostrar_cotizaciones_mercado(token_acceso):
             if st.form_submit_button("🔍 Consultar MEP"):
                 if simbolo_mep:
                     with st.spinner("Consultando cotización MEP..."):
-                        cotizacion_mep = obtener_cotizacion_mep(
+                        import asyncio
+                        cotizacion_mep = asyncio.run(obtener_cotizacion_mep(
                             token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
-                        )
+                        ))
                     if cotizacion_mep:
                         st.success("✅ Cotización MEP obtenida")
                         # Mostrar análisis completo en texto y tabla
@@ -2674,7 +2675,8 @@ def mostrar_cotizaciones_mercado(token_acceso):
     with st.expander("🏦 Tasas de Caución", expanded=True):
         if st.button("🔄 Actualizar Tasas"):
             with st.spinner("Consultando tasas de caución..."):
-                tasas_caucion = obtener_tasas_caucion(token_acceso)
+                import asyncio
+                tasas_caucion = asyncio.run(obtener_tasas_caucion(token_acceso))
             
             if tasas_caucion is not None and not tasas_caucion.empty:
                 df_tasas = pd.DataFrame(tasas_caucion)
@@ -2691,7 +2693,8 @@ def mostrar_cotizaciones_mercado(token_acceso):
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Menú Avanzado de Optimización de Portafolio")
     with st.spinner("Obteniendo portafolio actual..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        import asyncio
+        portafolio = asyncio.run(obtener_portafolio(token_acceso, id_cliente))
     if not portafolio or not portafolio.get('activos'):
         st.warning("No se pudo obtener el portafolio del cliente o está vacío")
         return
@@ -2953,7 +2956,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
     with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        import asyncio
+        portafolio = asyncio.run(obtener_portafolio(token_acceso, id_cliente))
     
     if not portafolio:
         st.warning("No se pudo obtener el portafolio del cliente")
@@ -3043,7 +3047,8 @@ def mostrar_movimientos_asesor():
     token_acceso = st.session_state.token_acceso
     
     # Obtener lista de clientes
-    clientes = obtener_lista_clientes(token_acceso)
+    import asyncio
+    clientes = asyncio.run(obtener_lista_clientes(token_acceso))
     if not clientes:
         st.warning("No se encontraron clientes")
         return
@@ -3090,7 +3095,8 @@ def mostrar_movimientos_asesor():
     
     if buscar and clientes_seleccionados:
         with st.spinner("Buscando movimientos..."):
-            movimientos = obtener_movimientos_asesor(
+            import asyncio
+            movimientos = asyncio.run(obtener_movimientos_asesor(
                 token_portador=token_acceso,
                 clientes=clientes_seleccionados,
                 fecha_desde=fecha_desde.isoformat(),
@@ -3099,7 +3105,7 @@ def mostrar_movimientos_asesor():
                 estado=estado or None,
                 tipo_operacion=tipo_operacion or None,
                 moneda=moneda or None
-            )
+            ))
             
             if movimientos and isinstance(movimientos, list):
                 df = pd.DataFrame(movimientos)
@@ -3227,7 +3233,8 @@ def main():
                 if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
                     if usuario and contraseña:
                         with st.spinner("Conectando..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            import asyncio
+                            token_acceso, refresh_token = asyncio.run(obtener_tokens(usuario, contraseña))
                             
                             if token_acceso:
                                 st.session_state.token_acceso = token_acceso
@@ -3264,7 +3271,8 @@ def main():
             if not st.session_state.clientes and st.session_state.token_acceso:
                 with st.spinner("Cargando clientes..."):
                     try:
-                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        import asyncio
+                        clientes = asyncio.run(obtener_lista_clientes(st.session_state.token_acceso))
                         if clientes:
                             st.session_state.clientes = clientes
                         else:
