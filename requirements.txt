@@ -11,3 +11,4 @@ streamlit
 tradingview
 aiohttp
 httpx
+google.generativeai
