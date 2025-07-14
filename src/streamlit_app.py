@@ -583,7 +583,7 @@ def procesar_respuesta_historico(data, tipo_activo):
                 except (ValueError, AttributeError) as e:
                     continue
             
-            if precios and fechas:
+            if len(precios) > 0 and len(fechas) > 0:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
                 # Eliminar duplicados manteniendo el último
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
@@ -713,7 +713,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                     print(f"  - Error inesperado al procesar item: {e}")
                     continue
             
-            if fechas and precios:
+            if len(fechas) > 0 and len(precios) > 0:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
                 # Eliminar duplicados manteniendo el último
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
@@ -813,7 +813,7 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
                 except (ValueError, TypeError, AttributeError) as e:
                     continue
             
-            if fechas and precios:
+            if len(fechas) > 0 and len(precios) > 0:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
@@ -3175,7 +3175,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.subheader("📈 Frontera Eficiente y Portafolios Especiales")
     if st.checkbox("Mostrar Frontera Eficiente", value=True):
         portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(target_return=0.08, include_min_variance=True)
-        if portfolios and returns and volatilities and len(returns) > 0 and len(volatilities) > 0:
+        if portfolios is not None and returns is not None and volatilities is not None and len(returns) > 0 and len(volatilities) > 0:
             import plotly.graph_objects as go
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=volatilities, y=returns, mode='lines+markers', name='Frontera Eficiente', line=dict(color='#0d6efd', width=3), marker=dict(size=6)))
