@@ -3169,7 +3169,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         if hasattr(res, 'plot_histogram_streamlit'):
             st.markdown("**Distribución de Retornos**")
             fig = res.plot_histogram_streamlit()
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key=f"hist_{clave}")
         # Pie chart de pesos
         if hasattr(res, 'dataframe_allocation') and res.dataframe_allocation is not None:
             st.markdown("**Distribución de Pesos**")
@@ -3177,7 +3177,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             df = res.dataframe_allocation
             fig_pie = go.Figure(data=[go.Pie(labels=df['rics'], values=df['weights'], textinfo='label+percent', hole=0.4)])
             fig_pie.update_layout(title="Distribución Optimizada de Activos", template='plotly_white')
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, use_container_width=True, key=f"pie_{clave}")
         # Métricas
         st.write(f"Retorno esperado: {getattr(res,'returns',0)*100:.2f}% | Riesgo: {getattr(res,'risk',0)*100:.2f}% | Sharpe: {sharpe:.2f}")
         st.markdown("---")
@@ -3194,9 +3194,24 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             colores = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
             for i, (label, port) in enumerate(portfolios.items()):
                 if port and hasattr(port, 'risk') and hasattr(port, 'returns'):
-                    fig.add_trace(go.Scatter(x=[port.risk], y=[port.returns], mode='markers+text', name=label, marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), text=[label], textposition='top center'))
-            fig.update_layout(title='Frontera Eficiente del Portafolio', xaxis_title='Volatilidad Anual', yaxis_title='Retorno Anual', showlegend=True, template='plotly_white', height=500)
-            st.plotly_chart(fig, use_container_width=True)
+                    fig.add_trace(go.Scatter(
+                        x=[port.risk], 
+                        y=[port.returns], 
+                        mode='markers+text', 
+                        name=label, 
+                        marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), 
+                        text=[label], 
+                        textposition='top center'
+                    ))
+            fig.update_layout(
+                title='Frontera Eficiente del Portafolio', 
+                xaxis_title='Volatilidad Anual', 
+                yaxis_title='Retorno Anual', 
+                showlegend=True, 
+                template='plotly_white', 
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True, key="efficient_frontier")
         else:
             st.warning("No se pudo calcular la frontera eficiente.")
 
