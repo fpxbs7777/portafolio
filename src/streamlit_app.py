@@ -1512,9 +1512,6 @@ class PortfolioManager:
         except Exception as e:
             st.error(f"Error al calcular el portafolio: {str(e)}")
             return None
-            
-        except Exception as e:
-            return None
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
