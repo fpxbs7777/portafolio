@@ -861,47 +861,30 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
 def obtener_tickers_por_panel(token_portador, paneles, pais):
     """
     Obtiene los tickers disponibles por panel desde la API de IOL
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        paneles (list): Lista de paneles a consultar
-        pais (str): País para la consulta
-        
-    Returns:
-        tuple: (tickers_por_panel, tickers_df)
     """
     tickers_por_panel = {}
     tickers_df = pd.DataFrame(columns=['panel', 'simbolo'])
-    
     for panel in paneles:
-        # Manejo especial para cauciones
         if panel == 'cauciones':
-            tickers = obtener_tickers_cauciones(token_portador)
-            if tickers:
+            continue  # Ignorar cauciones completamente
+        url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+        params = {
+            'cotizacionInstrumentoModel.instrumento': panel,
+            'cotizacionInstrumentoModel.pais': pais.lower()
+        }
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        try:
+            respuesta = requests.get(url, headers=encabezados, params=params, timeout=15)
+            if respuesta.status_code == 200:
+                datos = respuesta.json()
+                tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
                 tickers_por_panel[panel] = tickers
                 panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
                 tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
-        else:
-            url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
-            params = {
-                'cotizacionInstrumentoModel.instrumento': panel,
-                'cotizacionInstrumentoModel.pais': pais.lower()
-            }
-            encabezados = obtener_encabezado_autorizacion(token_portador)
-            
-            try:
-                respuesta = requests.get(url, headers=encabezados, params=params, timeout=15)
-                if respuesta.status_code == 200:
-                    datos = respuesta.json()
-                    tickers = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
-                    tickers_por_panel[panel] = tickers
-                    panel_df = pd.DataFrame({'panel': panel, 'simbolo': tickers})
-                    tickers_df = pd.concat([tickers_df, panel_df], ignore_index=True)
-                else:
-                    st.warning(f'Error en la solicitud para {panel}: {respuesta.status_code}')
-            except Exception as e:
-                st.error(f'Error al obtener tickers para {panel}: {str(e)}')
-    
+            else:
+                st.warning(f'Error en la solicitud para {panel}: {respuesta.status_code}')
+        except Exception as e:
+            st.error(f'Error al obtener tickers para {panel}: {str(e)}')
     return tickers_por_panel, tickers_df
 
 def obtener_series_historicas_aleatorias_con_capital(
@@ -915,57 +898,43 @@ def obtener_series_historicas_aleatorias_con_capital(
     series_historicas = pd.DataFrame()
     precios_ultimos = {}
     seleccion_final = {}
-
     for panel in paneles_seleccionados:
+        if panel == 'cauciones':
+            continue  # Ignorar cauciones completamente
         if panel in tickers_por_panel:
             tickers = tickers_por_panel[panel]
             random.shuffle(tickers)
             seleccionados = []
-            
             for simbolo in tickers:
-                # Manejo especial para cauciones
-                if panel == 'cauciones':
-                    serie = obtener_serie_historica_caucion(bearer_token, simbolo, fecha_desde, fecha_hasta)
-                else:
-                    mercado = 'BCBA'
-                    serie = obtener_serie_historica_iol(bearer_token, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-                
+                mercado = 'BCBA'
+                serie = obtener_serie_historica_iol(bearer_token, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
                 if serie is not None and not serie.empty:
-                    # Buscar columna de precio
                     col_precio = None
                     for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
                         if c in serie.columns:
                             col_precio = c
                             break
-                    
                     if col_precio is not None:
                         precio_final = serie[col_precio].dropna().iloc[-1]
                         precios_ultimos[simbolo] = precio_final
                         serie['simbolo'] = simbolo
                         serie['panel'] = panel
                         seleccionados.append((simbolo, serie, precio_final))
-                
                 if len(seleccionados) >= cantidad_activos:
                     break
-            
-            # Ordenar por precio y filtrar por capital
             seleccionados.sort(key=lambda x: x[2])
             seleccionables = []
             capital_restante = capital_ars
-            
             for simbolo, df, precio in seleccionados:
                 if precio <= capital_restante:
                     seleccionables.append((simbolo, df, precio))
                     capital_restante -= precio
-            
-            # Si no hay suficientes activos asequibles, tomar los que se pueda
             if len(seleccionables) < 2:
                 st.warning(f"No hay suficientes activos asequibles en el panel {panel} para el capital disponible.")
             else:
                 for simbolo, df, precio in seleccionables:
                     series_historicas = pd.concat([series_historicas, df], ignore_index=True)
                 seleccion_final[panel] = [s[0] for s in seleccionables]
-    
     return series_historicas, seleccion_final
 
 def calcular_valorizado_portafolio(series_historicas, seleccion_final):
@@ -4111,14 +4080,13 @@ def mostrar_optimizacion_universo_activos(token_acceso):
     st.markdown("#### 🌐 Selección de Universo de Activos")
     
     # Definir paneles disponibles
-    paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables', 'cauciones']
+    paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']  # cauciones excluidas
     nombres_paneles = {
         'acciones': 'Acciones',
         'cedears': 'CEDEARs',
         'aDRs': 'ADRs',
         'titulosPublicos': 'Títulos Públicos',
         'obligacionesNegociables': 'Obligaciones Negociables',
-        'cauciones': 'Cauciones'
     }
     
     # Configuración del universo
@@ -4162,17 +4130,9 @@ def mostrar_optimizacion_universo_activos(token_acceso):
             help="Capital disponible para la inversión"
         )
         
-        fecha_desde = st.date_input(
-            "Fecha desde:",
-            value=st.session_state.fecha_desde,
-            max_value=date.today()
-        )
-        
-        fecha_hasta = st.date_input(
-            "Fecha hasta:",
-            value=st.session_state.fecha_hasta,
-            max_value=date.today()
-        )
+        fecha_desde = st.date_input("Fecha desde:", value=date(2021, 1, 1), min_value=date(2021, 1, 1), max_value=date(2025, 7, 14))
+        fecha_hasta = st.date_input("Fecha hasta:", value=date(2025, 7, 14), min_value=date(2021, 1, 1), max_value=date(2025, 7, 14))
+        ajustada = st.selectbox("Tipo de ajuste", ["SinAjustar", "Ajustada"])
     
     # Botón para obtener universo
     if st.button("🔍 Obtener Universo de Activos", type="primary"):
@@ -4222,7 +4182,7 @@ def mostrar_optimizacion_universo_activos(token_acceso):
                 series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
                     tickers_por_panel, paneles_seleccionados, cantidad_activos,
                     fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'),
-                    'SinAjustar', token_acceso, capital_ars
+                    ajustada, token_acceso, capital_ars
                 )
                 
                 if series_historicas.empty:
@@ -4921,7 +4881,7 @@ def mostrar_rebalanceo_configurable(token_acceso, portafolio, estado_cuenta):
         st.info("Se rebalanceará con un universo aleatorio de activos configurable.")
 
         # Selección de paneles y configuración
-        paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables', 'cauciones']
+        paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']  # cauciones excluidas
         paneles_seleccionados = st.multiselect("Seleccione paneles", paneles, default=paneles[:2])
         cantidad_activos = st.number_input("Cantidad de activos por panel", min_value=1, max_value=10, value=3)
         capital_opcion = st.radio("¿Qué capital usar?", ["Saldo valorizado", "Saldo disponible", "Ambos"])
@@ -4937,9 +4897,12 @@ def mostrar_rebalanceo_configurable(token_acceso, portafolio, estado_cuenta):
         ajustada = st.selectbox("Tipo de ajuste", ["SinAjustar", "Ajustada"])
 
         if st.button("Rebalancear con universo aleatorio"):
-            tickers_por_panel, tickers_df = obtener_tickers_por_panel(token_acceso, paneles, 'Argentina')
+            # Filtrar cauciones si por error llegan a la función
+            paneles_filtrados = [p for p in paneles if p != 'cauciones']
+            paneles_seleccionados_filtrados = [p for p in paneles_seleccionados if p != 'cauciones']
+            tickers_por_panel, tickers_df = obtener_tickers_por_panel(token_acceso, paneles_filtrados, 'Argentina')
             series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
-                tickers_por_panel, paneles_seleccionados, cantidad_activos,
+                tickers_por_panel, paneles_seleccionados_filtrados, cantidad_activos,
                 fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'),
                 ajustada, token_acceso, capital_ars
             )
