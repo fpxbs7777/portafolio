@@ -172,6 +172,276 @@ def obtener_lista_clientes(token_portador):
         st.error(f'Error de conexión al obtener clientes: {str(e)}')
         return []
 
+# --- FUNCIONES PARA GESTIÓN DE CLIENTES Y APERTURA DE CUENTA ---
+
+def crear_usuario_sin_cuenta(token_portador, datos_usuario):
+    """
+    POST 1. Crear un usuario sin cuenta comitente en la plataforma IOL.
+    """
+    url = 'https://api.invertironline.com/api/v2/apertura-de-cuenta/registrar'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        respuesta = requests.post(url, headers=headers, json=datos_usuario)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al crear usuario: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_foto_dni_frontal(token_portador, id_cliente, archivo):
+    """
+    POST 2. Validar, extraer datos y guardar foto DNI frontal.
+    """
+    url = f'https://api.invertironline.com/api/v2/apertura-de-cuenta/dni-frontal-carga/{id_cliente}'
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'multipart/form-data'
+    }
+    
+    try:
+        files = {'imagen': archivo}
+        respuesta = requests.post(url, headers=headers, files=files)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al cargar DNI frontal: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_foto_dni_dorsal(token_portador, id_cliente, archivo):
+    """
+    POST 3. Validar, extraer datos y guardar foto DNI dorsal.
+    """
+    url = f'https://api.invertironline.com/api/v2/apertura-de-cuenta/dni-dorsal-carga/{id_cliente}'
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'multipart/form-data'
+    }
+    
+    try:
+        files = {'imagen': archivo}
+        respuesta = requests.post(url, headers=headers, files=files)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al cargar DNI dorsal: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_selfie_neutral(token_portador, id_cliente, archivo):
+    """
+    POST 4. Validar y guardar foto selfie neutral.
+    """
+    url = f'https://api.invertironline.com/api/v2/apertura-de-cuenta/selfie-neutral-carga/{id_cliente}'
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'multipart/form-data'
+    }
+    
+    try:
+        files = {'imagen': archivo}
+        respuesta = requests.post(url, headers=headers, files=files)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al cargar selfie neutral: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_selfie_sonriente(token_portador, id_cliente, archivo):
+    """
+    POST 5. Validar y guardar foto selfie sonriente.
+    """
+    url = f'https://api.invertironline.com/api/v2/apertura-de-cuenta/selfie-sonriendo-carga/{id_cliente}'
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'multipart/form-data'
+    }
+    
+    try:
+        files = {'imagen': archivo}
+        respuesta = requests.post(url, headers=headers, files=files)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al cargar selfie sonriente: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_datos_manuales(token_portador, id_cliente, datos_personales):
+    """
+    POST 6. Carga datos personales esenciales que no se pudieron obtener del DNI.
+    """
+    url = f'https://api.invertironline.com/api/v2/apertura-de-cuenta/carga-manual-datos/{id_cliente}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        respuesta = requests.post(url, headers=headers, json=datos_personales)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al cargar datos manuales: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def cargar_datos_adicionales(token_portador, id_cliente, datos_adicionales):
+    """
+    POST 7. Asociar datos personales y jurídicos de un cliente sin cuenta comitente.
+    """
+    url = f'https://api.invertironline.com/api/v2/apertura-de-cuenta/carga-datos-adicionales/{id_cliente}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    headers['Content-Type'] = 'application/json'
+    
+    try:
+        respuesta = requests.post(url, headers=headers, json=datos_adicionales)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al cargar datos adicionales: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def aceptar_tyc(token_portador, id_cliente):
+    """
+    POST. Aceptar los términos y condiciones para el uso de APIs.
+    """
+    url = f'https://api.invertironline.com/api/v2/Asesores/tyc-apis/{id_cliente}/aceptar'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.post(url, headers=headers)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al aceptar TyC: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def completar_apertura_cuenta(token_portador, id_cliente):
+    """
+    POST 8. Genera el número de cuenta comitente.
+    """
+    url = f'https://api.invertironline.com/api/v2/apertura-de-cuenta/completar-apertura/{id_cliente}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.post(url, headers=headers)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        else:
+            st.error(f"Error al completar apertura: {respuesta.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+
+def mostrar_gestion_clientes():
+    """
+    Interfaz para gestión de clientes y apertura de cuenta.
+    """
+    st.header("👥 Gestión de Clientes y Apertura de Cuenta")
+    
+    tab1, tab2, tab3 = st.tabs(["📋 Lista de Clientes", "➕ Alta de Cliente", "📊 Estado de Apertura"])
+    
+    with tab1:
+        st.subheader("📋 Lista de Clientes")
+        if st.button("🔄 Actualizar lista de clientes"):
+            with st.spinner("Obteniendo clientes..."):
+                clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                if clientes:
+                    st.session_state.clientes = clientes
+                    st.success(f"✅ Se encontraron {len(clientes)} clientes")
+                else:
+                    st.warning("No se encontraron clientes")
+        
+        if st.session_state.clientes:
+            df_clientes = pd.DataFrame(st.session_state.clientes)
+            st.dataframe(df_clientes, use_container_width=True)
+        else:
+            st.info("No hay clientes cargados")
+    
+    with tab2:
+        st.subheader("➕ Alta de Cliente")
+        
+        with st.form("alta_cliente"):
+            st.write("**Datos Personales Básicos**")
+            nombre = st.text_input("Nombre")
+            apellido = st.text_input("Apellido")
+            dni = st.text_input("DNI")
+            fecha_nacimiento = st.date_input("Fecha de Nacimiento")
+            sexo = st.selectbox("Sexo", ["Masculino", "Femenino"])
+            
+            st.write("**Datos Adicionales**")
+            actividad_laboral = st.selectbox("Actividad Laboral", [
+                "Relacion_de_dependecia", "Monotributista", "Autonomo", "Desempleado", "Jubilado"
+            ])
+            domicilio_calle = st.text_input("Calle")
+            domicilio_numero = st.text_input("Número")
+            codigo_postal = st.text_input("Código Postal")
+            cuil_cuit = st.text_input("CUIL/CUIT")
+            
+            if st.form_submit_button("🚀 Crear Cliente"):
+                if nombre and apellido and dni:
+                    datos_usuario = {
+                        "nombre": nombre,
+                        "apellido": apellido,
+                        "dni": dni,
+                        "fechaNacimiento": fecha_nacimiento.strftime("%Y-%m-%dT00:00:00Z"),
+                        "sexo": sexo
+                    }
+                    
+                    with st.spinner("Creando cliente..."):
+                        resultado = crear_usuario_sin_cuenta(st.session_state.token_acceso, datos_usuario)
+                        if resultado and resultado.get('ok'):
+                            st.success("✅ Cliente creado exitosamente")
+                            st.json(resultado)
+                        else:
+                            st.error("❌ Error al crear cliente")
+                else:
+                    st.warning("⚠️ Complete todos los campos obligatorios")
+    
+    with tab3:
+        st.subheader("📊 Estado de Apertura de Cuenta")
+        id_cliente = st.number_input("ID del Cliente", min_value=1, step=1)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📸 Cargar Fotos"):
+                st.info("Funcionalidad para cargar fotos DNI y selfies")
+                # Aquí se implementaría la carga de archivos
+        
+        with col2:
+            if st.button("✅ Completar Apertura"):
+                with st.spinner("Completando apertura..."):
+                    resultado = completar_apertura_cuenta(st.session_state.token_acceso, id_cliente)
+                    if resultado:
+                        if resultado.get('numeroCuenta'):
+                            st.success(f"✅ Cuenta creada: {resultado['numeroCuenta']}")
+                        else:
+                            st.info("ℹ️ Proceso de apertura en curso")
+                        st.json(resultado)
+
 def obtener_estado_cuenta(token_portador, id_cliente=None):
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
@@ -2785,22 +3055,39 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         simbolo = activo.get('Símbolo', '')
                                         valuacion = activo.get('Valuación', 0)
                                         
-                                        # Identificar FCIs, bonos y otros instrumentos de renta fija
+                                                                            # Identificar FCIs, bonos y otros instrumentos de renta fija
+                                    es_renta_fija = False
+                                    
+                                    # Primero verificar si es claramente una acción
+                                    tipo_lower = tipo.lower()
+                                    simbolo_lower = simbolo.lower()
+                                    
+                                    # Lista de acciones comunes en Argentina
+                                    acciones_comunes = [
+                                        'alua', 'ypf', 'ggal', 'pamp', 'tenaris', 'acro', 'bma', 'loma', 'txar', 'cresud',
+                                        'mirgor', 'siderar', 'petrobras', 'banco macro', 'banco galicia', 'banco santander',
+                                        'banco itau', 'banco hsbc', 'banco nacion', 'banco provincia', 'banco ciudad',
+                                        'despegar', 'mercadolibre', 'globant', 'despegar', 'tgs', 'pampa energia',
+                                        'central puerto', 'edesur', 'edenor', 'metrogas', 'transportadora gas del norte',
+                                        'transportadora gas del sur', 'camuzzi gas', 'metrogas', 'edenor', 'edelap'
+                                    ]
+                                    
+                                    # Si es claramente una acción, no es renta fija
+                                    if any(accion in simbolo_lower for accion in acciones_comunes):
                                         es_renta_fija = False
-                                        
-                                        # Verificar por tipo de activo
-                                        if any(keyword in tipo.lower() for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra', 'caucion']):
+                                    elif any(accion in tipo_lower for accion in ['accion', 'stock', 'equity', 'share']):
+                                        es_renta_fija = False
+                                    else:
+                                        # Verificar si es renta fija específicamente
+                                        if any(keyword in tipo_lower for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra', 'caucion']):
                                             es_renta_fija = True
-                                        
-                                        # Verificar por símbolo (FCIs y bonos suelen tener símbolos específicos)
-                                        elif any(keyword in simbolo.lower() for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg', 'adba', 'prcp', 'caucion']):
+                                        elif any(keyword in simbolo_lower for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg', 'adba', 'prcp', 'caucion']):
                                             es_renta_fija = True
-                                        
-                                        # Verificar por descripción
                                         elif 'descripcion' in activo:
                                             descripcion = activo['descripcion'].lower()
                                             if any(keyword in descripcion for keyword in ['fondo', 'fci', 'bono', 'caucion']):
-                                                es_renta_fija = True
+                                                if not any(accion in descripcion for accion in ['accion', 'stock', 'equity', 'empresa']):
+                                                    es_renta_fija = True
                                         
                                         if es_renta_fija:
                                             instrumentos_renta_fija.append({
@@ -2811,6 +3098,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             })
                                             total_renta_fija += valuacion
                                             print(f"Renta fija identificada: {simbolo} ({tipo}) - Valuación: ${valuacion:,.2f}")
+                                        else:
+                                            print(f"NO es renta fija: {simbolo} ({tipo}) - Valuación: ${valuacion:,.2f}")
                                     
                                     if instrumentos_renta_fija:
                                         st.success(f"✅ Se identificaron {len(instrumentos_renta_fija)} instrumentos de renta fija")
@@ -3473,7 +3762,9 @@ def mostrar_estado_cuenta(estado_cuenta):
 def mostrar_cotizaciones_mercado(token_acceso):
     st.markdown("### 💱 Cotizaciones y Mercado")
     
-    with st.expander("💰 Cotización MEP", expanded=True):
+    tab1, tab2, tab3 = st.tabs(["💰 Cotización MEP", "🏦 Tasas de Caución", "📈 Gráficos con Fechas"])
+    
+    with tab1:
         with st.form("mep_form"):
             col1, col2, col3 = st.columns(3)
             simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
@@ -3494,7 +3785,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     else:
                         st.error("❌ No se pudo obtener la cotización MEP")
     
-    with st.expander("🏦 Tasas de Caución", expanded=True):
+    with tab2:
         if st.button("🔄 Actualizar Tasas"):
             with st.spinner("Consultando tasas de caución..."):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
@@ -3510,6 +3801,111 @@ def mostrar_cotizaciones_mercado(token_acceso):
                     st.dataframe(df_tasas.head(10))
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
+    
+    with tab3:
+        st.subheader("📈 Gráficos con Fechas Reales")
+        
+        # Configuración de paneles
+        paneles = {
+            "Acciones": ["Panel%20General", "Burcap", "Todas"],
+            "Bonos": ["Panel%20General", "Burcap", "Todas"],
+            "Opciones": ["Panel%20General", "Burcap", "Todas"],
+            "Monedas": ["Panel%20General", "Burcap", "Todas"],
+            "Cauciones": ["Panel%20General", "Burcap", "Todas"],
+            "CHPD": ["Panel%20General", "Burcap", "Todas"],
+            "Futuros": ["Panel%20General", "Burcap", "Todas"],
+            "ADRs": ["Panel%20General", "Burcap", "Todas"]
+        }
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            instrumento = st.selectbox("Instrumento", list(paneles.keys()))
+        with col2:
+            panel = st.selectbox("Panel", paneles[instrumento])
+        
+        pais = st.selectbox("País", ["Argentina", "Estados_Unidos"])
+        
+        if st.button("🔍 Buscar Cotizaciones"):
+            with st.spinner("Obteniendo cotizaciones..."):
+                try:
+                    url = f'https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}'
+                    headers = obtener_encabezado_autorizacion(token_acceso)
+                    
+                    params = {
+                        'panelCotizacion.instrumento': instrumento.lower(),
+                        'panelCotizacion.panel': panel,
+                        'panelCotizacion.pais': pais.lower()
+                    }
+                    
+                    respuesta = requests.get(url, headers=headers, params=params)
+                    
+                    if respuesta.status_code == 200:
+                        datos = respuesta.json()
+                        titulos = datos.get('titulos', [])
+                        
+                        if titulos:
+                            df = pd.DataFrame(titulos)
+                            st.success(f"✅ Se encontraron {len(df)} títulos")
+                            st.dataframe(df, use_container_width=True)
+                            
+                            # Gráfico de variación
+                            if 'variacionPorcentual' in df.columns:
+                                fig = go.Figure()
+                                fig.add_trace(go.Bar(
+                                    x=df['simbolo'],
+                                    y=df['variacionPorcentual'],
+                                    marker_color=['green' if x > 0 else 'red' for x in df['variacionPorcentual']]
+                                ))
+                                fig.update_layout(
+                                    title=f"Variación Porcentual - {instrumento}",
+                                    xaxis_title="Símbolo",
+                                    yaxis_title="Variación (%)",
+                                    template='plotly_white'
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Gráfico de precios con fechas si están disponibles
+                            if 'fecha' in df.columns and 'ultimoPrecio' in df.columns:
+                                # Convertir fechas
+                                df['fecha'] = pd.to_datetime(df['fecha'])
+                                df = df.sort_values('fecha')
+                                
+                                fig_precios = go.Figure()
+                                fig_precios.add_trace(go.Scatter(
+                                    x=df['fecha'],
+                                    y=df['ultimoPrecio'],
+                                    mode='lines+markers',
+                                    name='Precio',
+                                    line=dict(color='#1f77b4', width=2)
+                                ))
+                                
+                                fig_precios.update_layout(
+                                    title=f"Evolución de Precios - {instrumento}",
+                                    xaxis_title="Fecha",
+                                    yaxis_title="Precio",
+                                    template='plotly_white',
+                                    height=400
+                                )
+                                
+                                # Configurar eje X para mostrar fechas reales
+                                fig_precios.update_xaxes(
+                                    tickformat='%d/%m/%Y',
+                                    tickangle=45,
+                                    tickmode='auto',
+                                    nticks=10
+                                )
+                                
+                                st.plotly_chart(fig_precios, use_container_width=True)
+                                
+                                # Información de fechas
+                                st.info(f"📅 Período de datos: {df['fecha'].min().strftime('%d/%m/%Y')} - {df['fecha'].max().strftime('%d/%m/%Y')}")
+                        else:
+                            st.warning("No se encontraron cotizaciones")
+                    else:
+                        st.error(f"Error al obtener cotizaciones: {respuesta.status_code}")
+                        
+                except Exception as e:
+                    st.error(f"Error de conexión: {str(e)}")
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
@@ -3627,6 +4023,37 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
                             fig = portfolio_result.plot_histogram_streamlit()
                             st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Gráfico de evolución temporal del portafolio
+                        if hasattr(portfolio_result, 'dataframe_allocation') and portfolio_result.dataframe_allocation is not None:
+                            st.markdown("#### 📈 Evolución Temporal del Portafolio")
+                            # Crear fechas reales para el eje X
+                            fechas = pd.date_range(start=st.session_state.fecha_desde, end=st.session_state.fecha_hasta, periods=len(portfolio_result.returns))
+                            df_evolucion = pd.DataFrame({
+                                'Fecha': fechas,
+                                'Retorno': portfolio_result.returns
+                            })
+                            
+                            fig_evolucion = go.Figure()
+                            fig_evolucion.add_trace(go.Scatter(
+                                x=df_evolucion['Fecha'],
+                                y=df_evolucion['Retorno'],
+                                mode='lines',
+                                name='Retorno del Portafolio',
+                                line=dict(color='#1f77b4', width=2)
+                            ))
+                            fig_evolucion.update_layout(
+                                title="Evolución de Retornos del Portafolio Optimizado",
+                                xaxis_title="Fecha",
+                                yaxis_title="Retorno (%)",
+                                template='plotly_white',
+                                height=400
+                            )
+                            fig_evolucion.update_xaxes(
+                                tickformat='%d/%m/%Y',
+                                tickangle=45
+                            )
+                            st.plotly_chart(fig_evolucion, use_container_width=True)
                         
                         # Gráfico de pesos
                         if portfolio_result.weights is not None:
@@ -3800,63 +4227,178 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         st.warning("No se encontraron símbolos válidos")
         return
     
+    # Opciones de visualización
+    tipo_visualizacion = st.radio(
+        "Tipo de visualización:",
+        ["📈 TradingView (Interactivo)", "📊 Gráficos con Datos IOL"],
+        horizontal=True
+    )
+    
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
         options=simbolos
     )
     
     if simbolo_seleccionado:
-        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
+        if tipo_visualizacion == "📈 TradingView (Interactivo)":
+            st.info(f"Mostrando gráfico TradingView para: {simbolo_seleccionado}")
+            
+            # Widget de TradingView
+            tv_widget = f"""
+            <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+            <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+            <script type="text/javascript">
+            new TradingView.widget({{
+              "container_id": "tradingview_{simbolo_seleccionado}",
+              "width": "100%",
+              "height": 650,
+              "symbol": "{simbolo_seleccionado}",
+              "interval": "D",
+              "timezone": "America/Argentina/Buenos_Aires",
+              "theme": "light",
+              "style": "1",
+              "locale": "es",
+              "toolbar_bg": "#f4f7f9",
+              "enable_publishing": false,
+              "allow_symbol_change": true,
+              "hide_side_toolbar": false,
+              "studies": [
+                "MACD@tv-basicstudies",
+                "RSI@tv-basicstudies",
+                "StochasticRSI@tv-basicstudies",
+                "Volume@tv-basicstudies",
+                "Moving Average@tv-basicstudies"
+              ],
+              "drawings_access": {{
+                "type": "black",
+                "tools": [
+                  {{"name": "Trend Line"}},
+                  {{"name": "Horizontal Line"}},
+                  {{"name": "Fibonacci Retracement"}},
+                  {{"name": "Rectangle"}},
+                  {{"name": "Text"}}
+                ]
+              }},
+              "enabled_features": [
+                "study_templates",
+                "header_indicators",
+                "header_compare",
+                "header_screenshot",
+                "header_fullscreen_button",
+                "header_settings",
+                "header_symbol_search"
+              ]
+            }});
+            </script>
+            """
+            components.html(tv_widget, height=680)
         
-        # Widget de TradingView
-        tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-          "container_id": "tradingview_{simbolo_seleccionado}",
-          "width": "100%",
-          "height": 650,
-          "symbol": "{simbolo_seleccionado}",
-          "interval": "D",
-          "timezone": "America/Argentina/Buenos_Aires",
-          "theme": "light",
-          "style": "1",
-          "locale": "es",
-          "toolbar_bg": "#f4f7f9",
-          "enable_publishing": false,
-          "allow_symbol_change": true,
-          "hide_side_toolbar": false,
-          "studies": [
-            "MACD@tv-basicstudies",
-            "RSI@tv-basicstudies",
-            "StochasticRSI@tv-basicstudies",
-            "Volume@tv-basicstudies",
-            "Moving Average@tv-basicstudies"
-          ],
-          "drawings_access": {{
-            "type": "black",
-            "tools": [
-              {{"name": "Trend Line"}},
-              {{"name": "Horizontal Line"}},
-              {{"name": "Fibonacci Retracement"}},
-              {{"name": "Rectangle"}},
-              {{"name": "Text"}}
-            ]
-          }},
-          "enabled_features": [
-            "study_templates",
-            "header_indicators",
-            "header_compare",
-            "header_screenshot",
-            "header_fullscreen_button",
-            "header_settings",
-            "header_symbol_search"
-          ]
-        }});
-        </script>
-        """
-        components.html(tv_widget, height=680)
+        else:
+            # Gráficos con datos de IOL y fechas reales
+            st.info(f"Mostrando gráficos con datos IOL para: {simbolo_seleccionado}")
+            
+            # Obtener datos históricos
+            fecha_desde = st.session_state.fecha_desde
+            fecha_hasta = st.session_state.fecha_hasta
+            
+            # Buscar el mercado del activo seleccionado
+            mercado_activo = None
+            for activo in activos:
+                titulo = activo.get('titulo', {})
+                if titulo.get('simbolo') == simbolo_seleccionado:
+                    mercado_activo = titulo.get('mercado', 'BCBA')
+                    break
+            
+            try:
+                datos_historicos = obtener_serie_historica_iol(token_acceso, mercado_activo, simbolo_seleccionado, fecha_desde, fecha_hasta)
+                
+                if datos_historicos and isinstance(datos_historicos, list) and len(datos_historicos) > 0:
+                    df = pd.DataFrame(datos_historicos)
+                    
+                    # Buscar columna de precio
+                    col_precio = None
+                    for col in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                        if col in df.columns:
+                            col_precio = col
+                            break
+                    
+                    if col_precio and 'fecha' in df.columns:
+                        # Convertir fechas
+                        df['fecha'] = pd.to_datetime(df['fecha'])
+                        df = df.sort_values('fecha')
+                        
+                        # Gráfico de precios con fechas reales
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=df['fecha'],
+                            y=df[col_precio],
+                            mode='lines',
+                            name=f'Precio {simbolo_seleccionado}',
+                            line=dict(color='#1f77b4', width=2)
+                        ))
+                        
+                        fig.update_layout(
+                            title=f"Evolución de Precios - {simbolo_seleccionado}",
+                            xaxis_title="Fecha",
+                            yaxis_title="Precio",
+                            template='plotly_white',
+                            height=400
+                        )
+                        
+                        # Configurar eje X para mostrar fechas reales
+                        fig.update_xaxes(
+                            tickformat='%d/%m/%Y',
+                            tickangle=45,
+                            tickmode='auto',
+                            nticks=10
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Gráfico de volumen si está disponible
+                        if 'volumen' in df.columns:
+                            fig_vol = go.Figure()
+                            fig_vol.add_trace(go.Bar(
+                                x=df['fecha'],
+                                y=df['volumen'],
+                                name=f'Volumen {simbolo_seleccionado}',
+                                marker_color='#ff7f0e'
+                            ))
+                            
+                            fig_vol.update_layout(
+                                title=f"Volumen de Operaciones - {simbolo_seleccionado}",
+                                xaxis_title="Fecha",
+                                yaxis_title="Volumen",
+                                template='plotly_white',
+                                height=300
+                            )
+                            
+                            fig_vol.update_xaxes(
+                                tickformat='%d/%m/%Y',
+                                tickangle=45
+                            )
+                            
+                            st.plotly_chart(fig_vol, use_container_width=True)
+                        
+                        # Métricas básicas
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Precio Actual", f"${df[col_precio].iloc[-1]:.2f}")
+                        with col2:
+                            st.metric("Precio Máximo", f"${df[col_precio].max():.2f}")
+                        with col3:
+                            st.metric("Precio Mínimo", f"${df[col_precio].min():.2f}")
+                        
+                        # Información de fechas
+                        st.info(f"📅 Período analizado: {df['fecha'].min().strftime('%d/%m/%Y')} - {df['fecha'].max().strftime('%d/%m/%Y')}")
+                        
+                    else:
+                        st.warning(f"No se encontraron datos de precios para {simbolo_seleccionado}")
+                else:
+                    st.warning(f"No se pudieron obtener datos históricos para {simbolo_seleccionado}")
+                    
+            except Exception as e:
+                st.error(f"Error al obtener datos para {simbolo_seleccionado}: {str(e)}")
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
@@ -4172,13 +4714,18 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "👥 Gestión de Clientes", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
             # Mostrar la página seleccionada
             if opcion == "🏠 Inicio":
                 st.info("👆 Seleccione una opción del menú para comenzar")
+            elif opcion == "👥 Gestión de Clientes":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    mostrar_gestion_clientes()
+                else:
+                    st.warning("Por favor inicie sesión para gestionar clientes")
             elif opcion == "📊 Análisis de Portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
