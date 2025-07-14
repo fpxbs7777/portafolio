@@ -1775,7 +1775,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
     retorno_esperado_anual = sum(
-        m['retorno_medio'] * m['peso'] 
+        (m.get('retorno_medio', 0) or 0) * (m.get('peso', 0) or 0)
         for m in metricas_activos.values()
     )
     
@@ -1788,7 +1788,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 print("No hay suficientes datos para calcular correlaciones confiables")
                 # Usar promedio ponderado simple como respaldo
                 volatilidad_portafolio = sum(
-                    m['volatilidad'] * m['peso'] 
+                    (m.get('volatilidad', 0) or 0) * (m.get('peso', 0) or 0)
                     for m in metricas_activos.values()
                 )
             else:
@@ -1832,7 +1832,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         traceback.print_exc()
         # Valor por defecto seguro
         volatilidad_portafolio = sum(
-            m['volatilidad'] * m['peso'] 
+            (m.get('volatilidad', 0) or 0) * (m.get('peso', 0) or 0)
             for m in metricas_activos.values()
         ) if metricas_activos else 0.2
     
@@ -1841,11 +1841,15 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     for _ in range(1000):  # Simulación Monte Carlo simple
         retorno_simulado = 0
         for m in metricas_activos.values():
-            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
+            retorno_medio = m.get('retorno_medio', 0) or 0
+            volatilidad = m.get('volatilidad', 0) or 0
+            peso = m.get('peso', 0) or 0
+            retorno_simulado += np.random.normal(retorno_medio/252, volatilidad/np.sqrt(252)) * peso
         retornos_simulados.append(retorno_simulado * 252)  # Anualizado
     
-    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
-    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
+    valor_total_safe = valor_total or 0
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total_safe / 100
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total_safe / 100
     
     # Calcular probabilidades basadas en los retornos simulados
     retornos_simulados = np.array(retornos_simulados)
@@ -1864,7 +1868,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             df_port_returns = pd.DataFrame(retornos_diarios)
             
             # Asegurarse de que los pesos estén en el mismo orden que las columnas
-            pesos_ordenados = [metricas_activos[col]['peso'] for col in df_port_returns.columns]
+            pesos_ordenados = [metricas_activos[col].get('peso', 0) or 0 for col in df_port_returns.columns]
             df_port_returns['Portfolio'] = df_port_returns.dot(pesos_ordenados)
             
             # Alinear fechas con el MERVAL
@@ -2085,7 +2089,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols = st.columns(3)
             
             # Mostrar retornos como porcentaje del portafolio
-            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+            retorno_anual_pct = (metricas.get('retorno_esperado_anual', 0) or 0) * 100
             cols[0].metric("Retorno Esperado Anual", 
                          f"{retorno_anual_pct:+.1f}%",
                          help="Retorno anual esperado basado en datos históricos")
@@ -2105,10 +2109,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.subheader("🎯 Probabilidades")
             cols = st.columns(4)
             probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+            cols[0].metric("Ganancia", f"{(probs.get('ganancia', 0) or 0)*100:.1f}%")
+            cols[1].metric("Pérdida", f"{(probs.get('perdida', 0) or 0)*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{(probs.get('ganancia_mayor_10', 0) or 0)*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{(probs.get('perdida_mayor_10', 0) or 0)*100:.1f}")
             
 
         
@@ -3069,10 +3073,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 continue
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
-    cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
-    cols[1].metric("Riesgo (Volatilidad)", f"{metricas_actual.get('riesgo_anual',0)*100:.2f}%")
+                cols[0].metric("Retorno Esperado", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
+            cols[1].metric("Riesgo (Volatilidad)", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
     cols[2].metric("Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-    cols[3].metric("Concentración", f"{metricas_actual.get('concentracion',0)*100:.1f}%")
+                cols[3].metric("Concentración", f"{(metricas_actual.get('concentracion',0) or 0)*100:.1f}%")
 
     st.markdown("---")
     st.subheader("⚙️ Configuración de Universo de Optimización")
@@ -3188,8 +3192,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     cols = st.columns(len(estrategias)+1)
     # Métricas del portafolio actual
     cols[0].metric("Actual: Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-    cols[0].metric("Actual: Retorno", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
-    cols[0].metric("Actual: Riesgo", f"{metricas_actual.get('riesgo_anual',0)*100:.2f}%")
+                cols[0].metric("Actual: Retorno", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
+            cols[0].metric("Actual: Riesgo", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
     for i, (clave, nombre) in enumerate(estrategias):
         res, sharpe, ret = resultados.get(clave, (None, None, None))
         if res:
@@ -3260,7 +3264,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Retorno': getattr(res,'returns',0)*100,
                 'Riesgo': getattr(res,'risk',0)*100,
                 'Sharpe': sharpe,
-                'Mejora Retorno (%)': (getattr(res,'returns',0)-metricas_actual.get('retorno_esperado_anual',0))*100,
+                'Mejora Retorno (%)': (getattr(res,'returns',0)-(metricas_actual.get('retorno_esperado_anual',0) or 0))*100,
                 'Mejora Sharpe': sharpe-(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6)))
             })
     if df_comp:
