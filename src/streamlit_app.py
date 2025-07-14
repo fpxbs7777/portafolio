@@ -3771,6 +3771,39 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
         except Exception as e:
             st.warning(f"No se pudo calcular el drawdown de benchmarks: {e}")
 
+    # --- Tabla de órdenes sugeridas para ejecución real ---
+    st.subheader("📝 Órdenes sugeridas para ejecutar el portafolio óptimo")
+    # Determinar capital total (usar valor final del portafolio simulado si no se provee otro)
+    capital_total = portafolio_valor[-1] if len(portafolio_valor) > 0 else 1.0
+    # Obtener pesos finales y activos
+    pesos_finales = pesos_array[-1] if len(pesos_array) > 0 else np.ones(len(activos)) / len(activos)
+    # Obtener precios actuales de cada activo
+    precios_actuales = {}
+    for activo in activos:
+        try:
+            # Si tienes token_portador disponible, pásalo aquí. Si no, dejar como None.
+            precio = obtener_precio_actual(None, 'BCBA', activo)
+            precios_actuales[activo] = precio if precio else 1.0
+        except Exception:
+            precios_actuales[activo] = 1.0
+    # Calcular monto y cantidad sugerida
+    data_ordenes = []
+    for i, activo in enumerate(activos):
+        peso = pesos_finales[i]
+        monto = peso * capital_total
+        precio = precios_actuales.get(activo, 1.0)
+        cantidad = monto / precio if precio else 0
+        data_ordenes.append({
+            'Activo': activo,
+            'Peso Final (%)': round(peso*100, 2),
+            'Monto a Invertir': round(monto, 2),
+            'Precio Actual': round(precio, 2),
+            'Cantidad Sugerida': int(cantidad)
+        })
+    df_ordenes = pd.DataFrame(data_ordenes)
+    st.dataframe(df_ordenes, use_container_width=True)
+# --- Sistema de Monitoreo y Alertas en Tiempo Real ---
+
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
@@ -4924,7 +4957,39 @@ def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_ra
     )
     
     st.plotly_chart(fig_comp, use_container_width=True)
-# --- Sistema de Monitoreo y Alertas en Tiempo Real ---
+
+    # --- Tabla de órdenes sugeridas para ejecución real ---
+    st.subheader("📝 Órdenes sugeridas para ejecutar el portafolio óptimo")
+    # Determinar capital total (usar valor final del portafolio simulado si no se provee otro)
+    capital_total = portafolio_valor[-1] if len(portafolio_valor) > 0 else 1.0
+    # Obtener pesos finales y activos
+    pesos_finales = pesos_array[-1] if len(pesos_array) > 0 else np.ones(len(activos)) / len(activos)
+    # Obtener precios actuales de cada activo
+    precios_actuales = {}
+    for activo in activos:
+        try:
+            # Si tienes token_portador disponible, pásalo aquí. Si no, dejar como None.
+            precio = obtener_precio_actual(None, 'BCBA', activo)
+            precios_actuales[activo] = precio if precio else 1.0
+        except Exception:
+            precios_actuales[activo] = 1.0
+    # Calcular monto y cantidad sugerida
+    data_ordenes = []
+    for i, activo in enumerate(activos):
+        peso = pesos_finales[i]
+        monto = peso * capital_total
+        precio = precios_actuales.get(activo, 1.0)
+        cantidad = monto / precio if precio else 0
+        data_ordenes.append({
+            'Activo': activo,
+            'Peso Final (%)': round(peso*100, 2),
+            'Monto a Invertir': round(monto, 2),
+            'Precio Actual': round(precio, 2),
+            'Cantidad Sugerida': int(cantidad)
+        })
+    df_ordenes = pd.DataFrame(data_ordenes)
+    st.dataframe(df_ordenes, use_container_width=True)
+
 def sistema_monitoreo_tiempo_real(portafolio_actual, precios_historicos, configuracion_alertas=None):
     """
     Sistema de monitoreo en tiempo real para detectar cambios significativos en el portafolio.
