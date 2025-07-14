@@ -1059,7 +1059,8 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
-        if self.returns is None or len(self.returns) == 0:
+        # Asegura que self.returns sea un array o serie, no un escalar
+        if self.returns is None or (hasattr(self.returns, '__len__') and len(self.returns) == 0) or (not hasattr(self.returns, '__len__') and not hasattr(self.returns, 'shape')):
             fig = go.Figure()
             fig.add_annotation(
                 text="No hay datos suficientes para mostrar",
