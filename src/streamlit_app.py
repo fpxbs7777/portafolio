@@ -3423,7 +3423,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 explicacion_ciclo = "Variables mixtas, posible recuperación o transición."
             st.success(f"Etapa detectada: **{etapa}**")
             st.caption(f"Explicación: {explicacion_ciclo}")
-            st.markdown(f"- Reservas: {reservas:,.0f}M USD\n- Tasa LELIQ: {tasa_leliq:.2f}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
+            # Validar y mostrar variables
+            reservas_str = f"{reservas:,.0f}M USD" if reservas is not None else "N/D"
+            tasa_leliq_str = f"{tasa_leliq:.2f}% anual" if tasa_leliq is not None else "N/D"
+            inflacion_str = f"{inflacion*100:.2f}%" if inflacion is not None else "N/D"
+            m2_crecimiento_str = f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D"
+            st.markdown(f"- Reservas: {reservas_str}\n- Tasa LELIQ: {tasa_leliq_str}\n- Inflación mensual: {inflacion_str}\n- Crecimiento M2: {m2_crecimiento_str}")
         else:
             st.warning("No se pudieron obtener todas las variables para el análisis de ciclo económico.")
     # --- FIN BLOQUE CICLO ECONÓMICO ---
