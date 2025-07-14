@@ -3002,7 +3002,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     activos_raw = portafolio['activos']
     # Diagnóstico del portafolio actual
     st.subheader("🔍 Diagnóstico del Portafolio Actual")
-    # Usar el mismo método de resumen de portafolio para diagnóstico real
     activos_dict = {}
     valor_total = 0
     for activo in activos_raw:
@@ -3054,6 +3053,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'mercado': mercado
             }
             valor_total += valuacion
+    # --- NUEVO: Validar cantidad de activos válidos antes de seguir ---
+    activos_validos = [a for a in activos_dict if activos_dict[a]['Valuación'] > 0]
+    if len(activos_validos) < 2:
+        st.warning("El portafolio actual solo tiene 1 activo válido. Agregue más activos o cambie el universo para poder optimizar.")
+        return
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
     cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
@@ -3073,14 +3077,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             {'simbolo': a.get('titulo',{}).get('simbolo'),
              'mercado': a.get('titulo',{}).get('mercado'),
              'tipo': a.get('titulo',{}).get('tipo')}
-            for a in activos_raw if a.get('titulo',{}).get('simbolo')
+            for a in activos_raw if a.get('titulo',{}).get('simbolo') and a.get('valuacionActual', a.get('valuacion', 0)) > 0
         ]
+        if len(universe_activos) < 2:
+            st.warning("El portafolio actual no tiene suficientes activos válidos para optimizar. Agregue más activos o cambie el universo.")
+            return
     else:
         st.info("Seleccione el tipo y cantidad de activos para el universo aleatorio")
         tipos = list(set([a.get('titulo',{}).get('tipo','Acción') for a in activos_raw]))
         tipo_sel = st.multiselect("Tipos de activo", tipos, default=tipos)
         cant = st.slider("Cantidad de activos aleatorios", 3, 15, 5)
-        # --- FILTRADO ROBUSTO DE ACTIVOS ALEATORIOS ---
         candidatos = [
             {'simbolo': a.get('titulo',{}).get('simbolo'),
              'mercado': a.get('titulo',{}).get('mercado'),
@@ -3101,11 +3107,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     fecha_hasta
                 )
                 if df is not None and not df.empty:
-                    # Debe tener al menos 180 días de historia
                     if len(df) >= 180:
                         precios = df['precio'] if 'precio' in df.columns else None
                         if precios is not None:
-                            # No debe ser constante ni tener más de 10% de nulos
                             if precios.nunique() > 1 and precios.isnull().mean() < 0.1:
                                 activos_validos.append(candidato)
                 if len(activos_validos) >= cant:
