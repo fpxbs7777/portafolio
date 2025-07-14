@@ -2985,15 +2985,51 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     activos_raw = portafolio['activos']
     # Diagnóstico del portafolio actual
     st.subheader("🔍 Diagnóstico del Portafolio Actual")
+    # Usar el mismo método de resumen de portafolio para diagnóstico real
     activos_dict = {}
     valor_total = 0
-    series_historicas = {}
     for activo in activos_raw:
         titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo')
-        tipo = titulo.get('tipo')
+        simbolo = titulo.get('simbolo', 'N/A')
+        tipo = titulo.get('tipo', 'N/A')
+        valuacion = 0
+        campos_valuacion = [
+            'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal', 'valorNominal',
+            'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
+        ]
+        for campo in campos_valuacion:
+            if campo in activo and activo[campo] is not None:
+                try:
+                    val = float(activo[campo])
+                    if val > 0:
+                        valuacion = val
+                        break
+                except (ValueError, TypeError):
+                    continue
+        if valuacion == 0 and activo.get('cantidad', 0):
+            campos_precio = [
+                'precioPromedio', 'precioCompra', 'precioActual', 'precio', 'precioUnitario', 'ultimoPrecio', 'cotizacion'
+            ]
+            precio_unitario = 0
+            for campo in campos_precio:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        precio = float(activo[campo])
+                        if precio > 0:
+                            precio_unitario = precio
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            if precio_unitario > 0:
+                try:
+                    cantidad_num = float(activo.get('cantidad', 0))
+                    if tipo == 'TitulosPublicos':
+                        valuacion = (cantidad_num * precio_unitario) / 100.0
+                    else:
+                        valuacion = cantidad_num * precio_unitario
+                except (ValueError, TypeError):
+                    pass
         mercado = titulo.get('mercado', 'BCBA')
-        valuacion = activo.get('valuacion', activo.get('valuacionActual', 0))
         if simbolo:
             activos_dict[simbolo] = {
                 'Valuación': valuacion,
@@ -3001,27 +3037,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'mercado': mercado
             }
             valor_total += valuacion
-            # Descargar la serie histórica real para cada activo
-            try:
-                df_hist = obtener_serie_historica_iol(
-                    token_portador=token_acceso,
-                    mercado=mercado,
-                    simbolo=simbolo,
-                    fecha_desde=str(st.session_state.fecha_desde),
-                    fecha_hasta=str(st.session_state.fecha_hasta),
-                    ajustada="SinAjustar"
-                )
-                if df_hist is not None and not df_hist.empty:
-                    series_historicas[simbolo] = df_hist
-            except Exception as e:
-                st.warning(f"No se pudo obtener la serie histórica de {simbolo}: {e}")
-
-    # Si no hay series históricas, advertir
-    if not series_historicas:
-        st.warning("No se pudieron obtener series históricas reales para los activos del portafolio. No se puede calcular el diagnóstico.")
-        return
-
-    # Calcular métricas usando las series reales
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
     cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
