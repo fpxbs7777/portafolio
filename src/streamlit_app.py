@@ -997,14 +997,20 @@ class manager:
         """Crea un objeto output con los pesos optimizados"""
         port_ret = np.sum(self.mean_returns * weights)
         port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
-        
         # Calcular retornos del portafolio
         if self.returns is not None:
             portfolio_returns = self.returns.dot(weights)
+            # Si los retornos son vacíos o de un solo valor, devolver NaN y advertir
+            if (hasattr(portfolio_returns, '__len__') and len(portfolio_returns) <= 1) or portfolio_returns.isnull().all():
+                import pandas as pd
+                portfolio_returns = pd.Series([np.nan])
+                import streamlit as st
+                st.warning("El portafolio optimizado no tiene suficientes retornos históricos para graficar el histograma.")
         else:
-            # Fallback si returns es None
-            portfolio_returns = pd.Series([0] * 252)  # Serie vacía
-        
+            import pandas as pd
+            portfolio_returns = pd.Series([np.nan])
+            import streamlit as st
+            st.warning("El portafolio optimizado no tiene retornos históricos disponibles.")
         # Crear objeto output
         port_output = output(portfolio_returns, self.notional)
         port_output.weights = weights
@@ -1014,7 +1020,6 @@ class manager:
             'volatilities': np.sqrt(np.diag(self.cov_matrix)),
             'returns': self.mean_returns
         })
-        
         return port_output
 
 class output:
@@ -1059,10 +1064,13 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
-        # Asegura que self.returns sea una secuencia (array, lista, o pandas Series), no un escalar
         import numpy as np
         import pandas as pd
         returns = self.returns
+        # Mostrar cantidad de datos
+        import streamlit as st
+        if hasattr(returns, '__len__'):
+            st.info(f"Histograma de retornos: {len(returns)} datos")
         # Si es None o vacío
         if returns is None or (hasattr(returns, '__len__') and len(returns) == 0):
             fig = go.Figure()
@@ -1093,14 +1101,12 @@ class output:
             )
             fig.update_layout(title=title)
             return fig
-
         fig = go.Figure(data=[go.Histogram(
             x=returns,
             nbinsx=30,
             name="Retornos del Portafolio",
             marker_color='#0d6efd'
         )])
-        # Agregar líneas de métricas importantes
         fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
                      annotation_text=f"Media: {self.mean_daily:.4f}")
         fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
