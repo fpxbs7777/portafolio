@@ -3699,8 +3699,7 @@ def mostrar_conceptos_estadisticos():
     st.markdown("""
     Este módulo educativo explica y aplica los principales conceptos estadísticos usados en finanzas y gestión de carteras, con ejemplos y cálculos sobre tus propios activos o portafolio.
     """)
-    # Selección de fuente de datos
-    fuente = st.radio("¿Sobre qué datos quieres ver los conceptos?", ["Portafolio actual", "Seleccionar activo manualmente"], index=0)
+    fuente = st.radio("¿Sobre qué datos quieres ver los conceptos?", ["Portafolio actual", "Serie histórica de un ticker", "Ingresar datos manualmente", "Ejemplo precargado"], index=0)
     datos = []
     nombre_serie = ""
     if fuente == "Portafolio actual":
@@ -3709,12 +3708,51 @@ def mostrar_conceptos_estadisticos():
             token = st.session_state.token_acceso
             portafolio = obtener_portafolio(token, id_cliente)
             activos = portafolio.get('activos', []) if portafolio else []
-            # Tomar valuaciones como ejemplo
-            datos = [a.get('valuacionActual', 0) or a.get('valuacion', 0) or 0 for a in activos if (a.get('valuacionActual', 0) or a.get('valuacion', 0) or 0) > 0]
-            nombre_serie = "Valuaciones de activos del portafolio"
+            if not activos:
+                st.warning("El portafolio está vacío. Prueba con otra opción.")
+            else:
+                campos_numericos = []
+                if len(activos) > 0:
+                    ejemplo = activos[0]
+                    campos_numericos = [k for k, v in ejemplo.items() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+                campo = st.selectbox("Selecciona el campo numérico a analizar", campos_numericos, index=0 if campos_numericos else None)
+                if campo:
+                    datos = [a.get(campo, 0) for a in activos if isinstance(a.get(campo, 0), (int, float))]
+                    datos = [d for d in datos if d is not None and d != 0]
+                    nombre_serie = f"{campo} de activos del portafolio"
         else:
-            st.warning("No hay portafolio cargado.")
-    else:
+            st.warning("No hay portafolio cargado o cliente seleccionado.")
+    elif fuente == "Serie histórica de un ticker":
+        if 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
+            id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
+            token = st.session_state.token_acceso
+            portafolio = obtener_portafolio(token, id_cliente)
+            activos = portafolio.get('activos', []) if portafolio else []
+            tickers = [a.get('simbolo') for a in activos if a.get('simbolo')]
+            ticker = st.selectbox("Selecciona un ticker del portafolio", tickers)
+            tipo_serie = st.radio("Tipo de serie a analizar", ["Precios históricos", "Retornos diarios"], index=0)
+            if ticker:
+                mercado = next((a.get('mercado') for a in activos if a.get('simbolo') == ticker), None)
+                fecha_desde = st.session_state.fecha_desde
+                fecha_hasta = st.session_state.fecha_hasta
+                if mercado:
+                    df = obtener_serie_historica_iol(token, mercado, ticker, fecha_desde, fecha_hasta)
+                    if df is not None and not df.empty:
+                        if tipo_serie == "Precios históricos":
+                            datos = df['precio'].dropna().tolist() if 'precio' in df.columns else df.iloc[:,0].dropna().tolist()
+                            nombre_serie = f"Precios históricos de {ticker}"
+                        else:
+                            precios = df['precio'].dropna() if 'precio' in df.columns else df.iloc[:,0].dropna()
+                            retornos = precios.pct_change().dropna()
+                            datos = retornos.tolist()
+                            nombre_serie = f"Retornos diarios de {ticker}"
+                    else:
+                        st.warning("No se pudo obtener la serie histórica para ese ticker.")
+                else:
+                    st.warning("No se encontró el mercado para ese ticker.")
+        else:
+            st.warning("No hay portafolio cargado o cliente seleccionado.")
+    elif fuente == "Ingresar datos manualmente":
         datos_str = st.text_area("Introduce una lista de datos separados por coma (ej: 30,32,40,45,50,52)")
         if datos_str:
             try:
@@ -3722,8 +3760,11 @@ def mostrar_conceptos_estadisticos():
                 nombre_serie = "Datos ingresados manualmente"
             except:
                 st.error("Error al procesar los datos. Asegúrate de usar solo números y comas.")
+    elif fuente == "Ejemplo precargado":
+        datos = [30,30,32,40,45,50,52,40,50,32,45,40,32,32,40,50,40,45,40,45,50,45]
+        nombre_serie = "Ejemplo: edades de un colectivo"
     if not datos or len(datos) < 2:
-        st.info("Introduce o selecciona datos para ver los conceptos aplicados.")
+        st.info("No hay datos suficientes para mostrar los conceptos. Prueba con otra opción o ingresa datos manualmente.")
         return
     st.subheader(f"1. Tabla de Frecuencias ({nombre_serie})")
     df = pd.Series(datos)
@@ -3799,7 +3840,7 @@ def mostrar_conceptos_estadisticos():
                 st.warning("Las dos series deben tener la misma longitud.")
         except:
             pass
-    st.info("Puedes usar estos conceptos para interpretar los resultados de tus activos y portafolio en los análisis de la app.")
+    st.info("Puedes usar estos conceptos para interpretar los resultados de tus activos, tickers y portafolio en los análisis de la app.")
 
 if __name__ == "__main__":
     main()
