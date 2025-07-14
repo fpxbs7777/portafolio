@@ -4879,7 +4879,73 @@ def mostrar_analisis_portafolio():
         mostrar_cotizaciones_mercado(token_acceso)
     
     with tab5:
-        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        mostrar_rebalanceo_configurable(token_acceso, portafolio, estado_cuenta)
+
+def mostrar_rebalanceo_configurable(token_acceso, portafolio, estado_cuenta):
+    st.markdown("### 🔄 Rebalanceo Configurable")
+
+    # Calcular saldo valorizado
+    saldo_valorizado = 0
+    if portafolio and 'activos' in portafolio:
+        for activo in portafolio['activos']:
+            for campo in ['valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal', 'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido', 'valorMercado', 'valorTotal', 'importe']:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            saldo_valorizado += val
+                            break
+                    except Exception:
+                        continue
+
+    # Saldo disponible
+    saldo_disponible = 0
+    if estado_cuenta and 'totalEnPesos' in estado_cuenta:
+        saldo_disponible = estado_cuenta['totalEnPesos']
+
+    tipo_rebalanceo = st.radio(
+        "¿Cómo desea rebalancear?",
+        ["Solo con activos actuales", "Con universo aleatorio configurable"]
+    )
+
+    if tipo_rebalanceo == "Solo con activos actuales":
+        st.info("Se rebalanceará solo con los activos actuales del portafolio.")
+        # Llama a la optimización tradicional
+        if portafolio and 'id' in portafolio:
+            mostrar_optimizacion_portafolio(token_acceso, portafolio['id'])
+        else:
+            st.warning("No se pudo obtener el ID del portafolio para optimizar.")
+    else:
+        st.info("Se rebalanceará con un universo aleatorio de activos configurable.")
+
+        # Selección de paneles y configuración
+        paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables', 'cauciones']
+        paneles_seleccionados = st.multiselect("Seleccione paneles", paneles, default=paneles[:2])
+        cantidad_activos = st.number_input("Cantidad de activos por panel", min_value=1, max_value=10, value=3)
+        capital_opcion = st.radio("¿Qué capital usar?", ["Saldo valorizado", "Saldo disponible", "Ambos"])
+        if capital_opcion == "Saldo valorizado":
+            capital_ars = saldo_valorizado
+        elif capital_opcion == "Saldo disponible":
+            capital_ars = saldo_disponible
+        else:
+            capital_ars = saldo_valorizado + saldo_disponible
+
+        fecha_desde = st.date_input("Fecha desde", value=date(2021, 1, 1))
+        fecha_hasta = st.date_input("Fecha hasta", value=date.today())
+        ajustada = st.selectbox("Tipo de ajuste", ["SinAjustar", "Ajustada"])
+
+        if st.button("Rebalancear con universo aleatorio"):
+            tickers_por_panel, tickers_df = obtener_tickers_por_panel(token_acceso, paneles, 'Argentina')
+            series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
+                tickers_por_panel, paneles_seleccionados, cantidad_activos,
+                fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'),
+                ajustada, token_acceso, capital_ars
+            )
+            st.write("Activos seleccionados por panel:", seleccion_final)
+            st.write("Series históricas:", series_historicas)
+            # Aquí puedes mostrar los gráficos y análisis como en mostrar_optimizacion_universo_activos
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
