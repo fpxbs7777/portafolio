@@ -1,5 +1,5 @@
 import streamlit as st
-import httpx
+import requests
 import plotly.graph_objects as go
 import pandas as pd
 from plotly.subplots import make_subplots
@@ -13,7 +13,6 @@ import random
 import warnings
 import streamlit.components.v1 as components
 from scipy.stats import linregress
-import asyncio
 
 warnings.filterwarnings('ignore')
 
@@ -128,7 +127,7 @@ def obtener_encabezado_autorizacion(token_portador):
         'Content-Type': 'application/json'
     }
 
-async def obtener_tokens(usuario, contraseña):
+def obtener_tokens(usuario, contraseña):
     url_login = 'https://api.invertironline.com/token'
     datos = {
         'username': usuario,
@@ -136,12 +135,11 @@ async def obtener_tokens(usuario, contraseña):
         'grant_type': 'password'
     }
     try:
-        async with httpx.AsyncClient() as client:
-            respuesta = await client.post(url_login, data=datos, timeout=15)
+        respuesta = requests.post(url_login, data=datos, timeout=15)
         respuesta.raise_for_status()
         respuesta_json = respuesta.json()
         return respuesta_json['access_token'], respuesta_json['refresh_token']
-    except httpx.HTTPStatusError as http_err:
+    except requests.exceptions.HTTPError as http_err:
         st.error(f'Error HTTP al obtener tokens: {http_err}')
         if respuesta.status_code == 400:
             st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
@@ -154,12 +152,11 @@ async def obtener_tokens(usuario, contraseña):
         st.error(f'Error inesperado al obtener tokens: {str(e)}')
         return None, None
 
-async def obtener_lista_clientes(token_portador):
+def obtener_lista_clientes(token_portador):
     url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        async with httpx.AsyncClient() as client:
-            respuesta = await client.get(url_clientes, headers=encabezados)
+        respuesta = requests.get(url_clientes, headers=encabezados)
         if respuesta.status_code == 200:
             clientes_data = respuesta.json()
             if isinstance(clientes_data, list):
@@ -175,31 +172,30 @@ async def obtener_lista_clientes(token_portador):
         st.error(f'Error de conexión al obtener clientes: {str(e)}')
         return []
 
-async def obtener_estado_cuenta(token_portador, id_cliente=None):
+def obtener_estado_cuenta(token_portador, id_cliente=None):
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
     else:
         url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
+    
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        async with httpx.AsyncClient() as client:
-            respuesta = await client.get(url_estado_cuenta, headers=encabezados)
+        respuesta = requests.get(url_estado_cuenta, headers=encabezados)
         if respuesta.status_code == 200:
             return respuesta.json()
         elif respuesta.status_code == 401:
-            return await obtener_estado_cuenta(token_portador, None)
+            return obtener_estado_cuenta(token_portador, None)
         else:
             return None
     except Exception as e:
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
         return None
 
-async def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
+def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        async with httpx.AsyncClient() as client:
-            respuesta = await client.get(url_portafolio, headers=encabezados)
+        respuesta = requests.get(url_portafolio, headers=encabezados)
         if respuesta.status_code == 200:
             return respuesta.json()
         else:
@@ -208,17 +204,18 @@ async def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
 
-async def obtener_precio_actual(token_portador, mercado, simbolo):
+def obtener_precio_actual(token_portador, mercado, simbolo):
+    """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
     url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
     headers = obtener_encabezado_autorizacion(token_portador)
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, (int, float)):
                 return float(data)
             elif isinstance(data, dict):
+                # La API suele devolver 'ultimoPrecio'
                 for k in [
                     'ultimoPrecio', 'ultimo_precio', 'ultimoPrecioComprador', 'ultimoPrecioVendedor',
                     'precio', 'precioActual', 'valor'
@@ -232,7 +229,8 @@ async def obtener_precio_actual(token_portador, mercado, simbolo):
     except Exception:
         return None
 
-async def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
+
+def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
     url_cotizacion_mep = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     datos = {
@@ -241,10 +239,10 @@ async def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_pl
         "idPlazoOperatoriaVenta": id_plazo_venta
     }
     try:
-        async with httpx.AsyncClient() as client:
-            respuesta = await client.post(url_cotizacion_mep, headers=encabezados, json=datos)
+        respuesta = requests.post(url_cotizacion_mep, headers=encabezados, json=datos)
         if respuesta.status_code == 200:
             resultado = respuesta.json()
+            # Asegurarse de que siempre devolvemos un diccionario
             if isinstance(resultado, (int, float)):
                 return {'precio': resultado, 'simbolo': simbolo}
             elif isinstance(resultado, dict):
@@ -257,13 +255,33 @@ async def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_pl
         st.error(f'Error al obtener cotización MEP: {str(e)}')
         return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
-async def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
+def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
+    """
+    Obtiene los movimientos de los clientes de un asesor
+    
+    Args:
+        token_portador (str): Token de autenticación
+        clientes (list): Lista de IDs de clientes
+        fecha_desde (str): Fecha de inicio (formato ISO)
+        fecha_hasta (str): Fecha de fin (formato ISO)
+        tipo_fecha (str): Tipo de fecha a filtrar ('fechaOperacion' o 'fechaLiquidacion')
+        estado (str, optional): Estado de la operación
+        tipo_operacion (str, optional): Tipo de operación
+        pais (str, optional): País de la operación
+        moneda (str, optional): Moneda de la operación
+        cuenta_comitente (str, optional): Número de cuenta comitente
+        
+    Returns:
+        dict: Diccionario con los movimientos o None en caso de error
+    """
     url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
     headers = {
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
+    
+    # Preparar el cuerpo de la solicitud
     payload = {
         "clientes": clientes,
         "from": fecha_desde,
@@ -275,9 +293,9 @@ async def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fech
         "currency": moneda or "",
         "cuentaComitente": cuenta_comitente or ""
     }
+    
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
             return response.json()
         else:
@@ -287,7 +305,16 @@ async def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fech
         st.error(f"Error de conexión: {str(e)}")
         return None
 
-async def obtener_tasas_caucion(token_portador):
+def obtener_tasas_caucion(token_portador):
+    """
+    Obtiene las tasas de caución desde la API de IOL
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        
+    Returns:
+        DataFrame: DataFrame con las tasas de caución o None en caso de error
+    """
     url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
     params = {
         'cotizacionInstrumentoModel.instrumento': 'cauciones',
@@ -297,28 +324,46 @@ async def obtener_tasas_caucion(token_portador):
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
+    
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, params=params, timeout=15)
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        
         if response.status_code == 200:
             data = response.json()
+            
             if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
                 df = pd.DataFrame(data['titulos'])
+                
+                # Filtrar solo las cauciónes y limpiar los datos
                 df = df[df['plazo'].notna()].copy()
+                
+                # Extraer el plazo en días
                 df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
+                
+                # Limpiar la tasa (convertir a float si es necesario)
                 if 'ultimoPrecio' in df.columns:
                     df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                
+                # Asegurarse de que las columnas necesarias existan
                 if 'monto' not in df.columns and 'volumen' in df.columns:
                     df['monto'] = df['volumen']
+                
+                # Ordenar por plazo
                 df = df.sort_values('plazo_dias')
+                
+                # Seleccionar solo las columnas necesarias
                 columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
                 columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
+                
                 return df[columnas_disponibles]
+            
             st.warning("No se encontraron datos de tasas de caución en la respuesta")
             return None
+            
         elif response.status_code == 401:
             st.error("Error de autenticación. Por favor, verifique su token de acceso.")
             return None
+            
         else:
             error_msg = f"Error {response.status_code} al obtener tasas de caución"
             try:
@@ -328,26 +373,252 @@ async def obtener_tasas_caucion(token_portador):
                 error_msg += f": {response.text}"
             st.error(error_msg)
             return None
-    except httpx.RequestError as e:
+            
+    except requests.exceptions.RequestException as e:
         st.error(f"Error de conexión: {str(e)}")
         return None
     except Exception as e:
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
 
-async def obtener_fondos_comunes(token_portador):
+def mostrar_tasas_caucion(token_portador):
+    """
+    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
+    """
+    st.subheader("📊 Tasas de Caución")
+    
+    try:
+        with st.spinner('Obteniendo tasas de caución...'):
+            df_cauciones = obtener_tasas_caucion(token_portador)
+            
+            # Verificar si se obtuvieron datos
+            if df_cauciones is None or df_cauciones.empty:
+                st.warning("No se encontraron datos de tasas de caución.")
+                return
+                
+            # Verificar columnas requeridas
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+            if missing_columns:
+                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+                return
+            
+            # Mostrar tabla con las tasas
+            st.dataframe(
+                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                             else ['simbolo', 'plazo', 'ultimoPrecio']]
+                .rename(columns={
+                    'simbolo': 'Instrumento',
+                    'plazo': 'Plazo',
+                    'ultimoPrecio': 'Tasa',
+                    'monto': 'Monto (en millones)'
+                }),
+                use_container_width=True,
+                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+            )
+            
+            # Crear gráfico de curva de tasas si hay suficientes puntos
+            if len(df_cauciones) > 1:
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_cauciones['plazo_dias'],
+                    y=df_cauciones['tasa_limpia'],
+                    mode='lines+markers+text',
+                    name='Tasa',
+                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                    textposition='top center',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=10, color='#1f77b4')
+                ))
+                
+                fig.update_layout(
+                    title='Curva de Tasas de Caución',
+                    xaxis_title='Plazo (días)',
+                    yaxis_title='Tasa Anual (%)',
+                    template='plotly_white',
+                    height=500,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar resumen estadístico
+            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+                with col2:
+                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+                    
+    except Exception as e:
+        st.error(f"Error al mostrar las tasas de caución: {str(e)}")
+        st.exception(e)  # Mostrar el traceback completo para depuración
+
+def parse_datetime_string(datetime_string):
+    """
+    Parsea una cadena de fecha/hora usando múltiples formatos
+    """
+    if not datetime_string:
+        return None
+        
+    formats_to_try = [
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "ISO8601",
+        "mixed"
+    ]
+    
+    for fmt in formats_to_try:
+        try:
+            if fmt == "ISO8601":
+                return pd.to_datetime(datetime_string, format='ISO8601')
+            elif fmt == "mixed":
+                return pd.to_datetime(datetime_string, format='mixed')
+            else:
+                return pd.to_datetime(datetime_string, format=fmt)
+        except Exception:
+            continue
+
+    try:
+        return pd.to_datetime(datetime_string, infer_datetime_format=True)
+    except Exception:
+        return None
+
+def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """Devuelve la URL correcta para la serie histórica del símbolo indicado.
+
+    La prioridad es:
+    1. Usar el mercado recibido (ya normalizado por la llamada superior)
+       si existe en el mapeo de casos especiales.
+    2. Caso contrario, construir la ruta estándar
+       "{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/...".
+
+    No se aplican heurísticas sobre el símbolo: la función que invoque debe
+    pasar el mercado correcto (por ejemplo: 'Bonos', 'Cedears', 'BCBA').
+    """
+    base_url = "https://api.invertironline.com/api/v2"
+
+    # Cubrir alias frecuentes para que el mapeo sea coherente
+    alias = {
+        'TITULOSPUBLICOS': 'TitulosPublicos',
+        'TITULOS PUBLICOS': 'TitulosPublicos'
+    }
+    mercado_norm = alias.get(mercado.upper(), mercado)
+
+    especiales = {
+        'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'FCI': f"{base_url}/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
+        'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
+        'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+    }
+
+    if mercado_norm in especiales:
+        return especiales[mercado_norm]
+
+    # Ruta genérica (acciones BCBA, NYSE, NASDAQ, etc.)
+    return f"{base_url}/{mercado_norm}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+
+def parse_datetime_flexible(date_str: str):
+    """
+    Parses a datetime string that may or may not include microseconds or timezone info.
+    Handles both formats: with and without milliseconds.
+    """
+    if not isinstance(date_str, str):
+        return None
+    try:
+        # First try parsing with the exact format that matches the error
+        try:
+            # Handle format without milliseconds: "2024-12-10T17:11:04"
+            if len(date_str) == 19 and 'T' in date_str and date_str.count(':') == 2:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S', utc=True)
+            # Handle format with milliseconds: "2024-12-10T17:11:04.123"
+            elif '.' in date_str and 'T' in date_str:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
+        except (ValueError, TypeError):
+            pass
+            
+        # Fall back to pandas' built-in parser if specific formats don't match
+        return pd.to_datetime(date_str, errors='coerce', utc=True)
+    except Exception as e:
+        st.warning(f"Error parsing date '{date_str}': {str(e)}")
+        return None
+
+def procesar_respuesta_historico(data, tipo_activo):
+    """
+    Procesa la respuesta de la API según el tipo de activo
+    """
+    if not data:
+        return None
+    
+    try:
+        # Para series históricas estándar
+        if isinstance(data, list):
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes estructuras de respuesta
+                    if isinstance(item, dict):
+                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
+                        if not precio or precio == 0:
+                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                        
+                        fecha_str = item.get('fechaHora') or item.get('fecha')
+                        
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = parse_datetime_flexible(fecha_str)
+                            if pd.notna(fecha_parsed):
+                                precios.append(float(precio))
+                                fechas.append(fecha_parsed)
+                except (ValueError, AttributeError) as e:
+                    continue
+            
+            if precios and fechas:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                # Eliminar duplicados manteniendo el último
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
+        
+        # Para respuestas que son un solo valor (ej: MEP)
+        elif isinstance(data, (int, float)):
+            df = pd.DataFrame({'fecha': [pd.Timestamp.now(tz='UTC').date()], 'precio': [float(data)]})
+            return df
+            
+        return None
+        
+    except Exception as e:
+        st.error(f"Error al procesar respuesta histórica: {str(e)}")
+        return None
+
+def obtener_fondos_comunes(token_portador):
+    """
+    Obtiene la lista de fondos comunes de inversión disponibles
+    """
     url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
     headers = {
         'Authorization': f'Bearer {token_portador}'
     }
+    
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
-    except httpx.RequestError as e:
+    except requests.exceptions.RequestException as e:
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
+
+
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
@@ -1192,12 +1463,21 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=None):
-    if risk_free_rate is None:
-        import streamlit as st
-        risk_free_rate = st.session_state.get('risk_free_rate', 0.40)
+def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
+    """
+    Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
+    
+    Args:
+        portfolio_returns (pd.Series): Retornos del portafolio
+        benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
+        risk_free_rate (float): Tasa libre de riesgo (anualizada)
+        
+    Returns:
+        dict: Diccionario con alpha, beta, información de la regresión y métricas adicionales
+    """
+    # Alinear las series por fecha y eliminar NaN
     aligned_data = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
-    if len(aligned_data) < 5:
+    if len(aligned_data) < 5:  # Mínimo de datos para regresión
         return {
             'alpha': 0,
             'beta': 1.0,
@@ -1208,13 +1488,20 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=Non
             'observations': len(aligned_data),
             'alpha_annual': 0
         }
+    
     portfolio_aligned = aligned_data.iloc[:, 0]
     benchmark_aligned = aligned_data.iloc[:, 1]
-    from scipy.stats import linregress
+    
+    # Calcular regresión lineal
     slope, intercept, r_value, p_value, std_err = linregress(benchmark_aligned, portfolio_aligned)
-    tracking_error = np.std(portfolio_aligned - benchmark_aligned) * np.sqrt(252)
+    
+    # Calcular métricas adicionales
+    tracking_error = np.std(portfolio_aligned - benchmark_aligned) * np.sqrt(252)  # Anualizado
     information_ratio = (portfolio_aligned.mean() - benchmark_aligned.mean()) / tracking_error if tracking_error != 0 else 0
-    alpha_annual = (intercept - risk_free_rate/252) * 252
+    
+    # Anualizar alpha (asumiendo 252 días hábiles)
+    alpha_annual = intercept * 252
+    
     return {
         'alpha': intercept,
         'beta': slope,
@@ -1342,13 +1629,11 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         
     # Descargar datos del MERVAL para cálculo de Alpha y Beta
     try:
-        import yfinance as yf
-        benchmark_symbol = st.session_state.get('benchmark_symbol', '^MERV')
-        merval_data = yf.download(benchmark_symbol, start=fecha_desde, end=fecha_hasta)['Close']
+        merval_data = yf.download('^MERV', start=fecha_desde, end=fecha_hasta)['Close']
         merval_returns = merval_data.pct_change().dropna()
         merval_available = True
     except Exception as e:
-        print(f"No se pudieron obtener datos del benchmark: {str(e)}")
+        print(f"No se pudieron obtener datos del MERVAL: {str(e)}")
         merval_available = False
         merval_returns = None
     
@@ -1492,69 +1777,80 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # Volatilidad del portafolio (considerando correlaciones)
     try:
         if len(retornos_diarios) > 1:
+            # Asegurarse de que tenemos suficientes datos para calcular correlaciones
             df_retornos = pd.DataFrame(retornos_diarios).dropna()
-            if len(df_retornos) < 5:
+            if len(df_retornos) < 5:  # Mínimo de datos para correlación confiable
+                print("No hay suficientes datos para calcular correlaciones confiables")
+                # Usar promedio ponderado simple como respaldo
                 volatilidad_portafolio = sum(
                     m['volatilidad'] * m['peso'] 
                     for m in metricas_activos.values()
                 )
             else:
+                # Calcular matriz de correlación
                 df_correlacion = df_retornos.corr()
+                
+                # Verificar si la matriz de correlación es válida
                 if df_correlacion.isna().any().any():
-                    df_correlacion = df_correlacion.fillna(0)
+                    print("Advertencia: Matriz de correlación contiene valores NaN")
+                    df_correlacion = df_correlacion.fillna(0)  # Reemplazar NaN con 0
+                
+                # Obtener pesos y volatilidades
                 activos = list(metricas_activos.keys())
                 pesos = np.array([metricas_activos[a]['peso'] for a in activos])
                 volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
+                
+                # Asegurarse de que las dimensiones coincidan
                 if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
+                    # Calcular matriz de covarianza
                     matriz_cov = np.diag(volatilidades) @ df_correlacion.values @ np.diag(volatilidades)
+                    # Calcular varianza del portafolio
                     varianza_portafolio = pesos.T @ matriz_cov @ pesos
+                    # Asegurar que la varianza no sea negativa
                     varianza_portafolio = max(0, varianza_portafolio)
                     volatilidad_portafolio = np.sqrt(varianza_portafolio)
                 else:
+                    print("Dimensiones no coinciden, usando promedio ponderado")
                     volatilidad_portafolio = sum(v * w for v, w in zip(volatilidades, pesos))
         else:
+            # Si solo hay un activo, usar su volatilidad directamente
             volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
+            
+        # Asegurar que la volatilidad sea un número finito
         if not np.isfinite(volatilidad_portafolio):
-            volatilidad_portafolio = 0.2
+            print("Advertencia: Volatilidad no finita, usando valor por defecto")
+            volatilidad_portafolio = 0.2  # Valor por defecto razonable
+            
     except Exception as e:
+        print(f"Error al calcular volatilidad del portafolio: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Valor por defecto seguro
         volatilidad_portafolio = sum(
             m['volatilidad'] * m['peso'] 
             for m in metricas_activos.values()
         ) if metricas_activos else 0.2
     
-    # --- SIMULACIÓN EMPÍRICA (BOOTSTRAP) ---
+    # Calcular percentiles para escenarios
     retornos_simulados = []
-    n_sim = 1000
-    if len(retornos_diarios) > 1:
-        df_retornos = pd.DataFrame(retornos_diarios).dropna()
-        activos = list(metricas_activos.keys())
-        pesos = np.array([metricas_activos[a]['peso'] for a in activos])
-        # Bootstrap: muestreo con reemplazo de días históricos
-        for _ in range(n_sim):
-            idx = np.random.choice(df_retornos.index, size=252, replace=True)
-            sample = df_retornos.loc[idx]
-            port_ret = (sample.values @ pesos).sum()  # Suma de retornos diarios simulados
-            retornos_simulados.append(port_ret)
-    elif len(retornos_diarios) == 1:
-        # Solo un activo
-        key = next(iter(retornos_diarios.keys()))
-        serie = retornos_diarios[key].dropna()
-        for _ in range(n_sim):
-            idx = np.random.choice(serie.index, size=252, replace=True)
-            port_ret = serie.loc[idx].sum()
-            retornos_simulados.append(port_ret)
-    else:
-        retornos_simulados = [0]*n_sim
+    for _ in range(1000):  # Simulación Monte Carlo simple
+        retorno_simulado = 0
+        for m in metricas_activos.values():
+            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
+        retornos_simulados.append(retorno_simulado * 252)  # Anualizado
+    
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
+    
+    # Calcular probabilidades basadas en los retornos simulados
     retornos_simulados = np.array(retornos_simulados)
-    # --- Probabilidades sobre simulación empírica ---
     total_simulaciones = len(retornos_simulados)
+            
     prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
     prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
     prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
     prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
-    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
-    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
-    
+            
     # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
     alpha_beta_metrics = {}
     if merval_available and len(retornos_diarios) > 1:
@@ -1581,7 +1877,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 alpha_beta_metrics = calcular_alpha_beta(
                     aligned_data['Portfolio'],  # Retornos del portafolio
                     aligned_data['MERVAL'],      # Retornos del MERVAL
-                    risk_free_rate=risk_free_rate  # Tasa libre de riesgo para Argentina
+                    risk_free_rate=0.40  # Tasa libre de riesgo para Argentina
                 )
                 
                 print(f"Alpha: {alpha_beta_metrics.get('alpha_annual', 0):.2%}, "
@@ -1716,8 +2012,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    import asyncio
-                    ultimo_precio = asyncio.run(obtener_precio_actual(token_portador, mercado, simbolo))
+                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2189,12 +2484,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     
                                     # Obtener cotización MEP para conversión
                                     try:
-                                        import asyncio
-                                        cotizacion_mep = asyncio.run(obtener_cotizacion_mep(token_portador, "AL30", 1, 1))
+                                        # Intentar obtener cotización MEP (usar AL30 como proxy)
+                                        cotizacion_mep = obtener_cotizacion_mep(token_portador, "AL30", 1, 1)
                                         if cotizacion_mep and cotizacion_mep.get('precio'):
                                             tasa_mep = float(cotizacion_mep['precio'])
                                         else:
-                                            tasa_mep = 1000
+                                            # Si no hay MEP, usar tasa aproximada
+                                            tasa_mep = 1000  # Tasa aproximada
                                             st.info("ℹ️ Usando tasa MEP aproximada para conversiones")
                                     except:
                                         tasa_mep = 1000
@@ -2634,10 +2930,9 @@ def mostrar_cotizaciones_mercado(token_acceso):
             if st.form_submit_button("🔍 Consultar MEP"):
                 if simbolo_mep:
                     with st.spinner("Consultando cotización MEP..."):
-                        import asyncio
-                        cotizacion_mep = asyncio.run(obtener_cotizacion_mep(
+                        cotizacion_mep = obtener_cotizacion_mep(
                             token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
-                        ))
+                        )
                     if cotizacion_mep:
                         st.success("✅ Cotización MEP obtenida")
                         # Mostrar análisis completo en texto y tabla
@@ -2675,8 +2970,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
     with st.expander("🏦 Tasas de Caución", expanded=True):
         if st.button("🔄 Actualizar Tasas"):
             with st.spinner("Consultando tasas de caución..."):
-                import asyncio
-                tasas_caucion = asyncio.run(obtener_tasas_caucion(token_acceso))
+                tasas_caucion = obtener_tasas_caucion(token_acceso)
             
             if tasas_caucion is not None and not tasas_caucion.empty:
                 df_tasas = pd.DataFrame(tasas_caucion)
@@ -2693,8 +2987,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Menú Avanzado de Optimización de Portafolio")
     with st.spinner("Obteniendo portafolio actual..."):
-        import asyncio
-        portafolio = asyncio.run(obtener_portafolio(token_acceso, id_cliente))
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
     if not portafolio or not portafolio.get('activos'):
         st.warning("No se pudo obtener el portafolio del cliente o está vacío")
         return
@@ -2956,8 +3249,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
     with st.spinner("Obteniendo portafolio..."):
-        import asyncio
-        portafolio = asyncio.run(obtener_portafolio(token_acceso, id_cliente))
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
     
     if not portafolio:
         st.warning("No se pudo obtener el portafolio del cliente")
@@ -3047,8 +3339,7 @@ def mostrar_movimientos_asesor():
     token_acceso = st.session_state.token_acceso
     
     # Obtener lista de clientes
-    import asyncio
-    clientes = asyncio.run(obtener_lista_clientes(token_acceso))
+    clientes = obtener_lista_clientes(token_acceso)
     if not clientes:
         st.warning("No se encontraron clientes")
         return
@@ -3095,8 +3386,7 @@ def mostrar_movimientos_asesor():
     
     if buscar and clientes_seleccionados:
         with st.spinner("Buscando movimientos..."):
-            import asyncio
-            movimientos = asyncio.run(obtener_movimientos_asesor(
+            movimientos = obtener_movimientos_asesor(
                 token_portador=token_acceso,
                 clientes=clientes_seleccionados,
                 fecha_desde=fecha_desde.isoformat(),
@@ -3105,7 +3395,7 @@ def mostrar_movimientos_asesor():
                 estado=estado or None,
                 tipo_operacion=tipo_operacion or None,
                 moneda=moneda or None
-            ))
+            )
             
             if movimientos and isinstance(movimientos, list):
                 df = pd.DataFrame(movimientos)
@@ -3154,15 +3444,14 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
-        import asyncio
-        portafolio = asyncio.run(obtener_portafolio(token_acceso, id_cliente))
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
-        estado_cuenta = asyncio.run(obtener_estado_cuenta(token_acceso, id_cliente))
+        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
             mostrar_estado_cuenta(estado_cuenta)
         else:
@@ -3198,32 +3487,6 @@ def main():
     # Barra lateral - Autenticación
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
-        # --- NUEVO: Input de tasa libre de riesgo y benchmark ---
-        if 'risk_free_rate' not in st.session_state:
-            st.session_state.risk_free_rate = 0.40  # 40% anual por defecto
-        if 'benchmark_symbol' not in st.session_state:
-            st.session_state.benchmark_symbol = '^MERV'
-        st.subheader("Configuración de Análisis")
-        st.session_state.risk_free_rate = st.number_input(
-            "Tasa libre de riesgo anual (%)",
-            min_value=0.0, max_value=100.0, value=float(st.session_state.risk_free_rate*100), step=0.1
-        ) / 100.0
-        benchmark_options = {
-            'MERVAL (Argentina)': '^MERV',
-            'S&P 500 (EEUU)': '^GSPC',
-            'NASDAQ 100': '^NDX',
-            'Dow Jones': '^DJI',
-            'Bovespa (Brasil)': '^BVSP',
-            'Euro Stoxx 50': '^STOXX50E',
-            'MSCI World': 'URTH',
-            'Bitcoin': 'BTC-USD',
-        }
-        st.session_state.benchmark_symbol = st.selectbox(
-            "Benchmark para Alpha/Beta:",
-            options=list(benchmark_options.values()),
-            format_func=lambda x: next((k for k, v in benchmark_options.items() if v == x), x),
-            index=list(benchmark_options.values()).index(st.session_state.benchmark_symbol) if st.session_state.benchmark_symbol in benchmark_options.values() else 0
-        )
         
         if st.session_state.token_acceso is None:
             with st.form("login_form"):
@@ -3234,8 +3497,7 @@ def main():
                 if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
                     if usuario and contraseña:
                         with st.spinner("Conectando..."):
-                            import asyncio
-                            token_acceso, refresh_token = asyncio.run(obtener_tokens(usuario, contraseña))
+                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
                             
                             if token_acceso:
                                 st.session_state.token_acceso = token_acceso
@@ -3272,8 +3534,7 @@ def main():
             if not st.session_state.clientes and st.session_state.token_acceso:
                 with st.spinner("Cargando clientes..."):
                     try:
-                        import asyncio
-                        clientes = asyncio.run(obtener_lista_clientes(st.session_state.token_acceso))
+                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
                         if clientes:
                             st.session_state.clientes = clientes
                         else:
