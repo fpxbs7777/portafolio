@@ -4592,17 +4592,16 @@ def mostrar_optimizacion_universo_activos(token_acceso):
                                         # Tabla comparativa de portafolios del universo
                                         st.markdown("#### 📊 Comparación de Estrategias del Universo")
                                         comparison_data_frontier = []
-                                        for label, portfolio in portfolios_frontier.items():
-                                            if portfolio is not None:
-                                                comparison_data_frontier.append({
-                                                    'Estrategia': label,
-                                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                                    'VaR 95%': f"{portfolio.var_95:.4f}",
-                                                    'Skewness': f"{portfolio.skewness:.4f}",
-                                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
-                                                })
+                                        for label, portfolio in portfolios_frontier.items() if portfolio is not None:
+                                            comparison_data_frontier.append({
+                                                'Estrategia': label,
+                                                'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                                'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                                'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                                'VaR 95%': f"{portfolio.var_95:.4f}",
+                                                'Skewness': f"{portfolio.skewness:.4f}",
+                                                'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                            })
                                         
                                         if comparison_data_frontier:
                                             df_comparison_frontier = pd.DataFrame(comparison_data_frontier)
