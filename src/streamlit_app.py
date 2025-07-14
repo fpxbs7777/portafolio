@@ -2220,61 +2220,62 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             else:
                                 fechas_comunes = fechas_comunes.intersection(set(serie.index))
                         
-                        if not fechas_comunes:
-                            st.warning("⚠️ No hay fechas comunes entre las series históricas")
-                            return
-                        
-                        # Convertir a lista ordenada
-                        fechas_comunes = sorted(list(fechas_comunes))
-                        df_portfolio.index = fechas_comunes
+                        if not fechas_comunes or len(fechas_comunes) == 0:
+                            # Si no hay fechas comunes, usar la unión y rellenar con ffill
+                            st.warning("⚠️ No hay fechas comunes entre las series históricas. Se usará la unión de fechas y se rellenarán los valores faltantes.")
+                            fechas_union = set()
+                            for activo_info in activos_exitosos:
+                                fechas_union = fechas_union.union(set(activo_info['serie'].index))
+                            fechas_union = sorted(list(fechas_union))
+                            df_portfolio.index = fechas_union
+                            usar_union = True
+                        else:
+                            fechas_comunes = sorted(list(fechas_comunes))
+                            df_portfolio.index = fechas_comunes
+                            usar_union = False
                         
                         for activo_info in activos_exitosos:
                             simbolo = activo_info['simbolo']
                             peso = activo_info['peso']
                             serie = activo_info['serie']
-                            
-                            # Encontrar la valuación real del activo en el portafolio
                             valuacion_activo = 0
                             for activo_original in datos_activos:
                                 if activo_original['Símbolo'] == simbolo:
                                     valuacion_activo = float(activo_original['Valuación'])
                                     break
-                            
-                            # Filtrar la serie para usar solo las fechas comunes
-                            serie_filtrada = serie.loc[fechas_comunes]
-                            
+                            # Seleccionar fechas
+                            if usar_union:
+                                serie_filtrada = serie.reindex(df_portfolio.index)
+                            else:
+                                serie_filtrada = serie.loc[df_portfolio.index]
                             # Agregar serie ponderada al DataFrame
-                            # Usar la valuación real del activo y aplicar el retorno histórico
                             if 'precio' in serie_filtrada.columns:
-                                # Calcular retornos históricos del activo
                                 precios = serie_filtrada['precio'].values
                                 if len(precios) > 1:
-                                    # Calcular retornos acumulados desde el primer precio
                                     retornos_acumulados = precios / precios[0]
-                                    # Aplicar retornos a la valuación actual
                                     df_portfolio[simbolo] = valuacion_activo * retornos_acumulados
                                 else:
-                                    # Si solo hay un precio, usar la valuación actual
                                     df_portfolio[simbolo] = valuacion_activo
                             else:
-                                # Si no hay columna 'precio', intentar con la primera columna numérica
                                 columnas_numericas = serie_filtrada.select_dtypes(include=[np.number]).columns
                                 if len(columnas_numericas) > 0:
                                     precios = serie_filtrada[columnas_numericas[0]].values
                                     if len(precios) > 1:
-                                        # Calcular retornos acumulados desde el primer precio
                                         retornos_acumulados = precios / precios[0]
-                                        # Aplicar retornos a la valuación actual
                                         df_portfolio[simbolo] = valuacion_activo * retornos_acumulados
                                     else:
-                                        # Si solo hay un precio, usar la valuación actual
                                         df_portfolio[simbolo] = valuacion_activo
                                 else:
                                     st.warning(f"⚠️ No se encontraron valores numéricos para {simbolo}")
                                     continue
-                        
+                        # Rellenar valores faltantes con forward-fill y eliminar filas completamente vacías
+                        df_portfolio = df_portfolio.ffill().dropna(how='all')
                         # Calcular valor total del portafolio por fecha
-                        df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
+                        if not df_portfolio.empty:
+                            df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
+                        else:
+                            st.error("❌ No se pudo construir el DataFrame del portafolio. Verifique los datos históricos de los activos seleccionados.")
+                            return
                         
                         # Mostrar información de debug
                         st.info(f"🔍 Debug: Valor total actual del portafolio: ${valor_total:,.2f}")
