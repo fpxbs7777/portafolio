@@ -997,20 +997,14 @@ class manager:
         """Crea un objeto output con los pesos optimizados"""
         port_ret = np.sum(self.mean_returns * weights)
         port_vol = np.sqrt(portfolio_variance(weights, self.cov_matrix))
+        
         # Calcular retornos del portafolio
         if self.returns is not None:
             portfolio_returns = self.returns.dot(weights)
-            # Si los retornos son vacíos o de un solo valor, devolver NaN y advertir
-            if (hasattr(portfolio_returns, '__len__') and len(portfolio_returns) <= 1) or portfolio_returns.isnull().all():
-                import pandas as pd
-                portfolio_returns = pd.Series([np.nan])
-                import streamlit as st
-                st.warning("El portafolio optimizado no tiene suficientes retornos históricos para graficar el histograma.")
         else:
-            import pandas as pd
-            portfolio_returns = pd.Series([np.nan])
-            import streamlit as st
-            st.warning("El portafolio optimizado no tiene retornos históricos disponibles.")
+            # Fallback si returns es None
+            portfolio_returns = pd.Series([0] * 252)  # Serie vacía
+        
         # Crear objeto output
         port_output = output(portfolio_returns, self.notional)
         port_output.weights = weights
@@ -1020,6 +1014,7 @@ class manager:
             'volatilities': np.sqrt(np.diag(self.cov_matrix)),
             'returns': self.mean_returns
         })
+        
         return port_output
 
 class output:
@@ -1064,13 +1059,10 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
+        # Asegura que self.returns sea una secuencia (array, lista, o pandas Series), no un escalar
         import numpy as np
         import pandas as pd
         returns = self.returns
-        # Mostrar cantidad de datos
-        import streamlit as st
-        if hasattr(returns, '__len__'):
-            st.info(f"Histograma de retornos: {len(returns)} datos")
         # Si es None o vacío
         if returns is None or (hasattr(returns, '__len__') and len(returns) == 0):
             fig = go.Figure()
@@ -1101,12 +1093,14 @@ class output:
             )
             fig.update_layout(title=title)
             return fig
+
         fig = go.Figure(data=[go.Histogram(
             x=returns,
             nbinsx=30,
             name="Retornos del Portafolio",
             marker_color='#0d6efd'
         )])
+        # Agregar líneas de métricas importantes
         fig.add_vline(x=self.mean_daily, line_dash="dash", line_color="red", 
                      annotation_text=f"Media: {self.mean_daily:.4f}")
         fig.add_vline(x=self.var_95, line_dash="dash", line_color="orange", 
@@ -3002,6 +2996,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     activos_raw = portafolio['activos']
     # Diagnóstico del portafolio actual
     st.subheader("🔍 Diagnóstico del Portafolio Actual")
+    # Usar el mismo método de resumen de portafolio para diagnóstico real
     activos_dict = {}
     valor_total = 0
     for activo in activos_raw:
@@ -3053,22 +3048,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'mercado': mercado
             }
             valor_total += valuacion
-    # --- NUEVO: Validar cantidad de activos válidos antes de seguir ---
-    activos_validos = [a for a in activos_dict if activos_dict[a]['Valuación'] > 0]
-    if len(activos_validos) < 2:
-        st.warning("El portafolio actual solo tiene 1 activo válido (con símbolo y cantidad > 0). Agregue más activos o cambie el universo para poder optimizar.")
-        return
-    # Advertir si hay activos con valuación cero
-    activos_con_valuacion_cero = [a for a in activos_validos if a.get('valuacionActual', a.get('valuacion', 0)) == 0]
-    if activos_con_valuacion_cero:
-        st.info(f"Hay {len(activos_con_valuacion_cero)} activos con valuación cero. Se intentará optimizar igualmente si hay series históricas disponibles.")
-    # Usar todos los activos válidos para la optimización
-    universe_activos = [
-        {'simbolo': a.get('titulo',{}).get('simbolo'),
-         'mercado': a.get('titulo',{}).get('mercado'),
-         'tipo': a.get('titulo',{}).get('tipo')}
-        for a in activos_validos
-    ]
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
     cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
@@ -3088,49 +3067,24 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             {'simbolo': a.get('titulo',{}).get('simbolo'),
              'mercado': a.get('titulo',{}).get('mercado'),
              'tipo': a.get('titulo',{}).get('tipo')}
-            for a in activos_raw if a.get('titulo',{}).get('simbolo') and a.get('valuacionActual', a.get('valuacion', 0)) > 0
+            for a in activos_raw if a.get('titulo',{}).get('simbolo')
         ]
-        if len(universe_activos) < 2:
-            st.warning("El portafolio actual no tiene suficientes activos válidos para optimizar. Agregue más activos o cambie el universo.")
-            return
     else:
         st.info("Seleccione el tipo y cantidad de activos para el universo aleatorio")
         tipos = list(set([a.get('titulo',{}).get('tipo','Acción') for a in activos_raw]))
         tipo_sel = st.multiselect("Tipos de activo", tipos, default=tipos)
         cant = st.slider("Cantidad de activos aleatorios", 3, 15, 5)
-        candidatos = [
+        # Simulación simple: tomar random de los tipos seleccionados
+        import random
+        universe_activos = random.sample([
             {'simbolo': a.get('titulo',{}).get('simbolo'),
              'mercado': a.get('titulo',{}).get('mercado'),
              'tipo': a.get('titulo',{}).get('tipo')}
-            for a in activos_raw if a.get('titulo',{}).get('tipo') in tipo_sel and a.get('titulo',{}).get('simbolo')
-        ]
-        activos_validos = []
-        fecha_desde = st.session_state.fecha_desde
-        fecha_hasta = st.session_state.fecha_hasta
-        st.info("Validando historia de los activos aleatorios...")
-        for candidato in random.sample(candidatos, min(len(candidatos), cant*2)):
-            try:
-                df = obtener_serie_historica_iol(
-                    st.session_state.token_acceso,
-                    candidato['mercado'],
-                    candidato['simbolo'],
-                    fecha_desde,
-                    fecha_hasta
-                )
-                if df is not None and not df.empty:
-                    if len(df) >= 180:
-                        precios = df['precio'] if 'precio' in df.columns else None
-                        if precios is not None:
-                            if precios.nunique() > 1 and precios.isnull().mean() < 0.1:
-                                activos_validos.append(candidato)
-                if len(activos_validos) >= cant:
-                    break
-            except Exception:
-                continue
-        if len(activos_validos) < 2:
-            st.warning("No hay suficientes activos con historia suficiente para optimizar. Pruebe aumentando el rango de fechas o eligiendo más activos.")
+            for a in activos_raw if a.get('titulo',{}).get('tipo') in tipo_sel
+        ], min(cant, len(activos_raw)))
+        if not universe_activos:
+            st.warning("No hay suficientes activos para el universo aleatorio seleccionado.")
             return
-        universe_activos = activos_validos[:cant]
 
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
@@ -3152,10 +3106,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     manager_inst = PortfolioManager(universe_activos, token_acceso, fecha_desde, fecha_hasta)
     if not manager_inst.load_data():
         st.error("No se pudieron cargar los datos históricos para optimización.")
-        return
-    # Validar matriz de retornos antes de optimizar
-    if manager_inst.returns is None or manager_inst.returns.shape[1] < 2 or manager_inst.returns.shape[0] < 10:
-        st.warning("No hay suficientes datos históricos comunes entre los activos seleccionados para optimizar. Pruebe aumentando el rango de fechas o eligiendo más activos.")
         return
 
     resultados = {}
@@ -3627,7 +3577,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "📚 Conceptos Estadísticos"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -3647,8 +3597,6 @@ def main():
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "📚 Conceptos Estadísticos":
-                mostrar_conceptos_estadisticos()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
@@ -3705,242 +3653,6 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
-
-def mostrar_conceptos_estadisticos():
-    import pandas as pd
-    import numpy as np
-    import streamlit as st
-    import plotly.graph_objects as go
-    st.title("📚 Conceptos Estadísticos Básicos")
-    st.markdown("""
-    Este módulo educativo explica y aplica los principales conceptos estadísticos usados en finanzas y gestión de carteras, con ejemplos teóricos y cálculos sobre tus propios activos o portafolio si hay datos disponibles.
-    """)
-    fuente = st.radio("¿Sobre qué datos quieres ver los conceptos?", ["Portafolio actual", "Serie histórica de uno o más tickers", "Ingresar datos manualmente", "Ejemplo precargado"])
-    datos_reales = None
-    nombre_datos = ""
-    # --- NUEVO: obtener portafolio real como DataFrame ---
-    def obtener_portafolio_activo():
-        try:
-            if 'token_acceso' in st.session_state and st.session_state.token_acceso and 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
-                id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
-                portafolio = obtener_portafolio(st.session_state.token_acceso, id_cliente)
-                if portafolio and 'activos' in portafolio:
-                    activos = portafolio['activos']
-                    df = pd.DataFrame([
-                        {
-                            **a.get('titulo', {}),
-                            'cantidad': a.get('cantidad', 0),
-                            'valuacion': a.get('valuacionActual', a.get('valuacion', 0)),
-                        }
-                        for a in activos if a.get('titulo', {}).get('simbolo')
-                    ])
-                    return df
-            return None
-        except Exception as e:
-            st.warning(f"Error al obtener portafolio: {e}")
-            return None
-    # --- NUEVO: obtener tickers reales del portafolio ---
-    def obtener_tickers_portafolio():
-        df = obtener_portafolio_activo()
-        if df is not None and 'simbolo' in df.columns:
-            return df['simbolo'].unique().tolist()
-        return []
-    # --- NUEVO: obtener serie histórica real de un ticker ---
-    def obtener_serie_historica_ticker(ticker):
-        try:
-            df = obtener_portafolio_activo()
-            if df is not None:
-                row = df[df['simbolo'] == ticker].iloc[0]
-                mercado = row.get('mercado', 'BCBA')
-                fecha_hasta = pd.Timestamp.today().strftime('%Y-%m-%d')
-                fecha_desde = (pd.Timestamp.today() - pd.Timedelta(days=365)).strftime('%Y-%m-%d')
-                serie = obtener_serie_historica_iol(
-                    st.session_state.token_acceso,
-                    mercado,
-                    ticker,
-                    fecha_desde,
-                    fecha_hasta
-                )
-                if serie is not None and 'precio' in serie.columns:
-                    serie = serie.set_index('fecha')['precio']
-                    return serie
-            return None
-        except Exception as e:
-            st.warning(f"Error al obtener serie histórica: {e}")
-            return None
-    # --- Selección de fuente de datos ---
-    if fuente == "Portafolio actual":
-        df = obtener_portafolio_activo()
-        if df is not None and not df.empty:
-            campos = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and df[c].notnull().sum() > 0]
-            if campos:
-                campo = st.selectbox("Selecciona el campo numérico a analizar", campos)
-                datos_reales = df[campo].dropna().values
-                nombre_datos = f"Portafolio actual - {campo}"
-            else:
-                st.info("No hay campos numéricos en el portafolio. Ingrese datos manualmente o seleccione otra opción.")
-        else:
-            st.info("El portafolio está vacío. Ingrese datos manualmente o seleccione otra opción.")
-    elif fuente == "Serie histórica de uno o más tickers":
-        tickers = obtener_tickers_portafolio()
-        if tickers:
-            tickers_sel = st.multiselect("Selecciona uno o más tickers del portafolio", tickers)
-            tipo_serie = st.radio("Tipo de serie a analizar", ["Precios históricos", "Retornos diarios"])
-            series_dict = {}
-            for ticker in tickers_sel:
-                serie = obtener_serie_historica_ticker(ticker)
-                if serie is not None and len(serie) > 1:
-                    if tipo_serie == "Retornos diarios":
-                        datos = serie.pct_change().dropna().values
-                        nombre = f"Retornos diarios de {ticker}"
-                    else:
-                        datos = serie.dropna().values
-                        nombre = f"Precios históricos de {ticker}"
-                    series_dict[ticker] = (datos, nombre)
-            if not series_dict:
-                st.info("No hay datos históricos suficientes para los tickers seleccionados. Ingrese datos manualmente o seleccione otra opción.")
-        else:
-            st.info("No hay tickers en el portafolio. Ingrese datos manualmente o seleccione otra opción.")
-    elif fuente == "Ingresar datos manualmente":
-        datos_texto = st.text_area("Pega una lista de valores separados por coma, espacio o salto de línea:")
-        if datos_texto:
-            try:
-                datos_reales = pd.to_numeric(pd.Series(datos_texto.replace("\n", ",").replace(" ", ",").split(",")).dropna()).values
-                nombre_datos = "Datos manuales"
-            except:
-                st.warning("No se pudieron interpretar los datos ingresados. Prueba con otra lista.")
-    elif fuente == "Ejemplo precargado":
-        datos_reales = np.array([30,30,32,40,45,50,52,40,50,32,45,40,32,32,40,50,40,45,40,45,50,45])
-        nombre_datos = "Ejemplo: Edades"
-    # --- Si no hay datos válidos, mostrar mensaje claro ---
-    if fuente == "Serie histórica de uno o más tickers":
-        if not tickers or not tickers_sel or not series_dict:
-            st.warning("No hay datos suficientes para mostrar los conceptos. Ingrese datos manualmente o seleccione otra opción.")
-            return
-    elif datos_reales is None or len(datos_reales) < 2:
-        st.warning("No hay datos suficientes para mostrar los conceptos. Ingrese datos manualmente o seleccione otra opción.")
-        return
-    # --- Tabs con teoría, ejemplo y datos reales ---
-    secciones = [
-        "Tablas de Frecuencias",
-        "Medidas de Tendencia Central",
-        "Esperanza Matemática",
-        "Medidas de Dispersión",
-        "Covarianza, Correlación y Regresión",
-        "Beta y Coeficiente de Determinación",
-        "Ejercicios Resueltos"
-    ]
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(secciones)
-    # --- Ejemplo teórico para cada sección (resumido del manual) ---
-    ejemplo_tabla = np.array([30,30,32,40,45,50,52,40,50,32,45,40,32,32,40,50,40,45,40,45,50,45])
-    # --- Tablas de Frecuencias ---
-    with tab1:
-        st.header("1. Tablas de Frecuencias")
-        st.markdown("""
-        **Definición:** Una tabla de frecuencias organiza los valores de una variable y la cantidad de veces que se repite cada uno. Permite resumir y visualizar la información de manera clara.
-        """)
-        st.markdown("**Ejemplo teórico:** (Edades) 30/30/32/40/45/50/52/40/50/32/45/40/32/32/40/50/40/45/40/45/50/45")
-        df_ej = pd.DataFrame(ejemplo_tabla, columns=["X"])
-        tabla_ej = df_ej["X"].value_counts().sort_index().reset_index()
-        tabla_ej.columns = ["xi", "ni"]
-        tabla_ej["Ni"] = tabla_ej["ni"].cumsum()
-        N_ej = tabla_ej["ni"].sum()
-        tabla_ej["hi"] = tabla_ej["ni"] / N_ej
-        tabla_ej["Hi"] = tabla_ej["Ni"] / N_ej
-        st.dataframe(tabla_ej)
-        fig1 = go.Figure([go.Bar(x=tabla_ej["xi"], y=tabla_ej["ni"], name="Frecuencia absoluta")])
-        fig1.update_layout(title="Diagrama de barras (Ejemplo)", xaxis_title="xi", yaxis_title="ni")
-        st.plotly_chart(fig1)
-        # --- Datos reales ---
-        if fuente == "Serie histórica de uno o más tickers":
-            for ticker, (datos, nombre) in series_dict.items():
-                st.markdown(f"**Datos analizados:** {nombre}")
-                df = pd.DataFrame(datos, columns=["X"])
-                tabla = df["X"].value_counts().sort_index().reset_index()
-                tabla.columns = ["xi", "ni"]
-                tabla["Ni"] = tabla["ni"].cumsum()
-                N = tabla["ni"].sum()
-                tabla["hi"] = tabla["ni"] / N
-                tabla["Hi"] = tabla["Ni"] / N
-                st.dataframe(tabla)
-                fig = go.Figure([go.Bar(x=tabla["xi"], y=tabla["ni"], name="Frecuencia absoluta")])
-                fig.update_layout(title=f"Diagrama de barras ({nombre})", xaxis_title="xi", yaxis_title="ni")
-                st.plotly_chart(fig)
-        elif datos_reales is not None:
-            st.markdown(f"**Datos analizados:** {nombre_datos}")
-            df = pd.DataFrame(datos_reales, columns=["X"])
-            tabla = df["X"].value_counts().sort_index().reset_index()
-            tabla.columns = ["xi", "ni"]
-            tabla["Ni"] = tabla["ni"].cumsum()
-            N = tabla["ni"].sum()
-            tabla["hi"] = tabla["ni"] / N
-            tabla["Hi"] = tabla["Ni"] / N
-            st.dataframe(tabla)
-            fig = go.Figure([go.Bar(x=tabla["xi"], y=tabla["ni"], name="Frecuencia absoluta")])
-            fig.update_layout(title=f"Diagrama de barras ({nombre_datos})", xaxis_title="xi", yaxis_title="ni")
-            st.plotly_chart(fig)
-    with tab2:
-        st.header("2. Medidas de Tendencia Central")
-        media = np.mean(datos_reales)
-        st.write(f"**Media aritmética:** {media:.2f}")
-        st.markdown("La media aritmética es la suma de todos los valores dividida por el número de datos.")
-        media_agrupada = np.sum(tabla["xi"] * tabla["ni"]) / N
-        st.write(f"**Media aritmética agrupada:** {media_agrupada:.2f}")
-        st.caption("Se muestran todos los ejemplos y fórmulas, y puedes comparar con tus datos reales.")
-    with tab3:
-        st.header("3. Esperanza Matemática")
-        st.markdown("La esperanza matemática es la media ponderada de los posibles valores de una variable aleatoria, usando probabilidades.")
-        st.write("**Ejemplo:** Escenario: Pesimista -1%, Normal 2,5%, Optimista 5%. Probabilidades: 0,25, 0,5, 0,25.")
-        valores = np.array([-1, 2.5, 5])
-        probs = np.array([0.25, 0.5, 0.25])
-        esperanza = np.sum(valores * probs)
-        st.write(f"Esperanza matemática: {esperanza:.2f}%")
-        st.caption("Puedes aplicar la fórmula a tus propios escenarios si lo deseas.")
-    with tab4:
-        st.header("4. Medidas de Dispersión")
-        varianza = np.var(datos_reales, ddof=0)
-        desv_tipica = np.std(datos_reales, ddof=0)
-        st.write(f"**Varianza:** {varianza:.2f}")
-        st.write(f"**Desviación típica:** {desv_tipica:.2f}")
-        st.markdown("La varianza es el promedio de las desviaciones al cuadrado respecto a la media. La desviación típica es su raíz cuadrada.")
-        st.caption("Puedes comparar con tus propios datos si los has cargado.")
-    with tab5:
-        st.header("5. Covarianza, Correlación y Regresión")
-        st.markdown("Puedes ingresar una segunda serie para comparar con la primera.")
-        datos2_text = st.text_area("Pega una segunda lista de valores (misma longitud que la anterior):", key="serie2")
-        datos2 = None
-        if datos2_text:
-            try:
-                datos2 = pd.to_numeric(pd.Series(datos2_text.replace("\n", ",").replace(" ", ",").split(",")).dropna()).values
-            except:
-                st.warning("No se pudieron interpretar los datos de la segunda serie.")
-        if datos2 is not None and len(datos2) == len(datos_reales):
-            cov = np.cov(datos_reales, datos2, ddof=0)[0,1]
-            corr = np.corrcoef(datos_reales, datos2)[0,1]
-            from scipy.stats import linregress
-            res = linregress(datos_reales, datos2)
-            st.write(f"**Covarianza:** {cov:.4f}")
-            st.write(f"**Coeficiente de correlación:** {corr:.4f}")
-            st.write(f"**Recta de regresión:** Y = {res.intercept:.2f} + {res.slope:.2f}·X")
-            st.write(f"**Beta:** {res.slope:.4f}")
-            st.write(f"**Coeficiente de determinación (R²):** {res.rvalue**2:.4f}")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=datos_reales, y=datos2, mode='markers', name='Datos reales'))
-            fig.add_trace(go.Scatter(x=datos_reales, y=res.intercept + res.slope*datos_reales, mode='lines', name='Recta de regresión'))
-            fig.update_layout(title='Regresión lineal', xaxis_title='X', yaxis_title='Y')
-            st.plotly_chart(fig)
-        else:
-            st.info("Para calcular covarianza, correlación y regresión, ingresa una segunda serie de igual longitud.")
-        st.caption("Puedes comparar con tus propios datos si los has cargado.")
-    with tab6:
-        st.header("6. Beta y Coeficiente de Determinación")
-        st.markdown("La beta mide la sensibilidad de una variable respecto a otra (por ejemplo, un activo respecto a un índice). R² mide la proporción de variabilidad explicada por el modelo de regresión.")
-        st.caption("Puedes comparar con tus propios datos si los has cargado.")
-    with tab7:
-        st.header("7. Ejercicios Resueltos")
-        st.markdown("Se muestran ejercicios con datos y soluciones paso a paso. Puedes comparar con tus propios datos si lo deseas.")
-        st.caption("Ejercicios de ejemplo.")
-    st.info("Puedes usar estos conceptos para interpretar los resultados de tus activos, tickers y portafolio en los análisis de la app. Si no hay datos reales, siempre verás un ejemplo precargado.")
 
 if __name__ == "__main__":
     main()
