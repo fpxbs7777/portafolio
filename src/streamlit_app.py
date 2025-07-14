@@ -17,6 +17,7 @@ import httpx
 import asyncio
 import matplotlib.pyplot as plt
 from scipy.stats import skew
+import google.generativeai as genai
 
 warnings.filterwarnings('ignore')
 
@@ -3523,6 +3524,212 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             st.markdown(f"**Recomendación:** Priorizar activos del sector **{[k for k,v in sector_etfs.items() if v==ranking.index[0]][0]}** para optimizaciones si es coherente con tu perfil de riesgo.")
         except Exception as e:
             st.warning(f"No se pudo obtener el ranking sectorial: {e}")
+
+    # --- Diagnóstico IA de ciclo económico y sugerencia de sectores ---
+    def diagnostico_ciclo_y_sugerencia(all_variables_data, gemini_api_key):
+        """
+        Usa IA para diagnosticar el ciclo económico y sugerir sectores/activos de Argentina y EEUU.
+        """
+        import google.generativeai as genai
+        resumen = []
+        for nombre, info in all_variables_data.items():
+            m = info.get('metrics', {})
+            resumen.append(
+                f"{nombre}: Actual={m.get('valor_actual', 0):.2f}, Cambio={m.get('cambio_porcentual', 0):+.1f}%, VolATR={m.get('volatilidad_atr', 0):.2f}%, Tend={m.get('tendencia_direccion', 'N/A')}"
+            )
+        prompt = f"""
+Actúa como economista jefe. Analiza el siguiente resumen de variables macroeconómicas argentinas y de EEUU:
+
+{chr(10).join(resumen)}
+
+1. Diagnostica el ciclo económico actual de Argentina y global (expansión, recesión, etc.).
+2. Sugiere 2-3 sectores o tipos de activos argentinos y 2-3 de EEUU que suelen rendir mejor en este ciclo, usando factores de Intermarket (ITM) y momentum si es relevante.
+3. Fundamenta brevemente cada sugerencia.
+
+Responde en español, en formato claro y ejecutivo. Enumera los sectores sugeridos en una lista separada al final bajo el título "SUGERENCIA DE SECTORES".
+"""
+        genai.configure(api_key=gemini_api_key)
+        model = genai.GenerativeModel(
+            'gemini-1.5-flash',
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.4,
+                max_output_tokens=900,
+                top_p=0.9,
+                top_k=30
+            )
+        )
+        response = model.generate_content(prompt)
+        return response.text if response and response.text else "No se pudo obtener diagnóstico IA."
+
+    # --- INICIO mostrar_optimizacion_portafolio ---
+        # Diagnóstico IA de ciclo económico y sugerencia de sectores
+        st.markdown("---")
+        st.subheader("🧠 Diagnóstico IA de ciclo económico y sugerencia de sectores")
+        if 'GEMINI_API_KEY' not in st.session_state:
+            st.session_state.GEMINI_API_KEY = ''
+        if st.button("🔍 Analizar ciclo y sugerir sectores", key="btn_diag_ia"):
+            import yfinance as yf
+            import numpy as np
+            all_variables_data = {}
+            ATR_WINDOW = 14
+            # --- Variables Argentina ---
+            try:
+                merval = yf.download('^MERV', period='6mo')['Close']
+                if not merval.empty:
+                    merval_ret = merval.pct_change().dropna()
+                    merval_atr = merval_ret.abs().rolling(ATR_WINDOW).mean().iloc[-1]*100 if len(merval_ret) >= ATR_WINDOW else merval_ret.abs().mean()*100
+                    all_variables_data['MERVAL (Argentina)'] = {
+                        'metrics': {
+                            'valor_actual': merval.iloc[-1],
+                            'cambio_porcentual': (merval.iloc[-1]/merval.iloc[0]-1)*100,
+                            'volatilidad_atr': merval_atr,
+                            'tendencia_direccion': 'alcista' if merval.iloc[-1]>merval.iloc[0] else 'bajista'
+                        }
+                    }
+            except Exception as e:
+                st.warning(f"No se pudo obtener MERVAL: {e}")
+            # --- Variables EEUU ---
+            tickers_usa = {
+                'S&P 500 (EEUU)': '^GSPC',
+                'VIX (EEUU)': '^VIX',
+                'Tecnología (XLK)': 'XLK',
+                'Financieros (XLF)': 'XLF',
+                'Energía (XLE)': 'XLE',
+                'Consumo Discrecional (XLY)': 'XLY',
+                'Consumo Básico (XLP)': 'XLP',
+                'Salud (XLV)': 'XLV',
+                'Industrial (XLI)': 'XLI',
+                'Materiales (XLB)': 'XLB',
+                'Bienes Raíces (XLRE)': 'XLRE',
+                'Servicios Públicos (XLU)': 'XLU',
+                'Comunicaciones (XLC)': 'XLC',
+            }
+            try:
+                precios = yf.download(list(tickers_usa.values()), period='6mo')['Close']
+                for nombre, ticker in tickers_usa.items():
+                    serie = precios[ticker] if ticker in precios else None
+                    if serie is not None and not serie.empty:
+                        ret = serie.pct_change().dropna()
+                        atr = ret.abs().rolling(ATR_WINDOW).mean().iloc[-1]*100 if len(ret) >= ATR_WINDOW else ret.abs().mean()*100
+                        all_variables_data[nombre] = {
+                            'metrics': {
+                                'valor_actual': serie.iloc[-1],
+                                'cambio_porcentual': (serie.iloc[-1]/serie.iloc[0]-1)*100,
+                                'volatilidad_atr': atr,
+                                'tendencia_direccion': 'alcista' if serie.iloc[-1]>serie.iloc[0] else 'bajista'
+                            }
+                        }
+            except Exception as e:
+                st.warning(f"No se pudieron obtener variables de EEUU: {e}")
+            # Puedes agregar aquí más variables macro de Argentina (reservas, inflación, etc.)
+            # all_variables_data['Reservas'] = {'metrics': {...}}
+            with st.spinner("Consultando IA..."):
+                diagnostico = diagnostico_ciclo_y_sugerencia(all_variables_data, st.session_state.GEMINI_API_KEY)
+            st.markdown(diagnostico)
+            # Extraer sectores sugeridos
+            import re
+            sugeridos = []
+            match = re.search(r"SUGERENCIA DE SECTORES\s*[:\-]*\s*(.*)", diagnostico, re.IGNORECASE | re.DOTALL)
+            if match:
+                sugeridos = re.findall(r"(?:\-|\d+\.)\s*([^\n]+)", match.group(1))
+            if sugeridos:
+                st.success(f"Sectores sugeridos por IA: {', '.join(sugeridos)}")
+                st.session_state['sectores_sugeridos_ia'] = sugeridos
+            else:
+                st.session_state['sectores_sugeridos_ia'] = []
+    # --- FIN BLOQUE DIAGNÓSTICO IA ---
+
+    # --- Función auxiliar para calcular drawdown ---
+    def calcular_drawdown(serie_valores):
+        """
+        Calcula el drawdown máximo y actual de una serie de valores (por ejemplo, valor de portafolio).
+        Devuelve: drawdown_max (float), drawdown_actual (float), serie_drawdown (pd.Series)
+        """
+        import numpy as np
+        import pandas as pd
+        if isinstance(serie_valores, (pd.Series, np.ndarray, list)):
+            serie = pd.Series(serie_valores)
+            max_acum = serie.cummax()
+            drawdown = (serie - max_acum) / max_acum
+            drawdown_max = drawdown.min()
+            drawdown_actual = drawdown.iloc[-1]
+            return drawdown_max, drawdown_actual, drawdown
+        else:
+            return 0, 0, pd.Series([])
+
+    # --- En mostrar_optimizacion_portafolio, después de mostrar resultados de optimización ---
+        # --- Análisis de Drawdown ---
+        st.subheader("📉 Análisis de Drawdown (Caídas Máximas)")
+        # Portafolio actual
+        st.markdown("**Portafolio Actual**")
+        # Intentar reconstruir serie de valor del portafolio actual
+        try:
+            # Usar los mismos datos que para el histograma de portafolio actual
+            # (puedes ajustar si tienes la serie exacta)
+            # Aquí se usa la suma ponderada de precios normalizados
+            activos = [a for a in activos_raw if a.get('titulo',{}).get('simbolo')]
+            pesos = [activos_dict[a.get('titulo',{}).get('simbolo')]['Valuación']/valor_total if valor_total>0 else 0 for a in activos]
+            precios = {}
+            for a in activos:
+                simbolo = a.get('titulo',{}).get('simbolo')
+                mercado = a.get('titulo',{}).get('mercado','BCBA')
+                df = obtener_serie_historica_iol(token_acceso, mercado, simbolo, fecha_desde.strftime('%Y-%m-%d'), fecha_hasta.strftime('%Y-%m-%d'))
+                if df is not None and not df.empty and 'precio' in df.columns:
+                    precios[simbolo] = df.set_index('fecha')['precio']
+            if precios:
+                df_precios = pd.DataFrame(precios).dropna()
+                serie_valor = (df_precios * pesos).sum(axis=1)
+                dd_max, dd_actual, serie_dd = calcular_drawdown(serie_valor)
+                st.metric("Drawdown Máximo", f"{dd_max*100:.2f}%")
+                st.metric("Drawdown Actual", f"{dd_actual*100:.2f}%")
+                import plotly.graph_objects as go
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=serie_dd.index, y=serie_dd*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
+                fig.update_layout(title="Drawdown Portafolio Actual", yaxis_title="Drawdown (%)", xaxis_title="Fecha", template='plotly_white', height=300)
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning(f"No se pudo calcular el drawdown del portafolio actual: {e}")
+        # Portafolios optimizados
+        for clave, nombre in estrategias:
+            res, _, _ = resultados.get(clave, (None, None, None))
+            if res and hasattr(res, 'returns') and res.returns is not None:
+                st.markdown(f"**{nombre}**")
+                # Reconstruir serie de valor acumulado
+                try:
+                    import numpy as np
+                    import pandas as pd
+                    if hasattr(res, 'returns'):
+                        # Suponemos retornos diarios
+                        serie_valor = (1 + pd.Series(res.returns)).cumprod()
+                        dd_max, dd_actual, serie_dd = calcular_drawdown(serie_valor)
+                        st.metric("Drawdown Máximo", f"{dd_max*100:.2f}%")
+                        st.metric("Drawdown Actual", f"{dd_actual*100:.2f}%")
+                        import plotly.graph_objects as go
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(y=serie_dd*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
+                        fig.update_layout(title=f"Drawdown {nombre}", yaxis_title="Drawdown (%)", xaxis_title="Día", template='plotly_white', height=250)
+                        st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"No se pudo calcular el drawdown de {nombre}: {e}")
+        # Benchmarks (ejemplo: S&P500, MERVAL)
+        st.markdown("**Benchmarks**")
+        try:
+            import yfinance as yf
+            import pandas as pd
+            benchmarks = {'S&P 500': '^GSPC', 'MERVAL': '^MERV'}
+            for nombre, ticker in benchmarks.items():
+                serie = yf.download(ticker, period='1y')['Close']
+                if not serie.empty:
+                    dd_max, dd_actual, serie_dd = calcular_drawdown(serie)
+                    st.metric(f"{nombre} Drawdown Máx", f"{dd_max*100:.2f}%")
+                    st.metric(f"{nombre} Drawdown Actual", f"{dd_actual*100:.2f}%")
+                    import plotly.graph_objects as go
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=serie_dd.index, y=serie_dd*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
+                    fig.update_layout(title=f"Drawdown {nombre}", yaxis_title="Drawdown (%)", xaxis_title="Fecha", template='plotly_white', height=250)
+                    st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning(f"No se pudo calcular el drawdown de benchmarks: {e}")
 
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
