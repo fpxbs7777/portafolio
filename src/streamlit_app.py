@@ -2892,9 +2892,70 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     
     return resultados
 
-# ... (rest of the code remains unchanged)
+def mostrar_analisis_portafolio():
+    """Función para mostrar análisis detallado del portafolio"""
+    st.markdown("### 📊 Análisis Detallado del Portafolio")
+    
+    # Verificar si hay un cliente seleccionado
+    if not st.session_state.cliente_seleccionado:
+        st.warning("👆 Seleccione un cliente en la barra lateral para comenzar")
+        return
+    
+    token_portador = st.session_state.token_acceso
+    id_cliente = st.session_state.cliente_seleccionado
+    
+    # Obtener datos del portafolio
+    with st.spinner("Obteniendo datos del portafolio..."):
+        portafolio = obtener_portafolio(token_portador, id_cliente)
+    
+    if not portafolio:
+        st.error("❌ No se pudo obtener el portafolio del cliente")
+        return
+    
+    activos_raw = portafolio.get('activos', [])
+    if not activos_raw:
+        st.warning("El portafolio está vacío")
+        return
+    
+    # Convertir a formato esperado por las funciones
+    datos_activos = []
+    valor_total = 0
+    
+    for activo in activos_raw:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', 'N/A')
+        cantidad = activo.get('cantidad', 0)
+        valorizado = activo.get('valorizado', 0)
         
-        with st.spinner(f"Obteniendo series históricas y calculando valorización del portafolio para {dias_analisis} días..."):
+        datos_activos.append({
+            'Símbolo': simbolo,
+            'Cantidad': cantidad,
+            'Valuación': valorizado,
+            'Tipo': titulo.get('tipo', 'Desconocido')
+        })
+        valor_total += valorizado
+    
+    if valor_total <= 0:
+        st.warning("El portafolio no tiene valor")
+        return
+    
+    # Configuración de análisis
+    st.markdown("#### ⚙️ Configuración del Análisis")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        dias_analisis = st.selectbox(
+            "Horizonte de análisis:",
+            options=[30, 60, 90, 180, 365],
+            index=2,  # 90 días por defecto
+            help="Período de días para el análisis histórico"
+        )
+    
+    with col2:
+        st.metric("Valor Total del Portafolio", f"${valor_total:,.2f}")
+    
+    # Análisis detallado
+    with st.spinner(f"Obteniendo series históricas y calculando valorización del portafolio para {dias_analisis} días..."):
             try:
                 # Obtener fechas para el histórico basado en el horizonte seleccionado
                 fecha_hasta = datetime.now().strftime('%Y-%m-%d')
@@ -4083,6 +4144,114 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         
                         if returns_data is not None and cov_matrix is not None:
                             # Aplicar optimización avanzada
+                            # Función de optimización avanzada
+                            def optimizar_portafolio_avanzado(returns_data, cov_matrix, metodo, target_return=None):
+                                """Optimización avanzada de portafolio"""
+                                try:
+                                    if metodo == 'Markowitz (Frontera Eficiente)':
+                                        if target_return is not None:
+                                            # Optimización con retorno objetivo
+                                            constraints = [
+                                                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},  # Pesos suman 1
+                                                {'type': 'eq', 'fun': lambda x: np.sum(returns_data.mean() * x) - target_return}  # Retorno objetivo
+                                            ]
+                                        else:
+                                            constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                                        
+                                        # Minimizar varianza
+                                        result = op.minimize(
+                                            lambda x: np.sqrt(np.dot(x.T, np.dot(cov_matrix, x))),
+                                            x0=np.array([1/len(returns_data.columns)] * len(returns_data.columns)),
+                                            method='SLSQP',
+                                            bounds=[(0, 1)] * len(returns_data.columns),
+                                            constraints=constraints
+                                        )
+                                        return result.x
+                                    
+                                    elif metodo == 'Mínima Varianza':
+                                        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                                        result = op.minimize(
+                                            lambda x: np.sqrt(np.dot(x.T, np.dot(cov_matrix, x))),
+                                            x0=np.array([1/len(returns_data.columns)] * len(returns_data.columns)),
+                                            method='SLSQP',
+                                            bounds=[(0, 1)] * len(returns_data.columns),
+                                            constraints=constraints
+                                        )
+                                        return result.x
+                                    
+                                    elif metodo == 'Máximo Sharpe':
+                                        # Maximizar ratio de Sharpe
+                                        risk_free_rate = 0.02  # 2% anual
+                                        def neg_sharpe_ratio(weights):
+                                            portfolio_return = np.sum(returns_data.mean() * weights)
+                                            portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                                            return -(portfolio_return - risk_free_rate) / portfolio_vol
+                                        
+                                        constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+                                        result = op.minimize(
+                                            neg_sharpe_ratio,
+                                            x0=np.array([1/len(returns_data.columns)] * len(returns_data.columns)),
+                                            method='SLSQP',
+                                            bounds=[(0, 1)] * len(returns_data.columns),
+                                            constraints=constraints
+                                        )
+                                        return result.x
+                                    
+                                    elif metodo == 'Pesos Iguales':
+                                        return np.array([1/len(returns_data.columns)] * len(returns_data.columns))
+                                    
+                                    else:
+                                        # Fallback a pesos iguales
+                                        return np.array([1/len(returns_data.columns)] * len(returns_data.columns))
+                                        
+                                except Exception as e:
+                                    st.error(f"Error en optimización: {str(e)}")
+                                    return np.array([1/len(returns_data.columns)] * len(returns_data.columns))
+                            
+                            # Función para calcular métricas del portafolio optimizado
+                            def calcular_metricas_portafolio_optimizado(weights, returns_data, cov_matrix):
+                                """Calcula métricas del portafolio optimizado"""
+                                try:
+                                    portfolio_returns = np.sum(returns_data * weights, axis=1)
+                                    
+                                    mean_return = portfolio_returns.mean() * 252
+                                    volatility = portfolio_returns.std() * np.sqrt(252)
+                                    sharpe_ratio = mean_return / volatility if volatility > 0 else 0
+                                    
+                                    # Métricas de riesgo
+                                    var_95 = np.percentile(portfolio_returns, 5)
+                                    skewness = stats.skew(portfolio_returns)
+                                    kurtosis = stats.kurtosis(portfolio_returns)
+                                    
+                                    # Test de Jarque-Bera
+                                    jb_statistic, jb_p_value = stats.jarque_bera(portfolio_returns)
+                                    is_normal = jb_p_value > 0.05
+                                    
+                                    return {
+                                        'mean_return': mean_return,
+                                        'volatility': volatility,
+                                        'sharpe_ratio': sharpe_ratio,
+                                        'var_95': var_95,
+                                        'skewness': skewness,
+                                        'kurtosis': kurtosis,
+                                        'jb_statistic': jb_statistic,
+                                        'is_normal': is_normal,
+                                        'returns': portfolio_returns
+                                    }
+                                except Exception as e:
+                                    st.error(f"Error calculando métricas: {str(e)}")
+                                    return {
+                                        'mean_return': 0,
+                                        'volatility': 0,
+                                        'sharpe_ratio': 0,
+                                        'var_95': 0,
+                                        'skewness': 0,
+                                        'kurtosis': 0,
+                                        'jb_statistic': 0,
+                                        'is_normal': False,
+                                        'returns': None
+                                    }
+                            
                             weights = optimizar_portafolio_avanzado(
                                 returns_data, cov_matrix, metodo_optimizacion, 
                                 target_return=use_target
@@ -4376,6 +4545,36 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 status_text.text("🔄 Seleccionando activos aleatoriamente...")
                 progress_bar.progress(25)
                 
+                # Función para seleccionar activos aleatorios del portafolio
+                def seleccionar_activos_aleatorios_del_portafolio(portafolio_actual, cantidad_activos, saldo_objetivo):
+                    """Selecciona activos aleatorios del portafolio actual"""
+                    try:
+                        activos_disponibles = []
+                        for activo in portafolio_actual:
+                            titulo = activo.get('titulo', {})
+                            simbolo = titulo.get('simbolo')
+                            mercado = titulo.get('mercado', 'BCBA')
+                            tipo = titulo.get('tipo', 'Desconocido')
+                            
+                            if simbolo and simbolo != 'N/A':
+                                activos_disponibles.append({
+                                    'simbolo': simbolo,
+                                    'mercado': mercado,
+                                    'tipo': tipo
+                                })
+                        
+                        if len(activos_disponibles) == 0:
+                            return []
+                        
+                        # Seleccionar aleatoriamente
+                        cantidad_seleccionar = min(cantidad_activos, len(activos_disponibles))
+                        activos_seleccionados = random.sample(activos_disponibles, cantidad_seleccionar)
+                        
+                        return activos_seleccionados
+                    except Exception as e:
+                        st.error(f"Error seleccionando activos: {str(e)}")
+                        return []
+                
                 # Seleccionar activos aleatoriamente del portafolio existente
                 activos_para_optimizacion = seleccionar_activos_aleatorios_del_portafolio(
                     portafolio_actual, cantidad_activos, saldo_objetivo
@@ -4463,7 +4662,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         activos_actuales = {activo['simbolo']: activo.get('valorizado', 0) for activo in activos_raw}
                         valor_total_actual = sum(activos_actuales.values())
                         
-                        if valor_total_actual > 0:
+                        if valor_total_actual > 0 and manager_inst.rics is not None:
                             recomendaciones = []
                             for i, simbolo in enumerate(manager_inst.rics):
                                 peso_optimizado = weights[i] * 100
