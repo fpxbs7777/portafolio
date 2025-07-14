@@ -1716,7 +1716,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             if valuacion == 0:
                 ultimo_precio = None
                 if mercado := titulo.get('mercado'):
-                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
+                    import asyncio
+                    ultimo_precio = asyncio.run(obtener_precio_actual(token_portador, mercado, simbolo))
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
@@ -2188,13 +2189,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     
                                     # Obtener cotización MEP para conversión
                                     try:
-                                        # Intentar obtener cotización MEP (usar AL30 como proxy)
-                                        cotizacion_mep = obtener_cotizacion_mep(token_portador, "AL30", 1, 1)
+                                        import asyncio
+                                        cotizacion_mep = asyncio.run(obtener_cotizacion_mep(token_portador, "AL30", 1, 1))
                                         if cotizacion_mep and cotizacion_mep.get('precio'):
                                             tasa_mep = float(cotizacion_mep['precio'])
                                         else:
-                                            # Si no hay MEP, usar tasa aproximada
-                                            tasa_mep = 1000  # Tasa aproximada
+                                            tasa_mep = 1000
                                             st.info("ℹ️ Usando tasa MEP aproximada para conversiones")
                                     except:
                                         tasa_mep = 1000
