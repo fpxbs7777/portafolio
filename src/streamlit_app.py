@@ -1061,12 +1061,12 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
-        # Asegura que self.returns sea un array NumPy plano
         import numpy as np
         arr = self.returns
         if hasattr(arr, "values"):
             arr = arr.values
         arr = np.asarray(arr).flatten()
+        # --- CORRECCIÓN: asegurar que arr sea lista/array aunque tenga un solo valor ---
         if arr is None or len(arr) == 0 or not np.issubdtype(arr.dtype, np.number):
             fig = go.Figure()
             fig.add_annotation(
@@ -1076,9 +1076,14 @@ class output:
             )
             fig.update_layout(title=title)
             return fig
-
+        # Si arr es un escalar, convertirlo a lista
+        if np.isscalar(arr) or arr.shape == ():  # shape vacío = escalar
+            arr = np.array([arr])
+        if arr.size == 1:
+            # Repetir el valor para que el histograma funcione (no tiene sentido estadístico, pero evita el error)
+            arr = np.repeat(arr, 2)
         fig = go.Figure(data=[go.Histogram(
-            x=arr,
+            x=arr.tolist(),
             nbinsx=30,
             name="Retornos del Portafolio",
             marker_color='#0d6efd'
