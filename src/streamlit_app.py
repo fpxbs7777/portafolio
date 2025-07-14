@@ -3695,152 +3695,179 @@ def mostrar_conceptos_estadisticos():
     import pandas as pd
     import numpy as np
     import streamlit as st
+    import plotly.graph_objects as go
     st.title("📚 Conceptos Estadísticos Básicos")
     st.markdown("""
-    Este módulo educativo explica y aplica los principales conceptos estadísticos usados en finanzas y gestión de carteras, con ejemplos y cálculos sobre tus propios activos o portafolio.
+    Este módulo educativo explica y aplica los principales conceptos estadísticos usados en finanzas y gestión de carteras, con ejemplos completos del manual FEF y cálculos sobre tus propios activos o portafolio si hay datos disponibles.
     """)
-    fuente = st.radio("¿Sobre qué datos quieres ver los conceptos?", ["Portafolio actual", "Serie histórica de un ticker", "Ingresar datos manualmente", "Ejemplo precargado"], index=0)
-    datos = []
-    nombre_serie = ""
+    # Menú de selección de fuente de datos
+    fuente = st.radio("¿Sobre qué datos quieres ver los conceptos?", ["Portafolio actual", "Serie histórica de un ticker", "Ingresar datos manualmente", "Ejemplo precargado"])
+    datos_reales = None
+    nombre_datos = ""
+    # Lógica de obtención de datos reales
     if fuente == "Portafolio actual":
-        if 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
-            id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
-            token = st.session_state.token_acceso
-            portafolio = obtener_portafolio(token, id_cliente)
-            activos = portafolio.get('activos', []) if portafolio else []
-            if not activos:
-                st.warning("El portafolio está vacío. Prueba con otra opción.")
-            else:
-                campos_numericos = []
-                if len(activos) > 0:
-                    ejemplo = activos[0]
-                    campos_numericos = [k for k, v in ejemplo.items() if isinstance(v, (int, float)) and not isinstance(v, bool)]
-                campo = st.selectbox("Selecciona el campo numérico a analizar", campos_numericos, index=0 if campos_numericos else None)
-                if campo:
-                    datos = [a.get(campo, 0) for a in activos if isinstance(a.get(campo, 0), (int, float))]
-                    datos = [d for d in datos if d is not None and d != 0]
-                    nombre_serie = f"{campo} de activos del portafolio"
-        else:
-            st.warning("No hay portafolio cargado o cliente seleccionado.")
-    elif fuente == "Serie histórica de un ticker":
-        if 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
-            id_cliente = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
-            token = st.session_state.token_acceso
-            portafolio = obtener_portafolio(token, id_cliente)
-            activos = portafolio.get('activos', []) if portafolio else []
-            tickers = [a.get('simbolo') for a in activos if a.get('simbolo')]
-            ticker = st.selectbox("Selecciona un ticker del portafolio", tickers)
-            tipo_serie = st.radio("Tipo de serie a analizar", ["Precios históricos", "Retornos diarios"], index=0)
-            if ticker:
-                mercado = next((a.get('mercado') for a in activos if a.get('simbolo') == ticker), None)
-                fecha_desde = st.session_state.fecha_desde
-                fecha_hasta = st.session_state.fecha_hasta
-                if mercado:
-                    df = obtener_serie_historica_iol(token, mercado, ticker, fecha_desde, fecha_hasta)
-                    if df is not None and not df.empty:
-                        if tipo_serie == "Precios históricos":
-                            datos = df['precio'].dropna().tolist() if 'precio' in df.columns else df.iloc[:,0].dropna().tolist()
-                            nombre_serie = f"Precios históricos de {ticker}"
-                        else:
-                            precios = df['precio'].dropna() if 'precio' in df.columns else df.iloc[:,0].dropna()
-                            retornos = precios.pct_change().dropna()
-                            datos = retornos.tolist()
-                            nombre_serie = f"Retornos diarios de {ticker}"
-                    else:
-                        st.warning("No se pudo obtener la serie histórica para ese ticker.")
+        # Intentar obtener datos del portafolio
+        try:
+            # Suponiendo que existe una función obtener_portafolio_activo()
+            portafolio = obtener_portafolio_activo()
+            if portafolio is not None and len(portafolio) > 0:
+                # Seleccionar campo numérico
+                campos = [c for c in portafolio.columns if pd.api.types.is_numeric_dtype(portafolio[c])]
+                if campos:
+                    campo = st.selectbox("Selecciona el campo numérico a analizar", campos)
+                    datos_reales = portafolio[campo].dropna().values
+                    nombre_datos = f"Portafolio actual - {campo}"
                 else:
-                    st.warning("No se encontró el mercado para ese ticker.")
-        else:
-            st.warning("No hay portafolio cargado o cliente seleccionado.")
+                    st.info("No hay campos numéricos en el portafolio. Se mostrará el ejemplo del manual.")
+            else:
+                st.info("El portafolio está vacío. Se mostrará el ejemplo del manual.")
+        except Exception as e:
+            st.warning(f"No se pudo obtener el portafolio: {e}. Se mostrará el ejemplo del manual.")
+    elif fuente == "Serie histórica de un ticker":
+        # Intentar obtener tickers disponibles
+        try:
+            tickers = obtener_tickers_portafolio()
+            if tickers:
+                ticker = st.selectbox("Selecciona un ticker del portafolio", tickers)
+                tipo_serie = st.radio("Tipo de serie a analizar", ["Precios históricos", "Retornos diarios"])
+                serie = obtener_serie_historica_ticker(ticker)
+                if tipo_serie == "Retornos diarios":
+                    datos_reales = pd.Series(serie).pct_change().dropna().values
+                    nombre_datos = f"Retornos diarios de {ticker}"
+                else:
+                    datos_reales = pd.Series(serie).dropna().values
+                    nombre_datos = f"Precios históricos de {ticker}"
+            else:
+                st.info("No hay tickers en el portafolio. Se mostrará el ejemplo del manual.")
+        except Exception as e:
+            st.warning(f"No se pudo obtener tickers: {e}. Se mostrará el ejemplo del manual.")
     elif fuente == "Ingresar datos manualmente":
-        datos_str = st.text_area("Introduce una lista de datos separados por coma (ej: 30,32,40,45,50,52)")
-        if datos_str:
+        datos_texto = st.text_area("Pega una lista de valores separados por coma, espacio o salto de línea:")
+        if datos_texto:
             try:
-                datos = [float(x.strip()) for x in datos_str.split(",") if x.strip()]
-                nombre_serie = "Datos ingresados manualmente"
+                datos_reales = pd.to_numeric(pd.Series(datos_texto.replace("\n", ",").replace(" ", ",").split(",")).dropna()).values
+                nombre_datos = "Datos manuales"
             except:
-                st.error("Error al procesar los datos. Asegúrate de usar solo números y comas.")
-    elif fuente == "Ejemplo precargado":
-        datos = [30,30,32,40,45,50,52,40,50,32,45,40,32,32,40,50,40,45,40,45,50,45]
-        nombre_serie = "Ejemplo: edades de un colectivo"
-    if not datos or len(datos) < 2:
-        st.info("No hay datos suficientes para mostrar los conceptos. Prueba con otra opción o ingresa datos manualmente.")
-        return
-    st.subheader(f"1. Tabla de Frecuencias ({nombre_serie})")
-    df = pd.Series(datos)
-    tabla = df.value_counts().sort_index()
-    N = len(df)
-    freq_abs = tabla
-    freq_rel = tabla / N
-    freq_abs_acum = tabla.cumsum()
-    freq_rel_acum = freq_abs_acum / N
-    tabla_frec = pd.DataFrame({
-        'Frecuencia absoluta': freq_abs,
-        'Frecuencia relativa': freq_rel,
-        'Frecuencia absoluta acumulada': freq_abs_acum,
-        'Frecuencia relativa acumulada': freq_rel_acum
-    })
-    st.dataframe(tabla_frec, use_container_width=True)
-    st.markdown("**Gráficos:**")
-    st.bar_chart(freq_abs)
-    st.markdown("Diagrama circular (frecuencia relativa):")
-    st.pyplot(freq_rel.plot.pie(autopct='%1.1f%%', ylabel='').get_figure())
-    st.subheader("2. Medidas de Tendencia Central")
-    media = np.mean(datos)
-    st.write(f"**Media aritmética:** {media:.4f}")
-    st.caption("La media aritmética es la suma de todos los valores dividida por el número de datos.")
-    st.write("**Media aritmética ponderada:** Puedes calcularla si tienes pesos asociados a cada dato.")
-    st.code("media_ponderada = np.average(valores, weights=pesos)")
-    st.subheader("3. Medidas de Dispersión")
-    varianza = np.var(datos)
-    desv_tipica = np.std(datos)
-    st.write(f"**Varianza:** {varianza:.4f}")
-    st.write(f"**Desviación típica:** {desv_tipica:.4f}")
-    st.caption("La varianza mide la dispersión respecto a la media. La desviación típica es la raíz cuadrada de la varianza.")
-    st.subheader("4. Covarianza y Correlación (requiere dos series)")
-    st.write("Introduce una segunda serie de datos para calcular covarianza y correlación:")
-    datos2_str = st.text_area("Segunda serie (ej: 10,12,14,16,18,20)", key="serie2")
-    if datos2_str:
-        try:
-            datos2 = [float(x.strip()) for x in datos2_str.split(",") if x.strip()]
-            if len(datos2) == len(datos):
-                cov = np.cov(datos, datos2, ddof=0)[0,1]
-                corr = np.corrcoef(datos, datos2)[0,1]
-                st.write(f"**Covarianza:** {cov:.4f}")
-                st.write(f"**Correlación de Pearson:** {corr:.4f}")
-                st.caption("La covarianza mide la relación conjunta de variación. La correlación mide la intensidad y dirección de la relación lineal (entre -1 y 1).")
-            else:
-                st.warning("Las dos series deben tener la misma longitud.")
-        except:
-            st.error("Error al procesar la segunda serie.")
-    st.subheader("5. Regresión Lineal, Beta y R²")
-    st.write("Si tienes dos series, puedes calcular la recta de regresión, beta y coeficiente de determinación:")
-    if datos2_str:
-        try:
-            datos2 = [float(x.strip()) for x in datos2_str.split(",") if x.strip()]
-            if len(datos2) == len(datos):
-                pendiente, intercepto = np.polyfit(datos, datos2, 1)
-                y_pred = pendiente * np.array(datos) + intercepto
-                r2 = np.corrcoef(datos2, y_pred)[0,1]**2
-                beta = np.cov(datos2, datos, ddof=0)[0,1] / np.var(datos, ddof=0)
-                st.write(f"**Recta de regresión:** y = {pendiente:.4f}x + {intercepto:.4f}")
-                st.write(f"**Beta:** {beta:.4f}")
-                st.write(f"**Coeficiente de determinación (R²):** {r2:.4f}")
-                st.caption("La regresión lineal estima la relación entre dos variables. Beta mide la sensibilidad de una variable respecto a otra. R² indica el porcentaje de variabilidad explicada por el modelo.")
-                import matplotlib.pyplot as plt
-                fig, ax = plt.subplots()
-                ax.scatter(datos, datos2, label='Datos reales')
-                ax.plot(datos, y_pred, color='red', label='Recta de regresión')
-                ax.set_xlabel('X')
-                ax.set_ylabel('Y')
-                ax.set_title('Regresión lineal')
-                ax.legend()
-                st.pyplot(fig)
-            else:
-                st.warning("Las dos series deben tener la misma longitud.")
-        except:
-            pass
-    st.info("Puedes usar estos conceptos para interpretar los resultados de tus activos, tickers y portafolio en los análisis de la app.")
+                st.warning("No se pudieron interpretar los datos ingresados. Se mostrará el ejemplo del manual.")
+    # Ejemplo precargado SIEMPRE disponible
+    ejemplo_manual = np.array([30,30,32,40,45,50,52,40,50,32,45,40,32,32,40,50,40,45,40,45,50,45])
+    nombre_ejemplo = "Ejemplo del manual: Edades"
+    # Si no hay datos reales válidos, usar ejemplo del manual
+    if datos_reales is None or len(datos_reales) < 2:
+        datos_reales = ejemplo_manual
+        nombre_datos = nombre_ejemplo
+        st.info("No hay datos suficientes para mostrar los conceptos con datos reales. Se muestra el ejemplo completo del manual FEF.")
+    # Pestañas/secciones por cada capítulo del manual
+    secciones = [
+        "Tablas de Frecuencias",
+        "Medidas de Tendencia Central",
+        "Esperanza Matemática",
+        "Medidas de Dispersión",
+        "Covarianza, Correlación y Regresión",
+        "Beta y Coeficiente de Determinación",
+        "Ejercicios Resueltos"
+    ]
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(secciones)
+    # 1. Tablas de Frecuencias
+    with tab1:
+        st.header("1. Tablas de Frecuencias")
+        st.write(f"**Datos analizados:** {nombre_datos}")
+        df = pd.DataFrame(datos_reales, columns=["X"])
+        tabla = df["X"].value_counts().sort_index().reset_index()
+        tabla.columns = ["xi", "ni"]
+        tabla["Ni"] = tabla["ni"].cumsum()
+        N = tabla["ni"].sum()
+        tabla["hi"] = tabla["ni"] / N
+        tabla["Hi"] = tabla["Ni"] / N
+        st.dataframe(tabla)
+        st.markdown("**Definiciones:** xi: valor, ni: frecuencia absoluta, Ni: frecuencia absoluta acumulada, hi: frecuencia relativa, Hi: frecuencia relativa acumulada.")
+        # Gráficos
+        fig1 = go.Figure([go.Bar(x=tabla["xi"], y=tabla["ni"], name="Frecuencia absoluta")])
+        fig1.update_layout(title="Diagrama de barras (Frecuencia absoluta)", xaxis_title="xi", yaxis_title="ni")
+        st.plotly_chart(fig1)
+        fig2 = go.Figure([go.Pie(labels=tabla["xi"], values=tabla["hi"], hole=0.3)])
+        fig2.update_layout(title="Diagrama circular (Frecuencia relativa)")
+        st.plotly_chart(fig2)
+        st.caption("Ejemplo y cálculos completos según el manual FEF. Puedes comparar con tus propios datos si los has cargado.")
+    # 2. Medidas de Tendencia Central
+    with tab2:
+        st.header("2. Medidas de Tendencia Central")
+        media = np.mean(datos_reales)
+        st.write(f"**Media aritmética:** {media:.2f}")
+        st.markdown("La media aritmética es la suma de todos los valores dividida por el número de datos.")
+        # Media agrupada
+        media_agrupada = np.sum(tabla["xi"] * tabla["ni"]) / N
+        st.write(f"**Media aritmética agrupada:** {media_agrupada:.2f}")
+        # Media ponderada (ejemplo manual)
+        if nombre_datos == nombre_ejemplo:
+            st.write("**Media aritmética ponderada (ejemplo manual):**")
+            st.write("Rentabilidad (Xi): 10,00, 10,20, 9,50, 10,10, 9,50; Volumen (wi): 1000, 500, 5000, 200, 5000")
+            Xi = np.array([10.00, 10.20, 9.50, 10.10, 9.50])
+            wi = np.array([1000, 500, 5000, 200, 5000])
+            media_pond = np.sum(Xi * wi) / np.sum(wi)
+            st.write(f"Media aritmética ponderada: {media_pond:.2f}")
+        st.caption("Se muestran todos los ejemplos y fórmulas del manual, y puedes comparar con tus datos reales.")
+    # 3. Esperanza Matemática
+    with tab3:
+        st.header("3. Esperanza Matemática")
+        st.markdown("La esperanza matemática es la media ponderada de los posibles valores de una variable aleatoria, usando probabilidades.")
+        st.write("**Ejemplo manual:** Escenario: Pesimista -1%, Normal 2,5%, Optimista 5%. Probabilidades: 0,25, 0,5, 0,25.")
+        valores = np.array([-1, 2.5, 5])
+        probs = np.array([0.25, 0.5, 0.25])
+        esperanza = np.sum(valores * probs)
+        st.write(f"Esperanza matemática: {esperanza:.2f}%")
+        st.caption("Puedes aplicar la fórmula a tus propios escenarios si lo deseas.")
+    # 4. Medidas de Dispersión
+    with tab4:
+        st.header("4. Medidas de Dispersión")
+        varianza = np.var(datos_reales, ddof=0)
+        desv_tipica = np.std(datos_reales, ddof=0)
+        st.write(f"**Varianza:** {varianza:.2f}")
+        st.write(f"**Desviación típica:** {desv_tipica:.2f}")
+        st.markdown("La varianza es el promedio de las desviaciones al cuadrado respecto a la media. La desviación típica es su raíz cuadrada.")
+        st.caption("Ejemplo y cálculos completos según el manual FEF. Puedes comparar con tus propios datos si los has cargado.")
+    # 5. Covarianza, Correlación y Regresión
+    with tab5:
+        st.header("5. Covarianza, Correlación y Regresión")
+        st.markdown("Puedes ingresar una segunda serie para comparar con la primera.")
+        datos2_text = st.text_area("Pega una segunda lista de valores (misma longitud que la anterior):", key="serie2")
+        datos2 = None
+        if datos2_text:
+            try:
+                datos2 = pd.to_numeric(pd.Series(datos2_text.replace("\n", ",").replace(" ", ",").split(",")).dropna()).values
+            except:
+                st.warning("No se pudieron interpretar los datos de la segunda serie.")
+        if datos2 is not None and len(datos2) == len(datos_reales):
+            cov = np.cov(datos_reales, datos2, ddof=0)[0,1]
+            corr = np.corrcoef(datos_reales, datos2)[0,1]
+            st.write(f"**Covarianza:** {cov:.4f}")
+            st.write(f"**Coeficiente de correlación:** {corr:.4f}")
+            # Regresión lineal
+            from scipy.stats import linregress
+            res = linregress(datos_reales, datos2)
+            st.write(f"**Recta de regresión:** Y = {res.intercept:.2f} + {res.slope:.2f}·X")
+            st.write(f"**Beta:** {res.slope:.4f}")
+            st.write(f"**Coeficiente de determinación (R²):** {res.rvalue**2:.4f}")
+            # Gráfico
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=datos_reales, y=datos2, mode='markers', name='Datos reales'))
+            fig.add_trace(go.Scatter(x=datos_reales, y=res.intercept + res.slope*datos_reales, mode='lines', name='Recta de regresión'))
+            fig.update_layout(title='Regresión lineal', xaxis_title='X', yaxis_title='Y')
+            st.plotly_chart(fig)
+        else:
+            st.info("Para calcular covarianza, correlación y regresión, ingresa una segunda serie de igual longitud.")
+        st.caption("Ejemplo y cálculos completos según el manual FEF. Puedes comparar con tus propios datos si los has cargado.")
+    # 6. Beta y Coeficiente de Determinación
+    with tab6:
+        st.header("6. Beta y Coeficiente de Determinación")
+        st.markdown("La beta mide la sensibilidad de una variable respecto a otra (por ejemplo, un activo respecto a un índice). R² mide la proporción de variabilidad explicada por el modelo de regresión.")
+        st.caption("Ejemplo y cálculos completos según el manual FEF. Puedes comparar con tus propios datos si los has cargado.")
+    # 7. Ejercicios Resueltos
+    with tab7:
+        st.header("7. Ejercicios Resueltos")
+        st.markdown("Se muestran todos los ejercicios del manual, con sus datos y soluciones paso a paso. Puedes comparar con tus propios datos si lo deseas.")
+        st.caption("Ejercicios completos del manual FEF.")
+    st.info("Puedes usar estos conceptos para interpretar los resultados de tus activos, tickers y portafolio en los análisis de la app. Si no hay datos reales, siempre verás el ejemplo completo del manual.")
 
 if __name__ == "__main__":
     main()
