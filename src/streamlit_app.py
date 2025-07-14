@@ -1463,21 +1463,12 @@ def _deprecated_serie_historica_iol(*args, **kwargs):
         return None
 
 # --- Portfolio Metrics Function ---
-def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
-    """
-    Calcula el Alpha y Beta de un portafolio respecto a un benchmark.
-    
-    Args:
-        portfolio_returns (pd.Series): Retornos del portafolio
-        benchmark_returns (pd.Series): Retornos del benchmark (ej: MERVAL)
-        risk_free_rate (float): Tasa libre de riesgo (anualizada)
-        
-    Returns:
-        dict: Diccionario con alpha, beta, información de la regresión y métricas adicionales
-    """
-    # Alinear las series por fecha y eliminar NaN
+def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=None):
+    if risk_free_rate is None:
+        import streamlit as st
+        risk_free_rate = st.session_state.get('risk_free_rate', 0.40)
     aligned_data = pd.concat([portfolio_returns, benchmark_returns], axis=1).dropna()
-    if len(aligned_data) < 5:  # Mínimo de datos para regresión
+    if len(aligned_data) < 5:
         return {
             'alpha': 0,
             'beta': 1.0,
@@ -1488,20 +1479,13 @@ def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0
             'observations': len(aligned_data),
             'alpha_annual': 0
         }
-    
     portfolio_aligned = aligned_data.iloc[:, 0]
     benchmark_aligned = aligned_data.iloc[:, 1]
-    
-    # Calcular regresión lineal
+    from scipy.stats import linregress
     slope, intercept, r_value, p_value, std_err = linregress(benchmark_aligned, portfolio_aligned)
-    
-    # Calcular métricas adicionales
-    tracking_error = np.std(portfolio_aligned - benchmark_aligned) * np.sqrt(252)  # Anualizado
+    tracking_error = np.std(portfolio_aligned - benchmark_aligned) * np.sqrt(252)
     information_ratio = (portfolio_aligned.mean() - benchmark_aligned.mean()) / tracking_error if tracking_error != 0 else 0
-    
-    # Anualizar alpha (asumiendo 252 días hábiles)
-    alpha_annual = intercept * 252
-    
+    alpha_annual = (intercept - risk_free_rate/252) * 252
     return {
         'alpha': intercept,
         'beta': slope,
@@ -1629,11 +1613,13 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         
     # Descargar datos del MERVAL para cálculo de Alpha y Beta
     try:
-        merval_data = yf.download('^MERV', start=fecha_desde, end=fecha_hasta)['Close']
+        import yfinance as yf
+        benchmark_symbol = st.session_state.get('benchmark_symbol', '^MERV')
+        merval_data = yf.download(benchmark_symbol, start=fecha_desde, end=fecha_hasta)['Close']
         merval_returns = merval_data.pct_change().dropna()
         merval_available = True
     except Exception as e:
-        print(f"No se pudieron obtener datos del MERVAL: {str(e)}")
+        print(f"No se pudieron obtener datos del benchmark: {str(e)}")
         merval_available = False
         merval_returns = None
     
@@ -1777,80 +1763,69 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # Volatilidad del portafolio (considerando correlaciones)
     try:
         if len(retornos_diarios) > 1:
-            # Asegurarse de que tenemos suficientes datos para calcular correlaciones
             df_retornos = pd.DataFrame(retornos_diarios).dropna()
-            if len(df_retornos) < 5:  # Mínimo de datos para correlación confiable
-                print("No hay suficientes datos para calcular correlaciones confiables")
-                # Usar promedio ponderado simple como respaldo
+            if len(df_retornos) < 5:
                 volatilidad_portafolio = sum(
                     m['volatilidad'] * m['peso'] 
                     for m in metricas_activos.values()
                 )
             else:
-                # Calcular matriz de correlación
                 df_correlacion = df_retornos.corr()
-                
-                # Verificar si la matriz de correlación es válida
                 if df_correlacion.isna().any().any():
-                    print("Advertencia: Matriz de correlación contiene valores NaN")
-                    df_correlacion = df_correlacion.fillna(0)  # Reemplazar NaN con 0
-                
-                # Obtener pesos y volatilidades
+                    df_correlacion = df_correlacion.fillna(0)
                 activos = list(metricas_activos.keys())
                 pesos = np.array([metricas_activos[a]['peso'] for a in activos])
                 volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
-                
-                # Asegurarse de que las dimensiones coincidan
                 if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
-                    # Calcular matriz de covarianza
                     matriz_cov = np.diag(volatilidades) @ df_correlacion.values @ np.diag(volatilidades)
-                    # Calcular varianza del portafolio
                     varianza_portafolio = pesos.T @ matriz_cov @ pesos
-                    # Asegurar que la varianza no sea negativa
                     varianza_portafolio = max(0, varianza_portafolio)
                     volatilidad_portafolio = np.sqrt(varianza_portafolio)
                 else:
-                    print("Dimensiones no coinciden, usando promedio ponderado")
                     volatilidad_portafolio = sum(v * w for v, w in zip(volatilidades, pesos))
         else:
-            # Si solo hay un activo, usar su volatilidad directamente
             volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
-            
-        # Asegurar que la volatilidad sea un número finito
         if not np.isfinite(volatilidad_portafolio):
-            print("Advertencia: Volatilidad no finita, usando valor por defecto")
-            volatilidad_portafolio = 0.2  # Valor por defecto razonable
-            
+            volatilidad_portafolio = 0.2
     except Exception as e:
-        print(f"Error al calcular volatilidad del portafolio: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        # Valor por defecto seguro
         volatilidad_portafolio = sum(
             m['volatilidad'] * m['peso'] 
             for m in metricas_activos.values()
         ) if metricas_activos else 0.2
     
-    # Calcular percentiles para escenarios
+    # --- SIMULACIÓN EMPÍRICA (BOOTSTRAP) ---
     retornos_simulados = []
-    for _ in range(1000):  # Simulación Monte Carlo simple
-        retorno_simulado = 0
-        for m in metricas_activos.values():
-            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
-        retornos_simulados.append(retorno_simulado * 252)  # Anualizado
-    
-    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
-    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
-    
-    # Calcular probabilidades basadas en los retornos simulados
+    n_sim = 1000
+    if len(retornos_diarios) > 1:
+        df_retornos = pd.DataFrame(retornos_diarios).dropna()
+        activos = list(metricas_activos.keys())
+        pesos = np.array([metricas_activos[a]['peso'] for a in activos])
+        # Bootstrap: muestreo con reemplazo de días históricos
+        for _ in range(n_sim):
+            idx = np.random.choice(df_retornos.index, size=252, replace=True)
+            sample = df_retornos.loc[idx]
+            port_ret = (sample.values @ pesos).sum()  # Suma de retornos diarios simulados
+            retornos_simulados.append(port_ret)
+    elif len(retornos_diarios) == 1:
+        # Solo un activo
+        key = next(iter(retornos_diarios.keys()))
+        serie = retornos_diarios[key].dropna()
+        for _ in range(n_sim):
+            idx = np.random.choice(serie.index, size=252, replace=True)
+            port_ret = serie.loc[idx].sum()
+            retornos_simulados.append(port_ret)
+    else:
+        retornos_simulados = [0]*n_sim
     retornos_simulados = np.array(retornos_simulados)
+    # --- Probabilidades sobre simulación empírica ---
     total_simulaciones = len(retornos_simulados)
-            
     prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
     prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
     prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
     prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
-            
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
+    
     # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
     alpha_beta_metrics = {}
     if merval_available and len(retornos_diarios) > 1:
@@ -1877,7 +1852,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 alpha_beta_metrics = calcular_alpha_beta(
                     aligned_data['Portfolio'],  # Retornos del portafolio
                     aligned_data['MERVAL'],      # Retornos del MERVAL
-                    risk_free_rate=0.40  # Tasa libre de riesgo para Argentina
+                    risk_free_rate=risk_free_rate  # Tasa libre de riesgo para Argentina
                 )
                 
                 print(f"Alpha: {alpha_beta_metrics.get('alpha_annual', 0):.2%}, "
@@ -3487,6 +3462,32 @@ def main():
     # Barra lateral - Autenticación
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
+        # --- NUEVO: Input de tasa libre de riesgo y benchmark ---
+        if 'risk_free_rate' not in st.session_state:
+            st.session_state.risk_free_rate = 0.40  # 40% anual por defecto
+        if 'benchmark_symbol' not in st.session_state:
+            st.session_state.benchmark_symbol = '^MERV'
+        st.subheader("Configuración de Análisis")
+        st.session_state.risk_free_rate = st.number_input(
+            "Tasa libre de riesgo anual (%)",
+            min_value=0.0, max_value=100.0, value=float(st.session_state.risk_free_rate*100), step=0.1
+        ) / 100.0
+        benchmark_options = {
+            'MERVAL (Argentina)': '^MERV',
+            'S&P 500 (EEUU)': '^GSPC',
+            'NASDAQ 100': '^NDX',
+            'Dow Jones': '^DJI',
+            'Bovespa (Brasil)': '^BVSP',
+            'Euro Stoxx 50': '^STOXX50E',
+            'MSCI World': 'URTH',
+            'Bitcoin': 'BTC-USD',
+        }
+        st.session_state.benchmark_symbol = st.selectbox(
+            "Benchmark para Alpha/Beta:",
+            options=list(benchmark_options.values()),
+            format_func=lambda x: next((k for k, v in benchmark_options.items() if v == x), x),
+            index=list(benchmark_options.values()).index(st.session_state.benchmark_symbol) if st.session_state.benchmark_symbol in benchmark_options.values() else 0
+        )
         
         if st.session_state.token_acceso is None:
             with st.form("login_form"):
