@@ -1332,33 +1332,21 @@ class PortfolioManager:
             
             # Combinar todos los DataFrames
             df_precios = pd.concat(data_frames.values(), axis=1, keys=data_frames.keys())
-            
             # Limpiar datos
-            # Primero verificar si hay fechas duplicadas
             if not df_precios.index.is_unique:
                 st.warning("⚠️ Se encontraron fechas duplicadas en los datos")
-                # Eliminar duplicados manteniendo el último valor de cada fecha
                 df_precios = df_precios.groupby(df_precios.index).last()
-            
-            # Luego llenar y eliminar valores faltantes
             df_precios = df_precios.fillna(method='ffill')
             df_precios = df_precios.dropna()
-            
             if df_precios.empty:
                 st.error("❌ No hay datos suficientes después del preprocesamiento")
                 return False
-            
-            # Calcular retornos
+            self.prices = df_precios  # <--- ASIGNAR PRECIOS PARA FRONTERA EFICIENTE
             self.returns = df_precios.pct_change().dropna()
-            
-            # Calcular estadísticas
             self.mean_returns = self.returns.mean()
             self.cov_matrix = self.returns.cov()
             self.data_loaded = True
-            
-            # Crear manager para optimización avanzada
             self.manager = manager(list(df_precios.columns), self.notional, df_precios.to_dict('series'))
-            
             return True
         except Exception as e:
             st.error(f"❌ Error en load_data: {str(e)}")
@@ -1400,17 +1388,16 @@ class PortfolioManager:
 
     def compute_efficient_frontier(self, target_return=0.08, include_min_variance=True):
         """Computa la frontera eficiente"""
-        if not self.data_loaded or not self.manager:
+        if not self.data_loaded or not self.manager or self.prices is None or self.prices.empty:
             return None, None, None
-        
         try:
-            if self.prices is not None:
-                portfolios, returns, volatilities = compute_efficient_frontier(
-                    self.manager.rics, self.notional, target_return, include_min_variance, 
-                    self.prices.to_dict('series')
-                )
-            else:
-                portfolios, returns, volatilities = None, None, None
+            # Chequeo adicional: evitar series con menos de 2 activos o fechas
+            if self.prices.shape[1] < 2 or self.prices.shape[0] < 10:
+                return None, None, None
+            portfolios, returns, volatilities = compute_efficient_frontier(
+                self.manager.rics, self.notional, target_return, include_min_variance, 
+                self.prices.to_dict('series')
+            )
             return portfolios, returns, volatilities
         except Exception as e:
             return None, None, None
@@ -2347,16 +2334,19 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             
                             # Mostrar evolución temporal del portafolio
                             st.markdown("#### 📈 Evolución Temporal del Portafolio")
-                            
+                            # --- ELIMINAR GRÁFICO DUPLICADO Y DEJAR SOLO UNO ---
                             fig_evolucion = go.Figure()
+                            # Usar fechas reales como eje X
+                            fechas = df_portfolio.index
+                            if not isinstance(fechas, pd.DatetimeIndex):
+                                fechas = pd.to_datetime(fechas)
                             fig_evolucion.add_trace(go.Scatter(
-                                x=df_portfolio.index,
+                                x=fechas,
                                 y=df_portfolio['Portfolio_Total'],
                                 mode='lines',
                                 name='Valor Total del Portafolio',
                                 line=dict(color='#0d6efd', width=2)
                             ))
-                            
                             fig_evolucion.update_layout(
                                 title="Evolución del Valor del Portafolio en el Tiempo",
                                 xaxis_title="Fecha",
@@ -2364,7 +2354,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 height=400,
                                 template='plotly_white'
                             )
-                            
                             st.plotly_chart(fig_evolucion, use_container_width=True)
                             
                             # Mostrar contribución de cada activo
