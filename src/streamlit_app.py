@@ -3092,7 +3092,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         st.info("Seleccione el universo aleatorio de mercado real")
         paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
         paneles_seleccionados = st.multiselect("Paneles de universo aleatorio", paneles, default=paneles)
-        # --- NUEVO: Selector de capital ---
         capital_mode = st.radio(
             "¿Cómo definir el capital disponible?",
             ["Manual", "Saldo valorizado + disponible (actual)"]
@@ -3110,21 +3109,33 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         ajustada = "SinAjustar"
         # Obtener tickers por panel
         tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, paneles_seleccionados, 'Argentina')
+        # Validar tickers_por_panel
+        if not tickers_por_panel or not any(tickers_por_panel.values()):
+            st.error("No se pudieron obtener tickers para el universo aleatorio seleccionado. Revise los paneles o intente nuevamente.")
+            return
         # Obtener series históricas aleatorias (ahora asincrónico y optimizado)
         st.info("Descargando series históricas en paralelo para mayor velocidad...")
-        series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
-            tickers_por_panel, paneles_seleccionados, cantidad_activos,
-            fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars
-        )
+        try:
+            series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
+                tickers_por_panel, paneles_seleccionados, cantidad_activos,
+                fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars
+            )
+        except Exception as e:
+            st.error(f"Error al obtener series históricas para el universo aleatorio: {e}")
+            return
         # Construir universe_activos a partir de seleccion_final
         universe_activos = []
-        for panel, simbolos in seleccion_final.items():
-            for simbolo in simbolos:
-                universe_activos.append({'simbolo': simbolo, 'mercado': 'BCBA', 'tipo': panel})
-        # Si no hay activos suficientes, advertir y salir
-        if not universe_activos:
-            st.warning("No hay suficientes activos para el universo aleatorio seleccionado.")
+        if seleccion_final and any(seleccion_final.values()):
+            for panel, simbolos in seleccion_final.items():
+                for simbolo in simbolos:
+                    universe_activos.append({'simbolo': simbolo, 'mercado': 'BCBA', 'tipo': panel})
+        else:
+            st.error("No hay suficientes activos para el universo aleatorio seleccionado. Intente con otros paneles o menos cantidad de activos.")
             return
+    # Validación final antes de continuar
+    if not universe_activos:
+        st.error("No se pudo construir el universo de activos para la optimización. Proceso detenido.")
+        return
 
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
