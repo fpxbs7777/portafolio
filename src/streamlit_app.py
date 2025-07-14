@@ -2236,10 +2236,26 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 st.subheader("🎯 Probabilidades")
                 cols = st.columns(4)
                 probs = metricas.get('probabilidades', {})
-                cols[0].metric("Ganancia", f"{probs.get('ganancia', 0)*100:.1f}%")
-                cols[1].metric("Pérdida", f"{probs.get('perdida', 0)*100:.1f}%")
-                cols[2].metric("Ganancia >10%", f"{probs.get('ganancia_mayor_10', 0)*100:.1f}%")
-                cols[3].metric("Pérdida >10%", f"{probs.get('perdida_mayor_10', 0)*100:.1f}")
+                cols[0].metric(
+                    "Ganancia",
+                    f"{probs.get('ganancia', 0)*100:.1f}%",
+                    help="Probabilidad estimada mediante simulación Monte Carlo de que el portafolio tenga un retorno positivo en el horizonte seleccionado."
+                )
+                cols[1].metric(
+                    "Pérdida",
+                    f"{probs.get('perdida', 0)*100:.1f}%",
+                    help="Probabilidad estimada mediante simulación Monte Carlo de que el portafolio tenga un retorno negativo en el horizonte seleccionado."
+                )
+                cols[2].metric(
+                    "Ganancia >10%",
+                    f"{probs.get('ganancia_mayor_10', 0)*100:.1f}%",
+                    help="Probabilidad de obtener una ganancia superior al 10% en el horizonte seleccionado, calculada por simulación Monte Carlo."
+                )
+                cols[3].metric(
+                    "Pérdida >10%",
+                    f"{probs.get('perdida_mayor_10', 0)*100:.1f}",
+                    help="Probabilidad de sufrir una pérdida superior al 10% en el horizonte seleccionado, calculada por simulación Monte Carlo."
+                )
                 
                 # Recomendaciones de riesgo
                 st.subheader("💡 Recomendaciones de Riesgo")
@@ -3948,12 +3964,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "🔄 Rebalanceo",
+        "🧮 Optimizaciones"
     ])
 
     with tab1:
@@ -3978,6 +3995,72 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+    
+    with tab6:
+        st.header("🧮 Optimizaciones de Portafolio")
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        if not portafolio or not estado_cuenta:
+            st.warning("No se pudo obtener el portafolio o el estado de cuenta.")
+            return
+        activos = portafolio.get('activos', [])
+        saldo_disponible = 0
+        cuentas = estado_cuenta.get('cuentas', [])
+        for cuenta in cuentas:
+            saldo_disponible += float(cuenta.get('disponible', 0))
+        # Preparar lista de activos con valuación
+        activos_val = []
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            valuacion = 0
+            for campo in ['valuacionEnMonedaOriginal','valuacionActual','valorNominalEnMonedaOriginal','valorNominal','valuacionDolar','valuacion','valorActual','montoInvertido','valorMercado','valorTotal','importe']:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            activos_val.append({'simbolo': simbolo, 'tipo': tipo, 'cantidad': cantidad, 'valorizado': valuacion})
+        # Inputs de configuración
+        metodo = st.selectbox("Método de optimización", ["Markowitz", "Aleatorio"], index=1)
+        incluir_saldo = st.checkbox("Incluir saldo disponible en la selección aleatoria", value=True)
+        cantidad_activos = st.number_input("Cantidad de activos a seleccionar (aleatorio)", min_value=1, max_value=len(activos_val), value=min(5, len(activos_val)))
+        saldo_objetivo = sum(a['valorizado'] for a in activos_val)
+        if incluir_saldo:
+            saldo_objetivo += saldo_disponible
+        st.info(f"Saldo objetivo para rebalanceo: ${saldo_objetivo:,.2f}")
+        if st.button("Ejecutar optimización"):
+            if metodo == "Aleatorio":
+                seleccion, total = seleccionar_activos_aleatorios_por_valor(activos_val, saldo_objetivo, incluir_saldo, saldo_disponible, cantidad_activos)
+                st.success(f"Activos seleccionados (total: ${total:,.2f}):")
+                st.dataframe(pd.DataFrame(seleccion))
+                # Gráfico de torta
+                if seleccion:
+                    fig = go.Figure(data=[go.Pie(labels=[a['simbolo'] for a in seleccion], values=[a['valorizado'] for a in seleccion], textinfo='label+percent', hole=0.4)])
+                    fig.update_layout(title="Distribución de activos seleccionados", height=400)
+                    st.plotly_chart(fig, use_container_width=True)
+            elif metodo == "Markowitz":
+                st.info("Optimización Markowitz: usar el módulo de optimización avanzado del sistema.")
+                # Aquí puedes llamar a tu función de optimización avanzada si lo deseas
+
+def seleccionar_activos_aleatorios_por_valor(activos, saldo_objetivo, incluir_saldo_disponible, saldo_disponible, cantidad_activos):
+    activos_shuffled = activos.copy()
+    random.shuffle(activos_shuffled)
+    seleccion = []
+    total = 0
+    for activo in activos_shuffled:
+        valor = activo['valorizado']
+        if total + valor <= saldo_objetivo and len(seleccion) < cantidad_activos:
+            seleccion.append(activo)
+            total += valor
+        if len(seleccion) >= cantidad_activos or total >= saldo_objetivo:
+            break
+    return seleccion, total
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
