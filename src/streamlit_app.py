@@ -3020,7 +3020,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             return
                         
                         # Convertir a lista ordenada
-                        fechas_comunes = sorted(list(fechas_comunes))
+                        fechas_comunes = pd.to_datetime(sorted(list(fechas_comunes)))
                         df_portfolio.index = fechas_comunes
                         
                         for activo_info in activos_exitosos:
