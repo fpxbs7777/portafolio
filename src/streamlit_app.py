@@ -4056,6 +4056,10 @@ def main():
         st.session_state.fecha_desde = date.today() - timedelta(days=365)
     if 'fecha_hasta' not in st.session_state:
         st.session_state.fecha_hasta = date.today()
+    if 'mostrar_tasas' not in st.session_state:
+        st.session_state.mostrar_tasas = False
+    if 'mostrar_asesor' not in st.session_state:
+        st.session_state.mostrar_asesor = False
     
     # Barra lateral - Autenticación
     with st.sidebar:
@@ -4142,33 +4146,46 @@ def main():
                         st.rerun()
             else:
                 st.warning("No se encontraron clientes")
+            
+            # Menú de acceso rápido para funciones adicionales
+            st.divider()
+            st.subheader("🔧 Herramientas Adicionales")
+            
+            if st.button("💰 Tasas de Caución", use_container_width=True):
+                st.session_state.mostrar_tasas = True
+            
+            if st.button("👨‍💼 Panel del Asesor", use_container_width=True):
+                st.session_state.mostrar_asesor = True
 
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            st.sidebar.title("Menú Principal")
-            opcion = st.sidebar.radio(
-                "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
-                index=0,
-            )
-
-            # Mostrar la página seleccionada
-            if opcion == "🏠 Inicio":
-                st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "📊 Análisis de Portafolio":
-                if st.session_state.cliente_seleccionado:
-                    mostrar_analisis_portafolio()
-                else:
-                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
-                else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
-                mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
+                    # Mostrar herramientas adicionales si están activadas
+        if st.session_state.mostrar_tasas:
+            st.session_state.mostrar_tasas = False  # Reset flag
+            mostrar_tasas_caucion(st.session_state.token_acceso)
+        elif st.session_state.mostrar_asesor:
+            st.session_state.mostrar_asesor = False  # Reset flag
+            mostrar_movimientos_asesor()
+        # Mostrar contenido principal cuando hay cliente seleccionado
+        elif st.session_state.cliente_seleccionado:
+            mostrar_analisis_portafolio()
+        else:
+            # Mostrar panel de bienvenida cuando está conectado pero sin cliente
+            st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            
+            # Panel de bienvenida para usuarios conectados
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
+                        border-radius: 15px; 
+                        padding: 40px; 
+                        color: white;
+                        text-align: center;
+                        margin: 30px 0;">
+                <h1 style="color: white; margin-bottom: 20px;">¡Bienvenido de vuelta!</h1>
+                <p style="font-size: 18px; margin-bottom: 30px;">Seleccione un cliente para comenzar a analizar sus portafolios</p>
+            </div>
+            """, unsafe_allow_html=True)
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
