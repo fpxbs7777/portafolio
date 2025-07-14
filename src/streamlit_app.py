@@ -153,6 +153,7 @@ def obtener_tokens(usuario, contraseña):
         return None, None
 
 def obtener_lista_clientes(token_portador):
+    refrescar_token_si_necesario()
     url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
@@ -173,6 +174,7 @@ def obtener_lista_clientes(token_portador):
         return []
 
 def obtener_estado_cuenta(token_portador, id_cliente=None):
+    refrescar_token_si_necesario()
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
     else:
@@ -192,6 +194,7 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         return None
 
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
+    refrescar_token_si_necesario()
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
@@ -4589,7 +4592,7 @@ def mostrar_optimizacion_universo_activos(token_acceso):
                                         # Tabla comparativa de portafolios del universo
                                         st.markdown("#### 📊 Comparación de Estrategias del Universo")
                                         comparison_data_frontier = []
-                                        for label, portfolio in portfolios_frontier.items():
+                                        for label, portfolio in portfolios_frontier.items()):
                                             if portfolio is not None:
                                                 comparison_data_frontier.append({
                                                     'Estrategia': label,
