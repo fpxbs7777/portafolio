@@ -2986,6 +2986,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.subheader("🔍 Diagnóstico del Portafolio Actual")
     activos_dict = {}
     valor_total = 0
+    series_historicas = {}
     for activo in activos_raw:
         titulo = activo.get('titulo', {})
         simbolo = titulo.get('simbolo')
@@ -2999,6 +3000,27 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'mercado': mercado
             }
             valor_total += valuacion
+            # Descargar la serie histórica real para cada activo
+            try:
+                df_hist = obtener_serie_historica_iol(
+                    token_portador=token_acceso,
+                    mercado=mercado,
+                    simbolo=simbolo,
+                    fecha_desde=str(st.session_state.fecha_desde),
+                    fecha_hasta=str(st.session_state.fecha_hasta),
+                    ajustada="SinAjustar"
+                )
+                if df_hist is not None and not df_hist.empty:
+                    series_historicas[simbolo] = df_hist
+            except Exception as e:
+                st.warning(f"No se pudo obtener la serie histórica de {simbolo}: {e}")
+
+    # Si no hay series históricas, advertir
+    if not series_historicas:
+        st.warning("No se pudieron obtener series históricas reales para los activos del portafolio. No se puede calcular el diagnóstico.")
+        return
+
+    # Calcular métricas usando las series reales
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
     cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
