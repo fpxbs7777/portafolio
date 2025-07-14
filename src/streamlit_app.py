@@ -4246,99 +4246,939 @@ def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
     return tickers, descripciones
 
 # --- Función: calcular retornos y covarianza con ventana móvil ---
-def calcular_estadisticas_ventana_movil(precios, ventana=252):
+def calcular_estadisticas_ventana_movil(precios, ventana=252, metodo_estimacion='robusto'):
     """
-    Calcula retornos esperados y matriz de covarianza usando una ventana móvil.
-    precios: DataFrame de precios (columnas=activos, filas=fechas)
-    ventana: días para la ventana móvil (por defecto 1 año)
+    Calcula retornos esperados y matriz de covarianza usando métodos robustos para la vida real.
+    
+    Args:
+        precios: DataFrame de precios (columnas=activos, filas=fechas)
+        ventana: días para la ventana móvil (por defecto 1 año)
+        metodo_estimacion: 'robusto', 'exponencial', 'bayesiano', 'black_litterman'
+    
     Devuelve: retornos esperados anualizados, covarianza anualizada
     """
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+    
     retornos = precios.pct_change().dropna()
     retornos_ventana = retornos.iloc[-ventana:]
-    mean_ret = retornos_ventana.mean() * 252
-    cov = retornos_ventana.cov() * 252
+    
+    if metodo_estimacion == 'robusto':
+        # Método robusto: usar mediana y métodos robustos para outliers
+        mean_ret = retornos_ventana.median() * 252  # Mediana en lugar de media
+        # Usar covarianza robusta (Ledoit-Wolf shrinkage)
+        cov = calcular_covarianza_robusta(retornos_ventana) * 252
+        
+    elif metodo_estimacion == 'exponencial':
+        # Peso exponencial: datos más recientes tienen más peso
+        pesos = np.exp(np.linspace(-1, 0, len(retornos_ventana)))
+        pesos = pesos / pesos.sum()
+        mean_ret = (retornos_ventana * pesos).sum() * 252
+        cov = calcular_covarianza_ponderada(retornos_ventana, pesos) * 252
+        
+    elif metodo_estimacion == 'bayesiano':
+        # Estimación bayesiana con prior
+        mean_ret, cov = estimacion_bayesiana_retornos(retornos_ventana)
+        
+    elif metodo_estimacion == 'black_litterman':
+        # Modelo Black-Litterman para incorporar views del mercado
+        mean_ret, cov = modelo_black_litterman(retornos_ventana)
+        
+    else:
+        # Método clásico
+        mean_ret = retornos_ventana.mean() * 252
+        cov = retornos_ventana.cov() * 252
+    
     return mean_ret, cov
 
-# --- Función: optimización Markowitz (max Sharpe) ---
-def optimizar_markowitz(mean_ret, cov, risk_free_rate=0.0):
+def calcular_covarianza_robusta(retornos):
     """
-    Devuelve los pesos óptimos de Markowitz (max Sharpe, long-only)
+    Calcula covarianza robusta usando shrinkage de Ledoit-Wolf
+    """
+    import numpy as np
+    from sklearn.covariance import LedoitWolf
+    
+    # Convertir a numpy array
+    X = retornos.values
+    
+    # Aplicar Ledoit-Wolf shrinkage
+    lw = LedoitWolf()
+    cov_robusta = lw.fit(X).covariance_
+    
+    # Convertir de vuelta a DataFrame
+    cov_df = pd.DataFrame(cov_robusta, index=retornos.columns, columns=retornos.columns)
+    
+    return cov_df
+
+def calcular_covarianza_ponderada(retornos, pesos):
+    """
+    Calcula covarianza ponderada exponencialmente
+    """
+    import numpy as np
+    
+    # Normalizar pesos
+    pesos = np.array(pesos)
+    pesos = pesos / pesos.sum()
+    
+    # Calcular media ponderada
+    media_ponderada = (retornos * pesos.reshape(-1, 1)).sum(axis=0)
+    
+    # Calcular covarianza ponderada
+    cov_ponderada = np.zeros((retornos.shape[1], retornos.shape[1]))
+    
+    for i in range(retornos.shape[1]):
+        for j in range(retornos.shape[1]):
+            diff_i = retornos.iloc[:, i] - media_ponderada[i]
+            diff_j = retornos.iloc[:, j] - media_ponderada[j]
+            cov_ponderada[i, j] = (pesos * diff_i * diff_j).sum()
+    
+    return pd.DataFrame(cov_ponderada, index=retornos.columns, columns=retornos.columns)
+
+def estimacion_bayesiana_retornos(retornos, prior_return=0.08, prior_vol=0.20):
+    """
+    Estimación bayesiana de retornos usando prior del mercado
+    """
+    import numpy as np
+    
+    # Estadísticas muestrales
+    n = len(retornos)
+    sample_mean = retornos.mean()
+    sample_cov = retornos.cov()
+    
+    # Prior: distribución normal con media del mercado
+    prior_mean = np.full(len(retornos.columns), prior_return / 252)  # Anual a diario
+    prior_precision = np.eye(len(retornos.columns)) / (prior_vol ** 2 / 252)
+    
+    # Likelihood
+    likelihood_precision = n * np.linalg.inv(sample_cov)
+    
+    # Posterior
+    posterior_precision = prior_precision + likelihood_precision
+    posterior_mean = np.linalg.solve(posterior_precision, 
+                                   prior_precision @ prior_mean + likelihood_precision @ sample_mean)
+    
+    # Convertir a anual
+    mean_ret = pd.Series(posterior_mean * 252, index=retornos.columns)
+    cov_ret = sample_cov * 252  # Usar covarianza muestral para simplicidad
+    
+    return mean_ret, cov_ret
+
+def modelo_black_litterman(retornos, views=None, confidence=None):
+    """
+    Modelo Black-Litterman para incorporar views del mercado
+    """
+    import numpy as np
+    
+    # Si no hay views, usar estimación estándar
+    if views is None:
+        return retornos.mean() * 252, retornos.cov() * 252
+    
+    # Implementación básica del modelo Black-Litterman
+    # (Aquí se puede expandir con la implementación completa)
+    mean_ret = retornos.mean() * 252
+    cov_ret = retornos.cov() * 252
+    
+    return mean_ret, cov_ret
+
+# --- Función: optimización Markowitz robusta para la vida real ---
+def optimizar_markowitz(mean_ret, cov, risk_free_rate=0.0, metodo='robusto', 
+                       restricciones_adicionales=None, tolerancia_optimizacion=1e-8):
+    """
+    Optimización Markowitz robusta para la vida real con múltiples métodos y restricciones.
+    
+    Args:
+        mean_ret: retornos esperados
+        cov: matriz de covarianza
+        risk_free_rate: tasa libre de riesgo
+        metodo: 'robusto', 'clasico', 'resampling', 'bayesiano'
+        restricciones_adicionales: dict con restricciones adicionales
+        tolerancia_optimizacion: tolerancia para convergencia
+    
+    Returns:
+        pesos óptimos
     """
     import numpy as np
     import scipy.optimize as op
+    from scipy.stats import norm
+    
+    n = len(mean_ret)
+    
+    if metodo == 'robusto':
+        return optimizacion_markowitz_robusta(mean_ret, cov, risk_free_rate, restricciones_adicionales)
+    elif metodo == 'resampling':
+        return optimizacion_markowitz_resampling(mean_ret, cov, risk_free_rate, restricciones_adicionales)
+    elif metodo == 'bayesiano':
+        return optimizacion_markowitz_bayesiano(mean_ret, cov, risk_free_rate, restricciones_adicionales)
+    else:
+        return optimizacion_markowitz_clasica(mean_ret, cov, risk_free_rate, restricciones_adicionales, tolerancia_optimizacion)
+
+def optimizacion_markowitz_clasica(mean_ret, cov, risk_free_rate, restricciones_adicionales, tolerancia):
+    """Optimización Markowitz clásica"""
+    import numpy as np
+    import scipy.optimize as op
+    
     n = len(mean_ret)
     bounds = tuple((0, 1) for _ in range(n))
-    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},)
+    constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+    
+    # Agregar restricciones adicionales si existen
+    if restricciones_adicionales:
+        if 'max_concentracion' in restricciones_adicionales:
+            max_conc = restricciones_adicionales['max_concentracion']
+            for i in range(n):
+                constraints.append({'type': 'ineq', 'fun': lambda x, i=i: max_conc - x[i]})
+        
+        if 'min_peso' in restricciones_adicionales:
+            min_peso = restricciones_adicionales['min_peso']
+            for i in range(n):
+                constraints.append({'type': 'ineq', 'fun': lambda x, i=i: x[i] - min_peso})
+    
     def neg_sharpe(x):
         port_ret = np.dot(mean_ret, x)
         port_vol = np.sqrt(np.dot(x, np.dot(cov, x)))
         if port_vol == 0:
             return 1e6
         return -(port_ret - risk_free_rate) / port_vol
-    x0 = np.ones(n) / n
-    res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints)
-    if res.success:
-        return res.x
-    else:
-        return x0
+    
+    # Múltiples puntos iniciales para evitar óptimos locales
+    mejores_pesos = None
+    mejor_sharpe = -np.inf
+    
+    for _ in range(10):
+        x0 = np.random.dirichlet(np.ones(n))  # Distribución uniforme en simplex
+        res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints, 
+                         method='SLSQP', tol=tolerancia)
+        
+        if res.success:
+            sharpe_actual = -res.fun
+            if sharpe_actual > mejor_sharpe:
+                mejor_sharpe = sharpe_actual
+                mejores_pesos = res.x
+    
+    return mejores_pesos if mejores_pesos is not None else np.ones(n) / n
 
-# --- Función: backtest con rebalanceo periódico ---
-def backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+def optimizacion_markowitz_robusta(mean_ret, cov, risk_free_rate, restricciones_adicionales):
+    """Optimización Markowitz robusta con múltiples escenarios"""
+    import numpy as np
+    
+    # Generar múltiples escenarios de retornos
+    n_escenarios = 100
+    escenarios_retornos = []
+    
+    # Escenario base
+    escenarios_retornos.append(mean_ret)
+    
+    # Escenarios con perturbaciones
+    for _ in range(n_escenarios - 1):
+        # Perturbación aleatoria de los retornos
+        perturbacion = np.random.normal(0, 0.1 * np.abs(mean_ret))
+        escenario = mean_ret + perturbacion
+        escenarios_retornos.append(escenario)
+    
+    # Optimizar para cada escenario
+    pesos_escenarios = []
+    for escenario in escenarios_retornos:
+        pesos = optimizacion_markowitz_clasica(escenario, cov, risk_free_rate, 
+                                              restricciones_adicionales, 1e-8)
+        pesos_escenarios.append(pesos)
+    
+    # Promedio robusto de los pesos
+    pesos_finales = np.mean(pesos_escenarios, axis=0)
+    pesos_finales = pesos_finales / np.sum(pesos_finales)  # Normalizar
+    
+    return pesos_finales
+
+def optimizacion_markowitz_resampling(mean_ret, cov, risk_free_rate, restricciones_adicionales):
+    """Optimización con resampling bootstrap"""
+    import numpy as np
+    
+    # Simular retornos usando la distribución normal multivariada
+    n_simulaciones = 1000
+    retornos_simulados = np.random.multivariate_normal(mean_ret, cov, n_simulaciones)
+    
+    # Optimizar para cada muestra bootstrap
+    pesos_bootstrap = []
+    for i in range(100):  # 100 muestras bootstrap
+        # Muestra bootstrap
+        indices = np.random.choice(n_simulaciones, size=n_simulaciones, replace=True)
+        muestra_retornos = retornos_simulados[indices]
+        
+        # Calcular estadísticas de la muestra
+        mean_muestra = np.mean(muestra_retornos, axis=0)
+        cov_muestra = np.cov(muestra_retornos.T)
+        
+        # Optimizar
+        pesos = optimizacion_markowitz_clasica(mean_muestra, cov_muestra, risk_free_rate, 
+                                              restricciones_adicionales, 1e-8)
+        pesos_bootstrap.append(pesos)
+    
+    # Promedio de los pesos bootstrap
+    pesos_finales = np.mean(pesos_bootstrap, axis=0)
+    pesos_finales = pesos_finales / np.sum(pesos_finales)
+    
+    return pesos_finales
+
+def optimizacion_markowitz_bayesiano(mean_ret, cov, risk_free_rate, restricciones_adicionales):
+    """Optimización bayesiana con incertidumbre en los parámetros"""
+    import numpy as np
+    
+    # Simular parámetros usando distribución posterior
+    n_simulaciones = 500
+    pesos_bayesiano = []
+    
+    for _ in range(n_simulaciones):
+        # Simular retornos esperados con incertidumbre
+        mean_simulado = np.random.multivariate_normal(mean_ret, cov / len(mean_ret))
+        
+        # Simular covarianza con incertidumbre (simplificado)
+        cov_simulado = cov * np.random.chisquare(df=len(mean_ret)) / len(mean_ret)
+        
+        # Optimizar
+        pesos = optimizacion_markowitz_clasica(mean_simulado, cov_simulado, risk_free_rate, 
+                                              restricciones_adicionales, 1e-8)
+        pesos_bayesiano.append(pesos)
+    
+    # Promedio de los pesos bayesianos
+    pesos_finales = np.mean(pesos_bayesiano, axis=0)
+    pesos_finales = pesos_finales / np.sum(pesos_finales)
+    
+    return pesos_finales
+
+# --- Función: backtest robusto con rebalanceo periódico para la vida real ---
+def backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0, 
+                      metodo_estimacion='robusto', metodo_optimizacion='robusto',
+                      restricciones_adicionales=None, incluir_costs_transaccion=True,
+                      slippage=0.001, comision=0.001):
     """
-    Simula la evolución de un portafolio Markowitz con rebalanceo periódico.
-    precios: DataFrame de precios (columnas=activos, filas=fechas)
-    ventana: días para estimar retornos/covarianza
-    rebalanceo: cada cuántos días rebalancear (63 = 3 meses aprox)
-    Devuelve: fechas, valores del portafolio, lista de pesos, fechas de rebalanceo
+    Backtest robusto de Markowitz para la vida real con costos de transacción y slippage.
+    
+    Args:
+        precios: DataFrame de precios (columnas=activos, filas=fechas)
+        ventana: días para estimar retornos/covarianza
+        rebalanceo: cada cuántos días rebalancear
+        risk_free_rate: tasa libre de riesgo
+        metodo_estimacion: método para estimar retornos/covarianza
+        metodo_optimizacion: método de optimización
+        restricciones_adicionales: restricciones adicionales
+        incluir_costs_transaccion: si incluir costos de transacción
+        slippage: slippage por operación (0.1% = 0.001)
+        comision: comisión por operación (0.1% = 0.001)
+    
+    Returns:
+        fechas, valores del portafolio, pesos_hist, fechas_reb, metricas_backtest
     """
     import numpy as np
+    import pandas as pd
+    
     fechas = precios.index
     n_activos = precios.shape[1]
     portafolio_valor = [1.0]
     pesos_hist = []
     fechas_reb = []
     pesos_actual = np.ones(n_activos) / n_activos
+    valor_portafolio_actual = 1.0
+    
+    # Métricas del backtest
+    metricas = {
+        'retorno_total': 0,
+        'volatilidad_anual': 0,
+        'sharpe_ratio': 0,
+        'max_drawdown': 0,
+        'num_rebalanceos': 0,
+        'costos_transaccion_total': 0,
+        'turnover_promedio': 0
+    }
+    
+    # Lista para tracking de métricas
+    retornos_diarios = []
+    drawdown_series = []
+    turnover_series = []
+    
     for i in range(ventana, len(fechas)-1, rebalanceo):
-        precios_window = precios.iloc[i-ventana:i]
-        mean_ret, cov = calcular_estadisticas_ventana_movil(precios_window, ventana)
-        pesos_actual = optimizar_markowitz(mean_ret, cov, risk_free_rate)
-        pesos_hist.append(pesos_actual)
-        fechas_reb.append(fechas[i])
-        # Simular evolución hasta el próximo rebalanceo
-        for j in range(i, min(i+rebalanceo, len(fechas)-1)):
-            ret = (precios.iloc[j+1] / precios.iloc[j] - 1).values
-            portafolio_valor.append(portafolio_valor[-1] * (1 + np.dot(pesos_actual, ret)))
+        try:
+            # Ventana de datos para estimación
+            precios_window = precios.iloc[i-ventana:i]
+            
+            # Verificar que hay suficientes datos
+            if len(precios_window) < ventana * 0.8:  # Al menos 80% de la ventana
+                continue
+                
+            # Estimar retornos y covarianza
+            mean_ret, cov = calcular_estadisticas_ventana_movil(
+                precios_window, ventana, metodo_estimacion
+            )
+            
+            # Verificar que la covarianza es válida
+            if np.any(np.isnan(cov)) or np.any(np.isinf(cov)):
+                continue
+                
+            # Optimizar portafolio
+            pesos_nuevos = optimizar_markowitz(
+                mean_ret, cov, risk_free_rate, metodo_optimizacion, 
+                restricciones_adicionales
+            )
+            
+            # Calcular costos de transacción si está habilitado
+            if incluir_costs_transaccion and len(pesos_hist) > 0:
+                # Calcular turnover
+                turnover = np.sum(np.abs(pesos_nuevos - pesos_actual))
+                turnover_series.append(turnover)
+                
+                # Costos de transacción
+                costos_transaccion = turnover * (slippage + comision)
+                metricas['costos_transaccion_total'] += costos_transaccion
+                
+                # Ajustar valor del portafolio por costos
+                valor_portafolio_actual *= (1 - costos_transaccion)
+            
+            pesos_actual = pesos_nuevos
+            pesos_hist.append(pesos_actual)
+            fechas_reb.append(fechas[i])
+            metricas['num_rebalanceos'] += 1
+            
+            # Simular evolución hasta el próximo rebalanceo
+            for j in range(i, min(i+rebalanceo, len(fechas)-1)):
+                try:
+                    # Calcular retornos diarios
+                    ret = (precios.iloc[j+1] / precios.iloc[j] - 1).values
+                    
+                    # Verificar que no hay valores NaN o infinitos
+                    if np.any(np.isnan(ret)) or np.any(np.isinf(ret)):
+                        ret = np.zeros_like(ret)
+                    
+                    # Calcular retorno del portafolio
+                    retorno_portafolio = np.dot(pesos_actual, ret)
+                    valor_portafolio_actual *= (1 + retorno_portafolio)
+                    portafolio_valor.append(valor_portafolio_actual)
+                    retornos_diarios.append(retorno_portafolio)
+                    
+                except Exception as e:
+                    # Si hay error, mantener el valor anterior
+                    portafolio_valor.append(portafolio_valor[-1])
+                    retornos_diarios.append(0)
+                    
+        except Exception as e:
+            # Si hay error en la optimización, mantener pesos anteriores
+            if len(pesos_hist) > 0:
+                pesos_actual = pesos_hist[-1]
+            else:
+                pesos_actual = np.ones(n_activos) / n_activos
+            pesos_hist.append(pesos_actual)
+            fechas_reb.append(fechas[i])
+    
     # Completar hasta el final con los últimos pesos
     while len(portafolio_valor) < len(fechas):
         portafolio_valor.append(portafolio_valor[-1])
-    return fechas, portafolio_valor, pesos_hist, fechas_reb
+    
+    # Calcular métricas finales
+    if len(retornos_diarios) > 0:
+        retornos_array = np.array(retornos_diarios)
+        
+        # Retorno total
+        metricas['retorno_total'] = (portafolio_valor[-1] / portafolio_valor[0]) - 1
+        
+        # Volatilidad anual
+        metricas['volatilidad_anual'] = np.std(retornos_array) * np.sqrt(252)
+        
+        # Sharpe ratio
+        if metricas['volatilidad_anual'] > 0:
+            metricas['sharpe_ratio'] = (metricas['retorno_total'] - risk_free_rate) / metricas['volatilidad_anual']
+        
+        # Máximo drawdown
+        valores_acumulados = np.array(portafolio_valor)
+        peak = np.maximum.accumulate(valores_acumulados)
+        drawdown = (valores_acumulados - peak) / peak
+        metricas['max_drawdown'] = np.min(drawdown)
+        
+        # Turnover promedio
+        if turnover_series:
+            metricas['turnover_promedio'] = np.mean(turnover_series)
+    
+    return fechas, portafolio_valor, pesos_hist, fechas_reb, metricas
 
-# --- Función: visualización de backtest y pesos ---
-def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+# --- Función: visualización robusta de backtest para la vida real ---
+def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0,
+                              metodo_estimacion='robusto', metodo_optimizacion='robusto',
+                              restricciones_adicionales=None, incluir_costs_transaccion=True):
     """
-    Visualiza la evolución del portafolio Markowitz con rebalanceo periódico.
+    Visualización robusta del backtest Markowitz con métricas avanzadas para la vida real.
     """
     import plotly.graph_objects as go
-    fechas, portafolio_valor, pesos_hist, fechas_reb = backtest_markowitz(precios, ventana, rebalanceo, risk_free_rate)
     import streamlit as st
-    st.subheader("📈 Evolución del Portafolio Markowitz (Backtest)")
+    import numpy as np
+    
+    # Configuración del backtest
+    st.subheader("⚙️ Configuración del Backtest")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Ventana de Estimación", f"{ventana} días")
+        st.metric("Frecuencia Rebalanceo", f"{rebalanceo} días")
+    
+    with col2:
+        st.metric("Método Estimación", metodo_estimacion.title())
+        st.metric("Método Optimización", metodo_optimizacion.title())
+    
+    with col3:
+        st.metric("Tasa Libre Riesgo", f"{risk_free_rate:.2%}")
+        st.metric("Costos Transacción", "Sí" if incluir_costs_transaccion else "No")
+    
+    # Ejecutar backtest
+    with st.spinner("Ejecutando backtest robusto..."):
+        fechas, portafolio_valor, pesos_hist, fechas_reb, metricas = backtest_markowitz(
+            precios, ventana, rebalanceo, risk_free_rate, metodo_estimacion, 
+            metodo_optimizacion, restricciones_adicionales, incluir_costs_transaccion
+        )
+    
+    # Mostrar métricas principales
+    st.subheader("📊 Métricas del Backtest")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Retorno Total", f"{metricas['retorno_total']:.2%}")
+        st.metric("Volatilidad Anual", f"{metricas['volatilidad_anual']:.2%}")
+    
+    with col2:
+        st.metric("Sharpe Ratio", f"{metricas['sharpe_ratio']:.3f}")
+        st.metric("Máximo Drawdown", f"{metricas['max_drawdown']:.2%}")
+    
+    with col3:
+        st.metric("Número Rebalanceos", metricas['num_rebalanceos'])
+        st.metric("Turnover Promedio", f"{metricas['turnover_promedio']:.2%}")
+    
+    with col4:
+        st.metric("Costos Transacción", f"{metricas['costos_transaccion_total']:.2%}")
+        st.metric("Retorno Neto", f"{metricas['retorno_total'] - metricas['costos_transaccion_total']:.2%}")
+    
+    # Gráfico de evolución del portafolio
+    st.subheader("📈 Evolución del Portafolio")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=fechas, y=portafolio_valor, mode='lines', name='Valor Portafolio'))
-    fig.update_layout(title="Backtest Markowitz con rebalanceo", xaxis_title="Fecha", yaxis_title="Valor acumulado", template="plotly_white")
+    
+    # Línea principal del portafolio
+    fig.add_trace(go.Scatter(
+        x=fechas, 
+        y=portafolio_valor, 
+        mode='lines', 
+        name='Valor Portafolio',
+        line=dict(color='#1f77b4', width=2)
+    ))
+    
+    # Marcar puntos de rebalanceo
+    if fechas_reb:
+        valores_reb = [portafolio_valor[fechas.get_loc(fecha)] for fecha in fechas_reb if fecha in fechas]
+        fig.add_trace(go.Scatter(
+            x=fechas_reb, 
+            y=valores_reb, 
+            mode='markers', 
+            name='Rebalanceos',
+            marker=dict(color='red', size=8, symbol='diamond')
+        ))
+    
+    fig.update_layout(
+        title="Evolución del Portafolio Markowitz (Backtest Robusto)",
+        xaxis_title="Fecha", 
+        yaxis_title="Valor Acumulado", 
+        template="plotly_white",
+        hovermode='x unified'
+    )
+    
     st.plotly_chart(fig, use_container_width=True)
-    # Mostrar evolución de pesos
+    
+    # Análisis de drawdown
+    st.subheader("📉 Análisis de Drawdown")
+    valores_array = np.array(portafolio_valor)
+    peak = np.maximum.accumulate(valores_array)
+    drawdown = (valores_array - peak) / peak
+    
+    fig_dd = go.Figure()
+    fig_dd.add_trace(go.Scatter(
+        x=fechas, 
+        y=drawdown * 100, 
+        mode='lines', 
+        name='Drawdown (%)',
+        fill='tonexty',
+        line=dict(color='red', width=1)
+    ))
+    
+    fig_dd.update_layout(
+        title="Análisis de Drawdown",
+        xaxis_title="Fecha", 
+        yaxis_title="Drawdown (%)", 
+        template="plotly_white",
+        yaxis=dict(range=[metricas['max_drawdown']*100*1.1, 5])
+    )
+    
+    st.plotly_chart(fig_dd, use_container_width=True)
+    
+    # Evolución de pesos
     st.subheader("🔄 Evolución de Pesos por Activo")
-    if pesos_hist:
-        import numpy as np
+    if pesos_hist and len(pesos_hist) > 0:
         activos = precios.columns
         pesos_array = np.array(pesos_hist)
-        fig2 = go.Figure()
+        
+        fig_pesos = go.Figure()
+        
+        # Colores para los activos
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                 '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+        
         for idx, activo in enumerate(activos):
-            fig2.add_trace(go.Scatter(x=fechas_reb, y=pesos_array[:, idx], mode='lines+markers', name=activo))
-        fig2.update_layout(title="Pesos óptimos en cada rebalanceo", xaxis_title="Fecha de rebalanceo", yaxis_title="Peso", template="plotly_white")
-        st.plotly_chart(fig2, use_container_width=True)
+            if idx < len(colors):
+                color = colors[idx]
+            else:
+                color = f'rgb({np.random.randint(0,255)},{np.random.randint(0,255)},{np.random.randint(0,255)})'
+            
+            fig_pesos.add_trace(go.Scatter(
+                x=fechas_reb, 
+                y=pesos_array[:, idx] * 100, 
+                mode='lines+markers', 
+                name=activo,
+                line=dict(color=color, width=2),
+                marker=dict(size=6)
+            ))
+        
+        fig_pesos.update_layout(
+            title="Evolución de Pesos por Activo",
+            xaxis_title="Fecha de Rebalanceo", 
+            yaxis_title="Peso (%)", 
+            template="plotly_white",
+            yaxis=dict(range=[0, 100])
+        )
+        
+        st.plotly_chart(fig_pesos, use_container_width=True)
+        
+        # Tabla de pesos finales
+        st.subheader("📋 Pesos Finales del Portafolio")
+        pesos_finales = pesos_array[-1] if len(pesos_array) > 0 else np.ones(len(activos)) / len(activos)
+        
+        df_pesos = pd.DataFrame({
+            'Activo': activos,
+            'Peso Final (%)': pesos_finales * 100,
+            'Peso Inicial (%)': (np.ones(len(activos)) / len(activos)) * 100
+        })
+        
+        st.dataframe(df_pesos, use_container_width=True)
+        
     else:
-        st.info("No hay datos suficientes para mostrar la evolución de pesos.")
+        st.warning("No hay datos suficientes para mostrar la evolución de pesos.")
+    
+    # Análisis de riesgo
+    st.subheader("⚠️ Análisis de Riesgo")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Métricas de Riesgo:**")
+        st.markdown(f"- **VaR 95%**: {np.percentile(np.diff(np.log(portafolio_valor)), 5)*100:.2f}%")
+        st.markdown(f"- **CVaR 95%**: {np.mean([x for x in np.diff(np.log(portafolio_valor)) if x <= np.percentile(np.diff(np.log(portafolio_valor)), 5)])*100:.2f}%")
+        st.markdown(f"- **Skewness**: {stats.skew(np.diff(np.log(portafolio_valor))):.3f}")
+        st.markdown(f"- **Kurtosis**: {stats.kurtosis(np.diff(np.log(portafolio_valor))):.3f}")
+    
+    with col2:
+        st.markdown("**Recomendaciones:**")
+        if metricas['sharpe_ratio'] > 1:
+            st.success("✅ Excelente ratio de Sharpe")
+        elif metricas['sharpe_ratio'] > 0.5:
+            st.info("ℹ️ Buen ratio de Sharpe")
+        else:
+            st.warning("⚠️ Ratio de Sharpe bajo")
+        
+        if metricas['max_drawdown'] > -0.2:
+            st.success("✅ Drawdown controlado")
+        else:
+            st.warning("⚠️ Drawdown alto")
+        
+        if metricas['turnover_promedio'] < 0.1:
+            st.success("✅ Turnover bajo")
+        else:
+            st.warning("⚠️ Turnover alto")
+    
+    # Comparación con benchmark
+    st.subheader("🏆 Comparación con Benchmark")
+    
+    # Calcular retornos del benchmark (equiponderado)
+    retornos_benchmark = precios.pct_change().mean(axis=1).fillna(0)
+    benchmark_acumulado = (1 + retornos_benchmark).cumprod()
+    
+    fig_comp = go.Figure()
+    fig_comp.add_trace(go.Scatter(
+        x=fechas, 
+        y=portafolio_valor, 
+        mode='lines', 
+        name='Portafolio Markowitz',
+        line=dict(color='blue', width=2)
+    ))
+    fig_comp.add_trace(go.Scatter(
+        x=fechas, 
+        y=benchmark_acumulado, 
+        mode='lines', 
+        name='Benchmark (Equiponderado)',
+        line=dict(color='gray', width=2, dash='dash')
+    ))
+    
+    fig_comp.update_layout(
+        title="Comparación con Benchmark",
+        xaxis_title="Fecha", 
+        yaxis_title="Valor Acumulado", 
+        template="plotly_white"
+    )
+    
+    st.plotly_chart(fig_comp, use_container_width=True)
+# --- Sistema de Monitoreo y Alertas en Tiempo Real ---
+def sistema_monitoreo_tiempo_real(portafolio_actual, precios_historicos, configuracion_alertas=None):
+    """
+    Sistema de monitoreo en tiempo real para detectar cambios significativos en el portafolio.
+    
+    Args:
+        portafolio_actual: dict con activos y pesos actuales
+        precios_historicos: DataFrame con precios históricos
+        configuracion_alertas: dict con umbrales de alerta
+    
+    Returns:
+        dict con alertas y recomendaciones
+    """
+    import numpy as np
+    import pandas as pd
+    from datetime import datetime, timedelta
+    
+    if configuracion_alertas is None:
+        configuracion_alertas = {
+            'umbral_drawdown': -0.05,  # -5%
+            'umbral_volatilidad': 0.25,  # 25%
+            'umbral_correlacion': 0.8,  # 80%
+            'umbral_concentracion': 0.3,  # 30%
+            'periodo_analisis': 30  # días
+        }
+    
+    alertas = []
+    recomendaciones = []
+    
+    try:
+        # 1. Análisis de drawdown reciente
+        precios_recientes = precios_historicos.tail(configuracion_alertas['periodo_analisis'])
+        if len(precios_recientes) > 0:
+            # Calcular valor del portafolio reciente
+            activos = list(portafolio_actual.keys())
+            pesos = list(portafolio_actual.values())
+            
+            if len(activos) == len(pesos):
+                valor_portafolio = []
+                for fecha in precios_recientes.index:
+                    valor_fecha = 0
+                    for activo, peso in zip(activos, pesos):
+                        if activo in precios_recientes.columns:
+                            valor_fecha += peso * precios_recientes.loc[fecha, activo]
+                    valor_portafolio.append(valor_fecha)
+                
+                if len(valor_portafolio) > 1:
+                    # Calcular drawdown
+                    peak = np.maximum.accumulate(valor_portafolio)
+                    drawdown = (np.array(valor_portafolio) - peak) / peak
+                    drawdown_actual = drawdown[-1]
+                    
+                    if drawdown_actual < configuracion_alertas['umbral_drawdown']:
+                        alertas.append({
+                            'tipo': 'DRAWDOWN',
+                            'severidad': 'ALTA' if drawdown_actual < -0.1 else 'MEDIA',
+                            'mensaje': f'Drawdown actual: {drawdown_actual:.2%}',
+                            'recomendacion': 'Considerar rebalanceo defensivo'
+                        })
+        
+        # 2. Análisis de volatilidad
+        if len(precios_recientes) > 5:
+            retornos_recientes = precios_recientes.pct_change().dropna()
+            volatilidad_actual = retornos_recientes.std().mean() * np.sqrt(252)
+            
+            if volatilidad_actual > configuracion_alertas['umbral_volatilidad']:
+                alertas.append({
+                    'tipo': 'VOLATILIDAD',
+                    'severidad': 'ALTA' if volatilidad_actual > 0.4 else 'MEDIA',
+                    'mensaje': f'Volatilidad alta: {volatilidad_actual:.2%}',
+                    'recomendacion': 'Considerar activos defensivos'
+                })
+        
+        # 3. Análisis de correlación
+        if len(precios_recientes) > 10:
+            correlaciones = precios_recientes.corr()
+            correlacion_max = correlaciones.max().max()
+            
+            if correlacion_max > configuracion_alertas['umbral_correlacion']:
+                alertas.append({
+                    'tipo': 'CORRELACION',
+                    'severidad': 'MEDIA',
+                    'mensaje': f'Correlación alta entre activos: {correlacion_max:.2f}',
+                    'recomendacion': 'Considerar diversificación adicional'
+                })
+        
+        # 4. Análisis de concentración
+        if len(pesos) > 0:
+            concentracion_max = max(pesos)
+            
+            if concentracion_max > configuracion_alertas['umbral_concentracion']:
+                alertas.append({
+                    'tipo': 'CONCENTRACION',
+                    'severidad': 'ALTA' if concentracion_max > 0.5 else 'MEDIA',
+                    'mensaje': f'Concentración alta: {concentracion_max:.2%}',
+                    'recomendacion': 'Considerar reducir exposición al activo más pesado'
+                })
+        
+        # 5. Análisis de momentum
+        if len(precios_recientes) > 20:
+            momentum_activos = {}
+            for activo in activos:
+                if activo in precios_recientes.columns:
+                    precios_activo = precios_recientes[activo].dropna()
+                    if len(precios_activo) > 10:
+                        momentum_20d = (precios_activo.iloc[-1] / precios_activo.iloc[-20]) - 1
+                        momentum_activos[activo] = momentum_20d
+            
+            # Identificar activos con momentum negativo
+            activos_negativos = {k: v for k, v in momentum_activos.items() if v < -0.1}
+            if activos_negativos:
+                alertas.append({
+                    'tipo': 'MOMENTUM',
+                    'severidad': 'MEDIA',
+                    'mensaje': f'Activos con momentum negativo: {list(activos_negativos.keys())}',
+                    'recomendacion': 'Revisar exposición a activos con momentum negativo'
+                })
+        
+        # 6. Análisis de liquidez (simulado)
+        # En un entorno real, esto se conectaría con datos de volumen
+        alertas.append({
+            'tipo': 'LIQUIDEZ',
+            'severidad': 'BAJA',
+            'mensaje': 'Monitoreo de liquidez activo',
+            'recomendacion': 'Verificar liquidez antes de operaciones grandes'
+        })
+        
+    except Exception as e:
+        alertas.append({
+            'tipo': 'ERROR',
+            'severidad': 'ALTA',
+            'mensaje': f'Error en análisis: {str(e)}',
+            'recomendacion': 'Revisar datos y configuración'
+        })
+    
+    return {
+        'alertas': alertas,
+        'timestamp': datetime.now(),
+        'resumen': {
+            'total_alertas': len(alertas),
+            'alertas_altas': len([a for a in alertas if a['severidad'] == 'ALTA']),
+            'alertas_medias': len([a for a in alertas if a['severidad'] == 'MEDIA']),
+            'alertas_bajas': len([a for a in alertas if a['severidad'] == 'BAJA'])
+        }
+    }
+
+def mostrar_monitoreo_tiempo_real(portafolio_actual, precios_historicos):
+    """
+    Interfaz para mostrar el monitoreo en tiempo real
+    """
+    import streamlit as st
+    import plotly.graph_objects as go
+    
+    st.subheader("🔍 Monitoreo en Tiempo Real")
+    
+    # Configuración de alertas
+    with st.expander("⚙️ Configuración de Alertas", expanded=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            umbral_drawdown = st.slider("Umbral Drawdown (%)", -20, 0, -5) / 100
+            umbral_volatilidad = st.slider("Umbral Volatilidad (%)", 10, 50, 25) / 100
+            umbral_correlacion = st.slider("Umbral Correlación", 0.5, 0.95, 0.8)
+        
+        with col2:
+            umbral_concentracion = st.slider("Umbral Concentración (%)", 10, 50, 30) / 100
+            periodo_analisis = st.slider("Período Análisis (días)", 10, 90, 30)
+    
+    configuracion = {
+        'umbral_drawdown': umbral_drawdown,
+        'umbral_volatilidad': umbral_volatilidad,
+        'umbral_correlacion': umbral_correlacion,
+        'umbral_concentracion': umbral_concentracion,
+        'periodo_analisis': periodo_analisis
+    }
+    
+    # Ejecutar monitoreo
+    if st.button("🔄 Actualizar Monitoreo"):
+        with st.spinner("Analizando portafolio..."):
+            resultado_monitoreo = sistema_monitoreo_tiempo_real(
+                portafolio_actual, precios_historicos, configuracion
+            )
+        
+        # Mostrar resumen
+        st.subheader("📊 Resumen de Alertas")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Alertas", resultado_monitoreo['resumen']['total_alertas'])
+        with col2:
+            st.metric("Alertas Altas", resultado_monitoreo['resumen']['alertas_altas'], 
+                     delta=f"{resultado_monitoreo['resumen']['alertas_altas']}")
+        with col3:
+            st.metric("Alertas Medias", resultado_monitoreo['resumen']['alertas_medias'])
+        with col4:
+            st.metric("Alertas Bajas", resultado_monitoreo['resumen']['alertas_bajas'])
+        
+        # Mostrar alertas detalladas
+        st.subheader("🚨 Alertas Detalladas")
+        
+        for alerta in resultado_monitoreo['alertas']:
+            if alerta['severidad'] == 'ALTA':
+                st.error(f"🔴 **{alerta['tipo']}**: {alerta['mensaje']}")
+                st.info(f"💡 **Recomendación**: {alerta['recomendacion']}")
+            elif alerta['severidad'] == 'MEDIA':
+                st.warning(f"🟡 **{alerta['tipo']}**: {alerta['mensaje']}")
+                st.info(f"💡 **Recomendación**: {alerta['recomendacion']}")
+            else:
+                st.info(f"🟢 **{alerta['tipo']}**: {alerta['mensaje']}")
+                st.info(f"💡 **Recomendación**: {alerta['recomendacion']}")
+        
+        # Gráfico de evolución reciente
+        st.subheader("📈 Evolución Reciente del Portafolio")
+        
+        if len(precios_historicos) > periodo_analisis:
+            precios_recientes = precios_historicos.tail(periodo_analisis)
+            
+            # Calcular valor del portafolio
+            activos = list(portafolio_actual.keys())
+            pesos = list(portafolio_actual.values())
+            
+            if len(activos) == len(pesos):
+                valor_portafolio = []
+                fechas = []
+                
+                for fecha in precios_recientes.index:
+                    valor_fecha = 0
+                    for activo, peso in zip(activos, pesos):
+                        if activo in precios_recientes.columns:
+                            valor_fecha += peso * precios_recientes.loc[fecha, activo]
+                    valor_portafolio.append(valor_fecha)
+                    fechas.append(fecha)
+                
+                if len(valor_portafolio) > 1:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=fechas, 
+                        y=valor_portafolio, 
+                        mode='lines+markers',
+                        name='Valor Portafolio',
+                        line=dict(color='blue', width=2)
+                    ))
+                    
+                    fig.update_layout(
+                        title="Evolución Reciente del Portafolio",
+                        xaxis_title="Fecha",
+                        yaxis_title="Valor",
+                        template="plotly_white"
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        # Mostrar timestamp
+        st.caption(f"Última actualización: {resultado_monitoreo['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+
 # --- FIN FUNCIONES ROBUSTAS ---
 
 def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
