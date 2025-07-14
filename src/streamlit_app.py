@@ -3080,17 +3080,42 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         tipos = list(set([a.get('titulo',{}).get('tipo','Acción') for a in activos_raw]))
         tipo_sel = st.multiselect("Tipos de activo", tipos, default=tipos)
         cant = st.slider("Cantidad de activos aleatorios", 3, 15, 5)
-        # Simulación simple: tomar random de los tipos seleccionados
-        import random
-        universe_activos = random.sample([
+        # --- FILTRADO ROBUSTO DE ACTIVOS ALEATORIOS ---
+        candidatos = [
             {'simbolo': a.get('titulo',{}).get('simbolo'),
              'mercado': a.get('titulo',{}).get('mercado'),
              'tipo': a.get('titulo',{}).get('tipo')}
-            for a in activos_raw if a.get('titulo',{}).get('tipo') in tipo_sel
-        ], min(cant, len(activos_raw)))
-        if not universe_activos:
-            st.warning("No hay suficientes activos para el universo aleatorio seleccionado.")
+            for a in activos_raw if a.get('titulo',{}).get('tipo') in tipo_sel and a.get('titulo',{}).get('simbolo')
+        ]
+        activos_validos = []
+        fecha_desde = st.session_state.fecha_desde
+        fecha_hasta = st.session_state.fecha_hasta
+        st.info("Validando historia de los activos aleatorios...")
+        for candidato in random.sample(candidatos, min(len(candidatos), cant*2)):
+            try:
+                df = obtener_serie_historica_iol(
+                    st.session_state.token_acceso,
+                    candidato['mercado'],
+                    candidato['simbolo'],
+                    fecha_desde,
+                    fecha_hasta
+                )
+                if df is not None and not df.empty:
+                    # Debe tener al menos 180 días de historia
+                    if len(df) >= 180:
+                        precios = df['precio'] if 'precio' in df.columns else None
+                        if precios is not None:
+                            # No debe ser constante ni tener más de 10% de nulos
+                            if precios.nunique() > 1 and precios.isnull().mean() < 0.1:
+                                activos_validos.append(candidato)
+                if len(activos_validos) >= cant:
+                    break
+            except Exception:
+                continue
+        if len(activos_validos) < 2:
+            st.warning("No hay suficientes activos con historia suficiente para optimizar. Pruebe aumentando el rango de fechas o eligiendo más activos.")
             return
+        universe_activos = activos_validos[:cant]
 
     fecha_desde = st.session_state.fecha_desde
     fecha_hasta = st.session_state.fecha_hasta
@@ -3112,6 +3137,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     manager_inst = PortfolioManager(universe_activos, token_acceso, fecha_desde, fecha_hasta)
     if not manager_inst.load_data():
         st.error("No se pudieron cargar los datos históricos para optimización.")
+        return
+    # Validar matriz de retornos antes de optimizar
+    if manager_inst.returns is None or manager_inst.returns.shape[1] < 2 or manager_inst.returns.shape[0] < 10:
+        st.warning("No hay suficientes datos históricos comunes entre los activos seleccionados para optimizar. Pruebe aumentando el rango de fechas o eligiendo más activos.")
         return
 
     resultados = {}
