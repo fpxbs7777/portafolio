@@ -3056,6 +3056,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'mercado': mercado
             }
             valor_total += valuacion
+    # Obtener saldo disponible de las cuentas
+    estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+    saldo_disponible = 0
+    if estado_cuenta and 'cuentas' in estado_cuenta:
+        for cuenta in estado_cuenta['cuentas']:
+            disponible = cuenta.get('disponible', 0)
+            try:
+                saldo_disponible += float(disponible)
+            except Exception:
+                continue
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
     cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
@@ -3081,8 +3091,19 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         st.info("Seleccione el universo aleatorio de mercado real")
         paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
         paneles_seleccionados = st.multiselect("Paneles de universo aleatorio", paneles, default=paneles)
+        # --- NUEVO: Selector de capital ---
+        capital_mode = st.radio(
+            "¿Cómo definir el capital disponible?",
+            ["Manual", "Saldo valorizado + disponible (actual)"]
+        )
+        capital_ars = 100000
+        capital_auto = valor_total + saldo_disponible
+        if capital_mode == "Manual":
+            capital_ars = st.number_input("Capital disponible para universo aleatorio (ARS)", min_value=10000, value=100000)
+        else:
+            st.success(f"Capital valorizado + disponible: ${capital_auto:,.2f}")
+            capital_ars = capital_auto
         cantidad_activos = st.slider("Cantidad de activos por panel", 2, 10, 5)
-        capital_ars = st.number_input("Capital disponible para universo aleatorio (ARS)", min_value=10000, value=100000)
         fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
         fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
         ajustada = "SinAjustar"
