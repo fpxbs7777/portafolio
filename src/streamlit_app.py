@@ -13,8 +13,69 @@ import random
 import warnings
 import streamlit.components.v1 as components
 from scipy.stats import linregress
+import time
+import hashlib
+import pickle
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 
 warnings.filterwarnings('ignore')
+
+# Configuración de caché
+CACHE_DIR = "cache"
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
+
+def get_cache_key(func_name, *args, **kwargs):
+    """Genera una clave única para el caché"""
+    key_data = f"{func_name}_{str(args)}_{str(sorted(kwargs.items()))}"
+    return hashlib.md5(key_data.encode()).hexdigest()
+
+def load_from_cache(cache_key):
+    """Carga datos desde el caché"""
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
+        except:
+            pass
+    return None
+
+def save_to_cache(cache_key, data):
+    """Guarda datos en el caché"""
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
+    try:
+        with open(cache_file, 'wb') as f:
+            pickle.dump(data, f)
+    except:
+        pass
+
+# Configuración de Streamlit para mejor rendimiento
+st.set_page_config(
+    page_title="Análisis de Portafolio IOL",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Configuración de caché de Streamlit
+@st.cache_data(ttl=3600)  # 1 hora de caché
+def cached_api_call(url, headers, timeout=10):
+    """Realiza llamadas API con caché"""
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        return None
+
+# Configuración de sesión para datos persistentes
+if 'cache_enabled' not in st.session_state:
+    st.session_state.cache_enabled = True
+if 'api_timeout' not in st.session_state:
+    st.session_state.api_timeout = 15
 
 # Configuración de la página con aspecto profesional
 st.set_page_config(
@@ -1511,9 +1572,11 @@ def obtener_valor_fci_actual(token_portador, simbolo_fci):
 
 
 
+@st.cache_data(ttl=1800)  # 30 minutos de caché
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
     Obtiene la serie histórica de precios para un activo específico desde la API de InvertirOnline.
+    Versión optimizada con caché y mejor manejo de errores.
     
     Args:
         token_portador (str): Token de autenticación de la API
@@ -1527,42 +1590,31 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
     try:
-        print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
-        
         # Endpoint para FCIs (manejo especial)
         if mercado.upper() == 'FCI':
-            print("Es un FCI, usando función específica")
             return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
         
         # Construir URL según el tipo de activo y mercado
         url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
         
         headers = {
-            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
+            'Authorization': f'Bearer {token_portador}',
             'Accept': 'application/json'
         }
         
-        # Realizar la solicitud
-        response = requests.get(url, headers={
-            'Authorization': f'Bearer {token_portador}',
-            'Accept': 'application/json'
-        }, timeout=30)
+        # Realizar la solicitud con timeout reducido
+        timeout = st.session_state.get('api_timeout', 15)
+        response = requests.get(url, headers=headers, timeout=timeout)
         
         # Verificar el estado de la respuesta
-        print(f"Estado de la respuesta: {response.status_code}")
-        response.raise_for_status()
+        if response.status_code != 200:
+            return None
         
         # Procesar la respuesta
         data = response.json()
-        print(f"Tipo de datos recibidos: {type(data)}")
         
         # Procesar la respuesta según el formato esperado
-        if isinstance(data, list):
-            print(f"Se recibió una lista con {len(data)} elementos")
-            if data:
-                print(f"Primer elemento: {data[0]}")
-                
+        if isinstance(data, list) and data:
             # Formato estándar para series históricas
             fechas = []
             precios = []
@@ -1572,36 +1624,30 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                     # Manejar diferentes formatos de fecha
                     fecha_str = item.get('fecha') or item.get('fechaHora')
                     if not fecha_str:
-                        print(f"  - Item sin fecha: {item}")
                         continue
                         
                     # Manejar diferentes formatos de precio
                     precio = item.get('ultimoPrecio') or item.get('precioCierre') or item.get('precio')
                     if precio is None:
-                        print(f"  - Item sin precio: {item}")
                         continue
                         
                     # Convertir fecha
                     try:
                         fecha = parse_datetime_flexible(fecha_str)
                         if pd.isna(fecha):
-                            print(f"  - Fecha inválida: {fecha_str}")
                             continue
                             
                         precio_float = float(precio)
                         if precio_float <= 0:
-                            print(f"  - Precio inválido: {precio}")
                             continue
                             
                         fechas.append(fecha)
                         precios.append(precio_float)
                         
-                    except (ValueError, TypeError) as e:
-                        print(f"  - Error al convertir datos: {e}")
+                    except (ValueError, TypeError):
                         continue
                         
-                except Exception as e:
-                    print(f"  - Error inesperado al procesar item: {e}")
+                except Exception:
                     continue
             
             if fechas and precios:
@@ -1609,48 +1655,22 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 # Eliminar duplicados manteniendo el último
                 df = df.drop_duplicates(subset=['fecha'], keep='last')
                 df = df.sort_values('fecha')
-                print(f"Datos procesados: {len(df)} registros válidos")
                 return df
-            else:
-                print("No se encontraron datos válidos en la respuesta")
-                return None
                 
         elif isinstance(data, dict):
-            print(f"Se recibió un diccionario: {data.keys()}")
             # Para respuestas que son un solo valor (ej: MEP)
             precio = data.get('ultimoPrecio') or data.get('precioCierre') or data.get('precio')
             if precio is not None:
-                print(f"Datos de un solo punto: precio={precio}")
                 return pd.DataFrame({
                     'fecha': [pd.Timestamp.now(tz='UTC')],
                     'precio': [float(precio)]
                 })
-            else:
-                print("No se encontró precio en la respuesta")
-        else:
-            print(f"Tipo de respuesta no manejado: {type(data)}")
             
-        print(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
         return None
         
-    except requests.exceptions.RequestException as e:
-        error_msg = f"Error de conexión para {simbolo} en {mercado}: {str(e)}"
-        if hasattr(e, 'response') and e.response is not None:
-            error_msg += f" - Status: {e.response.status_code}"
-            try:
-                error_msg += f" - Respuesta: {e.response.text[:200]}"
-            except:
-                pass
-        print(error_msg)
-        st.warning(error_msg)
+    except requests.exceptions.RequestException:
         return None
-    except Exception as e:
-        error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
-        print(error_msg)
-        import traceback
-        traceback.print_exc()
-        st.error(error_msg)
-        return None
+    except Exception:
         return None
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
@@ -2168,40 +2188,69 @@ class PortfolioManager:
                 st.error("❌ No se encontraron símbolos válidos para procesar")
                 return False
             
-            # Obtener datos históricos
+            # Obtener datos históricos en paralelo
             data_frames = {}
             
-            with st.spinner("Obteniendo datos históricos..."):
-                for simbolo, mercado in zip(symbols, markets):
-                    df = obtener_serie_historica_iol(
-                        self.token,
-                        mercado,
-                        simbolo,
-                        self.fecha_desde,
-                        self.fecha_hasta
-                    )
+            def load_single_asset(simbolo, mercado):
+                """Carga datos para un solo activo"""
+                df = obtener_serie_historica_iol(
+                    self.token,
+                    mercado,
+                    simbolo,
+                    self.fecha_desde,
+                    self.fecha_hasta
+                )
+                
+                if df is not None and not df.empty:
+                    # Usar la columna de último precio si está disponible
+                    precio_columns = ['ultimoPrecio', 'ultimo_precio', 'precio']
+                    precio_col = next((col for col in precio_columns if col in df.columns), None)
                     
-                    if df is not None and not df.empty:
-                        # Usar la columna de último precio si está disponible
-                        precio_columns = ['ultimoPrecio', 'ultimo_precio', 'precio']
-                        precio_col = next((col for col in precio_columns if col in df.columns), None)
+                    if precio_col:
+                        df = df[['fecha', precio_col]].copy()
+                        df.columns = ['fecha', 'precio']  # Normalizar el nombre de la columna
                         
-                        if precio_col:
-                            df = df[['fecha', precio_col]].copy()
-                            df.columns = ['fecha', 'precio']  # Normalizar el nombre de la columna
-                            
-                            # Convertir fechaHora a fecha y asegurar que sea única
-                            df['fecha'] = pd.to_datetime(df['fecha']).dt.date
-                            
-                            # Eliminar duplicados manteniendo el último valor
-                            df = df.drop_duplicates(subset=['fecha'], keep='last')
-                            
-                            df.set_index('fecha', inplace=True)
+                        # Convertir fechaHora a fecha y asegurar que sea única
+                        df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+                        
+                        # Eliminar duplicados manteniendo el último valor
+                        df = df.drop_duplicates(subset=['fecha'], keep='last')
+                        
+                        df.set_index('fecha', inplace=True)
+                        return simbolo, df
+                
+                return simbolo, None
+            
+            # Cargar datos en paralelo
+            with st.spinner("Obteniendo datos históricos en paralelo..."):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # Usar ThreadPoolExecutor para carga paralela
+                with ThreadPoolExecutor(max_workers=min(5, len(symbols))) as executor:
+                    # Crear tareas para cada activo
+                    future_to_symbol = {
+                        executor.submit(load_single_asset, simbolo, mercado): simbolo 
+                        for simbolo, mercado in zip(symbols, markets)
+                    }
+                    
+                    completed = 0
+                    for future in as_completed(future_to_symbol):
+                        simbolo, df = future.result()
+                        completed += 1
+                        
+                        # Actualizar progreso
+                        progress = completed / len(symbols)
+                        progress_bar.progress(progress)
+                        status_text.text(f"Cargando... {completed}/{len(symbols)} activos")
+                        
+                        if df is not None:
                             data_frames[simbolo] = df
                         else:
-                            st.warning(f"⚠️ No se encontró columna de precio válida para {simbolo}")
-                    else:
-                        st.warning(f"⚠️ No se pudieron obtener datos para {simbolo} en {mercado}")
+                            st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+                
+                progress_bar.progress(1.0)
+                status_text.text("✅ Carga completada")
             
             if not data_frames:
                 st.error("❌ No se pudieron obtener datos históricos para ningún activo")
@@ -4537,7 +4586,7 @@ def mostrar_estado_cuenta(estado_cuenta):
 def mostrar_cotizaciones_mercado(token_acceso):
     st.markdown("### 💱 Cotizaciones y Mercado")
     
-    tab1, tab2, tab3 = st.tabs(["💰 Cotización MEP", "🏦 Tasas de Caución", "📈 Gráficos con Fechas"])
+    tab1, tab2, tab3 = st.tabs(["💰 Cotización MEP", "📈 Gráficos con Fechas", "📊 Cotizaciones Avanzadas"])
     
     with tab1:
         with st.form("mep_form"):
@@ -4681,7 +4730,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
     # Configuración de pestañas
-    tab1, tab2, tab3 = st.tabs(["🎯 Optimización Individual", "🔄 Selección Aleatoria", "📊 Comparación Múltiple"])
+    tab1, tab2 = st.tabs(["🎯 Optimización Individual", "🔄 Selección Aleatoria"])
     
     with tab1:
         st.markdown("#### 🎯 Optimización de Portafolio Individual")
@@ -5064,126 +5113,126 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 
                 progress_bar.progress(50)
                 status_text.text("📊 Cargando datos históricos...")
+                
+                if activos_para_optimizacion:
+                    progress_bar.progress(75)
+                    status_text.text("🎯 Optimizando portafolio...")
                     
-                    if activos_para_optimizacion:
-                        progress_bar.progress(75)
-                        status_text.text("🎯 Optimizando portafolio...")
+                    st.success(f"✅ Seleccionados {len(activos_para_optimizacion)} activos aleatoriamente")
+                    
+                    # Mostrar activos seleccionados
+                    st.markdown("#### 📋 Activos Seleccionados Aleatoriamente")
+                    activos_seleccionados_info = []
+                    for activo in activos_para_optimizacion:
+                        activos_seleccionados_info.append({
+                            'Símbolo': activo['simbolo'],
+                            'Mercado': activo['mercado'],
+                            'Tipo': activo['tipo']
+                        })
+                    
+                    df_seleccionados = pd.DataFrame(activos_seleccionados_info)
+                    st.dataframe(df_seleccionados, use_container_width=True)
+                    
+                    # Optimizar portafolio con activos seleccionados
+                    manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, 
+                                                 st.session_state.fecha_desde, st.session_state.fecha_hasta)
+                    
+                    if manager_inst.load_data():
+                        progress_bar.progress(90)
+                        status_text.text("📈 Calculando métricas...")
+                        # Aplicar optimización
+                        weights = optimizar_portafolio_avanzado(
+                            manager_inst.returns_data, manager_inst.cov_matrix, 
+                            metodo_optimizacion_aleatoria
+                        )
                         
-                        st.success(f"✅ Seleccionados {len(activos_para_optimizacion)} activos aleatoriamente")
+                        metricas = calcular_metricas_portafolio_optimizado(
+                            weights, manager_inst.returns_data, manager_inst.cov_matrix
+                        )
                         
-                        # Mostrar activos seleccionados
-                        st.markdown("#### 📋 Activos Seleccionados Aleatoriamente")
-                        activos_seleccionados_info = []
-                        for activo in activos_para_optimizacion:
-                            activos_seleccionados_info.append({
-                                'Símbolo': activo['simbolo'],
-                                'Mercado': activo['mercado'],
-                                'Tipo': activo['tipo']
-                            })
+                        # Mostrar resultados
+                        col1, col2 = st.columns(2)
                         
-                        df_seleccionados = pd.DataFrame(activos_seleccionados_info)
-                        st.dataframe(df_seleccionados, use_container_width=True)
-                        
-                        # Optimizar portafolio con activos seleccionados
-                        manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, 
-                                                     st.session_state.fecha_desde, st.session_state.fecha_hasta)
-                        
-                        if manager_inst.load_data():
-                            progress_bar.progress(90)
-                            status_text.text("📈 Calculando métricas...")
-                            # Aplicar optimización
-                            weights = optimizar_portafolio_avanzado(
-                                manager_inst.returns_data, manager_inst.cov_matrix, 
-                                metodo_optimizacion_aleatoria
-                            )
-                            
-                            metricas = calcular_metricas_portafolio_optimizado(
-                                weights, manager_inst.returns_data, manager_inst.cov_matrix
-                            )
-                            
-                            # Mostrar resultados
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.markdown("#### 📊 Pesos del Portafolio Optimizado")
-                                if hasattr(manager_inst, 'rics'):
-                                    weights_df = pd.DataFrame({
-                                        'Activo': manager_inst.rics,
-                                        'Peso (%)': weights * 100
-                                    })
-                                    weights_df = weights_df.sort_values('Peso (%)', ascending=False)
-                                    st.dataframe(weights_df, use_container_width=True)
-                            
-                            with col2:
-                                st.markdown("#### 📈 Métricas del Portafolio")
-                                st.metric("Retorno Anual", f"{metricas['mean_return']:.2%}")
-                                st.metric("Volatilidad Anual", f"{metricas['volatility']:.2%}")
-                                st.metric("Ratio de Sharpe", f"{metricas['sharpe_ratio']:.4f}")
-                                st.metric("VaR 95%", f"{metricas['var_95']:.4f}")
-                            
-                            # Gráfico de pesos
+                        with col1:
+                            st.markdown("#### 📊 Pesos del Portafolio Optimizado")
                             if hasattr(manager_inst, 'rics'):
-                                st.markdown("#### 🥧 Distribución de Pesos")
-                                fig_pie = go.Figure(data=[go.Pie(
-                                    labels=manager_inst.rics,
-                                    values=weights,
-                                    textinfo='label+percent',
-                                    hole=0.4,
-                                    marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                                )])
-                                fig_pie.update_layout(
-                                    title="Distribución de Activos Seleccionados Aleatoriamente",
-                                    template='plotly_white'
-                                )
-                                st.plotly_chart(fig_pie, use_container_width=True)
-                            
-                            # Mostrar recomendaciones de rebalanceo
-                            st.markdown("#### 💡 Recomendaciones de Rebalanceo")
-                            
-                            # Calcular diferencias con el portafolio actual
-                            activos_actuales = {activo['simbolo']: activo.get('valorizado', 0) for activo in activos_raw}
-                            valor_total_actual = sum(activos_actuales.values())
-                            
-                            if valor_total_actual > 0:
-                                recomendaciones = []
-                                for i, simbolo in enumerate(manager_inst.rics):
-                                    peso_optimizado = weights[i] * 100
-                                    valor_actual = activos_actuales.get(simbolo, 0)
-                                    peso_actual = (valor_actual / valor_total_actual) * 100 if valor_total_actual > 0 else 0
-                                    diferencia = peso_optimizado - peso_actual
-                                    
-                                    if abs(diferencia) > 1:  # Solo mostrar diferencias significativas
-                                        accion = "Comprar" if diferencia > 0 else "Vender"
-                                        recomendaciones.append({
-                                            'Activo': simbolo,
-                                            'Peso Actual (%)': f"{peso_actual:.1f}%",
-                                            'Peso Optimizado (%)': f"{peso_optimizado:.1f}%",
-                                            'Diferencia (%)': f"{diferencia:+.1f}%",
-                                            'Acción': accion
-                                        })
-                                
-                                if recomendaciones:
-                                    df_recomendaciones = pd.DataFrame(recomendaciones)
-                                    st.dataframe(df_recomendaciones, use_container_width=True)
-                                else:
-                                    st.success("✅ El portafolio actual está bien balanceado")
-                                                            else:
-                                    st.warning("No se pudo calcular las recomendaciones de rebalanceo")
-                                
-                            progress_bar.progress(100)
-                            status_text.text("✅ Proceso completado exitosamente!")
-                            
-                        else:
-                            st.error("❌ No se pudieron cargar los datos para optimización")
-                    else:
-                        st.warning("No se pudieron seleccionar activos válidos del portafolio")
+                                weights_df = pd.DataFrame({
+                                    'Activo': manager_inst.rics,
+                                    'Peso (%)': weights * 100
+                                })
+                                weights_df = weights_df.sort_values('Peso (%)', ascending=False)
+                                st.dataframe(weights_df, use_container_width=True)
                         
-                except Exception as e:
-                    st.error(f"❌ Error en selección aleatoria: {str(e)}")
-                    progress_bar.progress(0)
-                    status_text.text("❌ Error en el proceso")
+                        with col2:
+                            st.markdown("#### 📈 Métricas del Portafolio")
+                            st.metric("Retorno Anual", f"{metricas['mean_return']:.2%}")
+                            st.metric("Volatilidad Anual", f"{metricas['volatility']:.2%}")
+                            st.metric("Ratio de Sharpe", f"{metricas['sharpe_ratio']:.4f}")
+                            st.metric("VaR 95%", f"{metricas['var_95']:.4f}")
+                        
+                        # Gráfico de pesos
+                        if hasattr(manager_inst, 'rics'):
+                            st.markdown("#### 🥧 Distribución de Pesos")
+                            fig_pie = go.Figure(data=[go.Pie(
+                                labels=manager_inst.rics,
+                                values=weights,
+                                textinfo='label+percent',
+                                hole=0.4,
+                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                            )])
+                            fig_pie.update_layout(
+                                title="Distribución de Activos Seleccionados Aleatoriamente",
+                                template='plotly_white'
+                            )
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                        
+                        # Mostrar recomendaciones de rebalanceo
+                        st.markdown("#### 💡 Recomendaciones de Rebalanceo")
+                        
+                        # Calcular diferencias con el portafolio actual
+                        activos_actuales = {activo['simbolo']: activo.get('valorizado', 0) for activo in activos_raw}
+                        valor_total_actual = sum(activos_actuales.values())
+                        
+                        if valor_total_actual > 0:
+                            recomendaciones = []
+                            for i, simbolo in enumerate(manager_inst.rics):
+                                peso_optimizado = weights[i] * 100
+                                valor_actual = activos_actuales.get(simbolo, 0)
+                                peso_actual = (valor_actual / valor_total_actual) * 100 if valor_total_actual > 0 else 0
+                                diferencia = peso_optimizado - peso_actual
+                                
+                                if abs(diferencia) > 1:  # Solo mostrar diferencias significativas
+                                    accion = "Comprar" if diferencia > 0 else "Vender"
+                                    recomendaciones.append({
+                                        'Activo': simbolo,
+                                        'Peso Actual (%)': f"{peso_actual:.1f}%",
+                                        'Peso Optimizado (%)': f"{peso_optimizado:.1f}%",
+                                        'Diferencia (%)': f"{diferencia:+.1f}%",
+                                        'Acción': accion
+                                    })
+                            
+                            if recomendaciones:
+                                df_recomendaciones = pd.DataFrame(recomendaciones)
+                                st.dataframe(df_recomendaciones, use_container_width=True)
+                            else:
+                                st.success("✅ El portafolio actual está bien balanceado")
+                        else:
+                            st.warning("No se pudo calcular las recomendaciones de rebalanceo")
+                        
+                        progress_bar.progress(100)
+                        status_text.text("✅ Proceso completado exitosamente!")
+                        
+                    else:
+                        st.error("❌ No se pudieron cargar los datos para optimización")
+                else:
+                    st.warning("No se pudieron seleccionar activos válidos del portafolio")
+                    
+            except Exception as e:
+                st.error(f"❌ Error en selección aleatoria: {str(e)}")
+                progress_bar.progress(0)
+                status_text.text("❌ Error en el proceso")
     
-    with tab3:
+    with tab2:
         st.markdown("#### 📊 Comparación de Múltiples Portafolios")
         
         # Obtener lista de clientes para comparación
@@ -5249,171 +5298,102 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         st.warning("No se encontraron símbolos válidos")
         return
     
-    # Opciones de visualización
-    tipo_visualizacion = st.radio(
-        "Tipo de visualización:",
-        ["📈 TradingView (Interactivo)", "📊 Gráficos con Datos IOL"],
-        horizontal=True
-    )
-    
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        help="Seleccione un activo de su portafolio para realizar análisis técnico con TradingView"
     )
     
     if simbolo_seleccionado:
-        if tipo_visualizacion == "📈 TradingView (Interactivo)":
-            st.info(f"Mostrando gráfico TradingView para: {simbolo_seleccionado}")
-            
-            # Widget de TradingView
-            tv_widget = f"""
-            <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
-            <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-            <script type="text/javascript">
-            new TradingView.widget({{
-              "container_id": "tradingview_{simbolo_seleccionado}",
-              "width": "100%",
-              "height": 650,
-              "symbol": "{simbolo_seleccionado}",
-              "interval": "D",
-              "timezone": "America/Argentina/Buenos_Aires",
-              "theme": "light",
-              "style": "1",
-              "locale": "es",
-              "toolbar_bg": "#f4f7f9",
-              "enable_publishing": false,
-              "allow_symbol_change": true,
-              "hide_side_toolbar": false,
-              "studies": [
-                "MACD@tv-basicstudies",
-                "RSI@tv-basicstudies",
-                "StochasticRSI@tv-basicstudies",
-                "Volume@tv-basicstudies",
-                "Moving Average@tv-basicstudies"
-              ],
-              "drawings_access": {{
-                "type": "black",
-                "tools": [
-                  {{"name": "Trend Line"}},
-                  {{"name": "Horizontal Line"}},
-                  {{"name": "Fibonacci Retracement"}},
-                  {{"name": "Rectangle"}},
-                  {{"name": "Text"}}
-                ]
-              }},
-              "enabled_features": [
-                "study_templates",
-                "header_indicators",
-                "header_compare",
-                "header_screenshot",
-                "header_fullscreen_button",
-                "header_settings",
-                "header_symbol_search"
-              ]
-            }});
-            </script>
-            """
-            components.html(tv_widget, height=680)
+        st.info(f"📈 Mostrando gráfico TradingView para: {simbolo_seleccionado}")
         
-        else:
-            # Gráficos con datos de IOL y fechas reales
-            st.info(f"Mostrando gráficos con datos IOL para: {simbolo_seleccionado}")
+        # Widget de TradingView
+        tv_widget = f"""
+        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+          "container_id": "tradingview_{simbolo_seleccionado}",
+          "width": "100%",
+          "height": 650,
+          "symbol": "{simbolo_seleccionado}",
+          "interval": "D",
+          "timezone": "America/Argentina/Buenos_Aires",
+          "theme": "light",
+          "style": "1",
+          "locale": "es",
+          "toolbar_bg": "#f4f7f9",
+          "enable_publishing": false,
+          "allow_symbol_change": true,
+          "hide_side_toolbar": false,
+          "studies": [
+            "MACD@tv-basicstudies",
+            "RSI@tv-basicstudies",
+            "StochasticRSI@tv-basicstudies",
+            "Volume@tv-basicstudies",
+            "Moving Average@tv-basicstudies"
+          ],
+          "drawings_access": {{
+            "type": "black",
+            "tools": [
+              {{"name": "Trend Line"}},
+              {{"name": "Horizontal Line"}},
+              {{"name": "Fibonacci Retracement"}},
+              {{"name": "Rectangle"}},
+              {{"name": "Text"}}
+            ]
+          }},
+          "enabled_features": [
+            "study_templates",
+            "header_indicators",
+            "header_compare",
+            "header_screenshot",
+            "header_fullscreen_button",
+            "header_settings",
+            "header_symbol_search"
+          ]
+        }});
+        </script>
+        """
+        components.html(tv_widget, height=680)
+        
+        # Información adicional sobre el análisis técnico
+        st.markdown("#### 💡 Información del Análisis Técnico")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            **📊 Indicadores Incluidos:**
+            - **MACD**: Convergencia/Divergencia de Medias Móviles
+            - **RSI**: Índice de Fuerza Relativa
+            - **Stochastic RSI**: Oscilador estocástico del RSI
+            - **Volume**: Volumen de operaciones
+            - **Moving Average**: Medias móviles
             
-            # Obtener datos históricos
-            fecha_desde = st.session_state.fecha_desde
-            fecha_hasta = st.session_state.fecha_hasta
+            **🎯 Herramientas Disponibles:**
+            - Líneas de tendencia
+            - Líneas horizontales
+            - Retrocesos de Fibonacci
+            - Rectángulos y texto
+                         """)
+        
+        with col2:
+            st.markdown("""
+            **🔧 Funcionalidades:**
+            - Cambio de símbolo
+            - Captura de pantalla
+            - Modo pantalla completa
+            - Búsqueda de símbolos
+            - Plantillas de estudios
+            - Comparación de activos
             
-            # Buscar el mercado del activo seleccionado
-            mercado_activo = None
-            for activo in activos:
-                titulo = activo.get('titulo', {})
-                if titulo.get('simbolo') == simbolo_seleccionado:
-                    mercado_activo = titulo.get('mercado', 'BCBA')
-                    break
-            
-            try:
-                datos_historicos = obtener_serie_historica_iol(token_acceso, mercado_activo, simbolo_seleccionado, fecha_desde, fecha_hasta)
-                
-                if datos_historicos and isinstance(datos_historicos, list) and len(datos_historicos) > 0:
-                    df = pd.DataFrame(datos_historicos)
-                    
-                    # Buscar columna de precio
-                    col_precio = None
-                    for col in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
-                        if col in df.columns:
-                            col_precio = col
-                            break
-                    
-                    if col_precio and 'fecha' in df.columns:
-                        # Convertir fechas
-                        df['fecha'] = pd.to_datetime(df['fecha'])
-                        df = df.sort_values('fecha')
-                        
-                        # Gráfico de precios con fechas reales
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=df['fecha'],
-                            y=df[col_precio],
-                            mode='lines',
-                            name=f'Precio {simbolo_seleccionado}',
-                            line=dict(color='#1f77b4', width=2)
-                        ))
-                        
-                        fig.update_layout(
-                            title=f"Evolución de Precios - {simbolo_seleccionado}",
-                            xaxis_title="Fecha",
-                            yaxis_title="Precio",
-                            template='plotly_white',
-                            height=400
-                        )
-                        
-                        # Configurar eje X para mostrar fechas reales
-                        fig = configurar_eje_fechas(fig)
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Gráfico de volumen si está disponible
-                        if 'volumen' in df.columns:
-                            fig_vol = go.Figure()
-                            fig_vol.add_trace(go.Bar(
-                                x=df['fecha'],
-                                y=df['volumen'],
-                                name=f'Volumen {simbolo_seleccionado}',
-                                marker_color='#ff7f0e'
-                            ))
-                            
-                            fig_vol.update_layout(
-                                title=f"Volumen de Operaciones - {simbolo_seleccionado}",
-                                xaxis_title="Fecha",
-                                yaxis_title="Volumen",
-                                template='plotly_white',
-                                height=300
-                            )
-                            
-                            # Configurar eje X para mostrar fechas reales
-                            fig_vol = configurar_eje_fechas(fig_vol)
-                            
-                            st.plotly_chart(fig_vol, use_container_width=True)
-                        
-                        # Métricas básicas
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Precio Actual", f"${df[col_precio].iloc[-1]:.2f}")
-                        with col2:
-                            st.metric("Precio Máximo", f"${df[col_precio].max():.2f}")
-                        with col3:
-                            st.metric("Precio Mínimo", f"${df[col_precio].min():.2f}")
-                        
-                        # Información de fechas
-                        st.info(f"📅 Período analizado: {df['fecha'].min().strftime('%d/%m/%Y')} - {df['fecha'].max().strftime('%d/%m/%Y')}")
-                        
-                    else:
-                        st.warning(f"No se encontraron datos de precios para {simbolo_seleccionado}")
-                else:
-                    st.warning(f"No se pudieron obtener datos históricos para {simbolo_seleccionado}")
-                    
-            except Exception as e:
-                st.error(f"Error al obtener datos para {simbolo_seleccionado}: {str(e)}")
+            **📈 Intervalos Disponibles:**
+            - Diario (D)
+            - Semanal (W)
+            - Mensual (M)
+            - Intradiario (1m, 5m, 15m, 1h)
+            """)
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
@@ -5430,8 +5410,15 @@ def mostrar_movimientos_asesor():
         st.warning("No se encontraron clientes")
         return
     
-    # Formulario de búsqueda
-    with st.form("form_buscar_movimientos"):
+    # Crear tabs para el panel del asesor
+    tab1, tab2 = st.tabs(["📋 Gestión de Clientes", "📊 Movimientos"])
+    
+    with tab1:
+        mostrar_gestion_clientes()
+    
+    with tab2:
+        # Formulario de búsqueda
+        with st.form("form_buscar_movimientos"):
         st.subheader("🔍 Buscar Movimientos")
         
         col1, col2 = st.columns(2)
@@ -6636,18 +6623,13 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "👥 Gestión de Clientes", "📊 Análisis de Portafolio", "🧠 Test del Inversor", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧠 Test del Inversor", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
             # Mostrar la página seleccionada
             if opcion == "🏠 Inicio":
                 st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "👥 Gestión de Clientes":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_gestion_clientes()
-                else:
-                    st.warning("Por favor inicie sesión para gestionar clientes")
             elif opcion == "📊 Análisis de Portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
@@ -6655,14 +6637,8 @@ def main():
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "🧠 Test del Inversor":
                 mostrar_test_inversor()
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
-                else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
@@ -6714,7 +6690,7 @@ def main():
                 st.markdown("""
                 **💱 Datos de Mercado**  
                 - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
+                - Análisis técnico avanzado  
                 - Estado de cuenta consolidado  
                 """)
     except Exception as e:
