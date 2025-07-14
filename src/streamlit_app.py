@@ -3416,30 +3416,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Información sobre la frecuencia de datos
         st.info("ℹ️ **Nota**: Los datos se obtienen en frecuencia diaria desde la API de IOL")
         
-        # Configuración del horizonte de inversión
-        horizonte_inversion = st.selectbox(
-            "Horizonte de Inversión:",
-            options=[
-                ("30 días", 30),
-                ("60 días", 60),
-                ("90 días", 90),
-                ("180 días", 180),
-                ("365 días", 365),
-                ("730 días", 730),
-                ("1095 días", 1095)
-            ],
-            format_func=lambda x: x[0],
-            index=3,  # Por defecto 180 días
-            help="Seleccione el período de tiempo para el análisis de retornos"
-        )
-        
-        # Extraer valores de las tuplas
-        dias_analisis = horizonte_inversion[1]
-        frecuencia = "D"  # Siempre diario ya que es lo único disponible en la API
-        
-        # Información sobre la frecuencia de datos
-        st.info("ℹ️ **Nota**: Los datos se obtienen en frecuencia diaria desde la API de IOL")
-        
         with st.spinner(f"Obteniendo series históricas y calculando valorización del portafolio para {dias_analisis} días..."):
             try:
                 # Obtener fechas para el histórico basado en el horizonte seleccionado
@@ -3879,39 +3855,39 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         simbolo = activo.get('Símbolo', '')
                                         valuacion = activo.get('Valuación', 0)
                                         
-                                                                            # Identificar FCIs, bonos y otros instrumentos de renta fija
-                                    es_renta_fija = False
-                                    
-                                    # Primero verificar si es claramente una acción
-                                    tipo_lower = tipo.lower()
-                                    simbolo_lower = simbolo.lower()
-                                    
-                                    # Lista de acciones comunes en Argentina
-                                    acciones_comunes = [
-                                        'alua', 'ypf', 'ggal', 'pamp', 'tenaris', 'acro', 'bma', 'loma', 'txar', 'cresud',
-                                        'mirgor', 'siderar', 'petrobras', 'banco macro', 'banco galicia', 'banco santander',
-                                        'banco itau', 'banco hsbc', 'banco nacion', 'banco provincia', 'banco ciudad',
-                                        'despegar', 'mercadolibre', 'globant', 'despegar', 'tgs', 'pampa energia',
-                                        'central puerto', 'edesur', 'edenor', 'metrogas', 'transportadora gas del norte',
-                                        'transportadora gas del sur', 'camuzzi gas', 'metrogas', 'edenor', 'edelap'
-                                    ]
-                                    
-                                    # Si es claramente una acción, no es renta fija
-                                    if any(accion in simbolo_lower for accion in acciones_comunes):
+                                        # Identificar FCIs, bonos y otros instrumentos de renta fija
                                         es_renta_fija = False
-                                    elif any(accion in tipo_lower for accion in ['accion', 'stock', 'equity', 'share']):
-                                        es_renta_fija = False
-                                    else:
-                                        # Verificar si es renta fija específicamente
-                                        if any(keyword in tipo_lower for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra', 'caucion']):
-                                            es_renta_fija = True
-                                        elif any(keyword in simbolo_lower for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg', 'adba', 'prcp', 'caucion']):
-                                            es_renta_fija = True
-                                        elif 'descripcion' in activo:
-                                            descripcion = activo['descripcion'].lower()
-                                            if any(keyword in descripcion for keyword in ['fondo', 'fci', 'bono', 'caucion']):
-                                                if not any(accion in descripcion for accion in ['accion', 'stock', 'equity', 'empresa']):
-                                                    es_renta_fija = True
+                                        
+                                        # Primero verificar si es claramente una acción
+                                        tipo_lower = tipo.lower()
+                                        simbolo_lower = simbolo.lower()
+                                        
+                                        # Lista de acciones comunes en Argentina
+                                        acciones_comunes = [
+                                            'alua', 'ypf', 'ggal', 'pamp', 'tenaris', 'acro', 'bma', 'loma', 'txar', 'cresud',
+                                            'mirgor', 'siderar', 'petrobras', 'banco macro', 'banco galicia', 'banco santander',
+                                            'banco itau', 'banco hsbc', 'banco nacion', 'banco provincia', 'banco ciudad',
+                                            'despegar', 'mercadolibre', 'globant', 'despegar', 'tgs', 'pampa energia',
+                                            'central puerto', 'edesur', 'edenor', 'metrogas', 'transportadora gas del norte',
+                                            'transportadora gas del sur', 'camuzzi gas', 'metrogas', 'edenor', 'edelap'
+                                        ]
+                                        
+                                        # Si es claramente una acción, no es renta fija
+                                        if any(accion in simbolo_lower for accion in acciones_comunes):
+                                            es_renta_fija = False
+                                        elif any(accion in tipo_lower for accion in ['accion', 'stock', 'equity', 'share']):
+                                            es_renta_fija = False
+                                        else:
+                                            # Verificar si es renta fija específicamente
+                                            if any(keyword in tipo_lower for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra', 'caucion']):
+                                                es_renta_fija = True
+                                            elif any(keyword in simbolo_lower for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg', 'adba', 'prcp', 'caucion']):
+                                                es_renta_fija = True
+                                            elif 'descripcion' in activo:
+                                                descripcion = activo['descripcion'].lower()
+                                                if any(keyword in descripcion for keyword in ['fondo', 'fci', 'bono', 'caucion']):
+                                                    if not any(accion in descripcion for accion in ['accion', 'stock', 'equity', 'empresa']):
+                                                        es_renta_fija = True
                                         
                                         if es_renta_fija:
                                             instrumentos_renta_fija.append({
@@ -4537,194 +4513,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             except Exception as e:
                                 st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
                                 st.exception(e)
-                            
-                        else:
-                            st.warning("⚠️ No hay datos suficientes para generar el histograma")
-                    else:
-                        st.warning("⚠️ No se pudieron obtener datos históricos para ningún activo")
-                else:
-                    st.warning("⚠️ No hay activos válidos para generar el histograma")
-                    
-            except Exception as e:
-                st.error(f"❌ Error generando histograma del portafolio: {str(e)}")
-                st.exception(e)
-        
-    else:
-        st.warning("No se encontraron activos en el portafolio")
-
-def mostrar_estado_cuenta(estado_cuenta):
-    st.markdown("### 💰 Estado de Cuenta")
-    
-    if not estado_cuenta:
-        st.warning("No hay datos de estado de cuenta disponibles")
-        return
-    
-    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-    cuentas = estado_cuenta.get('cuentas', [])
-    
-    cols = st.columns(3)
-    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-    cols[1].metric("Número de Cuentas", len(cuentas))
-    
-    if cuentas:
-        st.subheader("📊 Detalle de Cuentas")
-        
-        datos_cuentas = []
-        for cuenta in cuentas:
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                'Total': f"${cuenta.get('total', 0):,.2f}",
-            })
-        
-        df_cuentas = pd.DataFrame(datos_cuentas)
-        st.dataframe(df_cuentas, use_container_width=True, height=300)
-
-def mostrar_cotizaciones_mercado(token_acceso):
-    st.markdown("### 💱 Cotizaciones y Mercado")
-    
-    tab1, tab2, tab3 = st.tabs(["💰 Cotización MEP", "📈 Gráficos con Fechas", "📊 Cotizaciones Avanzadas"])
-    
-    with tab1:
-        with st.form("mep_form"):
-            col1, col2, col3 = st.columns(3)
-            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
-            id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
-            id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
-            
-            if st.form_submit_button("🔍 Consultar MEP"):
-                if simbolo_mep:
-                    with st.spinner("Consultando cotización MEP..."):
-                        cotizacion_mep = obtener_cotizacion_mep(
-                            token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
-                        )
-                    
-                    if cotizacion_mep:
-                        st.success("✅ Cotización MEP obtenida")
-                        precio_mep = cotizacion_mep.get('precio', 'N/A')
-                        st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
-                    else:
-                        st.error("❌ No se pudo obtener la cotización MEP")
-    
-    with tab2:
-        if st.button("🔄 Actualizar Tasas"):
-            with st.spinner("Consultando tasas de caución..."):
-                tasas_caucion = obtener_tasas_caucion(token_acceso)
-            
-            if tasas_caucion is not None and not tasas_caucion.empty:
-                df_tasas = pd.DataFrame(tasas_caucion)
-                columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
-                columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
-                
-                if columnas_disponibles:
-                    st.dataframe(df_tasas[columnas_disponibles].head(10))
-                else:
-                    st.dataframe(df_tasas.head(10))
-            else:
-                st.error("❌ No se pudieron obtener las tasas de caución")
-    
-    with tab3:
-        st.subheader("📈 Gráficos con Fechas Reales")
-        
-        # Configuración de paneles
-        paneles = {
-            "Acciones": ["Panel%20General", "Burcap", "Todas"],
-            "Bonos": ["Panel%20General", "Burcap", "Todas"],
-            "Opciones": ["Panel%20General", "Burcap", "Todas"],
-            "Monedas": ["Panel%20General", "Burcap", "Todas"],
-            "Cauciones": ["Panel%20General", "Burcap", "Todas"],
-            "CHPD": ["Panel%20General", "Burcap", "Todas"],
-            "Futuros": ["Panel%20General", "Burcap", "Todas"],
-            "ADRs": ["Panel%20General", "Burcap", "Todas"]
-        }
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            instrumento = st.selectbox("Instrumento", list(paneles.keys()))
-        with col2:
-            panel = st.selectbox("Panel", paneles[instrumento])
-        
-        pais = st.selectbox("País", ["Argentina", "Estados_Unidos"])
-        
-        if st.button("🔍 Buscar Cotizaciones"):
-            with st.spinner("Obteniendo cotizaciones..."):
-                try:
-                    url = f'https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}'
-                    headers = obtener_encabezado_autorizacion(token_acceso)
-                    
-                    params = {
-                        'panelCotizacion.instrumento': instrumento.lower(),
-                        'panelCotizacion.panel': panel,
-                        'panelCotizacion.pais': pais.lower()
-                    }
-                    
-                    respuesta = requests.get(url, headers=headers, params=params)
-                    
-                    if respuesta.status_code == 200:
-                        datos = respuesta.json()
-                        titulos = datos.get('titulos', [])
-                        
-                        if titulos:
-                            df = pd.DataFrame(titulos)
-                            st.success(f"✅ Se encontraron {len(df)} títulos")
-                            st.dataframe(df, use_container_width=True)
-                            
-                            # Gráfico de variación
-                            if 'variacionPorcentual' in df.columns:
-                                fig = go.Figure()
-                                fig.add_trace(go.Bar(
-                                    x=df['simbolo'],
-                                    y=df['variacionPorcentual'],
-                                    marker_color=['green' if x > 0 else 'red' for x in df['variacionPorcentual']]
-                                ))
-                                fig.update_layout(
-                                    title=f"Variación Porcentual - {instrumento}",
-                                    xaxis_title="Símbolo",
-                                    yaxis_title="Variación (%)",
-                                    template='plotly_white'
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Gráfico de precios con fechas si están disponibles
-                            if 'fecha' in df.columns and 'ultimoPrecio' in df.columns:
-                                # Convertir fechas
-                                df['fecha'] = pd.to_datetime(df['fecha'])
-                                df = df.sort_values('fecha')
-                                
-                                fig_precios = go.Figure()
-                                fig_precios.add_trace(go.Scatter(
-                                    x=df['fecha'],
-                                    y=df['ultimoPrecio'],
-                                    mode='lines+markers',
-                                    name='Precio',
-                                    line=dict(color='#1f77b4', width=2)
-                                ))
-                                
-                                fig_precios.update_layout(
-                                    title=f"Evolución de Precios - {instrumento}",
-                                    xaxis_title="Fecha",
-                                    yaxis_title="Precio",
-                                    template='plotly_white',
-                                    height=400
-                                )
-                                
-                                # Configurar eje X para mostrar fechas reales
-                                fig_precios = configurar_eje_fechas(fig_precios)
-                                
-                                st.plotly_chart(fig_precios, use_container_width=True)
-                                
-                                # Información de fechas
-                                st.info(f"📅 Período de datos: {df['fecha'].min().strftime('%d/%m/%Y')} - {df['fecha'].max().strftime('%d/%m/%Y')}")
-                        else:
-                            st.warning("No se encontraron cotizaciones")
-                    else:
-                        st.error(f"Error al obtener cotizaciones: {respuesta.status_code}")
-                        
-                except Exception as e:
-                    st.error(f"Error de conexión: {str(e)}")
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
@@ -5231,268 +5019,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 st.error(f"❌ Error en selección aleatoria: {str(e)}")
                 progress_bar.progress(0)
                 status_text.text("❌ Error en el proceso")
-    
-    with tab2:
-        st.markdown("#### 📊 Comparación de Múltiples Portafolios")
-        
-        # Obtener lista de clientes para comparación
-        clientes = obtener_lista_clientes(token_acceso)
-        
-        if clientes:
-            # Selección de portafolios para comparar
-            portafolios_disponibles = []
-            for cliente in clientes:
-                portafolios_disponibles.append({
-                    'id': cliente.get('id'),
-                    'nombre': f"{cliente.get('nombre', 'Cliente')} {cliente.get('apellido', '')}",
-                    'cuenta': cliente.get('cuentaComitente', '')
-                })
-            
-            portafolios_seleccionados = st.multiselect(
-                "Seleccione portafolios para comparar:",
-                options=portafolios_disponibles,
-                format_func=lambda x: f"{x['nombre']} ({x['cuenta']})",
-                help="Seleccione múltiples portafolios para comparar en la frontera eficiente"
-            )
-            
-            if portafolios_seleccionados:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    ejecutar_comparacion_frontera = st.button("🟢 Comparar en Frontera Eficiente", type="primary")
-                
-                with col2:
-                    ejecutar_evolucion_comparativa = st.button("📈 Comparar Evolución Temporal")
-                
-                if ejecutar_comparacion_frontera:
-                    comparar_portafolios_en_frontera_eficiente(token_acceso, portafolios_seleccionados)
-                
-                if ejecutar_evolucion_comparativa:
-                    mostrar_evolucion_comparativa(token_acceso, portafolios_seleccionados)
-        else:
-            st.warning("No se pudieron obtener los clientes para comparación")
-
-def mostrar_analisis_tecnico(token_acceso, id_cliente):
-    st.markdown("### 📊 Análisis Técnico")
-    
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-    
-    if not portafolio:
-        st.warning("No se pudo obtener el portafolio del cliente")
-        return
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("El portafolio está vacío")
-        return
-    
-    simbolos = []
-    for activo in activos:
-        titulo = activo.get('titulo', {})
-        simbolo = titulo.get('simbolo', '')
-        if simbolo:
-            simbolos.append(simbolo)
-    
-    if not simbolos:
-        st.warning("No se encontraron símbolos válidos")
-        return
-    
-    simbolo_seleccionado = st.selectbox(
-        "Seleccione un activo para análisis técnico:",
-        options=simbolos,
-        help="Seleccione un activo de su portafolio para realizar análisis técnico con TradingView"
-    )
-    
-    if simbolo_seleccionado:
-        st.info(f"📈 Mostrando gráfico TradingView para: {simbolo_seleccionado}")
-        
-        # Widget de TradingView
-        tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-          "container_id": "tradingview_{simbolo_seleccionado}",
-          "width": "100%",
-          "height": 650,
-          "symbol": "{simbolo_seleccionado}",
-          "interval": "D",
-          "timezone": "America/Argentina/Buenos_Aires",
-          "theme": "light",
-          "style": "1",
-          "locale": "es",
-          "toolbar_bg": "#f4f7f9",
-          "enable_publishing": false,
-          "allow_symbol_change": true,
-          "hide_side_toolbar": false,
-          "studies": [
-            "MACD@tv-basicstudies",
-            "RSI@tv-basicstudies",
-            "StochasticRSI@tv-basicstudies",
-            "Volume@tv-basicstudies",
-            "Moving Average@tv-basicstudies"
-          ],
-          "drawings_access": {{
-            "type": "black",
-            "tools": [
-              {{"name": "Trend Line"}},
-              {{"name": "Horizontal Line"}},
-              {{"name": "Fibonacci Retracement"}},
-              {{"name": "Rectangle"}},
-              {{"name": "Text"}}
-            ]
-          }},
-          "enabled_features": [
-            "study_templates",
-            "header_indicators",
-            "header_compare",
-            "header_screenshot",
-            "header_fullscreen_button",
-            "header_settings",
-            "header_symbol_search"
-          ]
-        }});
-        </script>
-        """
-        components.html(tv_widget, height=680)
-        
-        # Información adicional sobre el análisis técnico
-        st.markdown("#### 💡 Información del Análisis Técnico")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("""
-            **📊 Indicadores Incluidos:**
-            - **MACD**: Convergencia/Divergencia de Medias Móviles
-            - **RSI**: Índice de Fuerza Relativa
-            - **Stochastic RSI**: Oscilador estocástico del RSI
-            - **Volume**: Volumen de operaciones
-            - **Moving Average**: Medias móviles
-            
-            **🎯 Herramientas Disponibles:**
-            - Líneas de tendencia
-            - Líneas horizontales
-            - Retrocesos de Fibonacci
-            - Rectángulos y texto
-                         """)
-        
-        with col2:
-            st.markdown("""
-            **🔧 Funcionalidades:**
-            - Cambio de símbolo
-            - Captura de pantalla
-            - Modo pantalla completa
-            - Búsqueda de símbolos
-            - Plantillas de estudios
-            - Comparación de activos
-            
-            **📈 Intervalos Disponibles:**
-            - Diario (D)
-            - Semanal (W)
-            - Mensual (M)
-            - Intradiario (1m, 5m, 15m, 1h)
-            """)
-
-def mostrar_movimientos_asesor():
-    st.title("👨‍💼 Panel del Asesor")
-    
-    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-        st.error("Debe iniciar sesión primero")
-        return
-        
-    token_acceso = st.session_state.token_acceso
-    
-    # Obtener lista de clientes
-    clientes = obtener_lista_clientes(token_acceso)
-    if not clientes:
-        st.warning("No se encontraron clientes")
-        return
-    
-    # Crear tabs para el panel del asesor
-    tab1, tab2 = st.tabs(["📋 Gestión de Clientes", "📊 Movimientos"])
-    
-    with tab1:
-        mostrar_gestion_clientes()
-    
-    with tab2:
-        # Formulario de búsqueda
-        with st.form("form_buscar_movimientos"):
-        st.subheader("🔍 Buscar Movimientos")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30))
-        with col2:
-            fecha_hasta = st.date_input("Fecha hasta", value=date.today())
-        
-        # Selección múltiple de clientes
-        cliente_opciones = [{"label": f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} ({c.get('numeroCliente', c.get('id', ''))})", 
-                           "value": c.get('numeroCliente', c.get('id'))} for c in clientes]
-        
-        clientes_seleccionados = st.multiselect(
-            "Seleccione clientes",
-            options=[c['value'] for c in cliente_opciones],
-            format_func=lambda x: next((c['label'] for c in cliente_opciones if c['value'] == x), x),
-            default=[cliente_opciones[0]['value']] if cliente_opciones else []
-        )
-        
-        # Filtros adicionales
-        col1, col2 = st.columns(2)
-        with col1:
-            tipo_fecha = st.selectbox(
-                "Tipo de fecha",
-                ["fechaOperacion", "fechaLiquidacion"],
-                index=0
-            )
-            estado = st.selectbox(
-                "Estado",
-                ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
-            )
-        with col2:
-            tipo_operacion = st.text_input("Tipo de operación")
-            moneda = st.text_input("Moneda", "ARS")
-        
-        buscar = st.form_submit_button("🔍 Buscar movimientos")
-    
-    if buscar and clientes_seleccionados:
-        with st.spinner("Buscando movimientos..."):
-            movimientos = obtener_movimientos_asesor(
-                token_portador=token_acceso,
-                clientes=clientes_seleccionados,
-                fecha_desde=fecha_desde.isoformat(),
-                fecha_hasta=fecha_hasta.isoformat(),
-                tipo_fecha=tipo_fecha,
-                estado=estado or None,
-                tipo_operacion=tipo_operacion or None,
-                moneda=moneda or None
-            )
-            
-            if movimientos and isinstance(movimientos, list):
-                df = pd.DataFrame(movimientos)
-                if not df.empty:
-                    st.subheader("📋 Resultados de la búsqueda")
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # Mostrar resumen
-                    st.subheader("📊 Resumen de Movimientos")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Total Movimientos", len(df))
-                    
-                    if 'monto' in df.columns:
-                        col2.metric("Monto Total", f"${df['monto'].sum():,.2f}")
-                    
-                    if 'estado' in df.columns:
-                        estados = df['estado'].value_counts().to_dict()
-                        col3.metric("Estados", ", ".join([f"{k} ({v})" for k, v in estados.items()]))
-                else:
-                    st.info("No se encontraron movimientos con los filtros seleccionados")
-            else:
-                st.warning("No se encontraron movimientos o hubo un error en la consulta")
-                if movimientos and not isinstance(movimientos, list):
-                    st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
@@ -5508,11 +5034,8 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
         "🔄 Rebalanceo",
         "🧮 Optimizaciones"
     ])
@@ -5525,27 +5048,13 @@ def mostrar_analisis_portafolio():
             st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
-    
-    with tab3:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
-    
-    with tab4:
-        mostrar_cotizaciones_mercado(token_acceso)
-    
-    with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
     
-    with tab6:
+    with tab3:
         st.header("🧮 Optimizaciones de Portafolio")
         portafolio = obtener_portafolio(token_acceso, id_cliente)
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if not portafolio or not estado_cuenta:
-            st.warning("No se pudo obtener el portafolio o el estado de cuenta.")
+        if not portafolio:
+            st.warning("No se pudo obtener el portafolio.")
             return
         activos = portafolio.get('activos', [])
         saldo_disponible = 0
@@ -5699,8 +5208,6 @@ def seleccionar_activos_aleatorios_del_portafolio(portafolio, cantidad_activos, 
         })
     
     return activos_para_optimizacion
-
-# --- NUEVAS FUNCIONES DE SELECCIÓN DE ACTIVOS Y OPTIMIZACIÓN MEJORADA ---
 
 def obtener_tickers_por_panel(token_portador, paneles, pais):
     """
@@ -6623,7 +6130,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧠 Test del Inversor", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧠 Test del Inversor"),
                 index=0,
             )
 
@@ -6637,8 +6144,6 @@ def main():
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "🧠 Test del Inversor":
                 mostrar_test_inversor()
-            elif opcion == "👨\u200d💼 Panel del Asesor":
-                mostrar_movimientos_asesor()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
