@@ -1019,7 +1019,7 @@ class manager:
 
 class output:
     def __init__(self, returns, notional):
-        self.returns = returns
+        self.returns = returns  # <- Mantener la serie de retornos diarios
         self.notional = notional
         self.mean_daily = np.mean(returns)
         self.volatility_daily = np.std(returns)
@@ -1033,13 +1033,12 @@ class output:
         self.str_title = 'Portfolio Returns'
         self.volatility_annual = self.volatility_daily * np.sqrt(252)
         self.return_annual = self.mean_daily * 252
-        
         # Placeholders que serán actualizados por el manager
         self.weights = None
         self.dataframe_allocation = None
         # Compatibilidad: alias para risk y returns (usados en la interfaz)
         self.risk = self.volatility_annual
-        self.returns = self.return_annual
+        self.returns_annual = self.return_annual  # <- Si se necesita el valor anualizado
 
     def get_metrics_dict(self):
         """Retorna métricas del portafolio en formato diccionario"""
