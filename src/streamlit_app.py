@@ -3154,14 +3154,15 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        import asyncio
+        portafolio = asyncio.run(obtener_portafolio(token_acceso, id_cliente))
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        estado_cuenta = asyncio.run(obtener_estado_cuenta(token_acceso, id_cliente))
         if estado_cuenta:
             mostrar_estado_cuenta(estado_cuenta)
         else:
