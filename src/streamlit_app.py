@@ -3175,7 +3175,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             st.markdown("**Distribución de Pesos**")
             import plotly.graph_objects as go
             df = res.dataframe_allocation
-            fig_pie = go.Figure(data=[go.Pie(labels=df['Activo'], values=df['Peso'], textinfo='label+percent', hole=0.4)])
+            fig_pie = go.Figure(data=[go.Pie(labels=df['rics'], values=df['weights'], textinfo='label+percent', hole=0.4)])
             fig_pie.update_layout(title="Distribución Optimizada de Activos", template='plotly_white')
             st.plotly_chart(fig_pie, use_container_width=True)
         # Métricas
