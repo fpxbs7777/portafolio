@@ -1058,12 +1058,11 @@ class output:
 
     def plot_histogram_streamlit(self, title="Distribución de Retornos"):
         """Crea un histograma de retornos usando Plotly para Streamlit"""
-        # Asegura que self.returns sea una secuencia (array, lista, o pandas Series), no un escalar
         import numpy as np
         import pandas as pd
         returns = self.returns
         # Si es None o vacío
-        if returns is None or (hasattr(returns, '__len__') and len(returns) == 0):
+        if returns is None or (isinstance(returns, pd.Series) and returns.empty) or (hasattr(returns, '__len__') and len(returns) == 0):
             fig = go.Figure()
             fig.add_annotation(
                 text="No hay datos suficientes para mostrar",
@@ -1083,7 +1082,7 @@ class output:
             fig.update_layout(title=title)
             return fig
         # Si es un array/serie de un solo valor, también evitar graficar
-        if hasattr(returns, '__len__') and len(returns) <= 1:
+        if (isinstance(returns, pd.Series) and len(returns) <= 1) or (hasattr(returns, '__len__') and len(returns) <= 1):
             fig = go.Figure()
             fig.add_annotation(
                 text="No hay datos suficientes para mostrar",
@@ -1092,7 +1091,6 @@ class output:
             )
             fig.update_layout(title=title)
             return fig
-
         fig = go.Figure(data=[go.Histogram(
             x=returns,
             nbinsx=30,
