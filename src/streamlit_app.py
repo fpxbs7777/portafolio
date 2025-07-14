@@ -1,5 +1,5 @@
 import streamlit as st
-import requests
+import httpx
 import plotly.graph_objects as go
 import pandas as pd
 from plotly.subplots import make_subplots
@@ -13,6 +13,7 @@ import random
 import warnings
 import streamlit.components.v1 as components
 from scipy.stats import linregress
+import asyncio
 
 warnings.filterwarnings('ignore')
 
@@ -127,7 +128,7 @@ def obtener_encabezado_autorizacion(token_portador):
         'Content-Type': 'application/json'
     }
 
-def obtener_tokens(usuario, contraseña):
+async def obtener_tokens(usuario, contraseña):
     url_login = 'https://api.invertironline.com/token'
     datos = {
         'username': usuario,
@@ -135,11 +136,12 @@ def obtener_tokens(usuario, contraseña):
         'grant_type': 'password'
     }
     try:
-        respuesta = requests.post(url_login, data=datos, timeout=15)
+        async with httpx.AsyncClient() as client:
+            respuesta = await client.post(url_login, data=datos, timeout=15)
         respuesta.raise_for_status()
         respuesta_json = respuesta.json()
         return respuesta_json['access_token'], respuesta_json['refresh_token']
-    except requests.exceptions.HTTPError as http_err:
+    except httpx.HTTPStatusError as http_err:
         st.error(f'Error HTTP al obtener tokens: {http_err}')
         if respuesta.status_code == 400:
             st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
@@ -152,11 +154,12 @@ def obtener_tokens(usuario, contraseña):
         st.error(f'Error inesperado al obtener tokens: {str(e)}')
         return None, None
 
-def obtener_lista_clientes(token_portador):
+async def obtener_lista_clientes(token_portador):
     url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        respuesta = requests.get(url_clientes, headers=encabezados)
+        async with httpx.AsyncClient() as client:
+            respuesta = await client.get(url_clientes, headers=encabezados)
         if respuesta.status_code == 200:
             clientes_data = respuesta.json()
             if isinstance(clientes_data, list):
@@ -172,30 +175,31 @@ def obtener_lista_clientes(token_portador):
         st.error(f'Error de conexión al obtener clientes: {str(e)}')
         return []
 
-def obtener_estado_cuenta(token_portador, id_cliente=None):
+async def obtener_estado_cuenta(token_portador, id_cliente=None):
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
     else:
         url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
-    
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        respuesta = requests.get(url_estado_cuenta, headers=encabezados)
+        async with httpx.AsyncClient() as client:
+            respuesta = await client.get(url_estado_cuenta, headers=encabezados)
         if respuesta.status_code == 200:
             return respuesta.json()
         elif respuesta.status_code == 401:
-            return obtener_estado_cuenta(token_portador, None)
+            return await obtener_estado_cuenta(token_portador, None)
         else:
             return None
     except Exception as e:
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
         return None
 
-def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
+async def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
-        respuesta = requests.get(url_portafolio, headers=encabezados)
+        async with httpx.AsyncClient() as client:
+            respuesta = await client.get(url_portafolio, headers=encabezados)
         if respuesta.status_code == 200:
             return respuesta.json()
         else:
@@ -204,18 +208,17 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
 
-def obtener_precio_actual(token_portador, mercado, simbolo):
-    """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
+async def obtener_precio_actual(token_portador, mercado, simbolo):
     url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
     headers = obtener_encabezado_autorizacion(token_portador)
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, (int, float)):
                 return float(data)
             elif isinstance(data, dict):
-                # La API suele devolver 'ultimoPrecio'
                 for k in [
                     'ultimoPrecio', 'ultimo_precio', 'ultimoPrecioComprador', 'ultimoPrecioVendedor',
                     'precio', 'precioActual', 'valor'
@@ -229,8 +232,7 @@ def obtener_precio_actual(token_portador, mercado, simbolo):
     except Exception:
         return None
 
-
-def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
+async def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_venta):
     url_cotizacion_mep = 'https://api.invertironline.com/api/v2/Cotizaciones/MEP'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     datos = {
@@ -239,10 +241,10 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
         "idPlazoOperatoriaVenta": id_plazo_venta
     }
     try:
-        respuesta = requests.post(url_cotizacion_mep, headers=encabezados, json=datos)
+        async with httpx.AsyncClient() as client:
+            respuesta = await client.post(url_cotizacion_mep, headers=encabezados, json=datos)
         if respuesta.status_code == 200:
             resultado = respuesta.json()
-            # Asegurarse de que siempre devolvemos un diccionario
             if isinstance(resultado, (int, float)):
                 return {'precio': resultado, 'simbolo': simbolo}
             elif isinstance(resultado, dict):
@@ -255,33 +257,13 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
         st.error(f'Error al obtener cotización MEP: {str(e)}')
         return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
 
-def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
+async def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
-    """
-    Obtiene los movimientos de los clientes de un asesor
-    
-    Args:
-        token_portador (str): Token de autenticación
-        clientes (list): Lista de IDs de clientes
-        fecha_desde (str): Fecha de inicio (formato ISO)
-        fecha_hasta (str): Fecha de fin (formato ISO)
-        tipo_fecha (str): Tipo de fecha a filtrar ('fechaOperacion' o 'fechaLiquidacion')
-        estado (str, optional): Estado de la operación
-        tipo_operacion (str, optional): Tipo de operación
-        pais (str, optional): País de la operación
-        moneda (str, optional): Moneda de la operación
-        cuenta_comitente (str, optional): Número de cuenta comitente
-        
-    Returns:
-        dict: Diccionario con los movimientos o None en caso de error
-    """
     url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
     headers = {
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
-    
-    # Preparar el cuerpo de la solicitud
     payload = {
         "clientes": clientes,
         "from": fecha_desde,
@@ -293,9 +275,9 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         "currency": moneda or "",
         "cuentaComitente": cuenta_comitente or ""
     }
-    
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
             return response.json()
         else:
@@ -305,16 +287,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         st.error(f"Error de conexión: {str(e)}")
         return None
 
-def obtener_tasas_caucion(token_portador):
-    """
-    Obtiene las tasas de caución desde la API de IOL
-    
-    Args:
-        token_portador (str): Token de autenticación Bearer
-        
-    Returns:
-        DataFrame: DataFrame con las tasas de caución o None en caso de error
-    """
+async def obtener_tasas_caucion(token_portador):
     url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
     params = {
         'cotizacionInstrumentoModel.instrumento': 'cauciones',
@@ -324,46 +297,28 @@ def obtener_tasas_caucion(token_portador):
         'Accept': 'application/json',
         'Authorization': f'Bearer {token_portador}'
     }
-    
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
-        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=params, timeout=15)
         if response.status_code == 200:
             data = response.json()
-            
             if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
                 df = pd.DataFrame(data['titulos'])
-                
-                # Filtrar solo las cauciónes y limpiar los datos
                 df = df[df['plazo'].notna()].copy()
-                
-                # Extraer el plazo en días
                 df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
-                
-                # Limpiar la tasa (convertir a float si es necesario)
                 if 'ultimoPrecio' in df.columns:
                     df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
-                
-                # Asegurarse de que las columnas necesarias existan
                 if 'monto' not in df.columns and 'volumen' in df.columns:
                     df['monto'] = df['volumen']
-                
-                # Ordenar por plazo
                 df = df.sort_values('plazo_dias')
-                
-                # Seleccionar solo las columnas necesarias
                 columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
                 columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
-                
                 return df[columnas_disponibles]
-            
             st.warning("No se encontraron datos de tasas de caución en la respuesta")
             return None
-            
         elif response.status_code == 401:
             st.error("Error de autenticación. Por favor, verifique su token de acceso.")
             return None
-            
         else:
             error_msg = f"Error {response.status_code} al obtener tasas de caución"
             try:
@@ -373,252 +328,26 @@ def obtener_tasas_caucion(token_portador):
                 error_msg += f": {response.text}"
             st.error(error_msg)
             return None
-            
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         st.error(f"Error de conexión: {str(e)}")
         return None
     except Exception as e:
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
 
-def mostrar_tasas_caucion(token_portador):
-    """
-    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
-    """
-    st.subheader("📊 Tasas de Caución")
-    
-    try:
-        with st.spinner('Obteniendo tasas de caución...'):
-            df_cauciones = obtener_tasas_caucion(token_portador)
-            
-            # Verificar si se obtuvieron datos
-            if df_cauciones is None or df_cauciones.empty:
-                st.warning("No se encontraron datos de tasas de caución.")
-                return
-                
-            # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-            if missing_columns:
-                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-                return
-            
-            # Mostrar tabla con las tasas
-            st.dataframe(
-                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                             else ['simbolo', 'plazo', 'ultimoPrecio']]
-                .rename(columns={
-                    'simbolo': 'Instrumento',
-                    'plazo': 'Plazo',
-                    'ultimoPrecio': 'Tasa',
-                    'monto': 'Monto (en millones)'
-                }),
-                use_container_width=True,
-                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
-            )
-            
-            # Crear gráfico de curva de tasas si hay suficientes puntos
-            if len(df_cauciones) > 1:
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=df_cauciones['plazo_dias'],
-                    y=df_cauciones['tasa_limpia'],
-                    mode='lines+markers+text',
-                    name='Tasa',
-                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                    textposition='top center',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=10, color='#1f77b4')
-                ))
-                
-                fig.update_layout(
-                    title='Curva de Tasas de Caución',
-                    xaxis_title='Plazo (días)',
-                    yaxis_title='Tasa Anual (%)',
-                    template='plotly_white',
-                    height=500,
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Mostrar resumen estadístico
-            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-                with col2:
-                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
-                    
-    except Exception as e:
-        st.error(f"Error al mostrar las tasas de caución: {str(e)}")
-        st.exception(e)  # Mostrar el traceback completo para depuración
-
-def parse_datetime_string(datetime_string):
-    """
-    Parsea una cadena de fecha/hora usando múltiples formatos
-    """
-    if not datetime_string:
-        return None
-        
-    formats_to_try = [
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "ISO8601",
-        "mixed"
-    ]
-    
-    for fmt in formats_to_try:
-        try:
-            if fmt == "ISO8601":
-                return pd.to_datetime(datetime_string, format='ISO8601')
-            elif fmt == "mixed":
-                return pd.to_datetime(datetime_string, format='mixed')
-            else:
-                return pd.to_datetime(datetime_string, format=fmt)
-        except Exception:
-            continue
-
-    try:
-        return pd.to_datetime(datetime_string, infer_datetime_format=True)
-    except Exception:
-        return None
-
-def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
-    """Devuelve la URL correcta para la serie histórica del símbolo indicado.
-
-    La prioridad es:
-    1. Usar el mercado recibido (ya normalizado por la llamada superior)
-       si existe en el mapeo de casos especiales.
-    2. Caso contrario, construir la ruta estándar
-       "{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/...".
-
-    No se aplican heurísticas sobre el símbolo: la función que invoque debe
-    pasar el mercado correcto (por ejemplo: 'Bonos', 'Cedears', 'BCBA').
-    """
-    base_url = "https://api.invertironline.com/api/v2"
-
-    # Cubrir alias frecuentes para que el mapeo sea coherente
-    alias = {
-        'TITULOSPUBLICOS': 'TitulosPublicos',
-        'TITULOS PUBLICOS': 'TitulosPublicos'
-    }
-    mercado_norm = alias.get(mercado.upper(), mercado)
-
-    especiales = {
-        'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'FCI': f"{base_url}/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
-        'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
-        'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
-    }
-
-    if mercado_norm in especiales:
-        return especiales[mercado_norm]
-
-    # Ruta genérica (acciones BCBA, NYSE, NASDAQ, etc.)
-    return f"{base_url}/{mercado_norm}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-
-def parse_datetime_flexible(date_str: str):
-    """
-    Parses a datetime string that may or may not include microseconds or timezone info.
-    Handles both formats: with and without milliseconds.
-    """
-    if not isinstance(date_str, str):
-        return None
-    try:
-        # First try parsing with the exact format that matches the error
-        try:
-            # Handle format without milliseconds: "2024-12-10T17:11:04"
-            if len(date_str) == 19 and 'T' in date_str and date_str.count(':') == 2:
-                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S', utc=True)
-            # Handle format with milliseconds: "2024-12-10T17:11:04.123"
-            elif '.' in date_str and 'T' in date_str:
-                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
-        except (ValueError, TypeError):
-            pass
-            
-        # Fall back to pandas' built-in parser if specific formats don't match
-        return pd.to_datetime(date_str, errors='coerce', utc=True)
-    except Exception as e:
-        st.warning(f"Error parsing date '{date_str}': {str(e)}")
-        return None
-
-def procesar_respuesta_historico(data, tipo_activo):
-    """
-    Procesa la respuesta de la API según el tipo de activo
-    """
-    if not data:
-        return None
-    
-    try:
-        # Para series históricas estándar
-        if isinstance(data, list):
-            precios = []
-            fechas = []
-            
-            for item in data:
-                try:
-                    # Manejar diferentes estructuras de respuesta
-                    if isinstance(item, dict):
-                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
-                        if not precio or precio == 0:
-                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
-                        
-                        fecha_str = item.get('fechaHora') or item.get('fecha')
-                        
-                        if precio is not None and precio > 0 and fecha_str:
-                            fecha_parsed = parse_datetime_flexible(fecha_str)
-                            if pd.notna(fecha_parsed):
-                                precios.append(float(precio))
-                                fechas.append(fecha_parsed)
-                except (ValueError, AttributeError) as e:
-                    continue
-            
-            if precios and fechas:
-                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                # Eliminar duplicados manteniendo el último
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                return df
-        
-        # Para respuestas que son un solo valor (ej: MEP)
-        elif isinstance(data, (int, float)):
-            df = pd.DataFrame({'fecha': [pd.Timestamp.now(tz='UTC').date()], 'precio': [float(data)]})
-            return df
-            
-        return None
-        
-    except Exception as e:
-        st.error(f"Error al procesar respuesta histórica: {str(e)}")
-        return None
-
-def obtener_fondos_comunes(token_portador):
-    """
-    Obtiene la lista de fondos comunes de inversión disponibles
-    """
+async def obtener_fondos_comunes(token_portador):
     url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
     headers = {
         'Authorization': f'Bearer {token_portador}'
     }
-    
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
-
-
 
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
