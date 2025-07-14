@@ -3086,52 +3086,38 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             )
                             
                             if tipo_histograma == "Valor Total del Portafolio":
-                                # Histograma del valor total del portafolio
+                                # Gráfico de línea del valor total del portafolio con fechas reales
+                                fechas_portfolio = df_portfolio.index
                                 valores_portfolio = df_portfolio['Portfolio_Total'].values
-                                
-                                fig_hist = go.Figure(data=[go.Histogram(
-                                    x=valores_portfolio,
-                                    nbinsx=30,
+                                fig_line = go.Figure(data=[go.Scatter(
+                                    x=fechas_portfolio,
+                                    y=valores_portfolio,
+                                    mode='lines+markers',
                                     name="Valor Total del Portafolio",
                                     marker_color='#0d6efd',
                                     opacity=0.7
                                 )])
-                                
-                                # Agregar líneas de métricas importantes
-                                media_valor = np.mean(valores_portfolio)
-                                mediana_valor = np.median(valores_portfolio)
-                                percentil_5 = np.percentile(valores_portfolio, 5)
-                                percentil_95 = np.percentile(valores_portfolio, 95)
-                                
-                                fig_hist.add_vline(x=media_valor, line_dash="dash", line_color="red", 
-                                                 annotation_text=f"Media: ${media_valor:,.2f}")
-                                fig_hist.add_vline(x=mediana_valor, line_dash="dash", line_color="green", 
-                                                 annotation_text=f"Mediana: ${mediana_valor:,.2f}")
-                                fig_hist.add_vline(x=percentil_5, line_dash="dash", line_color="orange", 
-                                                 annotation_text=f"P5: ${percentil_5:,.2f}")
-                                fig_hist.add_vline(x=percentil_95, line_dash="dash", line_color="purple", 
-                                                 annotation_text=f"P95: ${percentil_95:,.2f}")
-                                
-                                fig_hist.update_layout(
-                                    title="Distribución del Valor Total del Portafolio",
-                                    xaxis_title="Valor del Portafolio ($)",
-                                    yaxis_title="Frecuencia",
+                                fig_line.update_layout(
+                                    title="Evolución del Valor Total del Portafolio",
+                                    xaxis_title="Fecha",
+                                    yaxis_title="Valor del Portafolio ($)",
                                     height=500,
                                     showlegend=False,
                                     template='plotly_white'
                                 )
-                                
-                                st.plotly_chart(fig_hist, use_container_width=True)
-                                
-                                # Mostrar estadísticas del histograma de valores
+                                st.plotly_chart(fig_line, use_container_width=True)
+                                # Mostrar estadísticas del valor del portafolio
                                 st.markdown("#### 📊 Estadísticas del Valor del Portafolio")
                                 col1, col2, col3, col4 = st.columns(4)
-                                
+                                media_valor = np.mean(valores_portfolio)
+                                mediana_valor = np.median(valores_portfolio)
+                                percentil_5 = np.percentile(valores_portfolio, 5)
+                                percentil_95 = np.percentile(valores_portfolio, 95)
                                 col1.metric("Valor Promedio", f"${media_valor:,.2f}")
                                 col2.metric("Valor Mediano", f"${mediana_valor:,.2f}")
                                 col3.metric("Valor Mínimo (P5)", f"${percentil_5:,.2f}")
                                 col4.metric("Valor Máximo (P95)", f"${percentil_95:,.2f}")
-                                
+                            
                             else:
                                 # Histograma de retornos del portafolio
                                 try:
