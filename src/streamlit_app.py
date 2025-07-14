@@ -2842,30 +2842,70 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             return max(vol_esperada, vol_actual * 0.5)  # Límite mínimo
                                         
                                         def obtener_metricas_mercado_activo(token_portador, simbolo, mercado):
-                                            """Obtiene métricas de mercado para un activo"""
+                                            """Obtiene métricas de mercado para un activo usando la API correcta de IOL"""
                                             try:
-                                                # Intentar obtener datos de mercado desde la API
-                                                url_mercado = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                                                # Usar el endpoint correcto según la documentación de IOL
+                                                if mercado.upper() == 'BCBA':
+                                                    # Para acciones argentinas
+                                                    url_mercado = f"https://api.invertironline.com/api/v2/BCBA/Titulos/{simbolo}/Cotizacion"
+                                                elif mercado.upper() in ['NYSE', 'NASDAQ', 'AMEX']:
+                                                    # Para acciones estadounidenses
+                                                    url_mercado = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                                                else:
+                                                    # Para otros mercados
+                                                    url_mercado = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                                                
                                                 headers = {'Authorization': f'Bearer {token_portador}'}
                                                 response = requests.get(url_mercado, headers=headers, timeout=10)
                                                 
                                                 if response.status_code == 200:
                                                     data = response.json()
+                                                    
+                                                    # Extraer métricas según la estructura de respuesta de IOL
+                                                    volumen = data.get('volumen', 0)
+                                                    ultimo_precio = data.get('ultimoPrecio', 0)
+                                                    apertura = data.get('apertura', 0)
+                                                    maximo = data.get('maximo', 0)
+                                                    minimo = data.get('minimo', 0)
+                                                    
+                                                    # Calcular spread aproximado si hay puntas
+                                                    spread = 0
+                                                    if 'puntas' in data:
+                                                        puntas = data['puntas']
+                                                        precio_compra = puntas.get('precioCompra', 0)
+                                                        precio_venta = puntas.get('precioVenta', 0)
+                                                        if precio_compra > 0 and precio_venta > 0:
+                                                            spread = (precio_venta - precio_compra) / precio_compra
+                                                    
+                                                    # Calcular liquidez basada en volumen y precio
+                                                    liquidez = 1.0
+                                                    if ultimo_precio > 0 and volumen > 0:
+                                                        # Liquidez basada en volumen relativo al precio
+                                                        liquidez = min(volumen / (ultimo_precio * 1000), 1.0)
+                                                    
                                                     return {
-                                                        'volumen': data.get('volumen', 0),
-                                                        'monto_operado': data.get('montoOperado', 0),
-                                                        'spread': data.get('spread', 0),
-                                                        'liquidez': data.get('liquidez', 1)
+                                                        'volumen': volumen,
+                                                        'monto_operado': volumen * ultimo_precio if ultimo_precio > 0 else 0,
+                                                        'spread': spread,
+                                                        'liquidez': liquidez,
+                                                        'ultimo_precio': ultimo_precio,
+                                                        'apertura': apertura,
+                                                        'maximo': maximo,
+                                                        'minimo': minimo
                                                     }
-                                            except:
-                                                pass
+                                            except Exception as e:
+                                                print(f"Error obteniendo métricas para {simbolo}: {str(e)}")
                                             
                                             # Valores por defecto si no se pueden obtener
                                             return {
                                                 'volumen': 1000000,
                                                 'monto_operado': 500000,
                                                 'spread': 0.01,
-                                                'liquidez': 0.8
+                                                'liquidez': 0.8,
+                                                'ultimo_precio': 0,
+                                                'apertura': 0,
+                                                'maximo': 0,
+                                                'minimo': 0
                                             }
                                         
                                         def calcular_factor_liquidez(metricas_mercado):
@@ -2896,11 +2936,29 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         # Obtener métricas de mercado si está habilitado
                                         metricas_mercado_totales = {}
                                         if incluir_metricas_mercado:
-                                            for activo_info in activos_exitosos:
-                                                simbolo = activo_info['simbolo']
-                                                mercado = 'BCBA'  # Default, ajustar según necesidad
-                                                metricas = obtener_metricas_mercado_activo(token_portador, simbolo, mercado)
-                                                metricas_mercado_totales[simbolo] = metricas
+                                            with st.spinner("Obteniendo métricas de mercado..."):
+                                                for activo_info in activos_exitosos:
+                                                    simbolo = activo_info['simbolo']
+                                                    # Determinar mercado basado en el tipo de activo
+                                                    mercado = 'BCBA'  # Default
+                                                    tipo_activo = activo_info.get('tipo', '').lower()
+                                                    
+                                                    # Ajustar mercado según el tipo de activo
+                                                    if any(keyword in tipo_activo for keyword in ['nyse', 'nasdaq', 'amex']):
+                                                        mercado = 'NYSE'  # Para acciones estadounidenses
+                                                    elif any(keyword in tipo_activo for keyword in ['fci', 'fondo']):
+                                                        mercado = 'FCI'  # Para fondos comunes
+                                                    elif any(keyword in tipo_activo for keyword in ['bono', 'titulo']):
+                                                        mercado = 'Bonos'  # Para bonos
+                                                    
+                                                    metricas = obtener_metricas_mercado_activo(token_portador, simbolo, mercado)
+                                                    metricas_mercado_totales[simbolo] = metricas
+                                                    
+                                                    # Mostrar progreso
+                                                    if metricas['ultimo_precio'] > 0:
+                                                        st.success(f"✅ {simbolo}: ${metricas['ultimo_precio']:.2f} - Vol: {metricas['volumen']:,.0f}")
+                                                    else:
+                                                        st.warning(f"⚠️ {simbolo}: Sin datos de mercado")
                                         
                                         for _ in range(n_sim):
                                             # 1. Calcular volatilidad esperada
@@ -2971,18 +3029,44 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         # --- NUEVO: Mostrar información de métricas de mercado ---
                                         if incluir_metricas_mercado and metricas_mercado_totales:
                                             st.markdown("#### 📊 Métricas de Mercado Utilizadas")
-                                            col1, col2, col3, col4 = st.columns(4)
                                             
+                                            # Calcular métricas agregadas
                                             metricas_promedio = {
                                                 'volumen': np.mean([m['volumen'] for m in metricas_mercado_totales.values()]),
                                                 'liquidez': np.mean([m['liquidez'] for m in metricas_mercado_totales.values()]),
-                                                'spread': np.mean([m['spread'] for m in metricas_mercado_totales.values()])
+                                                'spread': np.mean([m['spread'] for m in metricas_mercado_totales.values()]),
+                                                'monto_operado': np.mean([m['monto_operado'] for m in metricas_mercado_totales.values()]),
+                                                'ultimo_precio': np.mean([m['ultimo_precio'] for m in metricas_mercado_totales.values()])
                                             }
                                             
+                                            # Mostrar métricas principales
+                                            col1, col2, col3, col4 = st.columns(4)
                                             col1.metric("Volumen Promedio", f"${metricas_promedio['volumen']:,.0f}")
-                                            col2.metric("Liquidez Promedio", f"{metricas_promedio['liquidez']:.2f}")
-                                            col3.metric("Spread Promedio", f"{metricas_promedio['spread']:.4f}")
+                                            col2.metric("Monto Operado Promedio", f"${metricas_promedio['monto_operado']:,.0f}")
+                                            col3.metric("Precio Promedio", f"${metricas_promedio['ultimo_precio']:.2f}")
                                             col4.metric("Activos Analizados", len(metricas_mercado_totales))
+                                            
+                                            col1, col2, col3 = st.columns(3)
+                                            col1.metric("Liquidez Promedio", f"{metricas_promedio['liquidez']:.2f}")
+                                            col2.metric("Spread Promedio", f"{metricas_promedio['spread']:.4f}")
+                                            col3.metric("Activos con Datos", sum(1 for m in metricas_mercado_totales.values() if m['ultimo_precio'] > 0))
+                                            
+                                            # Mostrar tabla detallada de métricas por activo
+                                            st.markdown("#### 📋 Detalle de Métricas por Activo")
+                                            metricas_detalle = []
+                                            for simbolo, metricas in metricas_mercado_totales.items():
+                                                metricas_detalle.append({
+                                                    'Símbolo': simbolo,
+                                                    'Precio': f"${metricas['ultimo_precio']:.2f}" if metricas['ultimo_precio'] > 0 else "N/A",
+                                                    'Volumen': f"{metricas['volumen']:,.0f}",
+                                                    'Monto Operado': f"${metricas['monto_operado']:,.0f}",
+                                                    'Spread': f"{metricas['spread']:.4f}",
+                                                    'Liquidez': f"{metricas['liquidez']:.2f}"
+                                                })
+                                            
+                                            if metricas_detalle:
+                                                df_metricas = pd.DataFrame(metricas_detalle)
+                                                st.dataframe(df_metricas, use_container_width=True, height=200)
                                     
 
                                     
