@@ -4106,7 +4106,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4118,6 +4118,23 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "🧱 Análisis Intermarket":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    # Configuración de API key para IA
+                    if 'GEMINI_API_KEY' not in st.session_state:
+                        st.session_state.GEMINI_API_KEY = ''
+                    
+                    gemini_key = st.text_input(
+                        "🔑 API Key Gemini (opcional)",
+                        value=st.session_state.GEMINI_API_KEY,
+                        type="password",
+                        help="Para análisis IA avanzado del ciclo económico"
+                    )
+                    st.session_state.GEMINI_API_KEY = gemini_key
+                    
+                    analisis_intermarket_completo(st.session_state.token_acceso, gemini_key)
+                else:
+                    st.warning("Por favor inicie sesión para acceder al análisis intermarket")
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
@@ -4384,6 +4401,457 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     if total_activos == 0 or not series_historicas:
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
+
+def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
+    """
+    Análisis completo intermarket con detección de ciclos económicos.
+    Integra variables macro del BCRA, análisis intermarket local e internacional,
+    y sugerencias de activos según el ciclo.
+    """
+    st.markdown("---")
+    st.subheader("🧱 Análisis Intermarket Completo - Ciclo Económico")
+    
+    # Configuración de períodos
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        periodo_analisis = st.selectbox(
+            "Período de análisis",
+            ["6mo", "1y", "2y", "5y"],
+            index=1,
+            help="Período para el análisis de variables macro e intermarket"
+        )
+    with col2:
+        ventana_momentum = st.slider(
+            "Ventana momentum (días)",
+            min_value=10,
+            max_value=252,
+            value=63,
+            help="Ventana para cálculo de momentum y tendencias"
+        )
+    with col3:
+        incluir_ia = st.checkbox(
+            "Incluir análisis IA",
+            value=True,
+            help="Usar IA para diagnóstico de ciclo y sugerencias"
+        )
+    
+    if st.button("🔍 Ejecutar Análisis Intermarket Completo", type="primary"):
+        with st.spinner("Analizando variables macro e intermarket..."):
+            
+            # ========== 1. VARIABLES MACRO DEL BCRA ==========
+            st.markdown("### 📊 Variables Macro del BCRA")
+            
+            variables_macro = {}
+            
+            # Variables locales (simuladas con yfinance para demostración)
+            tickers_macro_local = {
+                'MERVAL': '^MERV',
+                'Dólar Oficial': 'USDOLLAR=X',  # Proxy
+                'Dólar MEP': 'USDARS=X',  # Proxy
+                'Bonos CER': 'GD30',  # Proxy
+                'Bonos Dollar-Linked': 'GD30D',  # Proxy
+                'Riesgo País': '^VIX',  # Proxy para volatilidad
+            }
+            
+            # Variables internacionales
+            tickers_macro_global = {
+                'S&P 500': '^GSPC',
+                'VIX': '^VIX',
+                'Dólar Index': 'DX-Y.NYB',
+                'Oro': 'GC=F',
+                'Petróleo': 'CL=F',
+                'Cobre': 'HG=F',
+                'Treasury 10Y': '^TNX',
+                'Treasury 2Y': '^UST2YR',
+            }
+            
+            # Obtener datos
+            try:
+                # Datos locales
+                datos_local = yf.download(list(tickers_macro_local.values()), period=periodo_analisis)['Close']
+                for nombre, ticker in tickers_macro_local.items():
+                    if ticker in datos_local.columns and not datos_local[ticker].empty:
+                        serie = datos_local[ticker].dropna()
+                        if len(serie) > 0:
+                            retornos = serie.pct_change().dropna()
+                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
+                            volatilidad = retornos.std() * np.sqrt(252) * 100
+                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
+                            
+                            variables_macro[nombre] = {
+                                'valor_actual': serie.iloc[-1],
+                                'momentum': momentum,
+                                'volatilidad': volatilidad,
+                                'tendencia': tendencia,
+                                'serie': serie
+                            }
+                
+                # Datos globales
+                datos_global = yf.download(list(tickers_macro_global.values()), period=periodo_analisis)['Close']
+                for nombre, ticker in tickers_macro_global.items():
+                    if ticker in datos_global.columns and not datos_global[ticker].empty:
+                        serie = datos_global[ticker].dropna()
+                        if len(serie) > 0:
+                            retornos = serie.pct_change().dropna()
+                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
+                            volatilidad = retornos.std() * np.sqrt(252) * 100
+                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
+                            
+                            variables_macro[nombre] = {
+                                'valor_actual': serie.iloc[-1],
+                                'momentum': momentum,
+                                'volatilidad': volatilidad,
+                                'tendencia': tendencia,
+                                'serie': serie
+                            }
+                
+                # Mostrar métricas macro
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Variables Locales**")
+                    for nombre, datos in variables_macro.items():
+                        if nombre in tickers_macro_local.values():
+                            st.metric(
+                                nombre,
+                                f"{datos['valor_actual']:.2f}",
+                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
+                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
+                            )
+                
+                with col2:
+                    st.markdown("**Variables Globales**")
+                    for nombre, datos in variables_macro.items():
+                        if nombre in tickers_macro_global.values():
+                            st.metric(
+                                nombre,
+                                f"{datos['valor_actual']:.2f}",
+                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
+                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
+                            )
+                
+            except Exception as e:
+                st.error(f"Error obteniendo datos macro: {e}")
+                return
+            
+            # ========== 2. ANÁLISIS INTERMARKET LOCAL ==========
+            st.markdown("### 🌐 Análisis Intermarket Local")
+            
+            # Correlaciones intermarket locales
+            if len(variables_macro) >= 3:
+                # Crear DataFrame de retornos
+                retornos_df = pd.DataFrame()
+                for nombre, datos in variables_macro.items():
+                    if 'serie' in datos:
+                        retornos_df[nombre] = datos['serie'].pct_change().dropna()
+                
+                if not retornos_df.empty:
+                    # Matriz de correlaciones
+                    correlaciones = retornos_df.corr()
+                    
+                    # Gráfico de correlaciones
+                    fig_corr = go.Figure(data=go.Heatmap(
+                        z=correlaciones.values,
+                        x=correlaciones.columns,
+                        y=correlaciones.columns,
+                        colorscale='RdBu',
+                        zmid=0,
+                        text=correlaciones.values.round(2),
+                        texttemplate="%{text}",
+                        textfont={"size": 10},
+                        hoverongaps=False
+                    ))
+                    
+                    fig_corr.update_layout(
+                        title="Matriz de Correlaciones Intermarket",
+                        width=600,
+                        height=500
+                    )
+                    st.plotly_chart(fig_corr, use_container_width=True)
+                    
+                    # Análisis de divergencias
+                    st.markdown("**🔍 Análisis de Divergencias**")
+                    
+                    # Buscar divergencias entre activos
+                    divergencias = []
+                    for i, activo1 in enumerate(correlaciones.columns):
+                        for j, activo2 in enumerate(correlaciones.columns):
+                            if i < j:
+                                corr = correlaciones.iloc[i, j]
+                                if abs(corr) < 0.3:  # Baja correlación
+                                    divergencias.append({
+                                        'activo1': activo1,
+                                        'activo2': activo2,
+                                        'correlacion': corr,
+                                        'tipo': 'Divergencia' if corr < 0 else 'Baja correlación'
+                                    })
+                    
+                    if divergencias:
+                        df_divergencias = pd.DataFrame(divergencias)
+                        st.dataframe(df_divergencias.sort_values('correlacion'))
+                    else:
+                        st.info("No se detectaron divergencias significativas")
+            
+            # ========== 3. ANÁLISIS INTERMARKET INTERNACIONAL ==========
+            st.markdown("### 🌍 Análisis Intermarket Internacional")
+            
+            # Curva de tasas (simulada)
+            if 'Treasury 10Y' in variables_macro and 'Treasury 2Y' in variables_macro:
+                tasa_10y = variables_macro['Treasury 10Y']['valor_actual']
+                tasa_2y = variables_macro['Treasury 2Y']['valor_actual']
+                spread_curva = tasa_10y - tasa_2y
+                
+                st.metric(
+                    "Spread Curva de Tasas (10Y - 2Y)",
+                    f"{spread_curva:.2f}%",
+                    "Recesión" if spread_curva < 0 else "Expansión",
+                    delta_color="inverse" if spread_curva < 0 else "normal"
+                )
+                
+                # Interpretación de la curva
+                if spread_curva < 0:
+                    st.warning("⚠️ Curva invertida - Señal de recesión potencial")
+                elif spread_curva < 0.5:
+                    st.info("📊 Curva plana - Transición de ciclo")
+                else:
+                    st.success("✅ Curva normal - Ciclo expansivo")
+            
+            # Análisis Dólar vs Commodities
+            if 'Dólar Index' in variables_macro and 'Oro' in variables_macro:
+                dolar_momentum = variables_macro['Dólar Index']['momentum']
+                oro_momentum = variables_macro['Oro']['momentum']
+                
+                st.markdown("**💱 Dólar vs Commodities**")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("Dólar Index", f"{dolar_momentum:+.1f}%")
+                with col2:
+                    st.metric("Oro", f"{oro_momentum:+.1f}%")
+                
+                # Interpretación
+                if dolar_momentum > 0 and oro_momentum < 0:
+                    st.info("📈 Dólar fuerte, commodities débiles - Ciclo deflacionario")
+                elif dolar_momentum < 0 and oro_momentum > 0:
+                    st.info("📉 Dólar débil, commodities fuertes - Ciclo inflacionario")
+                else:
+                    st.info("🔄 Movimiento mixto - Ciclo de transición")
+            
+            # ========== 4. DETECCIÓN DE CICLO ECONÓMICO ==========
+            st.markdown("### 🔄 Detección de Ciclo Económico")
+            
+            # Puntuación de ciclo basada en múltiples indicadores
+            puntuacion_ciclo = 0
+            indicadores_ciclo = []
+            
+            # Indicador 1: Curva de tasas
+            if 'Treasury 10Y' in variables_macro and 'Treasury 2Y' in variables_macro:
+                spread = variables_macro['Treasury 10Y']['valor_actual'] - variables_macro['Treasury 2Y']['valor_actual']
+                if spread < 0:
+                    puntuacion_ciclo -= 2
+                    indicadores_ciclo.append("Curva invertida (-2)")
+                elif spread < 0.5:
+                    puntuacion_ciclo -= 1
+                    indicadores_ciclo.append("Curva plana (-1)")
+                else:
+                    puntuacion_ciclo += 1
+                    indicadores_ciclo.append("Curva normal (+1)")
+            
+            # Indicador 2: VIX
+            if 'VIX' in variables_macro:
+                vix_actual = variables_macro['VIX']['valor_actual']
+                if vix_actual > 30:
+                    puntuacion_ciclo -= 1
+                    indicadores_ciclo.append("VIX alto (-1)")
+                elif vix_actual < 15:
+                    puntuacion_ciclo += 1
+                    indicadores_ciclo.append("VIX bajo (+1)")
+                else:
+                    indicadores_ciclo.append("VIX normal (0)")
+            
+            # Indicador 3: Momentum del mercado
+            if 'S&P 500' in variables_macro:
+                sp500_momentum = variables_macro['S&P 500']['momentum']
+                if sp500_momentum > 10:
+                    puntuacion_ciclo += 1
+                    indicadores_ciclo.append("S&P 500 fuerte (+1)")
+                elif sp500_momentum < -10:
+                    puntuacion_ciclo -= 1
+                    indicadores_ciclo.append("S&P 500 débil (-1)")
+                else:
+                    indicadores_ciclo.append("S&P 500 neutral (0)")
+            
+            # Determinar fase del ciclo
+            if puntuacion_ciclo >= 2:
+                fase_ciclo = "Expansión"
+                color_ciclo = "success"
+            elif puntuacion_ciclo >= 0:
+                fase_ciclo = "Auge"
+                color_ciclo = "info"
+            elif puntuacion_ciclo >= -1:
+                fase_ciclo = "Contracción"
+                color_ciclo = "warning"
+            else:
+                fase_ciclo = "Recesión"
+                color_ciclo = "error"
+            
+            # Mostrar diagnóstico
+            st.markdown(f"**🎯 Diagnóstico de Ciclo: {fase_ciclo}**")
+            st.markdown(f"**Puntuación:** {puntuacion_ciclo}")
+            
+            # Mostrar indicadores
+            for indicador in indicadores_ciclo:
+                st.write(f"• {indicador}")
+            
+            # ========== 5. SUGERENCIAS DE ACTIVOS SEGÚN CICLO ==========
+            st.markdown("### 💡 Sugerencias de Activos por Ciclo")
+            
+            # Matriz de sugerencias
+            matriz_sugerencias = {
+                "Expansión": {
+                    "Argentina": ["Acciones locales", "CEDEARs", "Bonos CER"],
+                    "EEUU": ["S&P 500", "Tecnología", "Consumo Discrecional"],
+                    "Comentario": "Flujo de capitales, suba de consumo"
+                },
+                "Auge": {
+                    "Argentina": ["Acciones value", "Activos hard", "Oro"],
+                    "EEUU": ["Value stocks", "Real estate", "Commodities"],
+                    "Comentario": "Protección ante sobrevaloración"
+                },
+                "Contracción": {
+                    "Argentina": ["Bonos tasa fija", "Dólar MEP", "Dólar-linked"],
+                    "EEUU": ["Treasury bonds", "Defensive stocks", "Cash"],
+                    "Comentario": "Fuga al refugio, evitar acciones cíclicas"
+                },
+                "Recesión": {
+                    "Argentina": ["CEDEARs defensivos", "Oro", "Bonos soberanos"],
+                    "EEUU": ["Consumer staples", "Healthcare", "Utilities"],
+                    "Comentario": "Baja actividad, refugio y liquidez"
+                }
+            }
+            
+            sugerencias = matriz_sugerencias.get(fase_ciclo, {})
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**🇦🇷 Argentina**")
+                for activo in sugerencias.get("Argentina", []):
+                    st.write(f"• {activo}")
+            
+            with col2:
+                st.markdown("**🇺🇸 EEUU**")
+                for activo in sugerencias.get("EEUU", []):
+                    st.write(f"• {activo}")
+            
+            st.info(f"**💬 Comentario:** {sugerencias.get('Comentario', '')}")
+            
+            # ========== 6. ANÁLISIS IA (OPCIONAL) ==========
+            if incluir_ia and gemini_api_key:
+                st.markdown("### 🤖 Análisis IA del Ciclo")
+                
+                # Preparar datos para IA
+                resumen_variables = []
+                for nombre, datos in variables_macro.items():
+                    resumen_variables.append(
+                        f"{nombre}: Valor={datos['valor_actual']:.2f}, "
+                        f"Momentum={datos['momentum']:+.1f}%, "
+                        f"Tendencia={datos['tendencia']}"
+                    )
+                
+                # Prompt para IA
+                prompt_ia = f"""
+                Analiza el siguiente resumen de variables macroeconómicas y de mercado:
+
+                {chr(10).join(resumen_variables)}
+
+                Diagnóstico de ciclo actual: {fase_ciclo} (puntuación: {puntuacion_ciclo})
+
+                Proporciona:
+                1. Análisis detallado del ciclo económico actual
+                2. Factores intermarket más relevantes
+                3. Sugerencias específicas de activos para Argentina y EEUU
+                4. Riesgos y oportunidades principales
+
+                Responde en español, formato ejecutivo.
+                """
+                
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=gemini_api_key)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    response = model.generate_content(prompt_ia)
+                    
+                    if response and response.text:
+                        st.markdown(response.text)
+                    else:
+                        st.warning("No se pudo obtener análisis de IA")
+                except Exception as e:
+                    st.error(f"Error en análisis IA: {e}")
+            
+            # ========== 7. GRÁFICOS INTERMARKET ==========
+            st.markdown("### 📈 Gráficos Intermarket")
+            
+            # Gráfico de evolución de variables clave
+            if len(variables_macro) >= 3:
+                fig_evolucion = go.Figure()
+                
+                # Normalizar series para comparación
+                for nombre, datos in variables_macro.items():
+                    if 'serie' in datos and len(datos['serie']) > 0:
+                        serie_norm = (datos['serie'] / datos['serie'].iloc[0]) * 100
+                        fig_evolucion.add_trace(go.Scatter(
+                            x=serie_norm.index,
+                            y=serie_norm.values,
+                            mode='lines',
+                            name=nombre,
+                            line=dict(width=2)
+                        ))
+                
+                fig_evolucion.update_layout(
+                    title="Evolución Normalizada de Variables Intermarket",
+                    xaxis_title="Fecha",
+                    yaxis_title="Valor Normalizado (%)",
+                    height=500,
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig_evolucion, use_container_width=True)
+            
+            # ========== 8. RESUMEN EJECUTIVO ==========
+            st.markdown("### 📋 Resumen Ejecutivo")
+            
+            resumen_ejecutivo = f"""
+            **🎯 Ciclo Económico Detectado:** {fase_ciclo}
+            
+            **📊 Indicadores Clave:**
+            - Puntuación de ciclo: {puntuacion_ciclo}
+            - Principales divergencias: {len(divergencias) if 'divergencias' in locals() else 0} detectadas
+            - Volatilidad promedio: {np.mean([d['volatilidad'] for d in variables_macro.values()]):.1f}%
+            
+            **💡 Recomendaciones:**
+            - **Argentina:** {', '.join(sugerencias.get('Argentina', []))}
+            - **EEUU:** {', '.join(sugerencias.get('EEUU', []))}
+            
+            **⚠️ Riesgos Principales:**
+            - {'Curva de tasas invertida' if 'spread_curva' in locals() and spread_curva < 0 else 'Ninguno crítico detectado'}
+            - {'VIX elevado' if 'VIX' in variables_macro and variables_macro['VIX']['valor_actual'] > 30 else 'Volatilidad normal'}
+            
+            **📈 Oportunidades:**
+            - Ciclo actual favorece activos {fase_ciclo.lower()}
+            - {'Divergencias aprovechables' if 'divergencias' in locals() and len(divergencias) > 0 else 'Correlaciones normales'}
+            """
+            
+            st.markdown(resumen_ejecutivo)
+            
+            # Guardar resultados en session state
+            st.session_state['analisis_intermarket'] = {
+                'fase_ciclo': fase_ciclo,
+                'puntuacion': puntuacion_ciclo,
+                'variables_macro': variables_macro,
+                'sugerencias': sugerencias,
+                'fecha_analisis': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
 
 if __name__ == "__main__":
     main()
