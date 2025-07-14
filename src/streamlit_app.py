@@ -2117,37 +2117,25 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         st.subheader("📈 Histograma del Portafolio Total Valorizado")
         
         # Configuración del horizonte de inversión
-        col1, col2 = st.columns(2)
-        with col1:
-            horizonte_inversion = st.selectbox(
-                "Horizonte de Inversión:",
-                options=[
-                    ("30 días", 30),
-                    ("60 días", 60),
-                    ("90 días", 90),
-                    ("180 días", 180),
-                    ("365 días", 365),
-                    ("730 días", 730),
-                    ("1095 días", 1095)
-                ],
-                format_func=lambda x: x[0],
-                index=3,  # Por defecto 180 días
-                help="Seleccione el período de tiempo para el análisis de retornos"
-            )
+        horizonte_inversion = st.selectbox(
+            "Horizonte de Inversión:",
+            options=[
+                ("30 días", 30),
+                ("60 días", 60),
+                ("90 días", 90),
+                ("180 días", 180),
+                ("365 días", 365),
+                ("730 días", 730),
+                ("1095 días", 1095)
+            ],
+            format_func=lambda x: x[0],
+            index=3,  # Por defecto 180 días
+            help="Seleccione el período de tiempo para el análisis de retornos"
+        )
         
-        with col2:
-            intervalo_analisis = st.selectbox(
-                "Intervalo de Análisis:",
-                options=[
-                    ("Diario", "D"),
-                    ("Semanal", "W"),
-                    ("Mensual", "M"),
-                    ("Trimestral", "Q")
-                ],
-                format_func=lambda x: x[0],
-                index=0,  # Por defecto diario
-                help="Frecuencia de los datos para el análisis"
-            )
+        # Intervalo de análisis fijo en diario
+        intervalo_analisis = ("Diario", "D")
+        st.info("📊 Análisis configurado en frecuencia diaria")
         
         # Extraer valores de las tuplas
         dias_analisis = horizonte_inversion[1]
