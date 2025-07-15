@@ -6419,6 +6419,23 @@ def mostrar_analisis_capm_y_estrategias(token_acceso, gemini_api_key=None):
     # Mostrar estrategias recomendadas
     st.subheader("🎯 Estrategias Recomendadas")
     
+    # Extraer estrategias para el selector
+    estrategias_disponibles = []
+    for strategy in recommendations['recommended_strategies']:
+        estrategias_disponibles.append(strategy['strategy'])
+    
+    # Selector de estrategia para buscar activos
+    if estrategias_disponibles:
+        estrategia_seleccionada = st.selectbox(
+            "Seleccione una estrategia para buscar activos específicos:",
+            estrategias_disponibles,
+            help="Seleccione una estrategia para ver activos que cumplan con esa estrategia"
+        )
+        
+        if st.button("🔍 Buscar Activos por Estrategia", type="primary"):
+            mostrar_activos_recomendados_por_estrategia(token_acceso, estrategia_seleccionada)
+    
+    # Mostrar detalles de cada estrategia
     for i, strategy in enumerate(recommendations['recommended_strategies']):
         with st.expander(f"{i+1}. {strategy['strategy']} - {strategy['priority']} Priority"):
             col1, col2 = st.columns([2, 1])
@@ -8674,12 +8691,203 @@ def analisis_correlacion_avanzado_con_ia(token_acceso, gemini_api_key=None):
                         for oportunidad in oportunidades_arbitraje:
                             st.markdown(f"• {oportunidad}")
                         
-                    except Exception as e:
-                        st.warning(f"No se pudo generar análisis IA: {e}")
-                        st.error(f"Error detallado: {str(e)}")
+                                    except Exception as e:
+                    st.warning(f"No se pudo generar análisis IA: {e}")
+                    st.error(f"Error detallado: {str(e)}")
+        
+    except Exception as e:
+        st.error(f"Error en el análisis de correlaciones: {e}")
+
+def buscar_activos_por_estrategia(token_portador, estrategia_recomendada, instrumento="Acciones", pais="Argentina"):
+    """
+    Busca activos en los paneles de IOL que cumplan con las estrategias recomendadas por IA.
+    
+    Args:
+        token_portador: Token de autorización
+        estrategia_recomendada: Estrategia recomendada por IA
+        instrumento: Tipo de instrumento (Acciones, Bonos, FCIs)
+        pais: País de los instrumentos
+    
+    Returns:
+        Lista de activos que cumplen con la estrategia
+    """
+    try:
+        # Mapeo de estrategias a características de activos
+        estrategias_caracteristicas = {
+            "Index tracker": {
+                "descripcion": "Activos que replican índices de mercado",
+                "caracteristicas": ["ETF", "INDEX", "SPY", "QQQ", "IWM"],
+                "beta_esperado": 1.0,
+                "alpha_esperado": 0.0
+            },
+            "Traditional long-only asset manager": {
+                "descripcion": "Activos que superan el mercado con retornos no correlacionados",
+                "caracteristicas": ["GROWTH", "QUALITY", "MOMENTUM"],
+                "beta_esperado": 1.0,
+                "alpha_esperado": ">0"
+            },
+            "Smart beta": {
+                "descripcion": "Activos con ajuste dinámico de pesos",
+                "caracteristicas": ["SMART", "BETA", "FACTOR"],
+                "beta_esperado": "variable",
+                "alpha_esperado": 0.0
+            },
+            "Hedge fund": {
+                "descripcion": "Activos con retornos absolutos no correlacionados",
+                "caracteristicas": ["HEDGE", "ABSOLUTE", "UNCORRELATED"],
+                "beta_esperado": 0.0,
+                "alpha_esperado": ">0"
+            },
+            "Defensive": {
+                "descripcion": "Activos defensivos con baja volatilidad",
+                "caracteristicas": ["DEFENSIVE", "LOW_VOL", "UTILITIES", "CONSUMER_STAPLES"],
+                "beta_esperado": "<1",
+                "alpha_esperado": ">0"
+            },
+            "Growth": {
+                "descripcion": "Activos de crecimiento con alto potencial",
+                "caracteristicas": ["TECH", "GROWTH", "INNOVATION"],
+                "beta_esperado": ">1",
+                "alpha_esperado": ">0"
+            },
+            "Value": {
+                "descripcion": "Activos de valor con valuaciones atractivas",
+                "caracteristicas": ["VALUE", "DIVIDEND", "FINANCIAL"],
+                "beta_esperado": "<1",
+                "alpha_esperado": ">0"
+            }
+        }
+        
+        # Obtener panel de cotizaciones
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        # Determinar el panel según el instrumento
+        panel_mapping = {
+            "Acciones": "Panel%20General",
+            "Bonos": "Bonos",
+            "FCIs": "FCI"
+        }
+        
+        panel = panel_mapping.get(instrumento, "Panel%20General")
+        
+        # URL para obtener cotizaciones del panel
+        url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
+        
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            titulos = data.get('titulos', [])
+            
+            # Filtrar activos según la estrategia
+            estrategia_info = estrategias_caracteristicas.get(estrategia_recomendada, {})
+            caracteristicas_buscar = estrategia_info.get('caracteristicas', [])
+            
+            activos_filtrados = []
+            
+            for titulo in titulos:
+                simbolo = titulo.get('simbolo', '').upper()
                 
-            except Exception as e:
-                st.error(f"Error en el análisis de correlaciones: {e}")
+                # Verificar si el símbolo contiene características de la estrategia
+                cumple_estrategia = any(caracteristica in simbolo for caracteristica in caracteristicas_buscar)
+                
+                if cumple_estrategia:
+                    activos_filtrados.append({
+                        'simbolo': simbolo,
+                        'ultimo_precio': titulo.get('ultimoPrecio', 0),
+                        'variacion_porcentual': titulo.get('variacionPorcentual', 0),
+                        'volumen': titulo.get('volumen', 0),
+                        'estrategia': estrategia_recomendada,
+                        'caracteristicas': caracteristicas_buscar
+                    })
+            
+            return activos_filtrados
+            
+        else:
+            st.error(f"Error al obtener datos del panel: {response.status_code}")
+            return []
+            
+    except Exception as e:
+        st.error(f"Error en búsqueda de activos: {e}")
+        return []
+
+def mostrar_activos_recomendados_por_estrategia(token_acceso, estrategia_recomendada):
+    """
+    Muestra activos recomendados según la estrategia de IA
+    """
+    st.subheader(f"📊 Activos Recomendados - Estrategia: {estrategia_recomendada}")
+    
+    # Crear tabs para diferentes tipos de instrumentos
+    tab_acciones, tab_bonos, tab_fcis = st.tabs(["📈 Acciones", "💰 Bonos", "🏦 FCIs"])
+    
+    with tab_acciones:
+        st.write("**Buscando acciones que cumplan con la estrategia...**")
+        acciones = buscar_activos_por_estrategia(token_acceso, estrategia_recomendada, "Acciones")
+        
+        if acciones:
+            st.success(f"Se encontraron {len(acciones)} acciones que cumplen con la estrategia")
+            
+            # Crear DataFrame para mostrar resultados
+            df_acciones = pd.DataFrame(acciones)
+            
+            # Mostrar tabla con los activos
+            st.dataframe(
+                df_acciones[['simbolo', 'ultimo_precio', 'variacion_porcentual', 'volumen']],
+                use_container_width=True
+            )
+            
+            # Gráfico de variación porcentual
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=df_acciones['simbolo'],
+                y=df_acciones['variacion_porcentual'],
+                name='Variación %',
+                marker_color='lightblue'
+            ))
+            
+            fig.update_layout(
+                title=f"Variación Porcentual - Acciones {estrategia_recomendada}",
+                xaxis_title="Símbolo",
+                yaxis_title="Variación %",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+        else:
+            st.warning("No se encontraron acciones que cumplan con la estrategia especificada")
+    
+    with tab_bonos:
+        st.write("**Buscando bonos que cumplan con la estrategia...**")
+        bonos = buscar_activos_por_estrategia(token_acceso, estrategia_recomendada, "Bonos")
+        
+        if bonos:
+            st.success(f"Se encontraron {len(bonos)} bonos que cumplen con la estrategia")
+            
+            df_bonos = pd.DataFrame(bonos)
+            st.dataframe(
+                df_bonos[['simbolo', 'ultimo_precio', 'variacion_porcentual', 'volumen']],
+                use_container_width=True
+            )
+            
+        else:
+            st.warning("No se encontraron bonos que cumplan con la estrategia especificada")
+    
+    with tab_fcis:
+        st.write("**Buscando FCIs que cumplan con la estrategia...**")
+        fcis = buscar_activos_por_estrategia(token_acceso, estrategia_recomendada, "FCIs")
+        
+        if fcis:
+            st.success(f"Se encontraron {len(fcis)} FCIs que cumplen con la estrategia")
+            
+            df_fcis = pd.DataFrame(fcis)
+            st.dataframe(
+                df_fcis[['simbolo', 'ultimo_precio', 'variacion_porcentual', 'volumen']],
+                use_container_width=True
+            )
+            
+        else:
+            st.warning("No se encontraron FCIs que cumplan con la estrategia especificada")
 
 
 if __name__ == "__main__":
