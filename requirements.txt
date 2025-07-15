@@ -14,3 +14,9 @@ httpx
 google.generativeai
 markdown2
 seaborn
+Flask==3.0.0
+requests==2.31.0
+plotly==5.17.0
+pandas==2.1.4
+python-dotenv==1.0.0
+Werkzeug==3.0.1
