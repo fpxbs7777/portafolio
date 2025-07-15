@@ -7225,11 +7225,11 @@ def mostrar_paneles_cotizacion():
                 st.warning("No se obtuvieron resultados del análisis")
     
     def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
-    """
-    Devuelve un diccionario con listas de tickers reales por panel para el universo aleatorio.
-    Si no hay API, usa listas fijas de tickers representativos.
-    Retorna: (dict panel->tickers, dict panel->descripciones)
-    """
+        """
+        Devuelve un diccionario con listas de tickers reales por panel para el universo aleatorio.
+        Si no hay API, usa listas fijas de tickers representativos.
+        Retorna: (dict panel->tickers, dict panel->descripciones)
+        """
     tickers = {}
     descripciones = {}
     # Paneles y ejemplos (puedes reemplazar por consulta a la API de IOL si tienes endpoint)
