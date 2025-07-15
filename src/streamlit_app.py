@@ -4677,9 +4677,9 @@ def main():
                     recomendar_activos_por_estrategia_optimizada(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para acceder al sistema de recomendación de activos")
-                            st.markdown("**Análisis específico del portafolio del cliente seleccionado**")
-                            mostrar_analisis_capm_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
-                    
+                    st.markdown("**Análisis específico del portafolio del cliente seleccionado**")
+                    mostrar_analisis_capm_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+
                     with tab5:
                         st.subheader("🎯 Análisis CAPM Interactivo")
                         st.markdown("""
@@ -8350,7 +8350,7 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                                     resumen_ciclo += f"- {indicador}: {tendencia['proyeccion_3m']:.1f} ({tendencia['cambio_proyeccion']:+.1f}%) - {tendencia['tendencia']} (R²: {tendencia['r_cuadrado']:.2f})\n"
                                 except Exception as e:
                                     resumen_ciclo += f"- {indicador}: Error en proyección - {str(e)}\n"
-                        else:
+                else:
                             resumen_ciclo += "\n**4. PROYECCIONES A 3 MESES:** No disponibles - datos insuficientes\n"
                         
                         # Agregar análisis de causalidad si está disponible
