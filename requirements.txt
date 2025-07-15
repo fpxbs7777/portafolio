@@ -18,4 +18,3 @@ Flask
 requests
 pandas
 python-doten
-Werkzeug
