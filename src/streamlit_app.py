@@ -8343,12 +8343,13 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                                     resumen_ciclo += f"- {indicador}: {tendencia['proyeccion_3m']:.1f} ({tendencia['cambio_proyeccion']:+.1f}%) - {tendencia['tendencia']} (R²: {tendencia['r_cuadrado']:.2f})\n"
                                 except Exception as e:
                                     resumen_ciclo += f"- {indicador}: Error en proyección - {str(e)}\n"
-                else:
+                        else:
                             resumen_ciclo += "\n**4. PROYECCIONES A 3 MESES:** No disponibles - datos insuficientes\n"
                         
                         # Agregar análisis de causalidad si está disponible
                         if 'lags_analysis' in locals():
                             resumen_ciclo += "\n**5. RELACIONES TEMPORALES (CAUSALIDAD):**\n"
+{{ ... }}
                             for par, lags in lags_analysis.items():
                                 resumen_ciclo += f"- {par}: Max correlación {lags['Max Correlación']:.3f}\n"
                         
