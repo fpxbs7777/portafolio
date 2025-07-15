@@ -13,3 +13,4 @@ aiohttp
 httpx
 google.generativeai
 markdown2
+seaborn
