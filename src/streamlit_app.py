@@ -540,6 +540,894 @@ def mostrar_analisis_beta_correlacion():
                 except Exception as e:
                     st.error(f"Error al guardar: {str(e)}")
 
+# ============================
+# BCRA DASHBOARD FUNCTIONS
+# ============================
+
+def metric_card(title: str, value: str, change: float = None, icon: str = "chart-line", color: str = "blue") -> str:
+    """Crea una tarjeta de métrica con estilo moderno"""
+    color_classes = {
+        "blue": {"bg": "bg-blue-50", "text": "text-blue-600", "icon_bg": "bg-blue-100"},
+        "green": {"bg": "bg-green-50", "text": "text-green-600", "icon_bg": "bg-green-100"},
+        "yellow": {"bg": "bg-yellow-50", "text": "text-yellow-600", "icon_bg": "bg-yellow-100"},
+        "red": {"bg": "bg-red-50", "text": "text-red-600", "icon_bg": "bg-red-100"},
+    }
+    
+    colors = color_classes.get(color, color_classes["blue"])
+    
+    change_html = ""
+    if change is not None:
+        is_positive = change >= 0
+        change_icon = "arrow-up" if is_positive else "arrow-down"
+        change_color = "text-green-500" if is_positive else "text-red-500"
+        change_html = f"""
+        <div class="mt-2">
+            <span class="text-sm font-medium {change_color}">
+                <i class="fas fa-{change_icon}"></i> {abs(change):.2f}%
+            </span>
+        </div>
+        """
+    
+    return f"""
+    <div class="metric-card">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-gray-500 text-sm font-medium">{title}</p>
+                <p class="text-2xl font-bold text-gray-900">{value}</p>
+            </div>
+            <div class="p-3 rounded-full {colors['icon_bg']} {colors['text']}">
+                <i class="fas fa-{icon} text-xl"></i>
+            </div>
+        </div>
+        {change_html}
+    </div>
+    """
+
+@st.cache_data(ttl=3600)  # Cachear por 1 hora
+def get_bcra_variables():
+    url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables.asp"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        requests.packages.urllib3.disable_warnings()
+        response = requests.get(url, headers=headers, verify=False, timeout=30)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        variables = []
+        
+        tables = soup.find_all('table', {'class': 'table'})
+        if not tables:
+            return pd.DataFrame()
+            
+        table = tables[0]
+        rows = table.find_all('tr')
+        
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                link = cols[0].find('a')
+                href = link.get('href') if link else ''
+                serie = ''
+                
+                if href and 'serie=' in href:
+                    serie = href.split('serie=')[1].split('&')[0]
+                
+                variable = {
+                    'Nombre': cols[0].get_text(strip=True),
+                    'Fecha': cols[1].get_text(strip=True) if len(cols) > 1 else '',
+                    'Valor': cols[2].get_text(strip=True) if len(cols) > 2 else '',
+                    'Serie ID': serie,
+                    'URL': f"https://www.bcra.gob.ar{href}" if href else ''
+                }
+                variables.append(variable)
+        
+        return pd.DataFrame(variables)
+    
+    except Exception as e:
+        st.error(f"Error al obtener las variables del BCRA: {str(e)}")
+        return pd.DataFrame()
+
+def get_historical_data(serie_id, fecha_desde=None, fecha_hasta=None):
+    if not fecha_desde:
+        fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    if not fecha_hasta:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    
+    url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables_datos.asp"
+    params = {
+        'serie': serie_id,
+        'fecha_desde': fecha_desde,
+        'fecha_hasta': fecha_hasta,
+        'primeravez': '1'
+    }
+    
+    try:
+        response = requests.get(url, params=params, verify=False)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        table = soup.find('table', {'class': 'table'})
+        if not table:
+            return pd.DataFrame()
+            
+        headers = []
+        header_row = table.find('tr')
+        if header_row:
+            headers = [th.get_text(strip=True) for th in header_row.find_all('th')]
+        
+        data = []
+        rows = table.find_all('tr')[1:]
+        
+        for row in rows:
+            cols = row.find_all('td')
+            if cols:
+                row_data = [col.get_text(strip=True) for col in cols]
+                data.append(row_data)
+        
+        if not data:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(data, columns=headers)
+        
+        if 'Fecha' in df.columns and len(df.columns) > 1:
+            value_column = df.columns[1]
+            df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
+            df[value_column] = df[value_column].str.replace('.', '').str.replace(',', '.').astype(float, errors='ignore')
+            df = df.sort_values('Fecha')
+            df = df.rename(columns={value_column: 'Valor'})
+            df = df.dropna(subset=['Fecha', 'Valor'])
+            return df
+            
+        return df
+        
+    except Exception as e:
+        st.error(f"Error al obtener datos históricos: {str(e)}")
+        return pd.DataFrame()
+
+def calculate_metrics(data):
+    """Calcular métricas a partir de los datos"""
+    if data is None or data.empty or 'Valor' not in data.columns or 'Fecha' not in data.columns:
+        return 0, 0, 0, 0, 0
+    
+    data = data.sort_values('Fecha')
+    current_value = data['Valor'].iloc[-1]
+    previous_value = data['Valor'].iloc[-2] if len(data) > 1 else current_value
+    change = current_value - previous_value
+    change_pct = (change / previous_value * 100) if previous_value != 0 else 0
+    max_val = data['Valor'].max()
+    min_val = data['Valor'].min()
+    
+    return current_value, change, change_pct, max_val, min_val
+
+def create_professional_chart(data, title, variable_name):
+    """Crear gráfico profesional con diseño mejorado"""
+    # Verificar que los datos no estén vacíos y tengan las columnas necesarias
+    if data is None or data.empty or 'Valor' not in data.columns or 'Fecha' not in data.columns:
+        st.error("Datos no válidos para generar el gráfico")
+        return go.Figure(), 0, 0, 0, 0, 0
+    
+    try:
+        # Asegurarse de que los valores sean numéricos
+        data['Valor'] = pd.to_numeric(data['Valor'], errors='coerce')
+        data = data.dropna(subset=['Valor', 'Fecha'])
+        
+        if len(data) < 2:
+            st.error("No hay suficientes datos para generar el gráfico")
+            return go.Figure(), 0, 0, 0
+        
+        # Ordenar por fecha
+        data = data.sort_values('Fecha')
+        
+        # Calcular métricas iniciales
+        current_value, change, change_pct, max_val, min_val = calculate_metrics(data)
+        
+        # Crear el gráfico principal
+        fig = go.Figure()
+        
+        # Línea principal
+        fig.add_trace(go.Scatter(
+            x=data['Fecha'],
+            y=data['Valor'],
+            mode='lines+markers',
+            name=variable_name,
+            customdata=data[['Fecha', 'Valor']],
+            line=dict(
+                color='#3b82f6',
+                width=3,
+                shape='spline'
+            ),
+            marker=dict(
+                size=4,
+                color='#3b82f6',
+                line=dict(color='white', width=1)
+            ),
+            fill='tonexty',
+            fillcolor='rgba(59, 130, 246, 0.1)',
+            hovertemplate='<b>%{y:,.2f}</b><br>%{x}<extra></extra>'
+        ))
+        
+        # Línea de tendencia (solo si hay suficientes puntos)
+        if len(data) > 2:
+            try:
+                x = np.arange(len(data))
+                y = data['Valor'].values
+                
+                # Verificar que no haya valores NaN o infinitos
+                mask = np.isfinite(y)
+                if np.any(mask):
+                    z = np.polyfit(x[mask], y[mask], 1)
+                    p = np.poly1d(z)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=data['Fecha'],
+                        y=p(x),
+                        mode='lines',
+                        name='Tendencia',
+                        line=dict(
+                            color='#f59e0b',
+                            width=2,
+                            dash='dot'
+                        ),
+                        hovertemplate='<b>Tendencia: %{y:,.2f}</b><extra></extra>'
+                    ))
+            except Exception as e:
+                st.warning(f"No se pudo calcular la línea de tendencia: {str(e)}")
+        
+        # Personalizar diseño del gráfico
+        fig.update_layout(
+            title=dict(
+                text=title,
+                x=0.5,
+                xanchor='center',
+                font=dict(size=18, family='Inter')
+            ),
+            xaxis=dict(
+                title='Fecha',
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='#e5e7eb',
+                showline=True,
+                linewidth=1,
+                linecolor='#d1d5db',
+                tickformat='%d/%m/%Y',
+                rangeslider=dict(visible=True, thickness=0.05),
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=7, label="7D", step="day", stepmode="backward"),
+                        dict(count=30, label="30D", step="day", stepmode="backward"),
+                        dict(count=90, label="3M", step="day", stepmode="backward"),
+                        dict(count=6, label="6M", step="month", stepmode="backward"),
+                        dict(count=1, label="1A", step="year", stepmode="backward"),
+                        dict(step="all", label="Todo")
+                    ])
+                )
+            ),
+            yaxis=dict(
+                title=variable_name,
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='#e5e7eb',
+                showline=True,
+                linewidth=1,
+                linecolor='#d1d5db',
+                tickformat=',.2f'
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            hovermode='x unified',
+            hoverlabel=dict(
+                bgcolor='white',
+                font_size=12,
+                font_family='Inter'
+            ),
+            margin=dict(l=50, r=50, t=80, b=50),
+            showlegend=True,
+            legend=dict(
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                xanchor='right',
+                x=1
+            )
+        )
+        
+        return fig, current_value, change, change_pct, max_val, min_val
+        
+    except Exception as e:
+        st.error(f"Error al generar el gráfico: {str(e)}")
+        return go.Figure(), 0, 0, 0
+
+def generate_bcra_analysis_report(data: pd.DataFrame, variable_name: str, variable_description: str = "") -> str:
+    """
+    Genera un informe básico de análisis para datos del BCRA.
+    """
+    try:
+        data_clean = data.dropna(subset=['Valor', 'Fecha']).copy()
+        data_clean['Valor'] = pd.to_numeric(data_clean['Valor'], errors='coerce')
+        data_clean = data_clean.dropna(subset=['Valor'])
+        
+        if len(data_clean) == 0:
+            return "## ⚠️ Sin datos válidos\n\nNo hay datos válidos para analizar."
+        
+        summary = data_clean['Valor'].describe().to_dict()
+        last_value = data_clean['Valor'].iloc[-1]
+        first_value = data_clean['Valor'].iloc[0]
+        total_change = ((last_value - first_value) / first_value * 100) if first_value != 0 else 0
+        
+        # Calcular métricas
+        volatility = data_clean['Valor'].std() / data_clean['Valor'].mean() * 100 if data_clean['Valor'].mean() != 0 else 0
+        x_vals = np.arange(len(data_clean))
+        coeffs = np.polyfit(x_vals, data_clean['Valor'], 1)
+        trend = "alcista" if coeffs[0] > 0 else "bajista" if coeffs[0] < 0 else "estable"
+        
+        # Determinar nivel de volatilidad
+        if volatility < 5:
+            volatility_level = "baja"
+            volatility_emoji = "🟢"
+        elif volatility < 15:
+            volatility_level = "moderada"
+            volatility_emoji = "🟡"
+        else:
+            volatility_level = "alta"
+            volatility_emoji = "🔴"
+        
+        # Generar informe básico estructurado
+        report = f"""
+# 📊 Informe de Análisis Económico - {variable_name}
+
+*Generado automáticamente el {datetime.now().strftime('%d/%m/%Y a las %H:%M:%S')}*  
+*Período analizado: {data_clean['Fecha'].min().strftime('%d/%m/%Y')} - {data_clean['Fecha'].max().strftime('%d/%m/%Y')}*
+
+---
+
+## 📋 Resumen Ejecutivo
+
+• **Variable analizada**: {variable_name}
+• **Período de análisis**: {(data_clean['Fecha'].max() - data_clean['Fecha'].min()).days} días
+• **Variación total**: {total_change:+.2f}%
+• **Tendencia general**: {trend.upper()}
+• **Volatilidad**: {volatility_emoji} {volatility_level.upper()} ({volatility:.2f}%)
+
+## 📈 Análisis de Tendencias
+
+### Comportamiento General
+La variable **{variable_name}** mostró una tendencia **{trend}** durante el período analizado, con una variación total de **{total_change:+.2f}%**.
+
+### Puntos Destacados
+- **Valor inicial**: {first_value:,.2f}
+- **Valor final**: {last_value:,.2f}
+- **Valor máximo**: {summary.get('max', 0):,.2f}
+- **Valor mínimo**: {summary.get('min', 0):,.2f}
+- **Promedio del período**: {summary.get('mean', 0):,.2f}
+
+## 🔍 Análisis Estadístico
+
+| Métrica | Valor |
+|---------|-------|
+| **Media** | {summary.get('mean', 0):,.2f} |
+| **Mediana** | {summary.get('50%', 0):,.2f} |
+| **Desviación Estándar** | {summary.get('std', 0):,.2f} |
+| **Rango** | {summary.get('max', 0) - summary.get('min', 0):,.2f} |
+| **Coeficiente de Variación** | {volatility:.2f}% |
+
+### Distribución de Valores
+- **Q1 (25%)**: {summary.get('25%', 0):,.2f}
+- **Q3 (75%)**: {summary.get('75%', 0):,.2f}
+- **Rango intercuartílico**: {summary.get('75%', 0) - summary.get('25%', 0):,.2f}
+
+## 💡 Insights Económicos
+
+### Volatilidad {volatility_emoji}
+La volatilidad de **{volatility:.2f}%** se considera **{volatility_level}**:
+"""
+        
+        if volatility < 5:
+            report += """
+- ✅ **Estabilidad alta**: La variable muestra comportamiento predecible
+- ✅ **Riesgo bajo**: Fluctuaciones menores en el período
+- ✅ **Tendencia clara**: Patrón de movimiento bien definido
+"""
+        elif volatility < 15:
+            report += """
+- ⚠️ **Estabilidad moderada**: Algunas fluctuaciones observadas
+- ⚠️ **Riesgo moderado**: Variaciones dentro de rangos esperados
+- ⚠️ **Seguimiento recomendado**: Monitorear cambios significativos
+"""
+        else:
+            report += """
+- 🚨 **Alta volatilidad**: Fluctuaciones significativas detectadas
+- 🚨 **Riesgo elevado**: Variaciones importantes en el período
+- 🚨 **Atención especial**: Requiere monitoreo continuo
+"""
+
+        report += f"""
+
+### Tendencia {trend.title()}
+"""
+        
+        if trend == "alcista":
+            report += f"""
+- 📈 **Crecimiento sostenido**: Incremento de {abs(total_change):.2f}%
+- 💹 **Momentum positivo**: Dirección ascendente confirmada
+- 🎯 **Proyección favorable**: Tendencia hacia valores superiores
+"""
+        elif trend == "bajista":
+            report += f"""
+- 📉 **Declive observado**: Disminución de {abs(total_change):.2f}%
+- ⬇️ **Momentum negativo**: Dirección descendente confirmada
+- 🎯 **Atención requerida**: Monitorear evolución futura
+"""
+        else:
+            report += f"""
+- ➡️ **Estabilidad relativa**: Variación mínima de {abs(total_change):.2f}%
+- ⚖️ **Equilibrio**: Sin tendencia dominante clara
+- 🎯 **Consolidación**: Período de estabilización
+"""
+
+        report += f"""
+
+## 📊 Conclusiones y Recomendaciones
+
+### Hallazgos Principales
+1. **Comportamiento general**: La variable mostró una tendencia **{trend}** con volatilidad **{volatility_level}**
+2. **Rango de valores**: Fluctuó entre {summary.get('min', 0):,.2f} y {summary.get('max', 0):,.2f}
+3. **Estabilidad**: El coeficiente de variación de {volatility:.2f}% indica {volatility_level} predictibilidad
+
+### Recomendaciones de Seguimiento
+- 📅 **Frecuencia**: Monitoreo {'diario' if volatility > 15 else 'semanal' if volatility > 5 else 'quincenal'}
+- 🎯 **Niveles clave**: Vigilar quiebres de {summary.get('min', 0):,.2f} (soporte) y {summary.get('max', 0):,.2f} (resistencia)
+- ⚠️ **Alertas**: Configurar notificaciones para cambios > {volatility * 1.5:.1f}%
+
+---
+
+## 📋 Datos Técnicos del Análisis
+
+| Métrica Técnica | Valor |
+|------------------|-------|
+| **Observaciones** | {len(data_clean):,} |
+| **Período (días)** | {(data_clean['Fecha'].max() - data_clean['Fecha'].min()).days} |
+| **Volatilidad** | {volatility:.2f}% |
+| **Tendencia** | {trend.title()} |
+| **R² aproximado** | {abs(coeffs[0]) / (summary.get('std', 1) + 0.001) * 100:.2f}% |
+
+*Análisis generado automáticamente con algoritmos estadísticos + datos oficiales del BCRA*
+"""
+        
+        return report
+        
+    except Exception as e:
+        return f"## ❌ Error en el análisis básico\n\nNo se pudo generar el análisis: {str(e)}"
+
+def mostrar_bcra_dashboard():
+    """
+    Función principal para mostrar el dashboard del BCRA.
+    """
+    st.header("🏦 BCRA Dashboard")
+    st.markdown("### Panel de Control - Banco Central de la República Argentina")
+    
+    # Obtener datos con spinner mejorado
+    with st.spinner('📊 Obteniendo datos del BCRA...'):
+        variables_df = get_bcra_variables()
+    
+    if not variables_df.empty:
+        # Sección de métricas principales
+        st.markdown("""
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">📊 Indicadores Principales</h2>
+                <p class="text-gray-500">Variables económicas más relevantes del BCRA</p>
+            </div>
+            <div class="text-sm text-gray-500">
+                <i class="far fa-clock mr-1"></i> Actualizado: {}
+            </div>
+        </div>
+        """.format(datetime.now().strftime("%d/%m/%Y %H:%M")), unsafe_allow_html=True)
+        
+        # Mostrar métricas principales
+        cols = st.columns(4)
+        colors = ["blue", "green", "yellow", "red"]
+        icons = ["dollar-sign", "chart-line", "percentage", "wallet"]
+        
+        for idx, row in variables_df.head(4).iterrows():
+            with cols[idx % 4]:
+                # Calcular cambio porcentual si hay datos históricos
+                change = None
+                if 'hist_data' in st.session_state and not st.session_state.hist_data.empty and len(st.session_state.hist_data) > 1:
+                    values = st.session_state.hist_data['Valor'].values
+                    if len(values) >= 2:
+                        change = ((values[-1] - values[-2]) / values[-2]) * 100
+                
+                st.markdown(metric_card(
+                    title=row['Nombre'],
+                    value=row['Valor'],
+                    change=change,
+                    icon=icons[idx % len(icons)],
+                    color=colors[idx % len(colors)]
+                ), unsafe_allow_html=True)
+        
+        # Sección de análisis histórico
+        st.markdown("""
+        <div class="mt-10 mb-6">
+            <h2 class="text-2xl font-bold text-gray-800">📈 Análisis Histórico</h2>
+            <p class="text-gray-500">Evolución temporal de las variables económicas</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Controles de análisis
+        st.markdown('<div class="bg-white p-6 rounded-xl shadow-sm mb-6">', unsafe_allow_html=True)
+        
+        # Filtros en fila
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            # Buscador mejorado
+            search_container = st.container()
+            with search_container:
+                selected_var = st.selectbox(
+                    "Seleccionar variable:",
+                    options=variables_df['Nombre'].tolist(),
+                    index=0,
+                    help="Seleccione la variable para ver su evolución histórica"
+                )
+        
+        with col2:
+            # Selector de rango de fechas
+            start_date = st.date_input(
+                "Desde:",
+                value=datetime.now() - timedelta(days=90),
+                max_value=datetime.now() - timedelta(days=1),
+                help="Fecha de inicio del análisis"
+            )
+        
+        with col3:
+            end_date = st.date_input(
+                "Hasta:",
+                value=datetime.now(),
+                max_value=datetime.now(),
+                min_value=start_date + timedelta(days=1) if start_date else None,
+                help="Fecha de fin del análisis"
+            )
+        
+        # Botón de análisis
+        analyze_col, _ = st.columns([1, 3])
+        with analyze_col:
+            analyze_clicked = st.button(
+                "🔍 Analizar Variable", 
+                type="primary",
+                use_container_width=True,
+                help="Generar análisis para la variable seleccionada"
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)  # Cierre del contenedor de controles
+        
+        # Obtener la serie seleccionada
+        selected_serie = variables_df[variables_df['Nombre'] == selected_var].iloc[0] if not variables_df.empty else None
+        
+        # Tabs para organizar contenido
+        tab1, tab2, tab3 = st.tabs(["📊 Gráfico", "📋 Datos", "💾 Descargar"])
+        
+        with tab1:
+            if analyze_clicked and selected_serie is not None:
+                with st.spinner('📈 Generando análisis...'):
+                    hist_data = get_historical_data(
+                        selected_serie['Serie ID'],
+                        start_date.strftime('%Y-%m-%d'),
+                        end_date.strftime('%Y-%m-%d')
+                    )
+                    
+                    if not hist_data.empty and 'Fecha' in hist_data.columns and 'Valor' in hist_data.columns:
+                        # Crear gráfico profesional con métricas
+                        fig, current_val, change, change_pct, max_val, min_val = create_professional_chart(
+                            hist_data, 
+                            f"Evolución de {selected_var}", 
+                            selected_var
+                        )
+                        
+                        # Mostrar métricas en tarjetas mejoradas
+                        st.markdown("### 📊 Resumen de la Serie")
+                        
+                        # Crear columnas para las métricas
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.markdown(metric_card(
+                                title="Valor Actual",
+                                value=f"{current_val:,.2f}",
+                                icon="dollar-sign",
+                                color="blue"
+                            ), unsafe_allow_html=True)
+                        
+                        with col2:
+                            st.markdown(metric_card(
+                                title="Cambio",
+                                value=f"{change:,.2f}",
+                                change=change_pct,
+                                icon="chart-line",
+                                color="green" if change_pct >= 0 else "red"
+                            ), unsafe_allow_html=True)
+                        
+                        with col3:
+                            st.markdown(metric_card(
+                                title="Máximo",
+                                value=f"{max_val:,.2f}",
+                                icon="arrow-up",
+                                color="green"
+                            ), unsafe_allow_html=True)
+                        
+                        with col4:
+                            st.markdown(metric_card(
+                                title="Mínimo",
+                                value=f"{min_val:,.2f}",
+                                icon="arrow-down",
+                                color="red"
+                            ), unsafe_allow_html=True)
+                        
+                        st.markdown("<div class='h-4'></div>", unsafe_allow_html=True)  # Espaciador
+                        
+                        # Mostrar gráfico
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Generar informe automático
+                        if st.session_state.get('selected_var') != selected_var or not st.session_state.get('analysis_report'):
+                            # Mostrar indicador de generación
+                            with st.status("🤖 Generando análisis...", expanded=True) as status:
+                                st.write("📊 Procesando datos estadísticos...")
+                                
+                                # Generar el informe
+                                report = generate_bcra_analysis_report(
+                                    hist_data,
+                                    selected_var,
+                                    selected_serie.get('Descripción', f'Variable económica del BCRA: {selected_var}')
+                                )
+                                
+                                st.write("✅ Análisis completado")
+                                status.update(label="✅ Análisis generado exitosamente", state="complete")
+                                
+                                # Guardar en session state
+                                st.session_state.analysis_report = report
+                                st.session_state.selected_var = selected_var
+                                st.session_state.report_generated = True
+                        
+                        # Mostrar vista previa del informe si está disponible
+                        if st.session_state.get('analysis_report'):
+                            st.markdown("---")
+                            st.markdown("### 🤖 Vista Previa del Análisis")
+                            
+                            with st.expander("📄 Ver análisis completo", expanded=False):
+                                st.markdown(st.session_state.analysis_report, unsafe_allow_html=True)
+                            
+                            st.info("💡 **Tip**: Ve a la pestaña 'Datos' para ver el informe completo y más detalles estadísticos.")
+                        
+                        # Guardar datos en session state para otras tabs
+                        st.session_state.hist_data = hist_data
+                        st.session_state.selected_serie = selected_serie
+                        
+                    else:
+                        st.warning("📊 No se encontraron datos para el período seleccionado.")
+        
+        with tab2:
+            if 'hist_data' in st.session_state and not st.session_state.hist_data.empty:
+                # Mostrar datos en un contenedor con estilo
+                with st.container():
+                    st.markdown("### 📊 Datos Históricos")
+                    st.dataframe(
+                        st.session_state.hist_data,
+                        use_container_width=True,
+                        height=400
+                    )
+                
+                # Mostrar estadísticas descriptivas
+                st.markdown("---")
+                st.subheader("📊 Estadísticas Descriptivas")
+                stats = st.session_state.hist_data['Valor'].describe()
+                
+                # Mostrar métricas en columnas
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Media", f"{stats['mean']:,.2f}")
+                with col2:
+                    st.metric("Mediana", f"{stats['50%']:,.2f}")
+                with col3:
+                    st.metric("Mínimo", f"{stats['min']:,.2f}")
+                with col4:
+                    st.metric("Máximo", f"{stats['max']:,.2f}")
+                
+                # Sección de Análisis
+                st.markdown("---")
+                st.markdown("## 🤖 Análisis Inteligente")
+                
+                # Mostrar el informe generado
+                if 'analysis_report' in st.session_state and st.session_state.analysis_report:
+                    # Botones de acción
+                    col1, col2 = st.columns([1, 1])
+                    
+                    with col1:
+                        if st.button("🔄 Regenerar Análisis", key="refresh_analysis", help="Generar un nuevo análisis"):
+                            with st.spinner("🤖 Regenerando análisis..."):
+                                # Limpiar el análisis actual
+                                st.session_state.analysis_report = None
+                                st.session_state.report_generated = False
+                                
+                                # Generar nuevo análisis
+                                new_report = generate_bcra_analysis_report(
+                                    st.session_state.hist_data,
+                                    st.session_state.selected_var,
+                                    st.session_state.selected_serie.get('Descripción', f'Variable económica del BCRA: {st.session_state.selected_var}')
+                                )
+                                
+                                st.session_state.analysis_report = new_report
+                                st.session_state.report_generated = True
+                                st.rerun()
+                    
+                    # Mostrar el análisis en una caja con estilo
+                    st.markdown("### 📄 Informe Completo")
+                    
+                    # Contenedor del análisis con scroll
+                    with st.container():
+                        st.markdown(
+                            f"""
+                            <div style="
+                                background-color: white;
+                                padding: 2rem;
+                                border-radius: 10px;
+                                border: 1px solid #e5e7eb;
+                                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+                                max-height: 600px;
+                                overflow-y: auto;
+                                margin: 1rem 0;
+                            ">
+                                {st.session_state.analysis_report}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                
+                else:
+                    # No hay análisis disponible
+                    st.info("💡 **Análisis no disponible**")
+                    
+                    if st.button("🚀 Generar Análisis", key="generate_new_analysis", type="primary"):
+                        st.session_state.generating_report = True
+                        st.rerun()
+                
+                # Trigger para generar análisis si está marcado
+                if st.session_state.get('generating_report', False):
+                    with st.spinner("🤖 Generando análisis..."):
+                        new_report = generate_bcra_analysis_report(
+                            st.session_state.hist_data,
+                            st.session_state.selected_var,
+                            st.session_state.selected_serie.get('Descripción', f'Variable económica del BCRA: {st.session_state.selected_var}')
+                        )
+                        
+                        st.session_state.analysis_report = new_report
+                        st.session_state.generating_report = False
+                        st.session_state.report_generated = True
+                        st.rerun()
+            else:
+                st.info("👆 Primero genere el análisis en la pestaña 'Gráfico'")
+        
+        with tab3:
+            if 'hist_data' in st.session_state and not st.session_state.hist_data.empty:
+                # Formato de descarga
+                download_format = st.selectbox(
+                    "Formato de descarga:",
+                    ["CSV", "Excel", "JSON"],
+                    index=0
+                )
+                
+                # Botón de descarga
+                if download_format == "CSV":
+                    csv = st.session_state.hist_data.to_csv(index=False)
+                    st.download_button(
+                        label="💾 Descargar CSV",
+                        data=csv,
+                        file_name=f"{st.session_state.selected_var.replace(' ', '_').lower()}.csv",
+                        mime="text/csv"
+                    )
+                elif download_format == "Excel":
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                        st.session_state.hist_data.to_excel(writer, index=False, sheet_name='Datos')
+                    excel_data = excel_buffer.getvalue()
+                    st.download_button(
+                        label="💾 Descargar Excel",
+                        data=excel_data,
+                        file_name=f"{st.session_state.selected_var.replace(' ', '_').lower()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:  # JSON
+                    json_data = st.session_state.hist_data.to_json(orient='records', date_format='iso')
+                    st.download_button(
+                        label="💾 Descargar JSON",
+                        data=json_data,
+                        file_name=f"{st.session_state.selected_var.replace(' ', '_').lower()}.json",
+                        mime="application/json"
+                    )
+                
+                # Opción para descargar el informe de análisis
+                if 'analysis_report' in st.session_state:
+                    st.markdown("---")
+                    st.markdown("### 📄 Descargar Informe de Análisis")
+                    
+                    # Formato del informe
+                    report_format = st.radio(
+                        "Formato del informe:",
+                        ["Texto Plano (TXT)", "Markdown (MD)", "HTML"],
+                        index=0,
+                        horizontal=True
+                    )
+                    
+                    # Generar el contenido según el formato seleccionado
+                    if report_format == "Texto Plano (TXT)":
+                        file_extension = "txt"
+                        mime_type = "text/plain"
+                        report_content = st.session_state.analysis_report
+                    elif report_format == "Markdown (MD)":
+                        file_extension = "md"
+                        mime_type = "text/markdown"
+                        report_content = st.session_state.analysis_report
+                    else:  # HTML
+                        file_extension = "html"
+                        mime_type = "text/html"
+                        # Convertir markdown a HTML
+                        html_content = f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="UTF-8">
+                            <title>Informe de Análisis - {st.session_state.selected_var}</title>
+                            <style>
+                                body {{ font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }}
+                                h1, h2, h3 {{ color: #2c3e50; }}
+                                .header {{ text-align: center; margin-bottom: 30px; }}
+                                .date {{ color: #7f8c8d; font-style: italic; }}
+                                .metrics {{ background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                            </style>
+                        </head>
+                        <body>
+                            <div class="header">
+                                <h1>Informe de Análisis</h1>
+                                <h2>{st.session_state.selected_var}</h2>
+                                <p class="date">Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                            </div>
+                            {markdown2.markdown(st.session_state.analysis_report)}
+                        </body>
+                        </html>
+                        """
+                        report_content = html_content
+                    
+                    st.download_button(
+                        label=f"⬇️ Descargar Informe ({report_format.split(' ')[0]})",
+                        data=report_content,
+                        file_name=f"informe_analisis_{st.session_state.selected_var.replace(' ', '_').lower()}.{file_extension}",
+                        mime=mime_type
+                    )
+            else:
+                st.info("No hay datos para descargar. Por favor, selecciona una variable y haz clic en 'Analizar Variable'.")
+        
+        # Expandir para ver todas las variables
+        with st.expander("📋 Ver todas las variables disponibles", expanded=False):
+            st.dataframe(
+                variables_df[['Nombre', 'Valor', 'Fecha']].reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True
+            )
+    
+    else:
+        st.error("❌ No se pudieron cargar los datos del BCRA. Por favor, inténtelo más tarde.")
+    
+    # Footer mejorado
+    st.markdown(f"""
+        <div class="footer">
+            <p><strong>🏦 BCRA Dashboard</strong> - Panel de Control Económico</p>
+            <p>Datos oficiales del <a href="https://www.bcra.gob.ar/" target="_blank">Banco Central de la República Argentina</a></p>
+            <p>Última actualización: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</p>
+            <p><small>Desarrollado con ❤️ usando Streamlit y Plotly</small></p>
+        </div>
+    """, unsafe_allow_html=True)
+
 class ArgentinaDatos:
     """
     Main class for fetching and analyzing Argentine economic and financial data.
@@ -5169,6 +6057,83 @@ def mostrar_analisis_portafolio():
         mostrar_informe_ia(token_acceso, id_cliente)
 
 def main():
+    # Configuración de estilos para BCRA Dashboard
+    st.markdown("""
+        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+        <style>
+            /* Estilos generales */
+            .stApp {
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background-color: #f8fafc;
+            }
+            
+            /* Sidebar */
+            .css-1d391kg, .css-1d391kg > div:first-child {
+                background: linear-gradient(180deg, #1e3a8a 0%, #1e40af 100%) !important;
+                color: white !important;
+            }
+            
+            /* Tarjetas */
+            .metric-card {
+                transition: all 0.3s ease;
+                border-radius: 0.75rem;
+                background: white;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                padding: 1.5rem;
+                height: 100%;
+            }
+            .metric-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            }
+            
+            /* Botones */
+            .stButton > button {
+                border-radius: 0.5rem !important;
+                font-weight: 500 !important;
+                transition: all 0.2s !important;
+            }
+            
+            /* Pestañas */
+            .stTabs [data-baseweb="tab-list"] {
+                gap: 0.5rem;
+            }
+            .stTabs [data-baseweb="tab"] {
+                padding: 0.5rem 1rem;
+                border-radius: 0.5rem;
+                transition: all 0.2s;
+            }
+            .stTabs [aria-selected="true"] {
+                background-color: #3b82f6;
+                color: white !important;
+            }
+            
+            /* Tablas */
+            .stDataFrame {
+                border-radius: 0.5rem;
+                overflow: hidden;
+                box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            }
+            
+            /* Footer */
+            .footer {
+                background: var(--card-background);
+                padding: 2rem;
+                border-radius: 12px;
+                margin-top: 3rem;
+                text-align: center;
+                box-shadow: var(--shadow);
+                border: 1px solid var(--border-color);
+            }
+            
+            .footer p {
+                margin: 0.5rem 0;
+                color: var(--text-secondary);
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
     
@@ -5278,7 +6243,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🇦🇷 Datos Económicos", "📊 Paneles de Cotización", "📈 Análisis Beta/Correlación"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🇦🇷 Datos Económicos", "🏦 BCRA Dashboard", "📊 Paneles de Cotización", "📈 Análisis Beta/Correlación"),
                 index=0,
             )
 
@@ -5300,6 +6265,8 @@ def main():
                 st.info("👆 Seleccione una opción del menú para comenzar")
             elif opcion == "🇦🇷 Datos Económicos":
                 mostrar_datos_argentina()
+            elif opcion == "🏦 BCRA Dashboard":
+                mostrar_bcra_dashboard()
             elif opcion == "📊 Paneles de Cotización":
                 mostrar_paneles_cotizacion()
             elif opcion == "📈 Análisis Beta/Correlación":
