@@ -12,3 +12,4 @@ tradingview
 aiohttp
 httpx
 google.generativeai
+markdown2
