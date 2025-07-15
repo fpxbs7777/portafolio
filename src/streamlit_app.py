@@ -5240,119 +5240,116 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
             'riesgos': riesgos,
             'sugerencias': sugerencias,
             'df_merged': df_merged,
-            'correlaciones_significativas': correlaciones_significativas
+            'correlaciones_significativas': correlaciones_significativas,
+            'economic_analysis': None
         }
 
-        return {
-            'correlaciones': correlaciones,
-            'volatilidades': volatilidades,
-            'tendencias': tendencias,
-            'riesgos': riesgos,
-            'sugerencias': sugerencias,
-            'df_merged': df_merged,
-            'correlaciones_significativas': correlaciones_significativas
-        }
-    except Exception as e:
-        print(f"Error en analisis_global_posicionamiento: {str(e)}")
-        return {
-            'error': f"Error en el análisis: {str(e)}"
-        }
-
-# --- Fin Función: Análisis Global de Posicionamiento ---
+        # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS LOCAL ==========
+        st.markdown("### 📈 Variables Económicas de Argentina")
+        economic_data = None
+        
+        try:
+            # Inicializar ArgentinaDatos
+            ad = ArgentinaDatos()
             
-            # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS LOCAL ==========
-            st.markdown("### 📈 Variables Económicas de Argentina")
-            st.markdown("### 📈 Variables Económicas de Argentina Datos")
+            # Obtener análisis económico completo
+            economic_analysis = ad.get_economic_analysis()
             
-            try:
-                # Inicializar ArgentinaDatos
-                ad = ArgentinaDatos()
+            if economic_analysis and 'data' in economic_analysis and economic_analysis['data']:
+                # Actualizar resultados con el análisis económico
+                resultados['economic_analysis'] = economic_analysis
                 
-                # Obtener análisis económico completo
-                economic_analysis = ad.get_economic_analysis()
+                # Mostrar resumen del análisis económico
+                col1, col2, col3 = st.columns(3)
                 
-                if economic_analysis['data']:
-                    # Mostrar resumen del análisis económico
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric(
-                            "Fase del Ciclo",
-                            economic_analysis['cycle_phase'],
-                            help="Fase actual del ciclo económico detectada"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Nivel de Riesgo",
-                            economic_analysis['risk_level'],
-                            help="Nivel de riesgo económico actual"
-                        )
-                    
-                    with col3:
-                        # Contar datos disponibles
-                        datos_disponibles = sum(1 for data in economic_analysis['data'].values() if data)
-                        st.metric(
-                            "Indicadores Disponibles",
-                            f"{datos_disponibles}/6",
-                            help="Cantidad de indicadores económicos disponibles"
-                        )
-                    
-                    # Mostrar gráficos de variables económicas
-                    st.markdown("#### 📊 Gráficos de Variables Económicas")
-                    
-                    # Gráfico de inflación
-                    if economic_analysis['data']['inflacion']:
+                with col1:
+                    st.metric(
+                        "Fase del Ciclo",
+                        economic_analysis.get('cycle_phase', 'N/A'),
+                        help="Fase actual del ciclo económico detectada"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Nivel de Riesgo",
+                        economic_analysis.get('risk_level', 'N/A'),
+                        help="Nivel de riesgo económico actual"
+                    )
+                
+                with col3:
+                    # Contar datos disponibles
+                    datos_disponibles = sum(1 for data in economic_analysis.get('data', {}).values() if data)
+                    st.metric(
+                        "Indicadores Disponibles",
+                        f"{datos_disponibles}/6",
+                        help="Cantidad de indicadores económicos disponibles"
+                    )
+                
+                # Mostrar gráficos de variables económicas
+                st.markdown("#### 📊 Gráficos de Variables Económicas")
+                
+                # Gráfico de inflación
+                if 'inflacion' in economic_analysis.get('data', {}) and economic_analysis['data']['inflacion']:
+                    try:
                         inflacion_chart = ad.create_inflacion_chart(economic_analysis['data']['inflacion'])
                         if inflacion_chart:
                             fig_inflacion = go.Figure(inflacion_chart)
                             st.plotly_chart(fig_inflacion, use_container_width=True)
-                    
-                    # Gráfico de tasas
-                    if economic_analysis['data']['tasas']:
+                    except Exception as e:
+                        st.error(f"Error generando gráfico de inflación: {e}")
+                
+                # Gráfico de tasas
+                if 'tasas' in economic_analysis.get('data', {}) and economic_analysis['data']['tasas']:
+                    try:
                         tasas_chart = ad.create_tasas_chart(economic_analysis['data']['tasas'])
                         if tasas_chart:
                             fig_tasas = go.Figure(tasas_chart)
                             st.plotly_chart(fig_tasas, use_container_width=True)
-                    
-                    # Gráfico de riesgo país
-                    if economic_analysis['data']['riesgo_pais']:
+                    except Exception as e:
+                        st.error(f"Error generando gráfico de tasas: {e}")
+                
+                # Gráfico de riesgo país
+                if 'riesgo_pais' in economic_analysis.get('data', {}) and economic_analysis['data']['riesgo_pais']:
+                    try:
                         riesgo_chart = ad.create_riesgo_pais_chart(economic_analysis['data']['riesgo_pais'])
                         if riesgo_chart:
                             fig_riesgo = go.Figure(riesgo_chart)
                             st.plotly_chart(fig_riesgo, use_container_width=True)
-                    
-                    # Mostrar recomendaciones basadas en el análisis económico
+                    except Exception as e:
+                        st.error(f"Error generando gráfico de riesgo país: {e}")
+                
+                # Mostrar recomendaciones basadas en el análisis económico
+                if 'sectors' in economic_analysis:
                     st.markdown("#### 💡 Recomendaciones Basadas en Variables Económicas")
                     
                     # Sectores favorables
-                    if economic_analysis['sectors']['favorable']:
+                    if economic_analysis['sectors'].get('favorable'):
                         st.success("**Sectores Favorables:**")
                         for sector in economic_analysis['sectors']['favorable']:
                             st.write(f"• {sector}")
                     
                     # Sectores desfavorables
-                    if economic_analysis['sectors']['unfavorable']:
+                    if economic_analysis['sectors'].get('unfavorable'):
                         st.warning("**Sectores Desfavorables:**")
                         for sector in economic_analysis['sectors']['unfavorable']:
                             st.write(f"• {sector}")
-                    
-                    # Recomendaciones específicas
-                    if economic_analysis['recommendations']:
-                        st.info("**Recomendaciones Específicas:**")
-                        for rec in economic_analysis['recommendations']:
-                            st.write(f"• {rec}")
-                    
-                    # Agregar datos económicos al análisis intermarket
-                    economic_data = economic_analysis
-                    
-                else:
-                    st.warning("No se pudieron obtener datos económicos de Argentina Datos")
-                    economic_data = None
-                    
-            except Exception as e:
-                st.error(f"Error obteniendo datos económicos: {e}")
+                
+                # Recomendaciones específicas
+                if 'recommendations' in economic_analysis and economic_analysis['recommendations']:
+                    st.info("**Recomendaciones Específicas:**")
+                    for rec in economic_analysis['recommendations']:
+                        st.write(f"• {rec}")
+                
+                # Agregar datos económicos al análisis intermarket
+                economic_data = economic_analysis
+                
+            else:
+                st.warning("No se encontraron datos económicos disponibles")
                 economic_data = None
+                
+        except Exception as e:
+            st.error(f"Error en el análisis económico: {str(e)}")
+            economic_data = None
             
             # ========== 2. VARIABLES MACRO DEL BCRA (DATOS REALES) ==========
             st.markdown("### 📊 Variables Macro del BCRA (Datos Reales)")
@@ -6034,11 +6031,12 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
                 # Preparar datos para IA
                 resumen_variables = []
                 for nombre, datos in variables_macro.items():
-                    resumen_variables.append(
+                    resumen = (
                         f"{nombre}: Valor={datos['valor_actual']:.2f}, "
                         f"Momentum={datos['momentum']:+.1f}%, "
                         f"Tendencia={datos['tendencia']}"
                     )
+                    resumen_variables.append(resumen)
                 
                 # Prompt para IA
                 prompt_ia = f"""
