@@ -1033,8 +1033,6 @@ def obtener_fondos_comunes(token_portador):
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
 
-
-
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
     Obtiene la serie histórica de precios para un activo específico desde la API de InvertirOnline.
@@ -1057,6 +1055,34 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     # Configurar reintentos
     max_reintentos = 3
     tiempo_espera_base = 2
+    
+    def validar_datos(df):
+        """Valida los datos y elimina valores atípicos"""
+        if df is None or df.empty:
+            return None
+            
+        # Eliminar valores nulos
+        df = df.dropna()
+        
+        # Verificar que los precios sean positivos
+        df = df[df['precio'] > 0]
+        
+        # Eliminar valores atípicos usando el método IQR
+        Q1 = df['precio'].quantile(0.25)
+        Q3 = df['precio'].quantile(0.75)
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        df = df[(df['precio'] >= lower_bound) & (df['precio'] <= upper_bound)]
+        
+        # Verificar consistencia temporal
+        df = df.sort_values('fecha')
+        if not df['fecha'].is_monotonic_increasing:
+            return None
+            
+        return df
     
     for intento in range(max_reintentos):
         try:
@@ -1181,11 +1207,9 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 
                 if fechas and precios:
                     df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                    # Eliminar duplicados manteniendo el último
-                    df = df.drop_duplicates(subset=['fecha'], keep='last')
-                    df = df.sort_values('fecha')
-                    print(f"Datos procesados: {len(df)} registros válidos")
-                    return df
+                    df = validar_datos(df)
+                    if df is not None:
+                        return df
                 else:
                     print("No se encontraron datos válidos en la respuesta")
                     return None
@@ -1292,9 +1316,9 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
             
             if fechas and precios:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                df = df.drop_duplicates(subset=['fecha'], keep='last')
-                df = df.sort_values('fecha')
-                return df
+                df = validar_datos(df)
+                if df is not None:
+                    return df
         
         # Si no se pudo obtener la serie histórica, intentar obtener el último valor
         try:
@@ -4988,12 +5012,20 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
     # Configuración de períodos
     col1, col2, col3 = st.columns(3)
     with col1:
-        periodo_analisis = st.selectbox(
+        periodo_opciones = {
+            'Último Mes': '1mo',
+            'Últimos 3 Meses': '3mo',
+            'Último Año': '1y',
+            'Últos 2 Años': '2y',
+            'Últos 5 Años': '5y'
+        }
+        periodo_seleccionado = st.selectbox(
             "Período de análisis",
-            ["6mo", "1y", "2y", "5y"],
-            index=1,
+            options=list(periodo_opciones.keys()),
+            index=2,  # Por defecto "Último Año"
             help="Período para el análisis de variables macro e intermarket"
         )
+        periodo_analisis = periodo_opciones[periodo_seleccionado]
     with col2:
         ventana_momentum = st.slider(
             "Ventana momentum (días)",
@@ -5012,7 +5044,8 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
     if st.button("🔍 Ejecutar Análisis Intermarket y Ciclo Económico", type="primary"):
         with st.spinner("Analizando variables económicas, macro e intermarket..."):
             
-            # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS ==========
+            # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS LOCAL ==========
+            st.markdown("### 📈 Variables Económicas de Argentina")
             st.markdown("### 📈 Variables Económicas de Argentina Datos")
             
             try:
