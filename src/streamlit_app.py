@@ -6856,7 +6856,7 @@ def mostrar_paneles_cotizacion():
                                                 st.plotly_chart(fig, use_container_width=True)
                     except Exception as e:
                         st.error(f"Error al cargar archivo: {str(e)}")
-                else:
+        else:
             st.info("📁 No hay archivos JSON almacenados aún. Use las otras pestañas para generar datos.")
     
     with tab6:
