@@ -4589,11 +4589,12 @@ def main():
                     """, unsafe_allow_html=True)
                     
                     # Crear tabs para el análisis integral
-                    tab1, tab2, tab3, tab4 = st.tabs([
+                    tab1, tab2, tab3, tab4, tab5 = st.tabs([
                         "🌍 Análisis Intermarket", 
                         "📈 Ciclo Económico", 
                         "🔗 Correlaciones Avanzadas",
-                        "📊 CAPM y Estrategias"
+                        "📊 CAPM y Estrategias",
+                        "🎯 CAPM Interactivo"
                     ])
                     
                     with tab1:
@@ -4646,6 +4647,18 @@ def main():
                             st.subheader("📊 Análisis CAPM del Portafolio")
                             st.markdown("**Análisis específico del portafolio del cliente seleccionado**")
                             mostrar_analisis_capm_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+                    
+                    with tab5:
+                        st.subheader("🎯 Análisis CAPM Interactivo")
+                        st.markdown("""
+                        **Análisis CAPM interactivo con menús desplegables:**
+                        - Selección de paneles de activos (Acciones, Bonos, FCIs, etc.)
+                        - Selección de benchmarks (Merval, S&P 500, NASDAQ, etc.)
+                        - Cálculo automático de Alpha, Beta y métricas CAPM
+                        - Clasificación automática por estrategias de inversión
+                        - Gráficos interactivos y recomendaciones detalladas
+                        """)
+                        analisis_capm_interactivo(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para acceder al análisis integral de mercados")
 
@@ -8888,6 +8901,408 @@ def mostrar_activos_recomendados_por_estrategia(token_acceso, estrategia_recomen
             
         else:
             st.warning("No se encontraron FCIs que cumplan con la estrategia especificada")
+
+def analisis_capm_interactivo(token_acceso):
+    """
+    Análisis CAPM interactivo con menús desplegables para paneles de activos y benchmarks
+    """
+    st.subheader("📊 Análisis CAPM Interactivo")
+    st.markdown("Seleccione un panel de activos y un benchmark para calcular Alpha, Beta y clasificar estrategias")
+    
+    # Configuración de parámetros
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Menú desplegable para tipos de activos
+        paneles_activos = {
+            "Acciones": "Panel%20General",
+            "Bonos": "Bonos", 
+            "FCIs": "FCI",
+            "CEDEARs": "CEDEARs",
+            "ADRs": "ADRs",
+            "Títulos Públicos": "TitulosPublicos",
+            "Obligaciones Negociables": "ObligacionesNegociables"
+        }
+        
+        panel_seleccionado = st.selectbox(
+            "Panel de Activos:",
+            list(paneles_activos.keys()),
+            help="Seleccione el tipo de activos a analizar"
+        )
+    
+    with col2:
+        # Menú desplegable para benchmarks
+        benchmarks_disponibles = {
+            "Merval": "^MERV",
+            "S&P 500": "^GSPC", 
+            "NASDAQ": "^IXIC",
+            "Dólar Blue": "USDARS=X",
+            "Oro": "GC=F",
+            "Petróleo": "CL=F",
+            "Treasury 10Y": "^TNX",
+            "VIX": "^VIX"
+        }
+        
+        benchmark_seleccionado = st.selectbox(
+            "Benchmark:",
+            list(benchmarks_disponibles.keys()),
+            help="Seleccione el benchmark para el análisis CAPM"
+        )
+    
+    with col3:
+        # Período de análisis
+        periodo_analisis = st.selectbox(
+            "Período:",
+            ["6mo", "1y", "2y", "5y"],
+            index=1,
+            help="Período para el análisis CAPM"
+        )
+    
+    # Configuración adicional
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        cantidad_activos = st.slider(
+            "Cantidad de activos a analizar:",
+            min_value=5,
+            max_value=50,
+            value=20,
+            help="Número de activos a incluir en el análisis"
+        )
+    
+    with col2:
+        incluir_graficos = st.checkbox(
+            "Incluir gráficos detallados",
+            value=True,
+            help="Mostrar gráficos de dispersión y evolución"
+        )
+    
+    if st.button("🔍 Ejecutar Análisis CAPM", type="primary"):
+        with st.spinner("Obteniendo datos y calculando métricas CAPM..."):
+            
+            try:
+                # ========== 1. OBTENER ACTIVOS DEL PANEL ==========
+                st.markdown("### 📋 Obteniendo Activos del Panel")
+                
+                # Obtener tickers del panel seleccionado
+                panel_iol = paneles_activos[panel_seleccionado]
+                tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, [panel_iol], 'Argentina')
+                
+                if not tickers_por_panel or not tickers_por_panel.get(panel_iol):
+                    st.error(f"No se pudieron obtener activos del panel {panel_seleccionado}")
+                    return
+                
+                activos_disponibles = tickers_por_panel[panel_iol]
+                st.success(f"✅ Obtenidos {len(activos_disponibles)} activos del panel {panel_seleccionado}")
+                
+                # Seleccionar muestra aleatoria
+                import random
+                if len(activos_disponibles) > cantidad_activos:
+                    activos_muestra = random.sample(activos_disponibles, cantidad_activos)
+                else:
+                    activos_muestra = activos_disponibles
+                
+                st.info(f"📊 Analizando {len(activos_muestra)} activos seleccionados")
+                
+                # ========== 2. OBTENER DATOS HISTÓRICOS ==========
+                st.markdown("### 📈 Obteniendo Datos Históricos")
+                
+                # Calcular fechas
+                fecha_hasta = datetime.now()
+                if periodo_analisis == "6mo":
+                    fecha_desde = fecha_hasta - timedelta(days=180)
+                elif periodo_analisis == "1y":
+                    fecha_desde = fecha_hasta - timedelta(days=365)
+                elif periodo_analisis == "2y":
+                    fecha_desde = fecha_hasta - timedelta(days=730)
+                else:  # 5y
+                    fecha_desde = fecha_hasta - timedelta(days=1825)
+                
+                # Obtener datos históricos de activos
+                datos_activos = {}
+                for activo in activos_muestra:
+                    try:
+                        df_activo = obtener_serie_historica_iol(
+                            token_acceso, "BCBA", activo, 
+                            fecha_desde.strftime('%Y-%m-%d'), 
+                            fecha_hasta.strftime('%Y-%m-%d'), 
+                            "SinAjustar"
+                        )
+                        if df_activo is not None and not df_activo.empty:
+                            datos_activos[activo] = df_activo
+                    except Exception as e:
+                        st.warning(f"⚠️ Error obteniendo datos para {activo}: {e}")
+                        continue
+                
+                if not datos_activos:
+                    st.error("❌ No se pudieron obtener datos históricos para ningún activo")
+                    return
+                
+                st.success(f"✅ Datos obtenidos para {len(datos_activos)} activos")
+                
+                # ========== 3. OBTENER DATOS DEL BENCHMARK ==========
+                st.markdown("### 🎯 Obteniendo Datos del Benchmark")
+                
+                benchmark_symbol = benchmarks_disponibles[benchmark_seleccionado]
+                
+                try:
+                    # Usar yfinance para el benchmark
+                    import yfinance as yf
+                    benchmark_data = yf.download(
+                        benchmark_symbol, 
+                        start=fecha_desde.strftime('%Y-%m-%d'),
+                        end=fecha_hasta.strftime('%Y-%m-%d'),
+                        progress=False
+                    )
+                    
+                    if benchmark_data.empty:
+                        st.error(f"❌ No se pudieron obtener datos para el benchmark {benchmark_seleccionado}")
+                        return
+                    
+                    st.success(f"✅ Datos obtenidos para benchmark: {benchmark_seleccionado}")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error obteniendo datos del benchmark: {e}")
+                    return
+                
+                # ========== 4. CALCULAR MÉTRICAS CAPM ==========
+                st.markdown("### 📊 Calculando Métricas CAPM")
+                
+                # Preparar datos del benchmark
+                benchmark_returns = benchmark_data['Adj Close'].pct_change().dropna()
+                
+                # Calcular métricas CAPM para cada activo
+                resultados_capm = []
+                
+                for simbolo, df_activo in datos_activos.items():
+                    try:
+                        # Obtener precios de cierre
+                        if 'ultimoPrecio' in df_activo.columns:
+                            precios_activo = df_activo['ultimoPrecio']
+                        elif 'precio' in df_activo.columns:
+                            precios_activo = df_activo['precio']
+                        else:
+                            continue
+                        
+                        # Calcular retornos
+                        retornos_activo = precios_activo.pct_change().dropna()
+                        
+                        # Alinear fechas
+                        fechas_comunes = retornos_activo.index.intersection(benchmark_returns.index)
+                        if len(fechas_comunes) < 30:  # Mínimo 30 días de datos
+                            continue
+                        
+                        retornos_activo_alineados = retornos_activo.loc[fechas_comunes]
+                        benchmark_returns_alineados = benchmark_returns.loc[fechas_comunes]
+                        
+                        # Calcular CAPM
+                        capm_analyzer = CAPMAnalyzer()
+                        capm_metrics = capm_analyzer.calculate_asset_capm(
+                            retornos_activo_alineados, 
+                            benchmark_returns_alineados, 
+                            simbolo
+                        )
+                        
+                        # Clasificar estrategia
+                        strategy_classification = capm_analyzer.classify_asset_strategy(capm_metrics)
+                        
+                        resultados_capm.append({
+                            'Activo': simbolo,
+                            'Beta': capm_metrics['beta'],
+                            'Alpha': capm_metrics['alpha'],
+                            'R²': capm_metrics['r_squared'],
+                            'Sharpe': capm_metrics['sharpe_ratio'],
+                            'Volatilidad': capm_metrics['volatility'],
+                            'Estrategia': strategy_classification['strategy_type'],
+                            'Descripción': strategy_classification['description']
+                        })
+                        
+                    except Exception as e:
+                        st.warning(f"⚠️ Error calculando CAPM para {simbolo}: {e}")
+                        continue
+                
+                if not resultados_capm:
+                    st.error("❌ No se pudieron calcular métricas CAPM para ningún activo")
+                    return
+                
+                st.success(f"✅ CAPM calculado para {len(resultados_capm)} activos")
+                
+                # ========== 5. CLASIFICAR POR ESTRATEGIAS ==========
+                st.markdown("### 🎯 Clasificación por Estrategias")
+                
+                # Crear DataFrame con resultados
+                df_capm = pd.DataFrame(resultados_capm)
+                
+                # Clasificar estrategias
+                estrategias_clasificadas = {
+                    'Index Tracker': [],
+                    'Traditional Long-Only': [],
+                    'Smart Beta': [],
+                    'Hedge Fund': [],
+                    'Defensive': [],
+                    'Growth': [],
+                    'Value': []
+                }
+                
+                for _, row in df_capm.iterrows():
+                    estrategia = row['Estrategia']
+                    if estrategia in estrategias_clasificadas:
+                        estrategias_clasificadas[estrategia].append(row.to_dict())
+                
+                # Mostrar resumen de clasificación
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**📊 Distribución por Estrategia:**")
+                    for estrategia, activos in estrategias_clasificadas.items():
+                        if activos:
+                            st.write(f"• **{estrategia}**: {len(activos)} activos")
+                
+                with col2:
+                    # Gráfico de distribución
+                    estrategias_con_activos = {k: len(v) for k, v in estrategias_clasificadas.items() if v}
+                    
+                    if estrategias_con_activos:
+                        fig_dist = go.Figure(data=[
+                            go.Bar(x=list(estrategias_con_activos.keys()), 
+                                  y=list(estrategias_con_activos.values()),
+                                  marker_color='lightblue')
+                        ])
+                        fig_dist.update_layout(
+                            title="Distribución por Estrategia",
+                            xaxis_title="Estrategia",
+                            yaxis_title="Cantidad de Activos",
+                            height=400
+                        )
+                        st.plotly_chart(fig_dist, use_container_width=True)
+                
+                # ========== 6. MOSTRAR RESULTADOS DETALLADOS ==========
+                st.markdown("### 📋 Resultados Detallados")
+                
+                # Métricas resumidas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    beta_promedio = df_capm['Beta'].mean()
+                    st.metric("Beta Promedio", f"{beta_promedio:.3f}")
+                
+                with col2:
+                    alpha_promedio = df_capm['Alpha'].mean()
+                    st.metric("Alpha Promedio", f"{alpha_promedio:.4f}")
+                
+                with col3:
+                    r2_promedio = df_capm['R²'].mean()
+                    st.metric("R² Promedio", f"{r2_promedio:.3f}")
+                
+                with col4:
+                    sharpe_promedio = df_capm['Sharpe'].mean()
+                    st.metric("Sharpe Promedio", f"{sharpe_promedio:.3f}")
+                
+                # Tabla de resultados
+                st.dataframe(df_capm, use_container_width=True)
+                
+                # ========== 7. GRÁFICOS DETALLADOS ==========
+                if incluir_graficos:
+                    st.markdown("### 📈 Gráficos Detallados")
+                    
+                    # Gráfico de dispersión Beta vs Alpha
+                    fig_scatter = go.Figure()
+                    
+                    # Colores por estrategia
+                    colores_estrategia = {
+                        'Index Tracker': 'blue',
+                        'Traditional Long-Only': 'green',
+                        'Smart Beta': 'orange',
+                        'Hedge Fund': 'red',
+                        'Defensive': 'purple',
+                        'Growth': 'yellow',
+                        'Value': 'brown'
+                    }
+                    
+                    for estrategia in estrategias_clasificadas.keys():
+                        activos_estrategia = df_capm[df_capm['Estrategia'] == estrategia]
+                        if not activos_estrategia.empty:
+                            fig_scatter.add_trace(go.Scatter(
+                                x=activos_estrategia['Beta'],
+                                y=activos_estrategia['Alpha'],
+                                mode='markers+text',
+                                name=estrategia,
+                                text=activos_estrategia['Activo'],
+                                textposition="top center",
+                                marker=dict(color=colores_estrategia.get(estrategia, 'gray'), size=8),
+                                hovertemplate="<b>%{text}</b><br>Beta: %{x:.3f}<br>Alpha: %{y:.4f}<extra></extra>"
+                            ))
+                    
+                    fig_scatter.update_layout(
+                        title=f"Dispersión Beta vs Alpha - {panel_seleccionado} vs {benchmark_seleccionado}",
+                        xaxis_title="Beta",
+                        yaxis_title="Alpha",
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+                    
+                    # Gráfico de evolución temporal (si hay datos suficientes)
+                    if len(resultados_capm) > 5:
+                        st.markdown("#### 📊 Top 10 Activos por Sharpe Ratio")
+                        
+                        top_sharpe = df_capm.nlargest(10, 'Sharpe')
+                        
+                        fig_top = go.Figure()
+                        fig_top.add_trace(go.Bar(
+                            x=top_sharpe['Activo'],
+                            y=top_sharpe['Sharpe'],
+                            marker_color='lightgreen',
+                            text=top_sharpe['Sharpe'].round(3),
+                            textposition='auto'
+                        ))
+                        
+                        fig_top.update_layout(
+                            title="Top 10 Activos por Sharpe Ratio",
+                            xaxis_title="Activo",
+                            yaxis_title="Sharpe Ratio",
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig_top, use_container_width=True)
+                
+                # ========== 8. RECOMENDACIONES ==========
+                st.markdown("### 💡 Recomendaciones")
+                
+                # Encontrar mejores activos por estrategia
+                mejores_por_estrategia = {}
+                
+                for estrategia, activos in estrategias_clasificadas.items():
+                    if activos:
+                        df_estrategia = pd.DataFrame(activos)
+                        mejor_sharpe = df_estrategia.loc[df_estrategia['Sharpe'].idxmax()]
+                        mejores_por_estrategia[estrategia] = mejor_sharpe
+                
+                if mejores_por_estrategia:
+                    st.markdown("**🏆 Mejores Activos por Estrategia:**")
+                    
+                    for estrategia, activo in mejores_por_estrategia.items():
+                        st.write(f"• **{estrategia}**: {activo['Activo']} (Sharpe: {activo['Sharpe']:.3f}, Beta: {activo['Beta']:.3f})")
+                
+                # Recomendaciones específicas
+                if len(resultados_capm) > 0:
+                    # Activos con mejor Alpha
+                    mejor_alpha = df_capm.loc[df_capm['Alpha'].idxmax()]
+                    st.success(f"🎯 **Mejor Alpha**: {mejor_alpha['Activo']} (α = {mejor_alpha['Alpha']:.4f})")
+                    
+                    # Activos defensivos (Beta < 0.8)
+                    defensivos = df_capm[df_capm['Beta'] < 0.8]
+                    if not defensivos.empty:
+                        st.info(f"🛡️ **Activos Defensivos**: {len(defensivos)} activos con Beta < 0.8")
+                    
+                    # Activos de crecimiento (Beta > 1.2)
+                    crecimiento = df_capm[df_capm['Beta'] > 1.2]
+                    if not crecimiento.empty:
+                        st.warning(f"📈 **Activos de Crecimiento**: {len(crecimiento)} activos con Beta > 1.2")
+                
+            except Exception as e:
+                st.error(f"❌ Error en el análisis CAPM: {str(e)}")
+                st.exception(e)
 
 
 if __name__ == "__main__":
