@@ -4106,7 +4106,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "📊 Análisis CAPM y Estrategias", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4132,31 +4132,22 @@ def main():
                     )
                     st.session_state.GEMINI_API_KEY = gemini_key
                     
-                    analisis_intermarket_completo(st.session_state.token_acceso, gemini_key)
+                    # Crear tabs para el análisis intermarket
+                    tab1, tab2 = st.tabs(["🌍 Análisis Intermarket", "📊 Análisis CAPM y Estrategias"])
+                    
+                    with tab1:
+                        analisis_intermarket_completo(st.session_state.token_acceso, gemini_key)
+                    
+                    with tab2:
+                        mostrar_analisis_capm_y_estrategias(st.session_state.token_acceso, gemini_key)
+                        
+                        # Si hay un cliente seleccionado, mostrar también análisis del portafolio
+                        if st.session_state.cliente_seleccionado:
+                            st.divider()
+                            mostrar_analisis_capm_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
                 else:
                     st.warning("Por favor inicie sesión para acceder al análisis intermarket")
-            elif opcion == "📊 Análisis CAPM y Estrategias":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    # Configuración de API key para IA
-                    if 'GEMINI_API_KEY' not in st.session_state:
-                        st.session_state.GEMINI_API_KEY = ''
-                    
-                    gemini_key = st.text_input(
-                        "🔑 API Key Gemini (opcional)",
-                        value=st.session_state.GEMINI_API_KEY,
-                        type="password",
-                        help="Para análisis IA avanzado de estrategias"
-                    )
-                    st.session_state.GEMINI_API_KEY = gemini_key
-                    
-                    mostrar_analisis_capm_y_estrategias(st.session_state.token_acceso, gemini_key)
-                    
-                    # Si hay un cliente seleccionado, mostrar también análisis del portafolio
-                    if st.session_state.cliente_seleccionado:
-                        st.divider()
-                        mostrar_analisis_capm_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
-                else:
-                    st.warning("Por favor inicie sesión para acceder al análisis CAPM")
+
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
@@ -5324,6 +5315,206 @@ class InvestmentStrategyRecommender:
                 })
         
         return notes
+
+def mostrar_analisis_capm_y_estrategias(token_acceso, gemini_api_key=None):
+    """
+    Muestra análisis CAPM y recomendaciones de estrategias de inversión
+    """
+    st.header("📊 Análisis CAPM y Estrategias de Inversión")
+    
+    # Inicializar el recomendador de estrategias
+    recommender = InvestmentStrategyRecommender(token_acceso, gemini_api_key)
+    
+    # Obtener condiciones de mercado del análisis intermarket
+    if 'analisis_intermarket' in st.session_state:
+        market_conditions = st.session_state['analisis_intermarket'].get('variables_macro', {})
+        fase_ciclo = st.session_state['analisis_intermarket'].get('fase_ciclo', 'Desconocida')
+    else:
+        st.warning("⚠️ Ejecute primero el análisis intermarket para obtener condiciones de mercado")
+        return
+    
+    # Mostrar fase del mercado
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Fase del Ciclo", fase_ciclo)
+    
+    with col2:
+        vix_actual = market_conditions.get('VIX', {}).get('valor_actual', 0)
+        st.metric("VIX Actual", f"{vix_actual:.1f}")
+    
+    # Generar recomendaciones
+    with st.spinner("Generando recomendaciones de estrategias..."):
+        recommendations = recommender.generate_market_recommendations(market_conditions)
+    
+    # Mostrar estrategias recomendadas
+    st.subheader("🎯 Estrategias Recomendadas")
+    
+    for i, strategy in enumerate(recommendations['recommended_strategies']):
+        with st.expander(f"{i+1}. {strategy['strategy']} - {strategy['priority']} Priority"):
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.write(f"**Descripción:** {strategy['description']}")
+                st.write(f"**Beta Objetivo:** {strategy['target_beta']:.2f}")
+                st.write(f"**Beta Máximo:** {strategy['max_beta']:.2f}")
+            
+            with col2:
+                if strategy['priority'] == 'High':
+                    st.success("🟢 Alta Prioridad")
+                else:
+                    st.info("🔵 Prioridad Media")
+    
+    # Mostrar activos defensivos si están disponibles
+    if recommendations['defensive_assets']:
+        st.subheader("🛡️ Activos Defensivos Recomendados")
+        
+        # Crear DataFrame para mostrar
+        defensive_data = []
+        for asset in recommendations['defensive_assets'][:10]:  # Top 10
+            defensive_data.append({
+                'Ticker': asset['ticker'],
+                'Beta': f"{asset['capm_metrics']['beta']:.3f}",
+                'Alpha (%)': f"{asset['capm_metrics']['alpha']*100:.2f}",
+                'Volatilidad (%)': f"{asset['capm_metrics']['volatility']*100:.1f}",
+                'Sharpe': f"{asset['capm_metrics']['sharpe_ratio']:.2f}",
+                'Score Defensivo': f"{asset['defensive_score']:.1f}",
+                'Estrategia': asset['strategy']['strategy_type']
+            })
+        
+        df_defensive = pd.DataFrame(defensive_data)
+        st.dataframe(df_defensive, use_container_width=True)
+    
+    # Mostrar ajustes de riesgo
+    st.subheader("⚖️ Ajustes de Riesgo")
+    
+    risk_adj = recommendations['risk_adjustments']
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.write("**Tamaño de Posiciones**")
+        pos_sizing = risk_adj['position_sizing']
+        st.write(f"• Máximo por posición: {pos_sizing['max_position']*100:.0f}%")
+        st.write(f"• Total en acciones: {pos_sizing['total_equity']*100:.0f}%")
+        st.write(f"• Reserva en efectivo: {pos_sizing['cash_reserve']*100:.0f}%")
+    
+    with col2:
+        st.write("**Stop Loss**")
+        stop_loss = risk_adj['stop_loss']
+        st.write(f"• Stop loss: {stop_loss['stop_percentage']*100:.0f}%")
+        if stop_loss['tight_stops']:
+            st.write("• Stops ajustados: ✅")
+        else:
+            st.write("• Stops ajustados: ❌")
+    
+    with col3:
+        st.write("**Diversificación**")
+        diversification = risk_adj['diversification']
+        st.write(f"• Mínimo posiciones: {diversification['min_positions']}")
+        st.write(f"• Máximo por sector: {diversification['max_sector_weight']*100:.0f}%")
+    
+    # Mostrar notas de implementación
+    if recommendations['implementation_notes']:
+        st.subheader("📝 Notas de Implementación")
+        
+        for note in recommendations['implementation_notes']:
+            if note['type'] == 'warning':
+                st.warning(f"⚠️ {note['message']}")
+            else:
+                st.info(f"ℹ️ {note['message']}")
+            
+            st.write(f"**Acción:** {note['action']}")
+            st.divider()
+
+def analizar_portafolio_capm(portafolio, token_portador, dias_historial=252):
+    """
+    Analiza un portafolio usando métricas CAPM
+    """
+    if not portafolio:
+        return None
+    
+    # Obtener datos del MERVAL
+    try:
+        merval_data = yf.download('^MERV', 
+                                start=(datetime.now() - timedelta(days=dias_historial)).strftime('%Y-%m-%d'),
+                                end=datetime.now().strftime('%Y-%m-%d'))['Close']
+        market_returns = merval_data.pct_change().dropna()
+    except Exception as e:
+        print(f"Error obteniendo datos del MERVAL: {str(e)}")
+        return None
+    
+    # Inicializar analizador CAPM
+    capm_analyzer = CAPMAnalyzer()
+    portfolio_analysis = {
+        'assets_analysis': [],
+        'portfolio_metrics': {},
+        'strategy_classification': {}
+    }
+    
+    # Analizar cada activo
+    for simbolo, activo in portafolio.items():
+        try:
+            # Obtener datos históricos
+            df_historico = obtener_serie_historica_iol(
+                token_portador,
+                activo.get('mercado', 'BCBA'),
+                simbolo,
+                (datetime.now() - timedelta(days=dias_historial)).strftime('%Y-%m-%d'),
+                datetime.now().strftime('%Y-%m-%d'),
+                "SinAjustar"
+            )
+            
+            if df_historico is not None and len(df_historico) > 50:
+                asset_returns = df_historico['close'].pct_change().dropna()
+                
+                # Análisis CAPM del activo
+                capm_metrics = capm_analyzer.calculate_asset_capm(
+                    asset_returns, market_returns, simbolo
+                )
+                
+                if capm_metrics:
+                    strategy_class = capm_analyzer.classify_asset_strategy(capm_metrics)
+                    
+                    portfolio_analysis['assets_analysis'].append({
+                        'symbol': simbolo,
+                        'capm_metrics': capm_metrics,
+                        'strategy': strategy_class,
+                        'weight': activo.get('Valuación', 0) / sum(a.get('Valuación', 0) for a in portafolio.values())
+                    })
+        
+        except Exception as e:
+            print(f"Error analizando {simbolo}: {str(e)}")
+            continue
+    
+    # Calcular métricas del portafolio
+    if portfolio_analysis['assets_analysis']:
+        # Beta ponderado del portafolio
+        portfolio_beta = sum(
+            asset['capm_metrics']['beta'] * asset['weight'] 
+            for asset in portfolio_analysis['assets_analysis']
+        )
+        
+        # Alpha ponderado del portafolio
+        portfolio_alpha = sum(
+            asset['capm_metrics']['alpha'] * asset['weight'] 
+            for asset in portfolio_analysis['assets_analysis']
+        )
+        
+        # Clasificar estrategia del portafolio
+        portfolio_strategy = capm_analyzer.classify_asset_strategy({
+            'beta': portfolio_beta,
+            'alpha': portfolio_alpha
+        })
+        
+        portfolio_analysis['portfolio_metrics'] = {
+            'portfolio_beta': portfolio_beta,
+            'portfolio_alpha': portfolio_alpha,
+            'total_assets': len(portfolio_analysis['assets_analysis'])
+        }
+        
+        portfolio_analysis['strategy_classification'] = portfolio_strategy
+    
+    return portfolio_analysis
 
 def mostrar_analisis_capm_portafolio(token_acceso, id_cliente):
     """
