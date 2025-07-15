@@ -5058,6 +5058,11 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
                     datos_globales[simbolo] = serie_historica
             except Exception as e:
                 print(f"Error al obtener datos para {simbolo}: {str(e)}")
+                continue
+        
+        # Verificar que se obtuvieron datos globales
+        if not datos_globales:
+            raise ValueError("No se pudieron obtener datos globales para ningún activo")
         
         # Unificar datos en un DataFrame
         df_local = pd.DataFrame()
@@ -5139,42 +5144,46 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
         # Crear gráficos de evolución para las correlaciones más fuertes
         def graficar_correlacion(df, var1, var2, correlacion):
             """Crea un gráfico de evolución para dos variables correlacionadas"""
-            fig = go.Figure()
-            
-            # Normalizar las series para comparación
-            serie1 = df[var1]
-            serie2 = df[var2]
-            
-            if not serie1.empty and not serie2.empty:
-                serie1_norm = (serie1 / serie1.iloc[0]) * 100
-                serie2_norm = (serie2 / serie2.iloc[0]) * 100
+            try:
+                fig = go.Figure()
                 
-                fig.add_trace(go.Scatter(
-                    x=serie1_norm.index,
-                    y=serie1_norm.values,
-                    mode='lines',
-                    name=var1,
-                    line=dict(color='blue', width=2)
-                ))
+                # Normalizar las series para comparación
+                serie1 = df[var1]
+                serie2 = df[var2]
                 
-                fig.add_trace(go.Scatter(
-                    x=serie2_norm.index,
-                    y=serie2_norm.values,
-                    mode='lines',
-                    name=var2,
-                    line=dict(color='red', width=2)
-                ))
-                
-                fig.update_layout(
-                    title=f'Evolución de {var1} vs {var2} (Correlación: {correlacion:.2f})',
-                    xaxis_title='Fecha',
-                    yaxis_title='Valor Normalizado (%)',
-                    height=500,
-                    hovermode='x unified'
-                )
-                
-                return fig
-            return None
+                if not serie1.empty and not serie2.empty:
+                    serie1_norm = (serie1 / serie1.iloc[0]) * 100
+                    serie2_norm = (serie2 / serie2.iloc[0]) * 100
+                    
+                    fig.add_trace(go.Scatter(
+                        x=serie1_norm.index,
+                        y=serie1_norm.values,
+                        mode='lines',
+                        name=var1,
+                        line=dict(color='blue', width=2)
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=serie2_norm.index,
+                        y=serie2_norm.values,
+                        mode='lines',
+                        name=var2,
+                        line=dict(color='red', width=2)
+                    ))
+                    
+                    fig.update_layout(
+                        title=f'Evolución de {var1} vs {var2} (Correlación: {correlacion:.2f})',
+                        xaxis_title='Fecha',
+                        yaxis_title='Valor Normalizado (%)',
+                        height=500,
+                        hovermode='x unified'
+                    )
+                    
+                    return fig
+                return None
+            except Exception as e:
+                print(f"Error al crear gráfico de correlación: {str(e)}")
+                return None
 
         # Encontrar las correlaciones más fuertes y significativas
         correlaciones_significativas = []
@@ -5191,6 +5200,20 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
                                 'grafico': fig
                             })
 
+        # Preparar el diccionario de resultados
+        resultados = {
+            'correlaciones': correlaciones,
+            'volatilidades': volatilidades,
+            'tendencias': tendencias,
+            'riesgos': riesgos,
+            'sugerencias': sugerencias,
+            'df_merged': df_merged,
+            'correlaciones_significativas': correlaciones_significativas
+        }
+
+        return resultados
+                            })
+
         return {
             'correlaciones': correlaciones,
             'volatilidades': volatilidades,
@@ -5201,8 +5224,10 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
             'graficos_correlacion': correlaciones_significativas
         }
     except Exception as e:
-        print(f"Error en el análisis global: {str(e)}")
-        return None
+        print(f"Error en analisis_global_posicionamiento: {str(e)}")
+        return {
+            'error': f"Error en el análisis: {str(e)}"
+        }
 
 # --- Fin Función: Análisis Global de Posicionamiento ---
 
@@ -6122,6 +6147,26 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
                 'sugerencias': sugerencias,
                 'fecha_analisis': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
+
+            # Preparar el diccionario de resultados
+            resultados = {
+                'correlaciones': correlaciones,
+                'volatilidades': volatilidades,
+                'tendencias': tendencias,
+                'riesgos': riesgos,
+                'sugerencias': sugerencias,
+                'df_merged': df_merged,
+                'correlaciones_significativas': correlaciones_significativas,
+                'fase_ciclo': fase_ciclo,
+                'puntuacion_ciclo': puntuacion_ciclo,
+                'variables_macro': variables_macro
+            }
+
+            return resultados
+
+    except Exception as e:
+        st.error(f"Error en el análisis global: {str(e)}")
+        return None
 
 class CAPMAnalyzer:
     """
