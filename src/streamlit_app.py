@@ -5000,14 +5000,163 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
 
-def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
+# --- Función: Análisis Global de Posicionamiento ---
+def analisis_global_posicionamiento(token_acceso, activos_globales=None):
     """
-    Análisis completo intermarket con detección de ciclos económicos.
+    Realiza un análisis global de posicionamiento basado en datos locales y globales.
+    
+    Args:
+        token_acceso (str): Token de acceso para la API de IOL
+        activos_globales (list, optional): Lista de activos globales a analizar
+    
+    Returns:
+        dict: Análisis completo con correlaciones, volatilidades y sugerencias
+    """
+    try:
+        # Configuración inicial
+        fecha_hasta = datetime.now()
+        fecha_desde = fecha_hasta - timedelta(days=365)
+        
+        # Si no se especifican activos globales, usar una lista por defecto
+        if activos_globales is None:
+            activos_globales = [
+                {'simbolo': 'AAPL', 'mercado': 'NASDAQ'},
+                {'simbolo': 'GOOGL', 'mercado': 'NASDAQ'},
+                {'simbolo': 'MSFT', 'mercado': 'NASDAQ'},
+                {'simbolo': 'AMZN', 'mercado': 'NASDAQ'},
+                {'simbolo': 'BTC/USD', 'mercado': 'cripto'}
+            ]
+        
+        # Obtener datos locales
+        argentina_datos = ArgentinaDatos()
+        datos_economicos = argentina_datos.get_all_economic_data()
+        
+        # Obtener datos de mercado local
+        datos_mercado = {
+            'dolares': argentina_datos.get_dolares(),
+            'inflacion': argentina_datos.get_inflacion(),
+            'tasas': argentina_datos.get_tasas(),
+            'uva': argentina_datos.get_uva(),
+            'riesgo_pais': argentina_datos.get_riesgo_pais()
+        }
+        
+        # Obtener datos de activos globales
+        datos_globales = {}
+        for activo in activos_globales:
+            mercado = activo.get('mercado', 'BCBA')
+            simbolo = activo['simbolo']
+            
+            try:
+                serie_historica = obtener_serie_historica_iol(
+                    token_acceso,
+                    mercado,
+                    simbolo,
+                    fecha_desde,
+                    fecha_hasta
+                )
+                if serie_historica is not None:
+                    datos_globales[simbolo] = serie_historica
+            except Exception as e:
+                print(f"Error al obtener datos para {simbolo}: {str(e)}")
+        
+        # Unificar datos en un DataFrame
+        df_local = pd.DataFrame()
+        for key, value in datos_economicos.items():
+            df_temp = pd.DataFrame(value)
+            df_temp['fecha'] = pd.to_datetime(df_temp['fecha'])
+            df_temp = df_temp.set_index('fecha')
+            df_local = pd.concat([df_local, df_temp], axis=1)
+        
+        for key, value in datos_mercado.items():
+            df_temp = pd.DataFrame(value)
+            df_temp['fecha'] = pd.to_datetime(df_temp['fecha'])
+            df_temp = df_temp.set_index('fecha')
+            df_local = pd.concat([df_local, df_temp], axis=1)
+        
+        df_global = pd.DataFrame()
+        for simbolo, serie in datos_globales.items():
+            df_temp = pd.DataFrame(serie)
+            df_temp['fecha'] = pd.to_datetime(df_temp['fecha'])
+            df_temp = df_temp.set_index('fecha')
+            df_temp.columns = [f"{simbolo}_{col}" for col in df_temp.columns]
+            df_global = pd.concat([df_global, df_temp], axis=1)
+        
+        # Unir datos locales y globales
+        df_merged = pd.concat([df_local, df_global], axis=1)
+        
+        # Limpieza de datos
+        df_merged = df_merged[~df_merged.index.duplicated(keep='first')]
+        df_merged = df_merged.dropna(thresh=len(df_merged.columns)*0.7)
+        df_merged = df_merged.ffill()
+        
+        # Análisis estadístico
+        correlaciones = df_merged.corr()
+        volatilidades = df_merged.std()
+        
+        # Análisis de tendencias
+        tendencias = {}
+        for columna in df_merged.columns:
+            if columna.endswith('_precio'):
+                tendencias[columna] = {
+                    'media': df_merged[columna].mean(),
+                    'tendencia': np.polyfit(
+                        range(len(df_merged)),
+                        df_merged[columna].values,
+                        1
+                    )[0],
+                    'volatilidad': df_merged[columna].std()
+                }
+        
+        # Análisis de riesgo
+        riesgos = {}
+        for columna in df_merged.columns:
+            if columna.endswith('_precio'):
+                riesgos[columna] = {
+                    'volatilidad': df_merged[columna].std(),
+                    'sharpe': df_merged[columna].mean() / df_merged[columna].std()
+                }
+        
+        # Generar sugerencias de posicionamiento
+        sugerencias = []
+        for columna in correlaciones.columns:
+            if columna.startswith('dolar') or columna.startswith('riesgo'):
+                correlaciones_col = correlaciones[columna]
+                for activo in datos_globales.keys():
+                    if f"{activo}_precio" in correlaciones_col.index:
+                        if correlaciones_col[f"{activo}_precio"] > 0.5:
+                            sugerencias.append({
+                                'activo': activo,
+                                'razon': f"Alta correlación con {columna}"
+                            })
+        
+        for activo, riesgo in riesgos.items():
+            if riesgo['sharpe'] > 0.5 and riesgo['volatilidad'] < 0.2:
+                sugerencias.append({
+                    'activo': activo.replace('_precio', ''),
+                    'razon': "Bajo riesgo y alta rentabilidad ajustada"
+                })
+        
+        return {
+            'correlaciones': correlaciones,
+            'volatilidades': volatilidades,
+            'tendencias': tendencias,
+            'riesgos': riesgos,
+            'sugerencias': sugerencias,
+            'df_merged': df_merged
+        }
+    except Exception as e:
+        print(f"Error en el análisis global: {str(e)}")
+        return None
+
+# --- Fin Función: Análisis Global de Posicionamiento ---
+
+# --- Función: mostrar_analisis_variables_economicas --- detección de ciclos económicos.
     Integra variables macro del BCRA, análisis intermarket local e internacional,
     y sugerencias de activos según el ciclo.
     """
     st.markdown("---")
     st.subheader("🧱 Análisis Intermarket y Ciclo Económico Integrado")
+{{ ... }}
     
     # Configuración de períodos
     col1, col2, col3 = st.columns(3)
