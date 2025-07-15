@@ -8349,7 +8349,6 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                         # Agregar análisis de causalidad si está disponible
                         if 'lags_analysis' in locals():
                             resumen_ciclo += "\n**5. RELACIONES TEMPORALES (CAUSALIDAD):**\n"
-{{ ... }}
                             for par, lags in lags_analysis.items():
                                 resumen_ciclo += f"- {par}: Max correlación {lags['Max Correlación']:.3f}\n"
                         
