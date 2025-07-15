@@ -24,24 +24,159 @@ import json
 from typing import Dict, List, Optional, Any
 import os
 from dotenv import load_dotenv
+from functools import lru_cache, wraps
+import aiohttp
+import time
+from typing import Optional, Dict, Any, List, Callable, Awaitable
+import asyncio
+from datetime import datetime, timedelta
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+# Token management
+class TokenManager:
+    """
+    Manages API token with automatic refresh before expiration.
+    """
+    def __init__(self, token_func: Callable[[], Awaitable[str]], refresh_interval: int = 300):
+        """
+        Initialize TokenManager.
+        
+        Args:
+            token_func: Async function that returns a new token
+            refresh_interval: Seconds before token expiration to refresh (default: 5 minutes)
+        """
+        self._token: Optional[str] = None
+        self._expiry: Optional[float] = None
+        self._token_func = token_func
+        self._refresh_interval = refresh_interval
+        self._lock = asyncio.Lock()
+        self._last_refresh: Optional[float] = None
+        
+    async def get_token(self, force_refresh: bool = False) -> str:
+        """
+        Get current token, refreshing if necessary.
+        
+        Args:
+            force_refresh: If True, force token refresh
+            
+        Returns:
+            str: Current valid token
+        """
+        async with self._lock:
+            current_time = time.time()
+            
+            if (force_refresh or 
+                not self._token or 
+                not self._expiry or 
+                current_time > self._expiry - self._refresh_interval):
+                
+                self._token = await self._token_func()
+                self._last_refresh = current_time
+                # Assuming token expires in 1 hour (3600 seconds)
+                self._expiry = current_time + 3600
+                
+                if hasattr(st, 'session_state'):
+                    st.session_state['last_token_refresh'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
+                print(f"Token refreshed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                
+            return self._token
+
+# Cache decorator with timeout
+def cache_with_timeout(seconds: int = 300):
+    """
+    Cache decorator with time-based invalidation.
+    
+    Args:
+        seconds: Cache timeout in seconds
+    """
+    def decorator(func):
+        cache = {}
+        
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Create a key based on function arguments
+            cache_key = (args, frozenset(kwargs.items()))
+            current_time = time.time()
+            
+            # Check if we have a cached result that's still valid
+            if cache_key in cache:
+                result, timestamp = cache[cache_key]
+                if current_time - timestamp < seconds:
+                    return result
+            
+            # Call the function and cache the result
+            result = await func(*args, **kwargs)
+            cache[cache_key] = (result, current_time)
+            return result
+            
+        return wrapper
+    return decorator
+
+# Global session for HTTP requests
+class HTTPSessionManager:
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.session = None
+        return cls._instance
+    
+    async def get_session(self) -> aiohttp.ClientSession:
+        """Get or create an aiohttp ClientSession."""
+        if self._instance.session is None or self._instance.session.closed:
+            timeout = aiohttp.ClientTimeout(total=30)  # 30 seconds timeout
+            self._instance.session = aiohttp.ClientSession(timeout=timeout)
+        return self._instance.session
+    
+    async def close(self):
+        """Close the aiohttp session."""
+        if self._instance.session and not self._instance.session.closed:
+            await self._instance.session.close()
+            self._instance.session = None
 
 # Load environment variables
 load_dotenv()
 
-warnings.filterwarnings('ignore')
-
 class ArgentinaDatos:
     """
     Main class for fetching and analyzing Argentine economic and financial data.
+    Supports both synchronous and asynchronous operations.
     """
     
     def __init__(self, base_url: str = 'https://api.argentinadatos.com'):
         self.base_url = base_url
-        self.session = requests.Session()
+        self._session = None
+        self._async_session = None
+    
+    @property
+    def session(self):
+        """Lazy initialization of requests session."""
+        if self._session is None:
+            self._session = requests.Session()
+        return self._session
+    
+    async def get_async_session(self) -> aiohttp.ClientSession:
+        """Get or create an async session."""
+        if self._async_session is None or self._async_session.closed:
+            self._async_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
+        return self._async_session
+    
+    async def close(self):
+        """Close all sessions."""
+        if self._session:
+            self._session.close()
+        if self._async_session and not self._async_session.closed:
+            await self._async_session.close()
     
     def fetch_data(self, endpoint: str) -> List[Dict]:
         """
-        Fetch data from Argentina Datos API.
+        Synchronously fetch data from Argentina Datos API.
         
         Args:
             endpoint: API endpoint path
@@ -57,33 +192,81 @@ class ArgentinaDatos:
             print(f"Error fetching data from {endpoint}: {e}")
             return []
     
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def fetch_data_async(self, endpoint: str) -> List[Dict]:
+        """
+        Asynchronously fetch data from Argentina Datos API with caching.
+        
+        Args:
+            endpoint: API endpoint path
+            
+        Returns:
+            List of data dictionaries
+        """
+        session = await self.get_async_session()
+        url = f"{self.base_url}{endpoint}"
+        
+        try:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                return await response.json()
+        except Exception as e:
+            print(f"Error in async fetch from {endpoint}: {e}")
+            return []
+    
+    # Synchronous methods
     def get_dolares(self) -> List[Dict]:
-        """Get dólar exchange rates data."""
+        """Get dólar exchange rates data (synchronous)."""
         return self.fetch_data('/v1/cotizaciones/dolares')
     
     def get_dolares_candlestick(self) -> Dict:
-        """Get dólar candlestick data."""
+        """Get dólar candlestick data (synchronous)."""
         return self.fetch_data('/v1/cotizaciones/dolares/candlestick')
     
     def get_inflacion(self) -> List[Dict]:
-        """Get inflation data."""
+        """Get inflation data (synchronous)."""
         return self.fetch_data('/v1/indicadores/inflacion')
     
     def get_tasas(self) -> List[Dict]:
-        """Get interest rates data."""
+        """Get interest rates data (synchronous)."""
         return self.fetch_data('/v1/indicadores/tasas')
     
     def get_uva(self) -> List[Dict]:
-        """Get UVA data."""
+        """Get UVA data (synchronous)."""
         return self.fetch_data('/v1/indicadores/uva')
     
     def get_riesgo_pais(self) -> List[Dict]:
-        """Get country risk data."""
+        """Get country risk data (synchronous)."""
         return self.fetch_data('/v1/indicadores/riesgo-pais')
+    
+    # Asynchronous methods
+    async def get_dolares_async(self) -> List[Dict]:
+        """Asynchronously get dólar exchange rates data."""
+        return await self.fetch_data_async('/v1/cotizaciones/dolares')
+    
+    async def get_dolares_candlestick_async(self) -> Dict:
+        """Asynchronously get dólar candlestick data."""
+        return await self.fetch_data_async('/v1/cotizaciones/dolares/candlestick')
+    
+    async def get_inflacion_async(self) -> List[Dict]:
+        """Asynchronously get inflation data."""
+        return await self.fetch_data_async('/v1/indicadores/inflacion')
+    
+    async def get_tasas_async(self) -> List[Dict]:
+        """Asynchronously get interest rates data."""
+        return await self.fetch_data_async('/v1/indicadores/tasas')
+    
+    async def get_uva_async(self) -> List[Dict]:
+        """Asynchronously get UVA data."""
+        return await self.fetch_data_async('/v1/indicadores/uva')
+    
+    async def get_riesgo_pais_async(self) -> List[Dict]:
+        """Asynchronously get country risk data."""
+        return await self.fetch_data_async('/v1/indicadores/riesgo-pais')
     
     def get_all_economic_data(self) -> Dict[str, Any]:
         """
-        Get all economic and financial data in one call.
+        Get all economic and financial data in one call (synchronous).
         
         Returns:
             Dictionary with all economic data
@@ -96,11 +279,40 @@ class ArgentinaDatos:
             'uva': self.get_uva(),
             'riesgo_pais': self.get_riesgo_pais()
         }
+        
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def get_all_economic_data_async(self) -> Dict[str, Any]:
+        """
+        Asynchronously get all economic and financial data in one call.
+        
+        Returns:
+            Dictionary with all economic data
+        """
+        # Run all async fetches concurrently
+        results = await asyncio.gather(
+            self.get_dolares_async(),
+            self.get_dolares_candlestick_async(),
+            self.get_inflacion_async(),
+            self.get_tasas_async(),
+            self.get_uva_async(),
+            self.get_riesgo_pais_async(),
+            return_exceptions=True  # Don't fail if one request fails
+        )
+        
+        # Map results to their respective keys
+        return {
+            'dolares': results[0] if not isinstance(results[0], Exception) else [],
+            'dolares_candlestick': results[1] if not isinstance(results[1], Exception) else {},
+            'inflacion': results[2] if not isinstance(results[2], Exception) else [],
+            'tasas': results[3] if not isinstance(results[3], Exception) else [],
+            'uva': results[4] if not isinstance(results[4], Exception) else [],
+            'riesgo_pais': results[5] if not isinstance(results[5], Exception) else []
+        }
     
     def create_dolares_chart(self, data: List[Dict], periodo: str = '1 mes', 
                             casas: Optional[List[str]] = None) -> Dict:
         """
-        Create dólares chart with Plotly.
+        Create dólares chart with Plotly (synchronous).
         
         Args:
             data: Dólares data
@@ -153,10 +365,31 @@ class ArgentinaDatos:
         )
         
         return json.loads(fig.to_json())
+        
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def create_dolares_chart_async(self, data: List[Dict], periodo: str = '1 mes', 
+                                      casas: Optional[List[str]] = None) -> Dict:
+        """
+        Asynchronously create dólares chart with Plotly.
+        
+        Args:
+            data: Dólares data
+            periodo: Time period ('1 semana', '1 mes', '1 año', '5 años', 'Todo')
+            casas: List of exchange houses to include
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        # Run the synchronous version in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.create_dolares_chart(data, periodo, casas)
+        )
     
     def create_inflacion_chart(self, data: List[Dict]) -> Dict:
         """
-        Create inflación chart with Plotly.
+        Create inflación chart with Plotly (synchronous).
         
         Args:
             data: Inflation data
@@ -190,10 +423,28 @@ class ArgentinaDatos:
         )
         
         return json.loads(fig.to_json())
+        
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def create_inflacion_chart_async(self, data: List[Dict]) -> Dict:
+        """
+        Asynchronously create inflación chart with Plotly.
+        
+        Args:
+            data: Inflation data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        # Run the synchronous version in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.create_inflacion_chart(data)
+        )
     
     def create_tasas_chart(self, data: List[Dict]) -> Dict:
         """
-        Create tasas chart with Plotly.
+        Create tasas de interés chart with Plotly (synchronous).
         
         Args:
             data: Interest rates data
@@ -207,31 +458,53 @@ class ArgentinaDatos:
         df = pd.DataFrame(data)
         df['fecha'] = pd.to_datetime(df['fecha'])
         
+        # Pivot to have different rates as columns
+        df_pivot = df.pivot(index='fecha', columns='tipo', values='valor').reset_index()
+        
         fig = go.Figure()
         
-        for tasa in df['tasa'].unique():
-            tasa_data = df[df['tasa'] == tasa]
+        # Add a trace for each rate type
+        for col in df_pivot.columns[1:]:  # Skip 'fecha' column
             fig.add_trace(go.Scatter(
-                x=tasa_data['fecha'],
-                y=tasa_data['valor'],
+                x=df_pivot['fecha'],
+                y=df_pivot[col],
                 mode='lines+markers',
-                name=tasa,
-                hovertemplate='<b>%{x}</b><br>%{fullData.name}: %{y}%<extra></extra>'
+                name=col,
+                hovertemplate=f'<b>%{{x}}</b><br>{col}: %{{y}}%<extra></extra>'
             ))
         
         fig.update_layout(
-            title='Evolución de las Tasas',
+            title='Evolución de las Tasas de Interés',
             xaxis_title='Fecha',
             yaxis_title='Tasa (%)',
             hovermode='x unified',
-            template='plotly_white'
+            template='plotly_white',
+            legend_title='Tipo de Tasa'
         )
         
         return json.loads(fig.to_json())
+        
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def create_tasas_chart_async(self, data: List[Dict]) -> Dict:
+        """
+        Asynchronously create tasas de interés chart with Plotly.
+        
+        Args:
+            data: Interest rates data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        # Run the synchronous version in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.create_tasas_chart(data)
+        )
     
     def create_uva_chart(self, data: List[Dict]) -> Dict:
         """
-        Create UVA chart with Plotly.
+        Create UVA chart with Plotly (synchronous).
         
         Args:
             data: UVA data
@@ -265,10 +538,28 @@ class ArgentinaDatos:
         )
         
         return json.loads(fig.to_json())
+        
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def create_uva_chart_async(self, data: List[Dict]) -> Dict:
+        """
+        Asynchronously create UVA chart with Plotly.
+        
+        Args:
+            data: UVA data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        # Run the synchronous version in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.create_uva_chart(data)
+        )
     
     def create_riesgo_pais_chart(self, data: List[Dict]) -> Dict:
         """
-        Create riesgo país chart with Plotly.
+        Create riesgo país chart with Plotly (synchronous).
         
         Args:
             data: Country risk data
@@ -302,10 +593,28 @@ class ArgentinaDatos:
         )
         
         return json.loads(fig.to_json())
+        
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def create_riesgo_pais_chart_async(self, data: List[Dict]) -> Dict:
+        """
+        Asynchronously create riesgo país chart with Plotly.
+        
+        Args:
+            data: Country risk data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        # Run the synchronous version in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.create_riesgo_pais_chart(data)
+        )
     
     def get_economic_analysis(self) -> Dict[str, Any]:
         """
-        Get comprehensive economic analysis including cycle phase detection.
+        Get comprehensive economic analysis including cycle phase detection (synchronous).
         
         Returns:
             Dictionary with economic analysis and cycle phase
@@ -429,6 +738,139 @@ class ArgentinaDatos:
             analysis['cycle_phase'] = 'Desconocido'
         if not analysis['risk_level'] or analysis['risk_level'] == 'Medium':
             analysis['risk_level'] = 'Medio'
+        return analysis
+
+    @cache_with_timeout(seconds=300)  # Cache for 5 minutes
+    async def get_economic_analysis_async(self) -> Dict[str, Any]:
+        """
+        Asynchronously get comprehensive economic analysis including cycle phase detection.
+        
+        Returns:
+            Dictionary with economic analysis and cycle phase
+        """
+        # Fetch all economic data asynchronously
+        data = await self.get_all_economic_data_async()
+        
+        # Create a new analysis dictionary
+        analysis = {
+            'data': data,
+            'cycle_phase': 'Unknown',
+            'recommendations': [],
+            'risk_level': 'Medium',
+            'sectors': {
+                'favorable': [],
+                'unfavorable': [],
+                'neutral': []
+            }
+        }
+        
+        # Analyze inflation trend
+        if data['inflacion']:
+            inflacion_df = pd.DataFrame(data['inflacion'])
+            inflacion_df['fecha'] = pd.to_datetime(inflacion_df['fecha'])
+            inflacion_df = inflacion_df.sort_values('fecha')
+            
+            if len(inflacion_df) >= 2:
+                latest_inflacion = inflacion_df.iloc[-1]['valor']
+                prev_inflacion = inflacion_df.iloc[-2]['valor']
+                inflacion_trend = latest_inflacion - prev_inflacion
+                
+                if inflacion_trend > 0:
+                    analysis['cycle_phase'] = 'Inflationary Pressure'
+                    analysis['risk_level'] = 'High'
+                    analysis['sectors']['favorable'].extend(['Commodities', 'Real Estate', 'TIPS'])
+                    analysis['sectors']['unfavorable'].extend(['Bonds', 'Cash', 'Growth Stocks'])
+                else:
+                    analysis['cycle_phase'] = 'Disinflationary'
+                    analysis['risk_level'] = 'Medium'
+                    analysis['sectors']['favorable'].extend(['Bonds', 'Growth Stocks', 'Technology'])
+        
+        # Analyze interest rates
+        if data['tasas']:
+            tasas_df = pd.DataFrame(data['tasas'])
+            tasas_df['fecha'] = pd.to_datetime(tasas_df['fecha'])
+            tasas_df = tasas_df.sort_values('fecha')
+            
+            if len(tasas_df) >= 2:
+                latest_tasa = tasas_df.iloc[-1]['valor']
+                prev_tasa = tasas_df.iloc[-2]['valor']
+                tasa_trend = latest_tasa - prev_tasa
+                
+                if tasa_trend > 0:
+                    analysis['cycle_phase'] = 'Tightening Monetary Policy'
+                    analysis['sectors']['favorable'].extend(['Financials', 'Value Stocks'])
+                    analysis['sectors']['unfavorable'].extend(['Growth Stocks', 'Real Estate'])
+                else:
+                    analysis['cycle_phase'] = 'Accommodative Monetary Policy'
+                    analysis['sectors']['favorable'].extend(['Growth Stocks', 'Real Estate', 'Technology'])
+        
+        # Analyze country risk
+        if data['riesgo_pais']:
+            riesgo_df = pd.DataFrame(data['riesgo_pais'])
+            riesgo_df['fecha'] = pd.to_datetime(riesgo_df['fecha'])
+            riesgo_df = riesgo_df.sort_values('fecha')
+            
+            if len(riesgo_df) >= 2:
+                latest_riesgo = riesgo_df.iloc[-1]['valor']
+                prev_riesgo = riesgo_df.iloc[-2]['valor']
+                riesgo_trend = latest_riesgo - prev_riesgo
+                
+                if riesgo_trend > 0:
+                    analysis['risk_level'] = 'High'
+                    analysis['sectors']['favorable'].extend(['Defensive Stocks', 'Gold', 'USD'])
+                    analysis['sectors']['unfavorable'].extend(['Emerging Markets', 'Local Currency Bonds'])
+                else:
+                    analysis['risk_level'] = 'Medium'
+                    analysis['sectors']['favorable'].extend(['Emerging Markets', 'Local Stocks'])
+        
+        # Generate recommendations based on cycle phase
+        if analysis['cycle_phase'] == 'Inflationary Pressure':
+            analysis['recommendations'].extend([
+                'Considerar activos refugio como oro y commodities',
+                'Reducir exposición a bonos de largo plazo',
+                'Mantener liquidez en dólares',
+                'Considerar acciones de empresas con poder de fijación de precios'
+            ])
+        elif analysis['cycle_phase'] == 'Tightening Monetary Policy':
+            analysis['recommendations'].extend([
+                'Favorecer acciones de valor sobre crecimiento',
+                'Considerar bonos de corto plazo',
+                'Mantener exposición a sectores financieros',
+                'Reducir exposición a bienes raíces'
+            ])
+        elif analysis['cycle_phase'] == 'Accommodative Monetary Policy':
+            analysis['recommendations'].extend([
+                'Favorecer acciones de crecimiento',
+                'Considerar bienes raíces',
+                'Mantener exposición a tecnología',
+                'Considerar bonos de largo plazo'
+            ])
+        
+        # Translate values to Spanish
+        traducciones_fase = {
+            'Unknown': 'Desconocido',
+            'Inflationary Pressure': 'Presión Inflacionaria',
+            'Disinflationary': 'Desinflacionario',
+            'Tightening Monetary Policy': 'Política Monetaria Contractiva',
+            'Accommodative Monetary Policy': 'Política Monetaria Expansiva',
+        }
+        traducciones_riesgo = {
+            'Medium': 'Medio',
+            'High': 'Alto',
+            'Low': 'Bajo',
+        }
+        
+        if analysis['cycle_phase'] in traducciones_fase:
+            analysis['cycle_phase'] = traducciones_fase[analysis['cycle_phase']]
+        if analysis['risk_level'] in traducciones_riesgo:
+            analysis['risk_level'] = traducciones_riesgo[analysis['risk_level']]
+            
+        # Set default values if still unknown
+        if not analysis['cycle_phase'] or analysis['cycle_phase'] == 'Unknown':
+            analysis['cycle_phase'] = 'Desconocido'
+        if not analysis['risk_level'] or analysis['risk_level'] == 'Medium':
+            analysis['risk_level'] = 'Medio'
+            
         return analysis
 
 # Configuración de la página con aspecto profesional
