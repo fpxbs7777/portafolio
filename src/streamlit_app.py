@@ -5228,17 +5228,7 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
 
 # --- Fin Función: Análisis Global de Posicionamiento ---
 
-def mostrar_analisis_variables_economicas(token_acceso, gemini_api_key=None):
-    """
-    Muestra análisis completo de variables económicas de Argentina Datos.
-    Incluye gráficos, análisis de ciclo económico y recomendaciones.
-    
-    Args:
-        token_acceso (str): Token de acceso para la API de IOL
-        gemini_api_key (str, optional): API key para análisis de IA
-    """
-    st.markdown("---")
-    st.subheader("🧱 Análisis Intermarket y Ciclo Económico Integrado")
+
 
     # Configuración de períodos
     col1, col2, col3 = st.columns(3)
@@ -7522,10 +7512,14 @@ def mostrar_analisis_variables_economicas(token_acceso, gemini_api_key=None):
     """
     Muestra análisis completo de variables económicas de Argentina Datos.
     Incluye gráficos, análisis de ciclo económico y recomendaciones.
+
+    Args:
+        token_acceso (str): Token de acceso para la API de IOL
+        gemini_api_key (str, optional): API key para análisis de IA
     """
     st.markdown("---")
     st.subheader("📈 Análisis de Variables Económicas - Argentina Datos")
-    
+
     # Configuración de parámetros
     col1, col2, col3 = st.columns(3)
     with col1:
