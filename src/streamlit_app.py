@@ -18,6 +18,664 @@ import asyncio
 import matplotlib.pyplot as plt
 from scipy.stats import skew
 import google.generativeai as genai
+import json
+from typing import Dict, List, Optional, Any
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+class ArgentinaDatos:
+    """
+    Main class for fetching and analyzing Argentine economic and financial data.
+    """
+    
+    def __init__(self, base_url: str = 'https://api.argentinadatos.com'):
+        self.base_url = base_url
+        self.session = requests.Session()
+    
+    def fetch_data(self, endpoint: str) -> List[Dict]:
+        """
+        Fetch data from Argentina Datos API.
+        
+        Args:
+            endpoint: API endpoint path
+            
+        Returns:
+            List of data dictionaries
+        """
+        try:
+            response = self.session.get(f"{self.base_url}{endpoint}", timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            print(f"Error fetching data from {endpoint}: {e}")
+            return []
+        except Exception as e:
+            print(f"Unexpected error fetching data from {endpoint}: {e}")
+            return []
+    
+    def get_dolares(self) -> List[Dict]:
+        """Get dólar exchange rates data."""
+        return self.fetch_data('/v1/cotizaciones/dolares')
+    
+    def get_dolares_candlestick(self) -> Dict:
+        """Get dólar candlestick data."""
+        return self.fetch_data('/v1/cotizaciones/dolares/candlestick')
+    
+    def get_inflacion(self) -> List[Dict]:
+        """Get inflation data."""
+        return self.fetch_data('/v1/indicadores/inflacion')
+    
+    def get_tasas(self) -> List[Dict]:
+        """Get interest rates data."""
+        return self.fetch_data('/v1/indicadores/tasas')
+    
+    def get_uva(self) -> List[Dict]:
+        """Get UVA data."""
+        return self.fetch_data('/v1/indicadores/uva')
+    
+    def get_riesgo_pais(self) -> List[Dict]:
+        """Get country risk data."""
+        return self.fetch_data('/v1/indicadores/riesgo-pais')
+    
+    def create_dolares_chart(self, data: List[Dict], periodo: str = '1 mes', 
+                            casas: Optional[List[str]] = None) -> Dict:
+        """
+        Create dólares chart with Plotly.
+        
+        Args:
+            data: Dólares data
+            periodo: Time period ('1 semana', '1 mes', '1 año', '5 años', 'Todo')
+            casas: List of exchange houses to include
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        if not data:
+            return {}
+        
+        df = pd.DataFrame(data)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        # Filter by period
+        periodos = {
+            '1 semana': 7,
+            '1 mes': 30,
+            '1 año': 365,
+            '5 años': 1825,
+        }
+        
+        if periodo in periodos and periodo != 'Todo':
+            cutoff_date = datetime.now() - timedelta(days=periodos[periodo])
+            df = df[df['fecha'] >= cutoff_date]
+        
+        # Filter by selected houses
+        if casas:
+            df = df[df['casa'].isin(casas)]
+        
+        fig = go.Figure()
+        
+        for casa in df['casa'].unique():
+            casa_data = df[df['casa'] == casa]
+            fig.add_trace(go.Scatter(
+                x=casa_data['fecha'],
+                y=casa_data['venta'],
+                mode='lines',
+                name=casa,
+                hovertemplate='<b>%{x}</b><br>Cotización: %{y}<extra></extra>'
+            ))
+        
+        fig.update_layout(
+            title='Cotizaciones del Dólar en Argentina',
+            xaxis_title='Fecha',
+            yaxis_title='Cotización',
+            hovermode='x unified',
+            template='plotly_white'
+        )
+        
+        return json.loads(fig.to_json())
+    
+    def create_dolares_candlestick_chart(self, data: Dict, periodo: str = '1 mes', 
+                                        casa: str = 'blue') -> Dict:
+        """
+        Create dólares candlestick chart with Plotly.
+        
+        Args:
+            data: Candlestick data
+            periodo: Time period
+            casa: Exchange house
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        if not data or casa not in data:
+            return {}
+        
+        candlestick_data = data[casa]['candlesticks']
+        df = pd.DataFrame(candlestick_data)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        # Filter by period
+        periodos = {
+            '1 semana': 7,
+            '1 mes': 30,
+            '1 año': 365,
+            '5 años': 1825,
+        }
+        
+        if periodo in periodos and periodo != 'Todo':
+            cutoff_date = datetime.now() - timedelta(days=periodos[periodo])
+            df = df[df['fecha'] >= cutoff_date]
+        
+        fig = go.Figure()
+        
+        # Candlestick chart
+        fig.add_trace(go.Candlestick(
+            x=df['fecha'],
+            open=df['apertura'],
+            high=df['maximo'],
+            low=df['minimo'],
+            close=df['cierre'],
+            name=casa,
+            increasing_line_color='#3b82f6',
+            decreasing_line_color='#ef4444'
+        ))
+        
+        fig.update_layout(
+            title=f'Evolución del Dólar - {casa}',
+            xaxis_title='Fecha',
+            yaxis_title='Cotización',
+            template='plotly_white'
+        )
+        
+        return json.loads(fig.to_json())
+    
+    def create_inflacion_chart(self, data: List[Dict]) -> Dict:
+        """
+        Create inflación chart with Plotly.
+        
+        Args:
+            data: Inflation data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        if not data:
+            return {}
+        
+        df = pd.DataFrame(data)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=df['fecha'],
+            y=df['valor'],
+            mode='lines+markers',
+            name='Inflación',
+            line=dict(color='#3b82f6', width=2),
+            hovertemplate='<b>%{x}</b><br>Inflación: %{y}%<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title='Evolución de la Inflación',
+            xaxis_title='Fecha',
+            yaxis_title='Inflación (%)',
+            hovermode='x unified',
+            template='plotly_white'
+        )
+        
+        return json.loads(fig.to_json())
+    
+    def create_tasas_chart(self, data: List[Dict]) -> Dict:
+        """
+        Create tasas chart with Plotly.
+        
+        Args:
+            data: Interest rates data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        if not data:
+            return {}
+        
+        df = pd.DataFrame(data)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        fig = go.Figure()
+        
+        for tasa in df['tasa'].unique():
+            tasa_data = df[df['tasa'] == tasa]
+            fig.add_trace(go.Scatter(
+                x=tasa_data['fecha'],
+                y=tasa_data['valor'],
+                mode='lines+markers',
+                name=tasa,
+                hovertemplate='<b>%{x}</b><br>%{fullData.name}: %{y}%<extra></extra>'
+            ))
+        
+        fig.update_layout(
+            title='Evolución de las Tasas',
+            xaxis_title='Fecha',
+            yaxis_title='Tasa (%)',
+            hovermode='x unified',
+            template='plotly_white'
+        )
+        
+        return json.loads(fig.to_json())
+    
+    def create_uva_chart(self, data: List[Dict]) -> Dict:
+        """
+        Create UVA chart with Plotly.
+        
+        Args:
+            data: UVA data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        if not data:
+            return {}
+        
+        df = pd.DataFrame(data)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=df['fecha'],
+            y=df['valor'],
+            mode='lines+markers',
+            name='UVA',
+            line=dict(color='#10b981', width=2),
+            hovertemplate='<b>%{x}</b><br>UVA: %{y}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title='Evolución del UVA',
+            xaxis_title='Fecha',
+            yaxis_title='UVA',
+            hovermode='x unified',
+            template='plotly_white'
+        )
+        
+        return json.loads(fig.to_json())
+    
+    def create_riesgo_pais_chart(self, data: List[Dict]) -> Dict:
+        """
+        Create riesgo país chart with Plotly.
+        
+        Args:
+            data: Country risk data
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        if not data:
+            return {}
+        
+        df = pd.DataFrame(data)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=df['fecha'],
+            y=df['valor'],
+            mode='lines+markers',
+            name='Riesgo País',
+            line=dict(color='#f59e0b', width=2),
+            hovertemplate='<b>%{x}</b><br>Riesgo País: %{y} puntos<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title='Evolución del Riesgo País',
+            xaxis_title='Fecha',
+            yaxis_title='Riesgo País (puntos)',
+            hovermode='x unified',
+            template='plotly_white'
+        )
+        
+        return json.loads(fig.to_json())
+    
+    def get_all_economic_data(self) -> Dict[str, Any]:
+        """
+        Get all economic and financial data in one call.
+        
+        Returns:
+            Dictionary with all economic data
+        """
+        return {
+            'dolares': self.get_dolares(),
+            'dolares_candlestick': self.get_dolares_candlestick(),
+            'inflacion': self.get_inflacion(),
+            'tasas': self.get_tasas(),
+            'uva': self.get_uva(),
+            'riesgo_pais': self.get_riesgo_pais()
+        }
+    
+    def create_all_charts(self, periodo: str = '1 mes', 
+                         casas: Optional[List[str]] = None,
+                         candlestick_casa: str = 'blue') -> Dict[str, Dict]:
+        """
+        Create all economic charts in one call.
+        
+        Args:
+            periodo: Time period for charts
+            casas: Exchange houses for dólar chart
+            candlestick_casa: Exchange house for candlestick chart
+            
+        Returns:
+            Dictionary with all chart figures
+        """
+        data = self.get_all_economic_data()
+        
+        return {
+            'dolares': self.create_dolares_chart(data['dolares'], periodo, casas),
+            'dolares_candlestick': self.create_dolares_candlestick_chart(
+                data['dolares_candlestick'], periodo, candlestick_casa
+            ),
+            'inflacion': self.create_inflacion_chart(data['inflacion']),
+            'tasas': self.create_tasas_chart(data['tasas']),
+            'uva': self.create_uva_chart(data['uva']),
+            'riesgo_pais': self.create_riesgo_pais_chart(data['riesgo_pais'])
+        }
+
+def mostrar_datos_argentina():
+    """
+    Función para mostrar el análisis de datos económicos de Argentina.
+    """
+    st.header("🇦🇷 Datos Económicos de Argentina")
+    st.markdown("### Análisis de Indicadores Económicos y Financieros")
+    
+    # Inicializar ArgentinaDatos
+    ad = ArgentinaDatos()
+    
+    # Sidebar para controles
+    with st.sidebar:
+        st.subheader("⚙️ Configuración de Análisis")
+        
+        # Selector de período
+        periodo = st.selectbox(
+            "Período de análisis:",
+            ["1 semana", "1 mes", "1 año", "5 años", "Todo"],
+            index=1,
+            help="Seleccione el período de tiempo para el análisis"
+        )
+        
+        # Selector de casas de cambio para dólar
+        casas_dolar = st.multiselect(
+            "Casas de cambio (Dólar):",
+            ["oficial", "blue", "ccl", "mep"],
+            default=["oficial", "blue"],
+            help="Seleccione las casas de cambio a mostrar"
+        )
+        
+        # Selector de casa para candlestick
+        casa_candlestick = st.selectbox(
+            "Casa para candlestick:",
+            ["blue", "oficial", "ccl", "mep"],
+            index=0,
+            help="Seleccione la casa de cambio para el gráfico de candlestick"
+        )
+        
+        # Botón para actualizar datos
+        if st.button("🔄 Actualizar Datos", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    
+    # Obtener datos con spinner
+    with st.spinner('📊 Obteniendo datos económicos...'):
+        try:
+            data = ad.get_all_economic_data()
+            
+            # Verificar si se obtuvieron datos
+            total_data = sum(len(v) if isinstance(v, list) else len(v) if isinstance(v, dict) else 0 for v in data.values())
+            
+            if total_data == 0:
+                st.warning("⚠️ No se pudieron obtener datos de la API. Mostrando datos de ejemplo...")
+                
+                # Datos de ejemplo para demostración
+                data = {
+                    'dolares': [
+                        {'fecha': '2024-01-01', 'casa': 'oficial', 'compra': 800, 'venta': 820},
+                        {'fecha': '2024-01-02', 'casa': 'oficial', 'compra': 810, 'venta': 830},
+                        {'fecha': '2024-01-03', 'casa': 'oficial', 'compra': 820, 'venta': 840},
+                        {'fecha': '2024-01-01', 'casa': 'blue', 'compra': 1200, 'venta': 1250},
+                        {'fecha': '2024-01-02', 'casa': 'blue', 'compra': 1220, 'venta': 1270},
+                        {'fecha': '2024-01-03', 'casa': 'blue', 'compra': 1240, 'venta': 1290}
+                    ],
+                    'inflacion': [
+                        {'fecha': '2024-01-01', 'valor': 25.5},
+                        {'fecha': '2024-02-01', 'valor': 26.2},
+                        {'fecha': '2024-03-01', 'valor': 27.1}
+                    ],
+                    'tasas': [
+                        {'fecha': '2024-01-01', 'tasa': 'Tasa de Referencia', 'valor': 118},
+                        {'fecha': '2024-02-01', 'tasa': 'Tasa de Referencia', 'valor': 120},
+                        {'fecha': '2024-03-01', 'tasa': 'Tasa de Referencia', 'valor': 122}
+                    ],
+                    'uva': [
+                        {'fecha': '2024-01-01', 'valor': 100.5},
+                        {'fecha': '2024-02-01', 'valor': 102.3},
+                        {'fecha': '2024-03-01', 'valor': 104.1}
+                    ],
+                    'riesgo_pais': [
+                        {'fecha': '2024-01-01', 'valor': 1500},
+                        {'fecha': '2024-02-01', 'valor': 1550},
+                        {'fecha': '2024-03-01', 'valor': 1600}
+                    ],
+                    'dolares_candlestick': {}
+                }
+                
+                st.info("💡 Los datos mostrados son de ejemplo. Para datos reales, verifique su conexión a internet.")
+            
+            # Mostrar resumen de datos
+            st.subheader("📋 Resumen de Datos Disponibles")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Dólares", f"{len(data['dolares'])} registros")
+                st.metric("Inflación", f"{len(data['inflacion'])} registros")
+            
+            with col2:
+                st.metric("Tasas", f"{len(data['tasas'])} registros")
+                st.metric("UVA", f"{len(data['uva'])} registros")
+            
+            with col3:
+                st.metric("Riesgo País", f"{len(data['riesgo_pais'])} registros")
+                st.metric("Candlestick", f"{len(data['dolares_candlestick'])} casas")
+            
+            # Crear pestañas para diferentes análisis
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                "💵 Dólar", "📈 Inflación", "🏦 Tasas", "📊 UVA", "⚠️ Riesgo País", "📋 Todos los Gráficos"
+            ])
+            
+            with tab1:
+                st.subheader("💵 Análisis del Dólar")
+                
+                if data['dolares']:
+                    # Crear gráfico de dólares
+                    fig_data = ad.create_dolares_chart(data['dolares'], periodo, casas_dolar)
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos más recientes
+                    df_dolares = pd.DataFrame(data['dolares'])
+                    if not df_dolares.empty:
+                        df_dolares['fecha'] = pd.to_datetime(df_dolares['fecha'])
+                        df_dolares = df_dolares.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Últimas Cotizaciones")
+                        st.dataframe(
+                            df_dolares.head(10)[['fecha', 'casa', 'compra', 'venta']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos del dólar")
+                
+                # Gráfico de candlestick
+                if data['dolares_candlestick'] and casa_candlestick in data['dolares_candlestick']:
+                    st.subheader(f"📊 Candlestick - {casa_candlestick.title()}")
+                    candlestick_data = ad.create_dolares_candlestick_chart(
+                        data['dolares_candlestick'], periodo, casa_candlestick
+                    )
+                    if candlestick_data:
+                        fig = go.Figure(candlestick_data)
+                        st.plotly_chart(fig, use_container_width=True)
+            
+            with tab2:
+                st.subheader("📈 Análisis de Inflación")
+                
+                if data['inflacion']:
+                    fig_data = ad.create_inflacion_chart(data['inflacion'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos de inflación
+                    df_inflacion = pd.DataFrame(data['inflacion'])
+                    if not df_inflacion.empty:
+                        df_inflacion['fecha'] = pd.to_datetime(df_inflacion['fecha'])
+                        df_inflacion = df_inflacion.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos de Inflación")
+                        st.dataframe(
+                            df_inflacion.head(10)[['fecha', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos de inflación")
+            
+            with tab3:
+                st.subheader("🏦 Análisis de Tasas")
+                
+                if data['tasas']:
+                    fig_data = ad.create_tasas_chart(data['tasas'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos de tasas
+                    df_tasas = pd.DataFrame(data['tasas'])
+                    if not df_tasas.empty:
+                        df_tasas['fecha'] = pd.to_datetime(df_tasas['fecha'])
+                        df_tasas = df_tasas.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos de Tasas")
+                        st.dataframe(
+                            df_tasas.head(10)[['fecha', 'tasa', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos de tasas")
+            
+            with tab4:
+                st.subheader("📊 Análisis del UVA")
+                
+                if data['uva']:
+                    fig_data = ad.create_uva_chart(data['uva'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos del UVA
+                    df_uva = pd.DataFrame(data['uva'])
+                    if not df_uva.empty:
+                        df_uva['fecha'] = pd.to_datetime(df_uva['fecha'])
+                        df_uva = df_uva.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos del UVA")
+                        st.dataframe(
+                            df_uva.head(10)[['fecha', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos del UVA")
+            
+            with tab5:
+                st.subheader("⚠️ Análisis del Riesgo País")
+                
+                if data['riesgo_pais']:
+                    fig_data = ad.create_riesgo_pais_chart(data['riesgo_pais'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos del riesgo país
+                    df_riesgo = pd.DataFrame(data['riesgo_pais'])
+                    if not df_riesgo.empty:
+                        df_riesgo['fecha'] = pd.to_datetime(df_riesgo['fecha'])
+                        df_riesgo = df_riesgo.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos del Riesgo País")
+                        st.dataframe(
+                            df_riesgo.head(10)[['fecha', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos del riesgo país")
+            
+            with tab6:
+                st.subheader("📋 Todos los Gráficos")
+                
+                # Crear todos los gráficos
+                charts = ad.create_all_charts(periodo, casas_dolar, casa_candlestick)
+                
+                # Mostrar cada gráfico
+                for chart_name, fig_data in charts.items():
+                    if fig_data:
+                        st.subheader(f"📊 {chart_name.replace('_', ' ').title()}")
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.markdown("---")
+            
+            # Sección de descarga de datos
+            st.markdown("---")
+            st.subheader("💾 Descargar Datos")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if data['dolares']:
+                    df_dolares = pd.DataFrame(data['dolares'])
+                    csv_dolares = df_dolares.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Descargar Dólares (CSV)",
+                        data=csv_dolares,
+                        file_name="dolares_argentina.csv",
+                        mime="text/csv"
+                    )
+            
+            with col2:
+                if data['inflacion']:
+                    df_inflacion = pd.DataFrame(data['inflacion'])
+                    csv_inflacion = df_inflacion.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Descargar Inflación (CSV)",
+                        data=csv_inflacion,
+                        file_name="inflacion_argentina.csv",
+                        mime="text/csv"
+                    )
+            
+            with col3:
+                if data['riesgo_pais']:
+                    df_riesgo = pd.DataFrame(data['riesgo_pais'])
+                    csv_riesgo = df_riesgo.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Descargar Riesgo País (CSV)",
+                        data=csv_riesgo,
+                        file_name="riesgo_pais_argentina.csv",
+                        mime="text/csv"
+                    )
+        
+        except Exception as e:
+            st.error(f"❌ Error al obtener datos económicos: {str(e)}")
+            st.info("💡 Verifique su conexión a internet e intente nuevamente")
 
 warnings.filterwarnings('ignore')
 
@@ -4106,7 +4764,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🇦🇷 Datos Económicos"),
                 index=0,
             )
 
@@ -4126,6 +4784,8 @@ def main():
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
+            elif opcion == "🇦🇷 Datos Económicos":
+                mostrar_datos_argentina()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
