@@ -18,17 +18,527 @@ import asyncio
 import matplotlib.pyplot as plt
 from scipy.stats import skew
 import google.generativeai as genai
-import requests
-from bs4 import BeautifulSoup
 import json
 from typing import Dict, List, Optional, Any
 import os
 from dotenv import load_dotenv
+import plotly.express as px
+from bs4 import BeautifulSoup
+import io
+import base64
+import time
+import markdown2
 
 # Load environment variables
 load_dotenv()
 
-warnings.filterwarnings('ignore')
+# ============================
+# ANÁLISIS DE BETA Y CORRELACIÓN
+# ============================
+
+# Diccionario expandido de benchmarks con categorías de activos completas
+BENCHMARK_FACTORS = {
+    # ÍNDICES GLOBALES PRINCIPALES
+    '^GSPC': 'S&P 500 (EE.UU.)',
+    '^DJI': 'Dow Jones Industrial (EE.UU.)',
+    '^IXIC': 'NASDAQ Composite (EE.UU.)',
+    '^RUT': 'Russell 2000 (EE.UU. Small Cap)',
+    '^VIX': 'Índice de Volatilidad VIX',
+    
+    # ÍNDICES INTERNACIONALES
+    '^FTSE': 'FTSE 100 (Reino Unido)',
+    '^GDAXI': 'DAX (Alemania)',
+    '^FCHI': 'CAC 40 (Francia)',
+    '^STOXX50E': 'Euro STOXX 50',
+    '^N225': 'Nikkei 225 (Japón)',
+    '^HSI': 'Hang Seng (Hong Kong)',
+    '000001.SS': 'Shanghai Composite (China)',
+    '^AXJO': 'ASX 200 (Australia)',
+    '^BVSP': 'Bovespa (Brasil)',
+    '^MXX': 'IPC (México)',
+    '^MERV': 'MERVAL (Argentina)',
+    '^IPSA': 'IPSA (Chile)',
+    
+    # SECTORES SPDR (XL Series)
+    'XLK': 'Tecnología (SPDR)',
+    'XLF': 'Servicios Financieros (SPDR)',
+    'XLV': 'Salud (SPDR)',
+    'XLE': 'Energía (SPDR)',
+    'XLI': 'Industrial (SPDR)',
+    'XLC': 'Servicios de Comunicación (SPDR)',
+    'XLY': 'Consumo Discrecional (SPDR)',
+    'XLP': 'Consumo Básico (SPDR)',
+    'XLB': 'Materiales (SPDR)',
+    'XLRE': 'Bienes Raíces (SPDR)',
+    'XLU': 'Servicios Públicos (SPDR)',
+    
+    # SECTORES VANGUARD (VTI Series)
+    'VTI': 'Total Stock Market (Vanguard)',
+    'VGT': 'Tecnología (Vanguard)',
+    'VFH': 'Financieros (Vanguard)',
+    'VHT': 'Salud (Vanguard)',
+    'VDE': 'Energía (Vanguard)',
+    'VIS': 'Industrial (Vanguard)',
+    'VOX': 'Telecomunicaciones (Vanguard)',
+    'VCR': 'Consumo Discrecional (Vanguard)',
+    'VDC': 'Consumo Básico (Vanguard)',
+    'VAW': 'Materiales (Vanguard)',
+    'VNQ': 'REITs (Vanguard)',
+    'VPU': 'Servicios Públicos (Vanguard)',
+    
+    # ETFS TEMÁTICOS Y DE ESTILO
+    'SPY': 'SPDR S&P 500 ETF',
+    'QQQ': 'Invesco QQQ (NASDAQ-100)',
+    'IWM': 'iShares Russell 2000 (Small Cap)',
+    'EFA': 'iShares MSCI EAFE (Desarrollados)',
+    'EEM': 'iShares MSCI Emerging Markets',
+    'VEA': 'Vanguard Developed Markets',
+    'VWO': 'Vanguard Emerging Markets',
+    'IEFA': 'iShares Core MSCI EAFE',
+    
+    # ETFS POR REGIÓN
+    'EWW': 'iShares MSCI México',
+    'EWZ': 'iShares MSCI Brasil',
+    'EWJ': 'iShares MSCI Japón',
+    'EWG': 'iShares MSCI Alemania',
+    'EWU': 'iShares MSCI Reino Unido',
+    'EWQ': 'iShares MSCI Francia',
+    'EWI': 'iShares MSCI Italia',
+    'EWP': 'iShares MSCI España',
+    'EWC': 'iShares MSCI Canadá',
+    'EWA': 'iShares MSCI Australia',
+    'EWY': 'iShares MSCI Corea del Sur',
+    'EWT': 'iShares MSCI Taiwán',
+    'INDA': 'iShares MSCI India',
+    'EWS': 'iShares MSCI Singapur',
+    'THD': 'iShares MSCI Tailandia',
+    'FXI': 'iShares China Large-Cap',
+    'ASHR': 'iShares China A-Shares',
+    
+    # COMMODITIES
+    'GLD': 'SPDR Gold Trust',
+    'SLV': 'iShares Silver Trust',
+    'USO': 'United States Oil Fund',
+    'UNG': 'United States Natural Gas Fund',
+    'DBA': 'Invesco DB Agriculture Fund',
+    'DBC': 'Invesco DB Commodity Index',
+    
+    # BONOS
+    'TLT': 'iShares 20+ Year Treasury Bond',
+    'IEF': 'iShares 7-10 Year Treasury Bond',
+    'SHY': 'iShares 1-3 Year Treasury Bond',
+    'LQD': 'iShares iBoxx Investment Grade Corporate Bond',
+    'HYG': 'iShares iBoxx High Yield Corporate Bond',
+    'EMB': 'iShares J.P. Morgan USD Emerging Markets Bond',
+    
+    # DIVISAS
+    'UUP': 'Invesco DB US Dollar Index Bullish Fund',
+    'FXE': 'Invesco CurrencyShares Euro Trust',
+    'FXY': 'Invesco CurrencyShares Japanese Yen Trust',
+    'FXB': 'Invesco CurrencyShares British Pound Sterling Trust',
+    'FXC': 'Invesco CurrencyShares Canadian Dollar Trust',
+    'FXA': 'Invesco CurrencyShares Australian Dollar Trust',
+    
+    # REAL ESTATE
+    'VNQ': 'Vanguard Real Estate ETF',
+    'IYR': 'iShares U.S. Real Estate ETF',
+    'SCHH': 'Schwab U.S. REIT ETF',
+    'RWR': 'SPDR Dow Jones REIT ETF',
+    
+    # ALTERNATIVOS
+    'ARKK': 'ARK Innovation ETF',
+    'ARKW': 'ARK Next Generation Internet ETF',
+    'ARKG': 'ARK Genomic Revolution ETF',
+    'ARKF': 'ARK Fintech Innovation ETF',
+    'ARKQ': 'ARK Autonomous Technology & Robotics ETF',
+    'ARKX': 'ARK Space Exploration & Innovation ETF',
+    
+    # FACTORES
+    'MTUM': 'iShares MSCI Momentum Factor ETF',
+    'VLUE': 'iShares MSCI USA Value Factor ETF',
+    'QUAL': 'iShares MSCI USA Quality Factor ETF',
+    'SIZE': 'iShares MSCI USA Size Factor ETF',
+    'USMV': 'iShares MSCI USA Min Vol Factor ETF',
+    
+    # CRYPTO
+    'GBTC': 'Grayscale Bitcoin Trust',
+    'ETHE': 'Grayscale Ethereum Trust',
+    'BITO': 'ProShares Bitcoin Strategy ETF',
+    'BITI': 'ProShares Short Bitcoin Strategy ETF',
+}
+
+def calcular_beta_alpha(returns_asset, returns_benchmark):
+    """
+    Calcula beta y alpha usando regresión lineal.
+    
+    Args:
+        returns_asset: Series de retornos del activo
+        returns_benchmark: Series de retornos del benchmark
+        
+    Returns:
+        tuple: (beta, alpha, r_squared, p_value)
+    """
+    try:
+        # Alinear las series de tiempo
+        aligned_data = pd.concat([returns_asset, returns_benchmark], axis=1).dropna()
+        if len(aligned_data) < 30:  # Mínimo 30 observaciones
+            return None, None, None, None
+            
+        asset_returns = aligned_data.iloc[:, 0]
+        benchmark_returns = aligned_data.iloc[:, 1]
+        
+        # Regresión lineal
+        slope, intercept, r_value, p_value, std_err = stats.linregress(benchmark_returns, asset_returns)
+        
+        beta = slope
+        alpha = intercept
+        r_squared = r_value ** 2
+        
+        return beta, alpha, r_squared, p_value
+        
+    except Exception as e:
+        st.error(f"Error en cálculo de beta/alpha: {str(e)}")
+        return None, None, None, None
+
+def clasificar_estrategia(beta, alpha, r_squared, p_value):
+    """
+    Clasifica la estrategia según beta y alpha.
+    
+    Args:
+        beta: Coeficiente beta
+        alpha: Coeficiente alpha
+        r_squared: R-cuadrado de la regresión
+        p_value: Valor p de la regresión
+        
+    Returns:
+        str: Clasificación de la estrategia
+    """
+    if beta is None or alpha is None:
+        return "Datos Insuficientes"
+    
+    # Verificar significancia estadística
+    if p_value > 0.05:
+        return "Sin Significancia Estadística"
+    
+    # Clasificación según criterios
+    if abs(beta - 1) < 0.1 and abs(alpha) < 0.001:
+        return "Index Tracker"
+    elif abs(beta - 1) < 0.1 and alpha > 0.001:
+        return "Tradicional Long-Only"
+    elif abs(alpha) < 0.001:
+        return "Smart Beta"
+    elif abs(beta) < 0.2 and alpha > 0.001:
+        return "Hedge Fund"
+    else:
+        return "Estrategia Mixta"
+
+def obtener_serie_historica_yfinance(ticker, periodo='1y'):
+    """
+    Obtiene serie histórica usando yfinance.
+    
+    Args:
+        ticker: Símbolo del ticker
+        periodo: Período de tiempo ('1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max')
+        
+    Returns:
+        pd.Series: Serie de retornos diarios
+    """
+    try:
+        ticker_obj = yf.Ticker(ticker)
+        hist = ticker_obj.history(period=periodo)
+        
+        if hist.empty:
+            return None
+            
+        # Calcular retornos diarios
+        returns = hist['Close'].pct_change().dropna()
+        return returns
+        
+    except Exception as e:
+        st.error(f"Error obteniendo datos para {ticker}: {str(e)}")
+        return None
+
+def crear_grafico_alpha_beta(resultados):
+    """
+    Crea gráfico de dispersión alpha vs beta.
+    
+    Args:
+        resultados: DataFrame con columnas ['Ticker', 'Beta', 'Alpha', 'Estrategia']
+        
+    Returns:
+        plotly.graph_objects.Figure: Gráfico interactivo
+    """
+    fig = go.Figure()
+    
+    # Colores por estrategia
+    colores = {
+        'Index Tracker': '#1f77b4',
+        'Tradicional Long-Only': '#ff7f0e',
+        'Smart Beta': '#2ca02c',
+        'Hedge Fund': '#d62728',
+        'Estrategia Mixta': '#9467bd',
+        'Sin Significancia Estadística': '#8c564b',
+        'Datos Insuficientes': '#e377c2'
+    }
+    
+    for estrategia in resultados['Estrategia'].unique():
+        data_estrategia = resultados[resultados['Estrategia'] == estrategia]
+        
+        fig.add_trace(go.Scatter(
+            x=data_estrategia['Beta'],
+            y=data_estrategia['Alpha'],
+            mode='markers',
+            name=estrategia,
+            marker=dict(
+                size=10,
+                color=colores.get(estrategia, '#7f7f7f'),
+                opacity=0.7
+            ),
+            text=data_estrategia['Ticker'],
+            hovertemplate='<b>%{text}</b><br>Beta: %{x:.3f}<br>Alpha: %{y:.3f}<extra></extra>'
+        ))
+    
+    # Líneas de referencia
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Alpha = 0")
+    fig.add_vline(x=1, line_dash="dash", line_color="gray", annotation_text="Beta = 1")
+    fig.add_vline(x=0, line_dash="dash", line_color="gray", annotation_text="Beta = 0")
+    
+    fig.update_layout(
+        title="Análisis Alpha vs Beta por Estrategia",
+        xaxis_title="Beta",
+        yaxis_title="Alpha",
+        template="plotly_white",
+        height=600
+    )
+    
+    return fig
+
+def mostrar_analisis_beta_correlacion():
+    """
+    Función principal para mostrar el análisis de beta y correlación.
+    """
+    st.header("📊 Análisis de Beta y Correlación")
+    st.markdown("### Clasificación de Estrategias de Inversión")
+    
+    # Configuración
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🎯 Configuración")
+        
+        # Selección de benchmark
+        benchmark_seleccionado = st.selectbox(
+            "Seleccione Benchmark:",
+            options=list(BENCHMARK_FACTORS.keys()),
+            format_func=lambda x: f"{x} - {BENCHMARK_FACTORS[x]}",
+            index=0
+        )
+        
+        # Período de análisis
+        periodo = st.selectbox(
+            "Período de Análisis:",
+            options=['1mo', '3mo', '6mo', '1y', '2y', '5y'],
+            index=3
+        )
+        
+        # Umbral de significancia
+        umbral_significancia = st.slider(
+            "Umbral de Significancia (p-value):",
+            min_value=0.01,
+            max_value=0.10,
+            value=0.05,
+            step=0.01
+        )
+    
+    with col2:
+        st.subheader("📋 Información")
+        st.info(f"""
+        **Benchmark Seleccionado:** {benchmark_seleccionado} - {BENCHMARK_FACTORS[benchmark_seleccionado]}
+        
+        **Período:** {periodo}
+        
+        **Umbral de Significancia:** {umbral_significancia}
+        """)
+    
+    # Obtener datos del benchmark
+    st.subheader("📈 Datos del Benchmark")
+    with st.spinner(f"Obteniendo datos del benchmark {benchmark_seleccionado}..."):
+        benchmark_returns = obtener_serie_historica_yfinance(benchmark_seleccionado, periodo)
+        
+        if benchmark_returns is not None:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Retorno Total", f"{benchmark_returns.sum():.2%}")
+                st.metric("Volatilidad", f"{benchmark_returns.std() * np.sqrt(252):.2%}")
+            
+            with col2:
+                st.metric("Retorno Promedio Diario", f"{benchmark_returns.mean():.2%}")
+                st.metric("Observaciones", len(benchmark_returns))
+            
+            # Gráfico del benchmark
+            fig_benchmark = go.Figure()
+            fig_benchmark.add_trace(go.Scatter(
+                x=benchmark_returns.index,
+                y=(1 + benchmark_returns).cumprod(),
+                mode='lines',
+                name=f'Benchmark ({benchmark_seleccionado})',
+                line=dict(color='blue', width=2)
+            ))
+            
+            fig_benchmark.update_layout(
+                title=f"Evolución del Benchmark: {BENCHMARK_FACTORS[benchmark_seleccionado]}",
+                xaxis_title="Fecha",
+                yaxis_title="Valor Acumulado",
+                template="plotly_white"
+            )
+            
+            st.plotly_chart(fig_benchmark, use_container_width=True)
+        else:
+            st.error("No se pudieron obtener los datos del benchmark")
+            return
+    
+    # Análisis de activos
+    st.subheader("🔍 Análisis de Activos")
+    
+    # Aquí puedes agregar la lógica para obtener los tickers de los paneles seleccionados
+    # Por ahora, usaremos algunos ejemplos
+    tickers_ejemplo = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX']
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.info("""
+        **Nota:** Esta sección está configurada para analizar activos específicos.
+        Para integrar con los paneles de cotización, selecciona los paneles deseados
+        y se analizarán automáticamente todos los activos de esos paneles.
+        """)
+        
+        # Opción para usar tickers de ejemplo o paneles
+        modo_analisis = st.radio(
+            "Modo de Análisis:",
+            ["Tickers de Ejemplo", "Paneles de Cotización"],
+            index=0
+        )
+    
+    with col2:
+        if modo_analisis == "Tickers de Ejemplo":
+            tickers_analizar = st.multiselect(
+                "Seleccione tickers para analizar:",
+                options=tickers_ejemplo,
+                default=tickers_ejemplo[:5]
+            )
+        else:
+            st.info("Selecciona los paneles en la pestaña de Paneles de Cotización")
+            tickers_analizar = []
+    
+    # Ejecutar análisis
+    if st.button("🚀 Ejecutar Análisis", use_container_width=True):
+        if not tickers_analizar:
+            st.warning("Selecciona al menos un ticker para analizar")
+            return
+        
+        resultados = []
+        
+        with st.spinner("Analizando activos..."):
+            for ticker in tickers_analizar:
+                asset_returns = obtener_serie_historica_yfinance(ticker, periodo)
+                
+                if asset_returns is not None:
+                    beta, alpha, r_squared, p_value = calcular_beta_alpha(asset_returns, benchmark_returns)
+                    estrategia = clasificar_estrategia(beta, alpha, r_squared, p_value)
+                    
+                    resultados.append({
+                        'Ticker': ticker,
+                        'Beta': beta if beta is not None else 0,
+                        'Alpha': alpha if alpha is not None else 0,
+                        'R_Squared': r_squared if r_squared is not None else 0,
+                        'P_Value': p_value if p_value is not None else 1,
+                        'Estrategia': estrategia,
+                        'Retorno_Total': asset_returns.sum(),
+                        'Volatilidad': asset_returns.std() * np.sqrt(252)
+                    })
+        
+        if resultados:
+            # Crear DataFrame
+            df_resultados = pd.DataFrame(resultados)
+            
+            # Mostrar resultados
+            st.subheader("📊 Resultados del Análisis")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.dataframe(
+                    df_resultados[['Ticker', 'Beta', 'Alpha', 'Estrategia']].round(4),
+                    use_container_width=True
+                )
+            
+            with col2:
+                # Estadísticas por estrategia
+                stats_estrategia = df_resultados.groupby('Estrategia').agg({
+                    'Ticker': 'count',
+                    'Beta': ['mean', 'std'],
+                    'Alpha': ['mean', 'std']
+                }).round(4)
+                
+                st.write("**Estadísticas por Estrategia:**")
+                st.dataframe(stats_estrategia, use_container_width=True)
+            
+            # Gráfico alpha vs beta
+            st.subheader("📈 Gráfico Alpha vs Beta")
+            fig_alpha_beta = crear_grafico_alpha_beta(df_resultados)
+            st.plotly_chart(fig_alpha_beta, use_container_width=True)
+            
+            # Explicación de estrategias
+            st.subheader("📚 Explicación de Estrategias")
+            
+            estrategias_info = {
+                'Index Tracker': {
+                    'descripcion': 'Replica el rendimiento de un benchmark',
+                    'caracteristicas': 'β ≈ 1, α ≈ 0',
+                    'ejemplo': 'ETF que replica S&P 500'
+                },
+                'Tradicional Long-Only': {
+                    'descripcion': 'Supera el mercado con retorno extra no correlacionado',
+                    'caracteristicas': 'β ≈ 1, α > 0',
+                    'ejemplo': 'Fondos mutuos tradicionales'
+                },
+                'Smart Beta': {
+                    'descripcion': 'Supera el mercado ajustando dinámicamente los pesos',
+                    'caracteristicas': 'β > 1 (mercado alcista), β < 1 (mercado bajista), α ≈ 0',
+                    'ejemplo': 'ETFs factor-based'
+                },
+                'Hedge Fund': {
+                    'descripcion': 'Entrega retornos absolutos no correlacionados con el mercado',
+                    'caracteristicas': 'β ≈ 0, α > 0',
+                    'ejemplo': 'Estrategias long/short'
+                }
+            }
+            
+            for estrategia, info in estrategias_info.items():
+                with st.expander(f"📋 {estrategia}"):
+                    st.write(f"**Descripción:** {info['descripcion']}")
+                    st.write(f"**Características:** {info['caracteristicas']}")
+                    st.write(f"**Ejemplo:** {info['ejemplo']}")
+            
+            # Almacenar resultados
+            if st.button("💾 Guardar Resultados", use_container_width=True):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                nombre_archivo = f"analisis_beta_alpha_{timestamp}.json"
+                
+                try:
+                    with open(nombre_archivo, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            'fecha_analisis': datetime.now().isoformat(),
+                            'benchmark': benchmark_seleccionado,
+                            'periodo': periodo,
+                            'resultados': df_resultados.to_dict('records')
+                        }, f, ensure_ascii=False, indent=2)
+                    
+                    st.success(f"✅ Resultados guardados en {nombre_archivo}")
+                except Exception as e:
+                    st.error(f"Error al guardar: {str(e)}")
 
 class ArgentinaDatos:
     """
@@ -50,11 +560,14 @@ class ArgentinaDatos:
             List of data dictionaries
         """
         try:
-            response = self.session.get(f"{self.base_url}{endpoint}")
+            response = self.session.get(f"{self.base_url}{endpoint}", timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
             print(f"Error fetching data from {endpoint}: {e}")
+            return []
+        except Exception as e:
+            print(f"Unexpected error fetching data from {endpoint}: {e}")
             return []
     
     def get_dolares(self) -> List[Dict]:
@@ -80,22 +593,6 @@ class ArgentinaDatos:
     def get_riesgo_pais(self) -> List[Dict]:
         """Get country risk data."""
         return self.fetch_data('/v1/indicadores/riesgo-pais')
-    
-    def get_all_economic_data(self) -> Dict[str, Any]:
-        """
-        Get all economic and financial data in one call.
-        
-        Returns:
-            Dictionary with all economic data
-        """
-        return {
-            'dolares': self.get_dolares(),
-            'dolares_candlestick': self.get_dolares_candlestick(),
-            'inflacion': self.get_inflacion(),
-            'tasas': self.get_tasas(),
-            'uva': self.get_uva(),
-            'riesgo_pais': self.get_riesgo_pais()
-        }
     
     def create_dolares_chart(self, data: List[Dict], periodo: str = '1 mes', 
                             casas: Optional[List[str]] = None) -> Dict:
@@ -149,6 +646,61 @@ class ArgentinaDatos:
             xaxis_title='Fecha',
             yaxis_title='Cotización',
             hovermode='x unified',
+            template='plotly_white'
+        )
+        
+        return json.loads(fig.to_json())
+    
+    def create_dolares_candlestick_chart(self, data: Dict, periodo: str = '1 mes', 
+                                        casa: str = 'blue') -> Dict:
+        """
+        Create dólares candlestick chart with Plotly.
+        
+        Args:
+            data: Candlestick data
+            periodo: Time period
+            casa: Exchange house
+            
+        Returns:
+            Plotly figure as dictionary
+        """
+        if not data or casa not in data:
+            return {}
+        
+        candlestick_data = data[casa]['candlesticks']
+        df = pd.DataFrame(candlestick_data)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        # Filter by period
+        periodos = {
+            '1 semana': 7,
+            '1 mes': 30,
+            '1 año': 365,
+            '5 años': 1825,
+        }
+        
+        if periodo in periodos and periodo != 'Todo':
+            cutoff_date = datetime.now() - timedelta(days=periodos[periodo])
+            df = df[df['fecha'] >= cutoff_date]
+        
+        fig = go.Figure()
+        
+        # Candlestick chart
+        fig.add_trace(go.Candlestick(
+            x=df['fecha'],
+            open=df['apertura'],
+            high=df['maximo'],
+            low=df['minimo'],
+            close=df['cierre'],
+            name=casa,
+            increasing_line_color='#3b82f6',
+            decreasing_line_color='#ef4444'
+        ))
+        
+        fig.update_layout(
+            title=f'Evolución del Dólar - {casa}',
+            xaxis_title='Fecha',
+            yaxis_title='Cotización',
             template='plotly_white'
         )
         
@@ -303,133 +855,343 @@ class ArgentinaDatos:
         
         return json.loads(fig.to_json())
     
-    def get_economic_analysis(self) -> Dict[str, Any]:
+    def get_all_economic_data(self) -> Dict[str, Any]:
         """
-        Get comprehensive economic analysis including cycle phase detection.
+        Get all economic and financial data in one call.
         
         Returns:
-            Dictionary with economic analysis and cycle phase
+            Dictionary with all economic data
+        """
+        return {
+            'dolares': self.get_dolares(),
+            'dolares_candlestick': self.get_dolares_candlestick(),
+            'inflacion': self.get_inflacion(),
+            'tasas': self.get_tasas(),
+            'uva': self.get_uva(),
+            'riesgo_pais': self.get_riesgo_pais()
+        }
+    
+    def create_all_charts(self, periodo: str = '1 mes', 
+                         casas: Optional[List[str]] = None,
+                         candlestick_casa: str = 'blue') -> Dict[str, Dict]:
+        """
+        Create all economic charts in one call.
+        
+        Args:
+            periodo: Time period for charts
+            casas: Exchange houses for dólar chart
+            candlestick_casa: Exchange house for candlestick chart
+            
+        Returns:
+            Dictionary with all chart figures
         """
         data = self.get_all_economic_data()
         
-        analysis = {
-            'data': data,
-            'cycle_phase': 'Unknown',
-            'recommendations': [],
-            'risk_level': 'Medium',
-            'sectors': {
-                'favorable': [],
-                'unfavorable': [],
-                'neutral': []
-            }
+        return {
+            'dolares': self.create_dolares_chart(data['dolares'], periodo, casas),
+            'dolares_candlestick': self.create_dolares_candlestick_chart(
+                data['dolares_candlestick'], periodo, candlestick_casa
+            ),
+            'inflacion': self.create_inflacion_chart(data['inflacion']),
+            'tasas': self.create_tasas_chart(data['tasas']),
+            'uva': self.create_uva_chart(data['uva']),
+            'riesgo_pais': self.create_riesgo_pais_chart(data['riesgo_pais'])
         }
+
+def mostrar_datos_argentina():
+    """
+    Función para mostrar el análisis de datos económicos de Argentina.
+    """
+    st.header("🇦🇷 Datos Económicos de Argentina")
+    st.markdown("### Análisis de Indicadores Económicos y Financieros")
+    
+    # Inicializar ArgentinaDatos
+    ad = ArgentinaDatos()
+    
+    # Sidebar para controles
+    with st.sidebar:
+        st.subheader("⚙️ Configuración de Análisis")
         
-        # Analyze inflation trend
-        if data['inflacion']:
-            inflacion_df = pd.DataFrame(data['inflacion'])
-            inflacion_df['fecha'] = pd.to_datetime(inflacion_df['fecha'])
-            inflacion_df = inflacion_df.sort_values('fecha')
+        # Selector de período
+        periodo = st.selectbox(
+            "Período de análisis:",
+            ["1 semana", "1 mes", "1 año", "5 años", "Todo"],
+            index=1,
+            help="Seleccione el período de tiempo para el análisis"
+        )
+        
+        # Selector de casas de cambio para dólar
+        casas_dolar = st.multiselect(
+            "Casas de cambio (Dólar):",
+            ["oficial", "blue", "ccl", "mep"],
+            default=["oficial", "blue"],
+            help="Seleccione las casas de cambio a mostrar"
+        )
+        
+        # Selector de casa para candlestick
+        casa_candlestick = st.selectbox(
+            "Casa para candlestick:",
+            ["blue", "oficial", "ccl", "mep"],
+            index=0,
+            help="Seleccione la casa de cambio para el gráfico de candlestick"
+        )
+        
+        # Botón para actualizar datos
+        if st.button("🔄 Actualizar Datos", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    
+    # Obtener datos con spinner
+    with st.spinner('📊 Obteniendo datos económicos...'):
+        try:
+            data = ad.get_all_economic_data()
             
-            if len(inflacion_df) >= 2:
-                latest_inflacion = inflacion_df.iloc[-1]['valor']
-                prev_inflacion = inflacion_df.iloc[-2]['valor']
-                inflacion_trend = latest_inflacion - prev_inflacion
-                
-                if inflacion_trend > 0:
-                    analysis['cycle_phase'] = 'Inflationary Pressure'
-                    analysis['risk_level'] = 'High'
-                    analysis['sectors']['favorable'].extend(['Commodities', 'Real Estate', 'TIPS'])
-                    analysis['sectors']['unfavorable'].extend(['Bonds', 'Cash', 'Growth Stocks'])
-                else:
-                    analysis['cycle_phase'] = 'Disinflationary'
-                    analysis['risk_level'] = 'Medium'
-                    analysis['sectors']['favorable'].extend(['Bonds', 'Growth Stocks', 'Technology'])
-        
-        # Analyze interest rates
-        if data['tasas']:
-            tasas_df = pd.DataFrame(data['tasas'])
-            tasas_df['fecha'] = pd.to_datetime(tasas_df['fecha'])
-            tasas_df = tasas_df.sort_values('fecha')
+            # Verificar si se obtuvieron datos
+            total_data = sum(len(v) if isinstance(v, list) else len(v) if isinstance(v, dict) else 0 for v in data.values())
             
-            if len(tasas_df) >= 2:
-                latest_tasa = tasas_df.iloc[-1]['valor']
-                prev_tasa = tasas_df.iloc[-2]['valor']
-                tasa_trend = latest_tasa - prev_tasa
+            if total_data == 0:
+                st.warning("⚠️ No se pudieron obtener datos de la API. Mostrando datos de ejemplo...")
                 
-                if tasa_trend > 0:
-                    analysis['cycle_phase'] = 'Tightening Monetary Policy'
-                    analysis['sectors']['favorable'].extend(['Financials', 'Value Stocks'])
-                    analysis['sectors']['unfavorable'].extend(['Growth Stocks', 'Real Estate'])
-                else:
-                    analysis['cycle_phase'] = 'Accommodative Monetary Policy'
-                    analysis['sectors']['favorable'].extend(['Growth Stocks', 'Real Estate', 'Technology'])
-        
-        # Analyze country risk
-        if data['riesgo_pais']:
-            riesgo_df = pd.DataFrame(data['riesgo_pais'])
-            riesgo_df['fecha'] = pd.to_datetime(riesgo_df['fecha'])
-            riesgo_df = riesgo_df.sort_values('fecha')
+                # Datos de ejemplo para demostración
+                data = {
+                    'dolares': [
+                        {'fecha': '2024-01-01', 'casa': 'oficial', 'compra': 800, 'venta': 820},
+                        {'fecha': '2024-01-02', 'casa': 'oficial', 'compra': 810, 'venta': 830},
+                        {'fecha': '2024-01-03', 'casa': 'oficial', 'compra': 820, 'venta': 840},
+                        {'fecha': '2024-01-01', 'casa': 'blue', 'compra': 1200, 'venta': 1250},
+                        {'fecha': '2024-01-02', 'casa': 'blue', 'compra': 1220, 'venta': 1270},
+                        {'fecha': '2024-01-03', 'casa': 'blue', 'compra': 1240, 'venta': 1290}
+                    ],
+                    'inflacion': [
+                        {'fecha': '2024-01-01', 'valor': 25.5},
+                        {'fecha': '2024-02-01', 'valor': 26.2},
+                        {'fecha': '2024-03-01', 'valor': 27.1}
+                    ],
+                    'tasas': [
+                        {'fecha': '2024-01-01', 'tasa': 'Tasa de Referencia', 'valor': 118},
+                        {'fecha': '2024-02-01', 'tasa': 'Tasa de Referencia', 'valor': 120},
+                        {'fecha': '2024-03-01', 'tasa': 'Tasa de Referencia', 'valor': 122}
+                    ],
+                    'uva': [
+                        {'fecha': '2024-01-01', 'valor': 100.5},
+                        {'fecha': '2024-02-01', 'valor': 102.3},
+                        {'fecha': '2024-03-01', 'valor': 104.1}
+                    ],
+                    'riesgo_pais': [
+                        {'fecha': '2024-01-01', 'valor': 1500},
+                        {'fecha': '2024-02-01', 'valor': 1550},
+                        {'fecha': '2024-03-01', 'valor': 1600}
+                    ],
+                    'dolares_candlestick': {}
+                }
+                
+                st.info("💡 Los datos mostrados son de ejemplo. Para datos reales, verifique su conexión a internet.")
             
-            if len(riesgo_df) >= 2:
-                latest_riesgo = riesgo_df.iloc[-1]['valor']
-                prev_riesgo = riesgo_df.iloc[-2]['valor']
-                riesgo_trend = latest_riesgo - prev_riesgo
+            # Mostrar resumen de datos
+            st.subheader("📋 Resumen de Datos Disponibles")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Dólares", f"{len(data['dolares'])} registros")
+                st.metric("Inflación", f"{len(data['inflacion'])} registros")
+            
+            with col2:
+                st.metric("Tasas", f"{len(data['tasas'])} registros")
+                st.metric("UVA", f"{len(data['uva'])} registros")
+            
+            with col3:
+                st.metric("Riesgo País", f"{len(data['riesgo_pais'])} registros")
+                st.metric("Candlestick", f"{len(data['dolares_candlestick'])} casas")
+            
+            # Crear pestañas para diferentes análisis
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                "💵 Dólar", "📈 Inflación", "🏦 Tasas", "📊 UVA", "⚠️ Riesgo País", "📋 Todos los Gráficos"
+            ])
+            
+            with tab1:
+                st.subheader("💵 Análisis del Dólar")
                 
-                if riesgo_trend > 0:
-                    analysis['risk_level'] = 'High'
-                    analysis['sectors']['favorable'].extend(['Defensive Stocks', 'Gold', 'USD'])
-                    analysis['sectors']['unfavorable'].extend(['Emerging Markets', 'Local Currency Bonds'])
+                if data['dolares']:
+                    # Crear gráfico de dólares
+                    fig_data = ad.create_dolares_chart(data['dolares'], periodo, casas_dolar)
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos más recientes
+                    df_dolares = pd.DataFrame(data['dolares'])
+                    if not df_dolares.empty:
+                        df_dolares['fecha'] = pd.to_datetime(df_dolares['fecha'])
+                        df_dolares = df_dolares.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Últimas Cotizaciones")
+                        st.dataframe(
+                            df_dolares.head(10)[['fecha', 'casa', 'compra', 'venta']],
+                            use_container_width=True
+                        )
                 else:
-                    analysis['risk_level'] = 'Medium'
-                    analysis['sectors']['favorable'].extend(['Emerging Markets', 'Local Stocks'])
+                    st.warning("No se pudieron obtener datos del dólar")
+                
+                # Gráfico de candlestick
+                if data['dolares_candlestick'] and casa_candlestick in data['dolares_candlestick']:
+                    st.subheader(f"📊 Candlestick - {casa_candlestick.title()}")
+                    candlestick_data = ad.create_dolares_candlestick_chart(
+                        data['dolares_candlestick'], periodo, casa_candlestick
+                    )
+                    if candlestick_data:
+                        fig = go.Figure(candlestick_data)
+                        st.plotly_chart(fig, use_container_width=True)
+            
+            with tab2:
+                st.subheader("📈 Análisis de Inflación")
+                
+                if data['inflacion']:
+                    fig_data = ad.create_inflacion_chart(data['inflacion'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos de inflación
+                    df_inflacion = pd.DataFrame(data['inflacion'])
+                    if not df_inflacion.empty:
+                        df_inflacion['fecha'] = pd.to_datetime(df_inflacion['fecha'])
+                        df_inflacion = df_inflacion.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos de Inflación")
+                        st.dataframe(
+                            df_inflacion.head(10)[['fecha', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos de inflación")
+            
+            with tab3:
+                st.subheader("🏦 Análisis de Tasas")
+                
+                if data['tasas']:
+                    fig_data = ad.create_tasas_chart(data['tasas'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos de tasas
+                    df_tasas = pd.DataFrame(data['tasas'])
+                    if not df_tasas.empty:
+                        df_tasas['fecha'] = pd.to_datetime(df_tasas['fecha'])
+                        df_tasas = df_tasas.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos de Tasas")
+                        st.dataframe(
+                            df_tasas.head(10)[['fecha', 'tasa', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos de tasas")
+            
+            with tab4:
+                st.subheader("📊 Análisis del UVA")
+                
+                if data['uva']:
+                    fig_data = ad.create_uva_chart(data['uva'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos del UVA
+                    df_uva = pd.DataFrame(data['uva'])
+                    if not df_uva.empty:
+                        df_uva['fecha'] = pd.to_datetime(df_uva['fecha'])
+                        df_uva = df_uva.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos del UVA")
+                        st.dataframe(
+                            df_uva.head(10)[['fecha', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos del UVA")
+            
+            with tab5:
+                st.subheader("⚠️ Análisis del Riesgo País")
+                
+                if data['riesgo_pais']:
+                    fig_data = ad.create_riesgo_pais_chart(data['riesgo_pais'])
+                    if fig_data:
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Mostrar datos del riesgo país
+                    df_riesgo = pd.DataFrame(data['riesgo_pais'])
+                    if not df_riesgo.empty:
+                        df_riesgo['fecha'] = pd.to_datetime(df_riesgo['fecha'])
+                        df_riesgo = df_riesgo.sort_values('fecha', ascending=False)
+                        
+                        st.subheader("📊 Datos del Riesgo País")
+                        st.dataframe(
+                            df_riesgo.head(10)[['fecha', 'valor']],
+                            use_container_width=True
+                        )
+                else:
+                    st.warning("No se pudieron obtener datos del riesgo país")
+            
+            with tab6:
+                st.subheader("📋 Todos los Gráficos")
+                
+                # Crear todos los gráficos
+                charts = ad.create_all_charts(periodo, casas_dolar, casa_candlestick)
+                
+                # Mostrar cada gráfico
+                for chart_name, fig_data in charts.items():
+                    if fig_data:
+                        st.subheader(f"📊 {chart_name.replace('_', ' ').title()}")
+                        fig = go.Figure(fig_data)
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.markdown("---")
+            
+            # Sección de descarga de datos
+            st.markdown("---")
+            st.subheader("💾 Descargar Datos")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if data['dolares']:
+                    df_dolares = pd.DataFrame(data['dolares'])
+                    csv_dolares = df_dolares.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Descargar Dólares (CSV)",
+                        data=csv_dolares,
+                        file_name="dolares_argentina.csv",
+                        mime="text/csv"
+                    )
+            
+            with col2:
+                if data['inflacion']:
+                    df_inflacion = pd.DataFrame(data['inflacion'])
+                    csv_inflacion = df_inflacion.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Descargar Inflación (CSV)",
+                        data=csv_inflacion,
+                        file_name="inflacion_argentina.csv",
+                        mime="text/csv"
+                    )
+            
+            with col3:
+                if data['riesgo_pais']:
+                    df_riesgo = pd.DataFrame(data['riesgo_pais'])
+                    csv_riesgo = df_riesgo.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Descargar Riesgo País (CSV)",
+                        data=csv_riesgo,
+                        file_name="riesgo_pais_argentina.csv",
+                        mime="text/csv"
+                    )
         
-        # Generate recommendations based on cycle phase
-        if analysis['cycle_phase'] == 'Inflationary Pressure':
-            analysis['recommendations'].extend([
-                'Considerar activos refugio como oro y commodities',
-                'Reducir exposición a bonos de largo plazo',
-                'Mantener liquidez en dólares',
-                'Considerar acciones de empresas con poder de fijación de precios'
-            ])
-        elif analysis['cycle_phase'] == 'Tightening Monetary Policy':
-            analysis['recommendations'].extend([
-                'Favorecer acciones de valor sobre crecimiento',
-                'Considerar bonos de corto plazo',
-                'Mantener exposición a sectores financieros',
-                'Reducir exposición a bienes raíces'
-            ])
-        elif analysis['cycle_phase'] == 'Accommodative Monetary Policy':
-            analysis['recommendations'].extend([
-                'Favorecer acciones de crecimiento',
-                'Considerar bienes raíces',
-                'Mantener exposición a tecnología',
-                'Considerar bonos de largo plazo'
-            ])
-        
-        # --- Traducción de valores a español ---
-        # Al final de get_economic_analysis, antes de return analysis
-        traducciones_fase = {
-            'Unknown': 'Desconocido',
-            'Inflationary Pressure': 'Presión Inflacionaria',
-            'Disinflationary': 'Desinflacionario',
-            'Tightening Monetary Policy': 'Política Monetaria Contractiva',
-            'Accommodative Monetary Policy': 'Política Monetaria Expansiva',
-        }
-        traducciones_riesgo = {
-            'Medium': 'Medio',
-            'High': 'Alto',
-            'Low': 'Bajo',
-        }
-        if analysis['cycle_phase'] in traducciones_fase:
-            analysis['cycle_phase'] = traducciones_fase[analysis['cycle_phase']]
-        if analysis['risk_level'] in traducciones_riesgo:
-            analysis['risk_level'] = traducciones_riesgo[analysis['risk_level']]
-        # Si sigue siendo Unknown, poner Desconocido
-        if not analysis['cycle_phase'] or analysis['cycle_phase'] == 'Unknown':
-            analysis['cycle_phase'] = 'Desconocido'
-        if not analysis['risk_level'] or analysis['risk_level'] == 'Medium':
-            analysis['risk_level'] = 'Medio'
-        return analysis
+        except Exception as e:
+            st.error(f"❌ Error al obtener datos económicos: {str(e)}")
+            st.info("💡 Verifique su conexión a internet e intente nuevamente")
+
+warnings.filterwarnings('ignore')
 
 # Configuración de la página con aspecto profesional
 st.set_page_config(
@@ -1033,10 +1795,11 @@ def obtener_fondos_comunes(token_portador):
         st.error(f"Error al obtener fondos comunes: {str(e)}")
         return []
 
+
+
 def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
     """
     Obtiene la serie histórica de precios para un activo específico desde la API de InvertirOnline.
-    Incluye manejo robusto de errores y reintentos.
     
     Args:
         token_portador (str): Token de autenticación de la API
@@ -1049,219 +1812,132 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
     Returns:
         pd.DataFrame: DataFrame con las columnas 'fecha' y 'precio', o None en caso de error
     """
-    import time
-    import random
-    
-    # Configurar reintentos
-    max_reintentos = 3
-    tiempo_espera_base = 2
-    
-    def validar_datos(df):
-        """Valida los datos y elimina valores atípicos"""
-        if df is None or df.empty:
-            return None
-            
-        # Eliminar valores nulos
-        df = df.dropna()
+    try:
+        print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta}")
         
-        # Verificar que los precios sean positivos
-        df = df[df['precio'] > 0]
+        # Endpoint para FCIs (manejo especial)
+        if mercado.upper() == 'FCI':
+            print("Es un FCI, usando función específica")
+            return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
         
-        # Eliminar valores atípicos usando el método IQR
-        Q1 = df['precio'].quantile(0.25)
-        Q3 = df['precio'].quantile(0.75)
-        IQR = Q3 - Q1
+        # Construir URL según el tipo de activo y mercado
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
         
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
+        headers = {
+            'Authorization': 'Bearer [TOKEN]',  # No mostrar el token real
+            'Accept': 'application/json'
+        }
         
-        df = df[(df['precio'] >= lower_bound) & (df['precio'] <= upper_bound)]
+        # Realizar la solicitud
+        response = requests.get(url, headers={
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }, timeout=30)
         
-        # Verificar consistencia temporal
-        df = df.sort_values('fecha')
-        if not df['fecha'].is_monotonic_increasing:
-            return None
-            
-        return df
-    
-    for intento in range(max_reintentos):
-        try:
-            print(f"Obteniendo datos para {simbolo} en {mercado} desde {fecha_desde} hasta {fecha_hasta} (intento {intento + 1})")
-            
-            # Endpoint para FCIs (manejo especial)
-            if mercado.upper() == 'FCI':
-                print("Es un FCI, usando función específica")
-                return obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta)
-            
-            # Construir URL según el tipo de activo y mercado
-            url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-            print(f"URL de la API: {url.split('?')[0]}")  # Mostrar URL sin parámetros sensibles
-            
-            # Headers mejorados
-            headers = {
-                'Authorization': f'Bearer {token_portador}',
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            # Realizar la solicitud con timeout extendido
-            response = requests.get(
-                url, 
-                headers=headers, 
-                timeout=45,
-                allow_redirects=True
-            )
-            
-            # Verificar el estado de la respuesta
-            print(f"Estado de la respuesta: {response.status_code}")
-            
-            # Manejar errores específicos
-            if response.status_code == 401:
-                error_msg = f"Error de autorización (401) para {simbolo} en {mercado}. Token puede estar expirado o ser inválido."
-                print(error_msg)
-                if intento < max_reintentos - 1:
-                    tiempo_espera = tiempo_espera_base * (2 ** intento) + random.uniform(0, 1)
-                    print(f"Reintentando en {tiempo_espera:.1f} segundos...")
-                    time.sleep(tiempo_espera)
-                    continue
-                else:
-                    st.warning(error_msg)
-                    return None
-                    
-            elif response.status_code == 403:
-                error_msg = f"Acceso denegado (403) para {simbolo} en {mercado}. Verificar permisos del token."
-                print(error_msg)
-                st.warning(error_msg)
-                return None
+        # Verificar el estado de la respuesta
+        print(f"Estado de la respuesta: {response.status_code}")
+        response.raise_for_status()
+        
+        # Procesar la respuesta
+        data = response.json()
+        print(f"Tipo de datos recibidos: {type(data)}")
+        
+        # Procesar la respuesta según el formato esperado
+        if isinstance(data, list):
+            print(f"Se recibió una lista con {len(data)} elementos")
+            if data:
+                print(f"Primer elemento: {data[0]}")
                 
-            elif response.status_code == 404:
-                error_msg = f"Activo no encontrado (404) para {simbolo} en {mercado}."
-                print(error_msg)
-                return None
-                
-            elif response.status_code == 429:
-                error_msg = f"Límite de requests excedido (429) para {simbolo} en {mercado}."
-                print(error_msg)
-                if intento < max_reintentos - 1:
-                    tiempo_espera = tiempo_espera_base * (2 ** intento) + random.uniform(1, 3)
-                    print(f"Esperando {tiempo_espera:.1f} segundos antes de reintentar...")
-                    time.sleep(tiempo_espera)
-                    continue
-                else:
-                    st.warning(error_msg)
-                    return None
+            # Formato estándar para series históricas
+            fechas = []
+            precios = []
             
-            response.raise_for_status()
-            
-            # Procesar la respuesta
-            data = response.json()
-            print(f"Tipo de datos recibidos: {type(data)}")
-            
-            # Procesar la respuesta según el formato esperado
-            if isinstance(data, list):
-                print(f"Se recibió una lista con {len(data)} elementos")
-                if data:
-                    print(f"Primer elemento: {data[0]}")
-                    
-                # Formato estándar para series históricas
-                fechas = []
-                precios = []
-                
-                for item in data:
-                    try:
-                        # Manejar diferentes formatos de fecha
-                        fecha_str = item.get('fecha') or item.get('fechaHora')
-                        if not fecha_str:
-                            print(f"  - Item sin fecha: {item}")
-                            continue
-                            
-                        # Manejar diferentes formatos de precio
-                        precio = item.get('ultimoPrecio') or item.get('precioCierre') or item.get('precio')
-                        if precio is None:
-                            print(f"  - Item sin precio: {item}")
-                            continue
-                            
-                        # Convertir fecha
-                        try:
-                            fecha = parse_datetime_flexible(fecha_str)
-                            if pd.isna(fecha):
-                                print(f"  - Fecha inválida: {fecha_str}")
-                                continue
-                                
-                            precio_float = float(precio)
-                            if precio_float <= 0:
-                                print(f"  - Precio inválido: {precio}")
-                                continue
-                                
-                            fechas.append(fecha)
-                            precios.append(precio_float)
-                            
-                        except (ValueError, TypeError) as e:
-                            print(f"  - Error al convertir datos: {e}")
-                            continue
-                            
-                    except Exception as e:
-                        print(f"  - Error inesperado al procesar item: {e}")
-                        continue
-                
-                if fechas and precios:
-                    df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                    df = validar_datos(df)
-                    if df is not None:
-                        return df
-                else:
-                    print("No se encontraron datos válidos en la respuesta")
-                    return None
-                    
-            elif isinstance(data, dict):
-                print(f"Se recibió un diccionario: {data.keys()}")
-                # Para respuestas que son un solo valor (ej: MEP)
-                precio = data.get('ultimoPrecio') or data.get('precioCierre') or data.get('precio')
-                if precio is not None:
-                    print(f"Datos de un solo punto: precio={precio}")
-                    return pd.DataFrame({
-                        'fecha': [pd.Timestamp.now(tz='UTC')],
-                        'precio': [float(precio)]
-                    })
-                else:
-                    print("No se encontró precio en la respuesta")
-            else:
-                print(f"Tipo de respuesta no manejado: {type(data)}")
-                
-            print(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
-            return None
-            
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Error de conexión para {simbolo} en {mercado}: {str(e)}"
-            if hasattr(e, 'response') and e.response is not None:
-                error_msg += f" - Status: {e.response.status_code}"
+            for item in data:
                 try:
-                    error_msg += f" - Respuesta: {e.response.text[:200]}"
-                except:
-                    pass
+                    # Manejar diferentes formatos de fecha
+                    fecha_str = item.get('fecha') or item.get('fechaHora')
+                    if not fecha_str:
+                        print(f"  - Item sin fecha: {item}")
+                        continue
+                        
+                    # Manejar diferentes formatos de precio
+                    precio = item.get('ultimoPrecio') or item.get('precioCierre') or item.get('precio')
+                    if precio is None:
+                        print(f"  - Item sin precio: {item}")
+                        continue
+                        
+                    # Convertir fecha
+                    try:
+                        fecha = parse_datetime_flexible(fecha_str)
+                        if pd.isna(fecha):
+                            print(f"  - Fecha inválida: {fecha_str}")
+                            continue
+                            
+                        precio_float = float(precio)
+                        if precio_float <= 0:
+                            print(f"  - Precio inválido: {precio}")
+                            continue
+                            
+                        fechas.append(fecha)
+                        precios.append(precio_float)
+                        
+                    except (ValueError, TypeError) as e:
+                        print(f"  - Error al convertir datos: {e}")
+                        continue
+                        
+                except Exception as e:
+                    print(f"  - Error inesperado al procesar item: {e}")
+                    continue
             
-            print(error_msg)
-            
-            # Reintentar solo para errores de red, no para errores de autorización
-            if intento < max_reintentos - 1 and e.response is None:
-                tiempo_espera = tiempo_espera_base * (2 ** intento) + random.uniform(0, 1)
-                print(f"Reintentando en {tiempo_espera:.1f} segundos...")
-                time.sleep(tiempo_espera)
-                continue
+            if fechas and precios:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                # Eliminar duplicados manteniendo el último
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                print(f"Datos procesados: {len(df)} registros válidos")
+                return df
             else:
-                st.warning(error_msg)
+                print("No se encontraron datos válidos en la respuesta")
                 return None
                 
-        except Exception as e:
-            error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
-            print(error_msg)
-            import traceback
-            traceback.print_exc()
-            st.error(error_msg)
-            return None
-    
-    return None
+        elif isinstance(data, dict):
+            print(f"Se recibió un diccionario: {data.keys()}")
+            # Para respuestas que son un solo valor (ej: MEP)
+            precio = data.get('ultimoPrecio') or data.get('precioCierre') or data.get('precio')
+            if precio is not None:
+                print(f"Datos de un solo punto: precio={precio}")
+                return pd.DataFrame({
+                    'fecha': [pd.Timestamp.now(tz='UTC')],
+                    'precio': [float(precio)]
+                })
+            else:
+                print("No se encontró precio en la respuesta")
+        else:
+            print(f"Tipo de respuesta no manejado: {type(data)}")
+            
+        print(f"No se pudieron procesar los datos para {simbolo} en {mercado}")
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Error de conexión para {simbolo} en {mercado}: {str(e)}"
+        if hasattr(e, 'response') and e.response is not None:
+            error_msg += f" - Status: {e.response.status_code}"
+            try:
+                error_msg += f" - Respuesta: {e.response.text[:200]}"
+            except:
+                pass
+        print(error_msg)
+        st.warning(error_msg)
+        return None
+    except Exception as e:
+        error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        st.error(error_msg)
+        return None
+        return None
 
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
@@ -1316,9 +1992,9 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
             
             if fechas and precios:
                 df = pd.DataFrame({'fecha': fechas, 'precio': precios})
-                df = validar_datos(df)
-                if df is not None:
-                    return df
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
         
         # Si no se pudo obtener la serie histórica, intentar obtener el último valor
         try:
@@ -2271,7 +2947,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
     retorno_esperado_anual = sum(
-        (m.get('retorno_medio', 0) or 0) * (m.get('peso', 0) or 0)
+        m['retorno_medio'] * m['peso'] 
         for m in metricas_activos.values()
     )
     
@@ -2284,7 +2960,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 print("No hay suficientes datos para calcular correlaciones confiables")
                 # Usar promedio ponderado simple como respaldo
                 volatilidad_portafolio = sum(
-                    (m.get('volatilidad', 0) or 0) * (m.get('peso', 0) or 0)
+                    m['volatilidad'] * m['peso'] 
                     for m in metricas_activos.values()
                 )
             else:
@@ -2328,7 +3004,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         traceback.print_exc()
         # Valor por defecto seguro
         volatilidad_portafolio = sum(
-            (m.get('volatilidad', 0) or 0) * (m.get('peso', 0) or 0)
+            m['volatilidad'] * m['peso'] 
             for m in metricas_activos.values()
         ) if metricas_activos else 0.2
     
@@ -2337,15 +3013,11 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     for _ in range(1000):  # Simulación Monte Carlo simple
         retorno_simulado = 0
         for m in metricas_activos.values():
-            retorno_medio = m.get('retorno_medio', 0) or 0
-            volatilidad = m.get('volatilidad', 0) or 0
-            peso = m.get('peso', 0) or 0
-            retorno_simulado += np.random.normal(retorno_medio/252, volatilidad/np.sqrt(252)) * peso
+            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
         retornos_simulados.append(retorno_simulado * 252)  # Anualizado
     
-    valor_total_safe = valor_total or 0
-    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total_safe / 100
-    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total_safe / 100
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
     
     # Calcular probabilidades basadas en los retornos simulados
     retornos_simulados = np.array(retornos_simulados)
@@ -2364,7 +3036,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             df_port_returns = pd.DataFrame(retornos_diarios)
             
             # Asegurarse de que los pesos estén en el mismo orden que las columnas
-            pesos_ordenados = [metricas_activos[col].get('peso', 0) or 0 for col in df_port_returns.columns]
+            pesos_ordenados = [metricas_activos[col]['peso'] for col in df_port_returns.columns]
             df_port_returns['Portfolio'] = df_port_returns.dot(pesos_ordenados)
             
             # Alinear fechas con el MERVAL
@@ -2585,7 +3257,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols = st.columns(3)
             
             # Mostrar retornos como porcentaje del portafolio
-            retorno_anual_pct = (metricas.get('retorno_esperado_anual', 0) or 0) * 100
+            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
             cols[0].metric("Retorno Esperado Anual", 
                          f"{retorno_anual_pct:+.1f}%",
                          help="Retorno anual esperado basado en datos históricos")
@@ -2605,10 +3277,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.subheader("🎯 Probabilidades")
             cols = st.columns(4)
             probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{(probs.get('ganancia', 0) or 0)*100:.1f}%")
-            cols[1].metric("Pérdida", f"{(probs.get('perdida', 0) or 0)*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{(probs.get('ganancia_mayor_10', 0) or 0)*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{(probs.get('perdida_mayor_10', 0) or 0)*100:.1f}")
+            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
             
 
         
@@ -3569,10 +4241,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 continue
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
-    cols[0].metric("Retorno Esperado", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
-    cols[1].metric("Riesgo (Volatilidad)", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
+    cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
+    cols[1].metric("Riesgo (Volatilidad)", f"{metricas_actual.get('riesgo_anual',0)*100:.2f}%")
     cols[2].metric("Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-    cols[3].metric("Concentración", f"{(metricas_actual.get('concentracion',0) or 0)*100:.1f}%")
+    cols[3].metric("Concentración", f"{metricas_actual.get('concentracion',0)*100:.1f}%")
 
     st.markdown("---")
     st.subheader("⚙️ Configuración de Universo de Optimización")
@@ -3688,8 +4360,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     cols = st.columns(len(estrategias)+1)
     # Métricas del portafolio actual
     cols[0].metric("Actual: Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-    cols[0].metric("Actual: Retorno", f"{(metricas_actual.get('retorno_esperado_anual',0) or 0)*100:.2f}%")
-    cols[0].metric("Actual: Riesgo", f"{(metricas_actual.get('riesgo_anual',0) or 0)*100:.2f}%")
+    cols[0].metric("Actual: Retorno", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
+    cols[0].metric("Actual: Riesgo", f"{metricas_actual.get('riesgo_anual',0)*100:.2f}%")
     for i, (clave, nombre) in enumerate(estrategias):
         res, sharpe, ret = resultados.get(clave, (None, None, None))
         if res:
@@ -3760,7 +4432,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'Retorno': getattr(res,'returns',0)*100,
                 'Riesgo': getattr(res,'risk',0)*100,
                 'Sharpe': sharpe,
-                'Mejora Retorno (%)': (getattr(res,'returns',0)-(metricas_actual.get('retorno_esperado_anual',0) or 0))*100,
+                'Mejora Retorno (%)': (getattr(res,'returns',0)-metricas_actual.get('retorno_esperado_anual',0))*100,
                 'Mejora Sharpe': sharpe-(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6)))
             })
     if df_comp:
@@ -3898,11 +4570,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             sugerencia = "Portafolio diversificado: mantener exposición equilibrada y flexibilidad."
         st.success(f"Etapa detectada: **{etapa}**")
         st.caption(f"Explicación: {explicacion_ciclo}")
-        cols = st.columns(4)
-        cols[0].metric("Reservas", f"{reservas:,.0f}M USD")
-        cols[1].metric("Tasa LELIQ", f"{tasa_leliq:.2f}% anual")
-        cols[2].metric("Inflación mensual", f"{inflacion*100:.2f}%")
-        cols[3].metric("Crecimiento M2", f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D")
+        st.markdown(f"- Reservas: {reservas:,.0f}M USD\n- Tasa LELIQ: {tasa_leliq:.2f}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
         # --- SUGERENCIA DE ESTRATEGIA SEGÚN CICLO ---
         st.markdown(f"""
         <div style='background:#eaf6fb;border-left:6px solid #007cf0;padding:1.2em 1.5em;margin:1.2em 0 1.5em 0;border-radius:10px;'>
@@ -4096,7 +4764,7 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
         st.markdown("---")
         st.subheader("🧠 Diagnóstico IA de ciclo económico y sugerencia de sectores")
         if 'GEMINI_API_KEY' not in st.session_state:
-            st.session_state.GEMINI_API_KEY = 'AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E'
+            st.session_state.GEMINI_API_KEY = ''
         if st.button("🔍 Analizar ciclo y sugerir sectores", key="btn_diag_ia"):
             import yfinance as yf
             import numpy as np
@@ -4465,12 +5133,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "🔄 Rebalanceo",
+        "🤖 Informe IA"
     ])
 
     with tab1:
@@ -4495,6 +5164,9 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+    
+    with tab6:
+        mostrar_informe_ia(token_acceso, id_cliente)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -4606,7 +5278,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "🌍 Análisis Integral de Mercados", "🎯 Recomendación de Activos", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🇦🇷 Datos Económicos", "📊 Paneles de Cotización", "📈 Análisis Beta/Correlación"),
                 index=0,
             )
 
@@ -4618,187 +5290,974 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "🌍 Análisis Integral de Mercados":
+            elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    # Configuración de API key para IA
-                    if 'GEMINI_API_KEY' not in st.session_state:
-                        st.session_state.GEMINI_API_KEY = 'AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E'
-                    
-                    gemini_key = st.session_state.GEMINI_API_KEY
-                    
-                    # Encabezado principal del análisis integral
-                    st.markdown("""
-                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                border-radius: 15px; 
-                                padding: 30px; 
-                                color: white;
-                                text-align: center;
-                                margin: 20px 0;">
-                        <h1 style="color: white; margin-bottom: 15px;">🌍 Análisis Integral de Mercados</h1>
-                        <p style="font-size: 16px; margin-bottom: 0;">Análisis completo de mercados, ciclos económicos, correlaciones y estrategias de inversión</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Crear tabs para el análisis integral
-                    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                        "🌍 Análisis Intermarket", 
-                        "📈 Ciclo Económico", 
-                        "🔗 Correlaciones Avanzadas",
-                        "📊 CAPM y Estrategias",
-                        "🎯 CAPM Interactivo"
-                    ])
-                    
-                    with tab1:
-                        st.subheader("🌍 Análisis Intermarket Completo")
-                        st.markdown("""
-                        **Análisis completo de mercados interconectados:**
-                        - Correlaciones entre diferentes clases de activos
-                        - Análisis de momentum y tendencias
-                        - Identificación de oportunidades de arbitraje
-                        - Recomendaciones de estrategias de inversión
-                        """)
-                        analisis_intermarket_completo(st.session_state.token_acceso, gemini_key)
-                    
-                    with tab2:
-                        st.subheader("📈 Análisis del Ciclo Económico")
-                        st.markdown("""
-                        **Análisis profundo del ciclo económico argentino:**
-                        - Variables macroeconómicas en tiempo real
-                        - Indicadores de empleo, inflación y actividad
-                        - Proyecciones y tendencias del ciclo
-                        - Recomendaciones basadas en el contexto económico
-                        """)
-                        graficar_ciclo_economico_real(st.session_state.token_acceso, gemini_key)
-                    
-                    with tab3:
-                        st.subheader("🔗 Análisis Avanzado de Correlaciones")
-                        st.markdown("""
-                        **Análisis detallado de correlaciones y divergencias:**
-                        - Correlaciones históricas entre variables económicas
-                        - Detección de divergencias y oportunidades
-                        - Análisis de causalidad y relaciones
-                        - Recomendaciones de arbitraje y cobertura
-                        """)
-                        st.warning("Funcionalidad en desarrollo. Próximamente disponible.")
-                    
-                    with tab4:
-                        st.subheader("📊 Análisis CAPM y Estrategias de Inversión")
-                        st.markdown("""
-                        **Análisis de riesgo y estrategias de inversión:**
-                        - Modelo CAPM para activos individuales
-                        - Identificación de activos defensivos
-                        - Estrategias de inversión según condiciones de mercado
-                        - Análisis de portafolio con métricas de riesgo
-                        """)
-                        st.warning("Funcionalidad en desarrollo. Próximamente disponible.")
-                        
-                        # Si hay un cliente seleccionado, mostrar también análisis del portafolio
-                        if st.session_state.cliente_seleccionado:
-                            st.divider()
-                            st.subheader("📊 Análisis CAPM del Portafolio")
-                            st.warning("Análisis CAPM del portafolio en desarrollo. Próximamente disponible.")
-                    
-                    with tab5:
-                        st.subheader("🎯 Análisis CAPM Interactivo")
-                        st.markdown("""
-                        **Análisis CAPM interactivo con menús desplegables:**
-                        - Selección de paneles de activos (Acciones, Bonos, FCIs, etc.)
-                        - Selección de benchmarks (Merval, S&P 500, NASDAQ, etc.)
-                        - Cálculo automático de Alpha, Beta y métricas CAPM
-                        - Clasificación automática por estrategias de inversión
-                        - Gráficos interactivos y recomendaciones detalladas
-                        """)
-                        st.warning("Funcionalidad en desarrollo. Próximamente disponible.")
+                    mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
-                    st.warning("Por favor inicie sesión para acceder al análisis de mercados")
-                
-            elif opcion == "🎯 Recomendación de Activos":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    st.markdown("""
-                    <div style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); 
-                                border-radius: 15px; 
-                                padding: 30px; 
-                                color: white;
-                                text-align: center;
-                                margin: 20px 0;">
-                        <h1 style="color: white; margin-bottom: 15px;">🎯 Recomendación de Activos</h1>
-                        <p style="font-size: 16px; margin-bottom: 0;">Recomendaciones personalizadas basadas en su perfil de riesgo y objetivos</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    st.warning("Funcionalidad en desarrollo. Próximamente disponible.")
-                else:
-                    st.warning("Por favor inicie sesión para acceder al sistema de recomendación de activos")
-            
+                    st.warning("Por favor inicie sesión para ver las tasas de caución")
             elif opcion == "👨\u200d💼 Panel del Asesor":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_movimientos_asesor()
-                else:
-                    st.warning("Por favor inicie sesión para acceder al panel del asesor")
+                mostrar_movimientos_asesor()
+                st.info("👆 Seleccione una opción del menú para comenzar")
+            elif opcion == "🇦🇷 Datos Económicos":
+                mostrar_datos_argentina()
+            elif opcion == "📊 Paneles de Cotización":
+                mostrar_paneles_cotizacion()
+            elif opcion == "📈 Análisis Beta/Correlación":
+                mostrar_analisis_beta_correlacion()
+        else:
+            st.info("👆 Ingrese sus credenciales para comenzar")
             
-            # Mostrar panel de bienvenida solo si no se ha seleccionado ninguna opción
-            if opcion is None or opcion == "🏠 Inicio":
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
-                            border-radius: 15px; 
-                            padding: 40px; 
-                            color: white;
-                            text-align: center;
-                            margin: 30px 0;">
-                    <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
-                    <p style="font-size: 18px; margin-bottom: 30px;">Seleccione una opción del menú para comenzar</p>
-                    <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-                        <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                            <h3>📊 Análisis Completo</h3>
-                            <p>Visualice todos sus activos en un solo lugar con detalle</p>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                            <h3>📈 Gráficos Interactivos</h3>
-                            <p>Comprenda su portafolio con visualizaciones avanzadas</p>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                            <h3>⚖️ Gestión de Riesgo</h3>
-                            <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-                        </div>
+            # Panel de bienvenida
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
+                        border-radius: 15px; 
+                        padding: 40px; 
+                        color: white;
+                        text-align: center;
+                        margin: 30px 0;">
+                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
+                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
+                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>📊 Análisis Completo</h3>
+                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>📈 Gráficos Interactivos</h3>
+                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>⚖️ Gestión de Riesgo</h3>
+                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-                
-                # Características principales
-                st.subheader("✨ Características Principales")
-                cols = st.columns(3)
-                with cols[0]:
-                    st.markdown("""
-                    **📊 Análisis Detallado**  
-                    - Valuación completa de activos  
-                    - Distribución por tipo de instrumento  
-                    - Concentración del portafolio  
-                    - Análisis de rendimiento histórico
-                    """)
-                with cols[1]:
-                    st.markdown("""
-                    **📈 Herramientas Profesionales**  
-                    - Optimización de portafolio  
-                    - Análisis técnico avanzado  
-                    - Modelos de valoración  
-                    - Backtesting de estrategias
-                    """)
-                with cols[2]:
-                    st.markdown("""
-                    **🔍 Análisis de Mercado**  
-                    - Correlaciones entre activos  
-                    - Análisis de factores de riesgo  
-                    - Simulaciones de Monte Carlo  
-                    - Estrategias de cobertura
-                    - Proyecciones de rendimiento
-                    - Datos de Mercado
-                    - Cotizaciones MEP en tiempo real  
-                    - Tasas de caución actualizadas  
-                    - Estado de cuenta consolidado
-                    """)
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Características
+            st.subheader("✨ Características Principales")
+            cols = st.columns(3)
+            with cols[0]:
+                st.markdown("""
+                **📊 Análisis Detallado**  
+                - Valuación completa de activos  
+                - Distribución por tipo de instrumento  
+                - Concentración del portafolio  
+                """)
+            with cols[1]:
+                st.markdown("""
+                **📈 Herramientas Profesionales**  
+                - Optimización de portafolio  
+                - Análisis técnico avanzado  
+                - Proyecciones de rendimiento  
+                """)
+            with cols[2]:
+                st.markdown("""
+                **💱 Datos de Mercado**  
+                - Cotizaciones MEP en tiempo real  
+                - Tasas de caución actualizadas  
+                - Estado de cuenta consolidado  
+                """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
-def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
+def obtener_paneles_cotizacion(token_portador, pais='Argentina'):
+    """
+    Obtiene todos los paneles de cotización disponibles.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/{pais}/Titulos/Cotizacion/Paneles"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener paneles de cotización: {str(e)}")
+        return []
+
+def obtener_instrumentos_por_panel(token_portador, instrumento, panel, pais='Argentina'):
+    """
+    Obtiene los instrumentos de un panel específico.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener instrumentos del panel {panel}: {str(e)}")
+        return []
+
+def obtener_cotizaciones_todos_instrumentos(token_portador, instrumento, pais='Argentina'):
+    """
+    Obtiene cotizaciones de todos los instrumentos de un tipo.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{pais}/Todos"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener cotizaciones de {instrumento}: {str(e)}")
+        return []
+
+def obtener_fci_administradoras(token_portador):
+    """
+    Obtiene las administradoras de fondos comunes de inversión.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = "https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener administradoras FCI: {str(e)}")
+        return []
+
+def obtener_fci_por_administradora(token_portador, administradora):
+    """
+    Obtiene los fondos comunes de inversión de una administradora específica.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/Titulos/FCI/Administradoras/{administradora}/TipoFondos"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener FCI de {administradora}: {str(e)}")
+        return []
+
+def obtener_serie_historica_completa(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene la serie histórica completa de un instrumento.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener serie histórica de {simbolo}: {str(e)}")
+        return []
+
+def almacenar_datos_para_analisis(datos, nombre_archivo):
+    """
+    Almacena datos para análisis posterior en formato JSON.
+    """
+    try:
+        import json
+        from datetime import datetime
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        nombre_completo = f"{nombre_archivo}_{timestamp}.json"
+        
+        with open(nombre_completo, 'w', encoding='utf-8') as f:
+            json.dump(datos, f, ensure_ascii=False, indent=2)
+        
+        return nombre_completo
+    except Exception as e:
+        st.error(f"Error al almacenar datos: {str(e)}")
+        return None
+
+def obtener_cotizacion_detalle(token_portador, mercado, simbolo):
+    """
+    Obtiene el detalle completo de cotización de un instrumento.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/CotizacionDetalle"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener detalle de cotización de {simbolo}: {str(e)}")
+        return None
+
+def obtener_opciones_instrumento(token_portador, mercado, simbolo):
+    """
+    Obtiene las opciones disponibles para un instrumento.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Opciones"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener opciones de {simbolo}: {str(e)}")
+        return []
+
+def obtener_cotizacion_mep_detalle(token_portador, simbolo):
+    """
+    Obtiene cotización MEP detallada para un símbolo.
+    """
+    try:
+        headers = obtener_encabezado_autorizacion(token_portador)
+        url = f"https://api.invertironline.com/api/v2/Cotizaciones/MEP/{simbolo}"
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.error(f"Error al obtener cotización MEP de {simbolo}: {str(e)}")
+        return None
+
+def analizar_datos_almacenados(archivo_json):
+    """
+    Analiza datos almacenados y genera insights.
+    """
+    try:
+        with open(archivo_json, 'r', encoding='utf-8') as f:
+            datos = json.load(f)
+        
+        if not datos:
+            return None
+        
+        df = pd.DataFrame(datos)
+        
+        # Análisis básico
+        analisis = {
+            'total_registros': len(df),
+            'columnas': list(df.columns),
+            'tipos_datos': df.dtypes.to_dict(),
+            'valores_faltantes': df.isnull().sum().to_dict()
+        }
+        
+        # Análisis numérico si hay columnas numéricas
+        columnas_numericas = df.select_dtypes(include=[np.number]).columns
+        if len(columnas_numericas) > 0:
+            analisis['estadisticas_numericas'] = df[columnas_numericas].describe().to_dict()
+        
+        # Análisis de fechas si hay columnas de fecha
+        columnas_fecha = df.select_dtypes(include=['datetime64']).columns
+        if len(columnas_fecha) > 0:
+            analisis['rangos_fecha'] = {
+                col: {
+                    'min': df[col].min().strftime('%Y-%m-%d'),
+                    'max': df[col].max().strftime('%Y-%m-%d')
+                } for col in columnas_fecha
+            }
+        
+        return analisis
+    except Exception as e:
+        st.error(f"Error al analizar datos: {str(e)}")
+        return None
+
+def mostrar_paneles_cotizacion():
+    """
+    Función principal para mostrar todos los paneles de cotización y sus series.
+    """
+    st.header("📊 Paneles de Cotización y Series Históricas")
+    st.markdown("### Análisis Completo de Instrumentos Financieros")
+    
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.warning("🔐 Por favor, inicie sesión para acceder a los paneles de cotización")
+        return
+    
+    token_acceso = st.session_state.token_acceso
+    
+    # Configuración de análisis
+    st.subheader("⚙️ Configuración de Análisis")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        pais = st.selectbox("País", ["Argentina", "Estados Unidos"], index=0)
+    with col2:
+        fecha_desde = st.date_input("Fecha Desde", value=st.session_state.fecha_desde)
+    with col3:
+        fecha_hasta = st.date_input("Fecha Hasta", value=st.session_state.fecha_hasta)
+    
+    # Opciones de análisis
+    st.subheader("📋 Opciones de Análisis")
+    
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🏢 Fondos Comunes", "📈 Instrumentos", "📊 Paneles", "📉 Series Históricas", "💾 Almacenamiento", "🔍 Análisis Avanzado"
+    ])
+    
+    with tab1:
+        st.subheader("🏢 Fondos Comunes de Inversión")
+        
+        if st.button("🔄 Cargar Administradoras FCI", use_container_width=True):
+            with st.spinner("Cargando administradoras..."):
+                administradoras = obtener_fci_administradoras(token_acceso)
+                
+                if administradoras:
+                    st.success(f"✅ Se encontraron {len(administradoras)} administradoras")
+                    
+                    # Mostrar administradoras
+                    for admin in administradoras:
+                        with st.expander(f"🏢 {admin.get('nombre', 'Sin nombre')}"):
+                            if st.button(f"📊 Ver FCI de {admin.get('nombre', 'Administradora')}", key=f"fci_{admin.get('id')}"):
+                                with st.spinner(f"Cargando FCI de {admin.get('nombre', 'Administradora')}..."):
+                                    fci_list = obtener_fci_por_administradora(token_acceso, admin.get('id'))
+                                    
+                                    if fci_list:
+                                        st.success(f"✅ Se encontraron {len(fci_list)} fondos")
+                                        
+                                        # Crear DataFrame para mejor visualización
+                                        df_fci = pd.DataFrame(fci_list)
+                                        st.dataframe(df_fci, use_container_width=True)
+                                        
+                                        # Opción para almacenar datos
+                                        if st.button(f"💾 Almacenar FCI {admin.get('nombre', 'Administradora')}", key=f"store_fci_{admin.get('id')}"):
+                                            nombre_archivo = almacenar_datos_para_analisis(fci_list, f"FCI_{admin.get('nombre', 'Admin')}")
+                                            if nombre_archivo:
+                                                st.success(f"✅ Datos almacenados en {nombre_archivo}")
+                                    else:
+                                        st.warning("No se encontraron fondos para esta administradora")
+                else:
+                    st.warning("No se encontraron administradoras")
+    
+    with tab2:
+        st.subheader("📈 Instrumentos por Tipo")
+        
+        instrumentos = ["Acciones", "Bonos", "Opciones", "Futuros", "Cedears"]
+        instrumento_seleccionado = st.selectbox("Seleccionar Instrumento", instrumentos)
+        
+        if st.button(f"🔄 Cargar {instrumento_seleccionado}", use_container_width=True):
+            with st.spinner(f"Cargando {instrumento_seleccionado}..."):
+                cotizaciones = obtener_cotizaciones_todos_instrumentos(token_acceso, instrumento_seleccionado, pais)
+                
+                if cotizaciones:
+                    st.success(f"✅ Se encontraron {len(cotizaciones)} instrumentos")
+                    
+                    # Crear DataFrame
+                    df_cotizaciones = pd.DataFrame(cotizaciones)
+                    st.dataframe(df_cotizaciones, use_container_width=True)
+                    
+                    # Estadísticas básicas
+                    if not df_cotizaciones.empty:
+                        st.subheader("📊 Estadísticas")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Total Instrumentos", len(df_cotizaciones))
+                        with col2:
+                            if 'ultimoPrecio' in df_cotizaciones.columns:
+                                st.metric("Precio Promedio", f"${df_cotizaciones['ultimoPrecio'].mean():.2f}")
+                        with col3:
+                            if 'variacion' in df_cotizaciones.columns:
+                                st.metric("Variación Promedio", f"{df_cotizaciones['variacion'].mean():.2f}%")
+                    
+                    # Opción para almacenar datos
+                    if st.button(f"💾 Almacenar {instrumento_seleccionado}", key=f"store_{instrumento_seleccionado}"):
+                        nombre_archivo = almacenar_datos_para_analisis(cotizaciones, f"{instrumento_seleccionado}_{pais}")
+                        if nombre_archivo:
+                            st.success(f"✅ Datos almacenados en {nombre_archivo}")
+                else:
+                    st.warning(f"No se encontraron {instrumento_seleccionado}")
+    
+    with tab3:
+        st.subheader("📊 Paneles de Cotización")
+        
+        if st.button("🔄 Cargar Paneles", use_container_width=True):
+            with st.spinner("Cargando paneles..."):
+                paneles = obtener_paneles_cotizacion(token_acceso, pais)
+                
+                if paneles:
+                    st.success(f"✅ Se encontraron {len(paneles)} paneles")
+                    
+                    for panel in paneles:
+                        with st.expander(f"📊 Panel: {panel.get('nombre', 'Sin nombre')}"):
+                            st.write(f"**Descripción:** {panel.get('descripcion', 'Sin descripción')}")
+                            st.write(f"**Instrumento:** {panel.get('instrumento', 'N/A')}")
+                            
+                            if st.button(f"📈 Ver Instrumentos", key=f"panel_{panel.get('id')}"):
+                                with st.spinner(f"Cargando instrumentos del panel {panel.get('nombre', 'Panel')}..."):
+                                    instrumentos_panel = obtener_instrumentos_por_panel(
+                                        token_acceso, 
+                                        panel.get('instrumento', 'Acciones'), 
+                                        panel.get('nombre', 'Panel'), 
+                                        pais
+                                    )
+                                    
+                                    if instrumentos_panel:
+                                        st.success(f"✅ Se encontraron {len(instrumentos_panel)} instrumentos")
+                                        
+                                        df_panel = pd.DataFrame(instrumentos_panel)
+                                        st.dataframe(df_panel, use_container_width=True)
+                                        
+                                        # Gráfico de precios si hay datos
+                                        if 'ultimoPrecio' in df_panel.columns and not df_panel.empty:
+                                            fig = go.Figure()
+                                            fig.add_trace(go.Bar(
+                                                x=df_panel['simbolo'],
+                                                y=df_panel['ultimoPrecio'],
+                                                name='Último Precio'
+                                            ))
+                                            fig.update_layout(
+                                                title=f"Precios - Panel {panel.get('nombre', 'Panel')}",
+                                                xaxis_title="Símbolo",
+                                                yaxis_title="Precio ($)"
+                                            )
+                                            st.plotly_chart(fig, use_container_width=True)
+                                    else:
+                                        st.warning("No se encontraron instrumentos en este panel")
+                else:
+                    st.warning("No se encontraron paneles")
+    
+    with tab4:
+        st.subheader("📉 Series Históricas")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            mercado = st.text_input("Mercado", placeholder="ROFEX")
+        with col2:
+            simbolo = st.text_input("Símbolo", placeholder="GGAL")
+        
+        ajustada = st.selectbox("Ajuste", ["SinAjustar", "Ajustada"], index=0)
+        
+        if st.button("📊 Obtener Serie Histórica", use_container_width=True):
+            if mercado and simbolo:
+                with st.spinner(f"Obteniendo serie histórica de {simbolo}..."):
+                    serie_historica = obtener_serie_historica_completa(
+                        token_acceso, 
+                        mercado, 
+                        simbolo, 
+                        fecha_desde.strftime("%Y-%m-%d"), 
+                        fecha_hasta.strftime("%Y-%m-%d"), 
+                        ajustada
+                    )
+                    
+                    if serie_historica:
+                        st.success(f"✅ Serie histórica obtenida con {len(serie_historica)} registros")
+                        
+                        # Crear DataFrame
+                        df_serie = pd.DataFrame(serie_historica)
+                        
+                        # Convertir fechas si es necesario
+                        if 'fecha' in df_serie.columns:
+                            df_serie['fecha'] = pd.to_datetime(df_serie['fecha'])
+                        
+                        # Gráfico de precios
+                        if not df_serie.empty and 'precio' in df_serie.columns:
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=df_serie['fecha'] if 'fecha' in df_serie.columns else df_serie.index,
+                                y=df_serie['precio'],
+                                mode='lines',
+                                name='Precio'
+                            ))
+                            fig.update_layout(
+                                title=f"Serie Histórica - {simbolo}",
+                                xaxis_title="Fecha",
+                                yaxis_title="Precio ($)"
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Mostrar datos
+                        st.dataframe(df_serie, use_container_width=True)
+                        
+                        # Estadísticas
+                        if not df_serie.empty and 'precio' in df_serie.columns:
+                            st.subheader("📊 Estadísticas de la Serie")
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("Precio Máximo", f"${df_serie['precio'].max():.2f}")
+                            with col2:
+                                st.metric("Precio Mínimo", f"${df_serie['precio'].min():.2f}")
+                            with col3:
+                                st.metric("Precio Promedio", f"${df_serie['precio'].mean():.2f}")
+                            with col4:
+                                st.metric("Volatilidad", f"{df_serie['precio'].std():.2f}")
+                        
+                        # Opción para almacenar datos
+                        if st.button(f"💾 Almacenar Serie {simbolo}", key=f"store_serie_{simbolo}"):
+                            nombre_archivo = almacenar_datos_para_analisis(serie_historica, f"Serie_{simbolo}_{mercado}")
+                            if nombre_archivo:
+                                st.success(f"✅ Datos almacenados en {nombre_archivo}")
+                    else:
+                        st.warning("No se pudo obtener la serie histórica")
+            else:
+                st.warning("Por favor complete mercado y símbolo")
+    
+    with tab5:
+        st.subheader("💾 Gestión de Datos Almacenados")
+        
+        st.info("""
+        **Funcionalidades de Almacenamiento:**
+        - Los datos se guardan automáticamente en formato JSON
+        - Cada archivo incluye timestamp para identificación única
+        - Los datos están listos para análisis posterior
+        - Formato compatible con pandas y otras herramientas de análisis
+        """)
+        
+        # Mostrar archivos almacenados recientemente
+        import os
+        import glob
+        
+        archivos_json = glob.glob("*.json")
+        if archivos_json:
+            st.subheader("📁 Archivos Disponibles")
+            
+            # Ordenar por fecha de modificación
+            archivos_json.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            
+            for archivo in archivos_json[:10]:  # Mostrar solo los 10 más recientes
+                tamaño = os.path.getsize(archivo) / 1024  # KB
+                fecha_mod = datetime.fromtimestamp(os.path.getmtime(archivo))
+                
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.write(f"📄 {archivo}")
+                with col2:
+                    st.write(f"{tamaño:.1f} KB")
+                with col3:
+                    st.write(fecha_mod.strftime("%Y-%m-%d %H:%M"))
+                
+                # Opción para cargar y analizar
+                if st.button(f"📊 Analizar {archivo}", key=f"analyze_{archivo}"):
+                    try:
+                        with open(archivo, 'r', encoding='utf-8') as f:
+                            datos = json.load(f)
+                        
+                        st.success(f"✅ Datos cargados: {len(datos)} registros")
+                        
+                        # Análisis básico
+                        if isinstance(datos, list) and len(datos) > 0:
+                            df_temp = pd.DataFrame(datos)
+                            st.dataframe(df_temp.head(), use_container_width=True)
+                            
+                            # Estadísticas básicas
+                            st.write(f"**Columnas disponibles:** {list(df_temp.columns)}")
+                            st.write(f"**Registros:** {len(df_temp)}")
+                            
+                            # Análisis avanzado
+                            analisis = analizar_datos_almacenados(archivo)
+                            if analisis:
+                                st.subheader("📊 Análisis Detallado")
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.write("**Información General:**")
+                                    st.write(f"- Total registros: {analisis['total_registros']}")
+                                    st.write(f"- Columnas: {len(analisis['columnas'])}")
+                                
+                                with col2:
+                                    st.write("**Valores Faltantes:**")
+                                    for col, faltantes in analisis['valores_faltantes'].items():
+                                        if faltantes > 0:
+                                            st.write(f"- {col}: {faltantes}")
+                                
+                                # Gráficos si hay datos numéricos
+                                if 'estadisticas_numericas' in analisis:
+                                    st.subheader("📈 Estadísticas Numéricas")
+                                    df_stats = pd.DataFrame(analisis['estadisticas_numericas'])
+                                    st.dataframe(df_stats, use_container_width=True)
+                                    
+                                    # Gráfico de distribución si hay suficientes datos
+                                    if len(df_temp) > 10:
+                                        columnas_numericas = df_temp.select_dtypes(include=[np.number]).columns
+                                        if len(columnas_numericas) > 0:
+                                            col_seleccionada = st.selectbox("Seleccionar columna para gráfico", columnas_numericas)
+                                            
+                                            if col_seleccionada:
+                                                fig = go.Figure()
+                                                fig.add_trace(go.Histogram(
+                                                    x=df_temp[col_seleccionada],
+                                                    nbinsx=20,
+                                                    name='Distribución'
+                                                ))
+                                                fig.update_layout(
+                                                    title=f"Distribución de {col_seleccionada}",
+                                                    xaxis_title=col_seleccionada,
+                                                    yaxis_title="Frecuencia"
+                                                )
+                                                st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error al cargar archivo: {str(e)}")
+                else:
+            st.info("📁 No hay archivos JSON almacenados aún. Use las otras pestañas para generar datos.")
+    
+    with tab6:
+        st.subheader("🔍 Análisis Avanzado")
+        
+        # Análisis MEP
+        st.markdown("### 💱 Análisis MEP")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            simbolo_mep = st.text_input("Símbolo para MEP", placeholder="GGAL")
+        with col2:
+            if st.button("📊 Obtener MEP", use_container_width=True):
+                if simbolo_mep:
+                    with st.spinner(f"Obteniendo MEP para {simbolo_mep}..."):
+                        mep_data = obtener_cotizacion_mep_detalle(token_acceso, simbolo_mep)
+                        
+                        if mep_data:
+                            st.success(f"✅ MEP obtenido para {simbolo_mep}")
+                            
+                            # Mostrar datos MEP
+                            if isinstance(mep_data, dict):
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric("Compra", f"${mep_data.get('compra', 0):.2f}")
+                                with col2:
+                                    st.metric("Venta", f"${mep_data.get('venta', 0):.2f}")
+                                
+                                # Gráfico MEP si hay datos históricos
+                                if 'historico' in mep_data:
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Scatter(
+                                        x=mep_data['historico'].get('fechas', []),
+                                        y=mep_data['historico'].get('valores', []),
+                                        mode='lines',
+                                        name='MEP Histórico'
+                                    ))
+                                    fig.update_layout(
+                                        title=f"Evolución MEP - {simbolo_mep}",
+                                        xaxis_title="Fecha",
+                                        yaxis_title="Precio MEP ($)"
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning(f"No se pudo obtener MEP para {simbolo_mep}")
+                else:
+                    st.warning("Por favor ingrese un símbolo")
+        
+        # Análisis detallado de instrumentos
+        st.markdown("### 📊 Análisis Detallado de Instrumentos")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            mercado_detalle = st.text_input("Mercado", placeholder="ROFEX")
+        with col2:
+            simbolo_detalle = st.text_input("Símbolo", placeholder="GGAL")
+        
+        if st.button("🔍 Obtener Detalle", use_container_width=True):
+            if mercado_detalle and simbolo_detalle:
+                with st.spinner(f"Obteniendo detalle de {simbolo_detalle}..."):
+                    detalle = obtener_cotizacion_detalle(token_acceso, mercado_detalle, simbolo_detalle)
+                    
+                    if detalle:
+                        st.success(f"✅ Detalle obtenido para {simbolo_detalle}")
+                        
+                        # Mostrar información detallada
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("**Información General:**")
+                            for key, value in detalle.items():
+                                if key not in ['opciones', 'historico']:
+                                    st.write(f"- {key}: {value}")
+                        
+                        with col2:
+                            st.write("**Métricas de Trading:**")
+                            if 'volumen' in detalle:
+                                st.metric("Volumen", f"{detalle['volumen']:,}")
+                            if 'variacion' in detalle:
+                                st.metric("Variación", f"{detalle['variacion']:.2f}%")
+                            if 'ultimoPrecio' in detalle:
+                                st.metric("Último Precio", f"${detalle['ultimoPrecio']:.2f}")
+                        
+                        # Opciones si están disponibles
+                        if 'opciones' in detalle and detalle['opciones']:
+                            st.subheader("📋 Opciones Disponibles")
+                            df_opciones = pd.DataFrame(detalle['opciones'])
+                            st.dataframe(df_opciones, use_container_width=True)
+                        
+                        # Almacenar detalle
+                        if st.button(f"💾 Almacenar Detalle {simbolo_detalle}", key=f"store_detalle_{simbolo_detalle}"):
+                            nombre_archivo = almacenar_datos_para_analisis(detalle, f"Detalle_{simbolo_detalle}_{mercado_detalle}")
+                            if nombre_archivo:
+                                st.success(f"✅ Detalle almacenado en {nombre_archivo}")
+                    else:
+                        st.warning(f"No se pudo obtener detalle para {simbolo_detalle}")
+            else:
+                st.warning("Por favor complete mercado y símbolo")
+        
+        # Análisis comparativo
+        st.markdown("### 📈 Análisis Comparativo")
+        
+        instrumentos_comparar = st.multiselect(
+            "Seleccionar instrumentos para comparar",
+            ["GGAL", "YPF", "PAMP", "TENAR", "CRESUD"],
+            default=["GGAL", "YPF"]
+        )
+        
+        if st.button("📊 Comparar Instrumentos", use_container_width=True) and len(instrumentos_comparar) >= 2:
+            with st.spinner("Obteniendo datos comparativos..."):
+                datos_comparacion = []
+                
+                for simbolo in instrumentos_comparar:
+                    detalle = obtener_cotizacion_detalle(token_acceso, "ROFEX", simbolo)
+                    if detalle:
+                        datos_comparacion.append({
+                            'simbolo': simbolo,
+                            'precio': detalle.get('ultimoPrecio', 0),
+                            'variacion': detalle.get('variacion', 0),
+                            'volumen': detalle.get('volumen', 0)
+                        })
+                
+                if datos_comparacion:
+                    df_comparacion = pd.DataFrame(datos_comparacion)
+                    
+                    # Gráfico comparativo
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=df_comparacion['simbolo'],
+                        y=df_comparacion['precio'],
+                        name='Precio',
+                        text=df_comparacion['precio'].round(2),
+                        textposition='auto'
+                    ))
+                    fig.update_layout(
+                        title="Comparación de Precios",
+                        xaxis_title="Símbolo",
+                        yaxis_title="Precio ($)"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Tabla comparativa
+                    st.dataframe(df_comparacion, use_container_width=True)
+                    
+                    # Almacenar comparación
+                    if st.button("💾 Almacenar Comparación", key="store_comparacion"):
+                        nombre_archivo = almacenar_datos_para_analisis(datos_comparacion, "Comparacion_Instrumentos")
+                        if nombre_archivo:
+                            st.success(f"✅ Comparación almacenada en {nombre_archivo}")
+                else:
+                    st.warning("No se pudieron obtener datos para la comparación")
+        
+        # --- SUB-TAB: Clasificación Estrategias (Alpha/Beta) ---
+        st.markdown("---")
+        st.markdown("### 📊 Clasificación de Estrategias (Alpha/Beta)")
+        
+        # Configuración para análisis de estrategias
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🎯 Configuración de Análisis")
+            
+            # Selección de benchmark
+            benchmark_seleccionado = st.selectbox(
+                "Seleccione Benchmark:",
+                options=list(BENCHMARK_FACTORS.keys()),
+                format_func=lambda x: f"{x} - {BENCHMARK_FACTORS[x]}",
+                index=0,
+                key="benchmark_strategy"
+            )
+            
+            # Período de análisis
+            periodo_estrategia = st.selectbox(
+                "Período de Análisis:",
+                options=['1mo', '3mo', '6mo', '1y', '2y', '5y'],
+                index=3,
+                key="periodo_strategy"
+            )
+            
+            # Umbral de significancia
+            umbral_significancia = st.slider(
+                "Umbral de Significancia (p-value):",
+                min_value=0.01,
+                max_value=0.10,
+                value=0.05,
+                step=0.01,
+                key="umbral_strategy"
+            )
+        
+        with col2:
+            st.subheader("📋 Información")
+            st.info(f"""
+            **Benchmark Seleccionado:** {benchmark_seleccionado} - {BENCHMARK_FACTORS[benchmark_seleccionado]}
+            
+            **Período:** {periodo_estrategia}
+            
+            **Umbral de Significancia:** {umbral_significancia}
+            """)
+        
+        # Selección de paneles para análisis
+        st.subheader("🔍 Selección de Paneles para Análisis")
+        
+        # Obtener paneles disponibles
+        paneles_disponibles = obtener_paneles_cotizacion(token_acceso, pais)
+        if paneles_disponibles:
+            nombres_paneles = [panel.get('nombre', f"Panel {i}") for i, panel in enumerate(paneles_disponibles)]
+            paneles_seleccionados = st.multiselect(
+                "Seleccione paneles para analizar:",
+                options=nombres_paneles,
+                default=nombres_paneles[:3] if len(nombres_paneles) >= 3 else nombres_paneles
+            )
+        else:
+            st.warning("No se pudieron obtener paneles. Usando tickers de ejemplo.")
+            paneles_seleccionados = []
+        
+        # Opción para usar tickers de ejemplo si no hay paneles
+        if not paneles_seleccionados:
+            tickers_ejemplo = ['GGAL', 'YPF', 'PAMP', 'BMA', 'SUPV', 'CEPU', 'TXAR', 'ALUA']
+            tickers_analizar = st.multiselect(
+                "Seleccione tickers para analizar:",
+                options=tickers_ejemplo,
+                default=tickers_ejemplo[:5]
+            )
+        else:
+            tickers_analizar = []
+            # Aquí se procesarían los paneles seleccionados para obtener tickers
+            st.info("Los tickers se obtendrán de los paneles seleccionados")
+        
+        # Ejecutar análisis de estrategias
+        if st.button("🚀 Ejecutar Análisis de Estrategias", use_container_width=True):
+            if not tickers_analizar and not paneles_seleccionados:
+                st.warning("Selecciona al menos un panel o ticker para analizar")
+                return
+            
+            # Obtener datos del benchmark
+            with st.spinner(f"Obteniendo datos del benchmark {benchmark_seleccionado}..."):
+                benchmark_returns = obtener_serie_historica_yfinance(benchmark_seleccionado, periodo_estrategia)
+                
+                if benchmark_returns is None:
+                    st.error("No se pudieron obtener los datos del benchmark")
+                    return
+            
+            # Procesar tickers de los paneles seleccionados
+            if paneles_seleccionados:
+                tickers_analizar = []
+                for panel_nombre in paneles_seleccionados:
+                    panel_data = next((p for p in paneles_disponibles if p.get('nombre') == panel_nombre), None)
+                    if panel_data:
+                        instrumentos_panel = obtener_instrumentos_por_panel(
+                            token_acceso,
+                            panel_data.get('instrumento', 'Acciones'),
+                            panel_nombre,
+                            pais
+                        )
+                        if instrumentos_panel:
+                            tickers_panel = [item.get('simbolo') for item in instrumentos_panel if item.get('simbolo')]
+                            tickers_analizar.extend(tickers_panel)
+            
+            if not tickers_analizar:
+                st.warning("No se encontraron tickers para analizar")
+                return
+            
+            # Ejecutar análisis
+            resultados = []
+            
+            with st.spinner("Analizando estrategias de inversión..."):
+                for ticker in tickers_analizar[:20]:  # Limitar a 20 tickers para evitar sobrecarga
+                    asset_returns = obtener_serie_historica_yfinance(ticker, periodo_estrategia)
+                    
+                    if asset_returns is not None:
+                        beta, alpha, r_squared, p_value = calcular_beta_alpha(asset_returns, benchmark_returns)
+                        estrategia = clasificar_estrategia(beta, alpha, r_squared, p_value)
+                        
+                        resultados.append({
+                            'Ticker': ticker,
+                            'Beta': beta if beta is not None else 0,
+                            'Alpha': alpha if alpha is not None else 0,
+                            'R_Squared': r_squared if r_squared is not None else 0,
+                            'P_Value': p_value if p_value is not None else 1,
+                            'Estrategia': estrategia,
+                            'Retorno_Total': asset_returns.sum(),
+                            'Volatilidad': asset_returns.std() * np.sqrt(252)
+                        })
+            
+            if resultados:
+                # Crear DataFrame
+                df_resultados = pd.DataFrame(resultados)
+                
+                # Mostrar resultados
+                st.subheader("📊 Resultados del Análisis de Estrategias")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.dataframe(
+                        df_resultados[['Ticker', 'Beta', 'Alpha', 'Estrategia']].round(4),
+                        use_container_width=True
+                    )
+                
+                with col2:
+                    # Estadísticas por estrategia
+                    stats_estrategia = df_resultados.groupby('Estrategia').agg({
+                        'Ticker': 'count',
+                        'Beta': ['mean', 'std'],
+                        'Alpha': ['mean', 'std']
+                    }).round(4)
+                    
+                    st.write("**Estadísticas por Estrategia:**")
+                    st.dataframe(stats_estrategia, use_container_width=True)
+                
+                # Gráfico alpha vs beta
+                st.subheader("📈 Gráfico Alpha vs Beta")
+                fig_alpha_beta = crear_grafico_alpha_beta(df_resultados)
+                st.plotly_chart(fig_alpha_beta, use_container_width=True)
+                
+                # Explicación de estrategias
+                st.subheader("📚 Explicación de Estrategias")
+                
+                estrategias_info = {
+                    'Index Tracker': {
+                        'descripcion': 'Replica el rendimiento de un benchmark',
+                        'caracteristicas': 'β ≈ 1, α ≈ 0',
+                        'ejemplo': 'ETF que replica S&P 500'
+                    },
+                    'Tradicional Long-Only': {
+                        'descripcion': 'Supera el mercado con retorno extra no correlacionado',
+                        'caracteristicas': 'β ≈ 1, α > 0',
+                        'ejemplo': 'Fondos mutuos tradicionales'
+                    },
+                    'Smart Beta': {
+                        'descripcion': 'Supera el mercado ajustando dinámicamente los pesos',
+                        'caracteristicas': 'β > 1 (mercado alcista), β < 1 (mercado bajista), α ≈ 0',
+                        'ejemplo': 'ETFs factor-based'
+                    },
+                    'Hedge Fund': {
+                        'descripcion': 'Entrega retornos absolutos no correlacionados con el mercado',
+                        'caracteristicas': 'β ≈ 0, α > 0',
+                        'ejemplo': 'Estrategias long/short'
+                    }
+                }
+                
+                for estrategia, info in estrategias_info.items():
+                    with st.expander(f"📋 {estrategia}"):
+                        st.write(f"**Descripción:** {info['descripcion']}")
+                        st.write(f"**Características:** {info['caracteristicas']}")
+                        st.write(f"**Ejemplo:** {info['ejemplo']}")
+                
+                # Almacenar resultados
+                if st.button("💾 Guardar Análisis de Estrategias", use_container_width=True):
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    nombre_archivo = f"analisis_estrategias_{timestamp}.json"
+                    
+                    try:
+                        with open(nombre_archivo, 'w', encoding='utf-8') as f:
+                            json.dump({
+                                'fecha_analisis': datetime.now().isoformat(),
+                                'benchmark': benchmark_seleccionado,
+                                'periodo': periodo_estrategia,
+                                'paneles_analizados': paneles_seleccionados,
+                                'resultados': df_resultados.to_dict('records')
+                            }, f, ensure_ascii=False, indent=2)
+                        
+                        st.success(f"✅ Análisis de estrategias guardado en {nombre_archivo}")
+                    except Exception as e:
+                        st.error(f"Error al guardar: {str(e)}")
+            else:
+                st.warning("No se obtuvieron resultados del análisis")
+    
+    def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
     """
     Devuelve un diccionario con listas de tickers reales por panel para el universo aleatorio.
     Si no hay API, usa listas fijas de tickers representativos.
@@ -5000,4379 +6459,267 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
 
-# --- Función: Análisis Global de Posicionamiento ---
-def analisis_global_posicionamiento(token_acceso, activos_globales=None):
+def mostrar_informe_ia(token_acceso, id_cliente):
     """
-    Realiza un análisis global de posicionamiento basado en datos locales y globales.
-    
-    Args:
-        token_acceso (str): Token de acceso para la API de IOL
-        activos_globales (list, optional): Lista de activos globales a analizar
-    
-    Returns:
-        dict: Análisis completo con correlaciones, volatilidades y sugerencias
+    Genera un informe inteligente del portafolio usando IA
     """
-    try:
-        # Configuración inicial
-        fecha_hasta = datetime.now()
-        fecha_desde = fecha_hasta - timedelta(days=365)
-        
-        # Si no se especifican activos globales, usar una lista por defecto
-        if activos_globales is None:
-            activos_globales = [
-                {'simbolo': 'AAPL', 'mercado': 'NASDAQ'},
-                {'simbolo': 'GOOGL', 'mercado': 'NASDAQ'},
-                {'simbolo': 'MSFT', 'mercado': 'NASDAQ'},
-                {'simbolo': 'AMZN', 'mercado': 'NASDAQ'},
-                {'simbolo': 'BTC/USD', 'mercado': 'cripto'}
-            ]
-        
-        # Obtener datos locales
-        argentina_datos = ArgentinaDatos()
-        datos_economicos = argentina_datos.get_all_economic_data()
-        
-        # Obtener datos de mercado local
-        datos_mercado = {
-            'dolares': argentina_datos.get_dolares(),
-            'inflacion': argentina_datos.get_inflacion(),
-            'tasas': argentina_datos.get_tasas(),
-            'uva': argentina_datos.get_uva(),
-            'riesgo_pais': argentina_datos.get_riesgo_pais()
-        }
-        
-        # Obtener datos de activos globales
-        datos_globales = {}
-        for activo in activos_globales:
-            mercado = activo.get('mercado', 'BCBA')
-            simbolo = activo['simbolo']
-            
-            try:
-                serie_historica = obtener_serie_historica_iol(
-                    token_acceso,
-                    mercado,
-                    simbolo,
-                    fecha_desde,
-                    fecha_hasta
-                )
-                if serie_historica is not None:
-                    datos_globales[simbolo] = serie_historica
-            except Exception as e:
-                print(f"Error al obtener datos para {simbolo}: {str(e)}")
-                continue
-        
-        # Verificar que se obtuvieron datos globales
-        if not datos_globales:
-            raise ValueError("No se pudieron obtener datos globales para ningún activo")
-        
-        # Unificar datos en un DataFrame
-        df_local = pd.DataFrame()
-        for key, value in datos_economicos.items():
-            df_temp = pd.DataFrame(value)
-            df_temp['fecha'] = pd.to_datetime(df_temp['fecha'])
-            df_temp = df_temp.set_index('fecha')
-            df_local = pd.concat([df_local, df_temp], axis=1)
-        
-        for key, value in datos_mercado.items():
-            df_temp = pd.DataFrame(value)
-            df_temp['fecha'] = pd.to_datetime(df_temp['fecha'])
-            df_temp = df_temp.set_index('fecha')
-            df_local = pd.concat([df_local, df_temp], axis=1)
-        
-        df_global = pd.DataFrame()
-        for simbolo, serie in datos_globales.items():
-            df_temp = pd.DataFrame(serie)
-            df_temp['fecha'] = pd.to_datetime(df_temp['fecha'])
-            df_temp = df_temp.set_index('fecha')
-            df_temp.columns = [f"{simbolo}_{col}" for col in df_temp.columns]
-            df_global = pd.concat([df_global, df_temp], axis=1)
-        
-        # Unir datos locales y globales
-        df_merged = pd.concat([df_local, df_global], axis=1)
-        
-        # Limpieza de datos
-        df_merged = df_merged[~df_merged.index.duplicated(keep='first')]
-        df_merged = df_merged.dropna(thresh=len(df_merged.columns)*0.7)
-        df_merged = df_merged.ffill()
-        
-        # Análisis estadístico
-        correlaciones = df_merged.corr()
-        volatilidades = df_merged.std()
-        
-        # Análisis de tendencias
-        tendencias = {}
-        for columna in df_merged.columns:
-            if columna.endswith('_precio'):
-                tendencias[columna] = {
-                    'media': df_merged[columna].mean(),
-                    'tendencia': np.polyfit(
-                        range(len(df_merged)),
-                        df_merged[columna].values,
-                        1
-                    )[0],
-                    'volatilidad': df_merged[columna].std()
-                }
-        
-        # Análisis de riesgo
-        riesgos = {}
-        for columna in df_merged.columns:
-            if columna.endswith('_precio'):
-                riesgos[columna] = {
-                    'volatilidad': df_merged[columna].std(),
-                    'sharpe': df_merged[columna].mean() / df_merged[columna].std()
-                }
-        
-        # Generar sugerencias de posicionamiento
-        sugerencias = []
-        for columna in correlaciones.columns:
-            if columna.startswith('dolar') or columna.startswith('riesgo'):
-                correlaciones_col = correlaciones[columna]
-                for activo in datos_globales.keys():
-                    if f"{activo}_precio" in correlaciones_col.index:
-                        if correlaciones_col[f"{activo}_precio"] > 0.5:
-                            sugerencias.append({
-                                'activo': activo,
-                                'razon': f"Alta correlación con {columna}"
-                            })
-        
-        for activo, riesgo in riesgos.items():
-            if riesgo['sharpe'] > 0.5 and riesgo['volatilidad'] < 0.2:
-                sugerencias.append({
-                    'activo': activo.replace('_precio', ''),
-                    'razon': "Bajo riesgo y alta rentabilidad ajustada"
-                })
-
-        # Crear gráficos de evolución para las correlaciones más fuertes
-        def graficar_correlacion(df, var1, var2, correlacion):
-            """Crea un gráfico de evolución para dos variables correlacionadas"""
-            try:
-                fig = go.Figure()
-                
-                # Normalizar las series para comparación
-                serie1 = df[var1]
-                serie2 = df[var2]
-                
-                if not serie1.empty and not serie2.empty:
-                    serie1_norm = (serie1 / serie1.iloc[0]) * 100
-                    serie2_norm = (serie2 / serie2.iloc[0]) * 100
-                    
-                    fig.add_trace(go.Scatter(
-                        x=serie1_norm.index,
-                        y=serie1_norm.values,
-                        mode='lines',
-                        name=var1,
-                        line=dict(color='blue', width=2)
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=serie2_norm.index,
-                        y=serie2_norm.values,
-                        mode='lines',
-                        name=var2,
-                        line=dict(color='red', width=2)
-                    ))
-                    
-                    fig.update_layout(
-                        title=f'Evolución de {var1} vs {var2} (Correlación: {correlacion:.2f})',
-                        xaxis_title='Fecha',
-                        yaxis_title='Valor Normalizado (%)',
-                        height=500,
-                        hovermode='x unified'
-                    )
-                    
-                    return fig
-                return None
-            except Exception as e:
-                print(f"Error al crear gráfico de correlación: {str(e)}")
-                return None
-
-        # Encontrar las correlaciones más fuertes y significativas
-        correlaciones_significativas = []
-        for i, col1 in enumerate(correlaciones.columns):
-            for j, col2 in enumerate(correlaciones.columns):
-                if i < j:  # Evitar duplicados y auto-correlaciones
-                    corr = correlaciones.loc[col1, col2]
-                    if abs(corr) > 0.5:  # Umbral para correlaciones significativas
-                        fig = graficar_correlacion(df_merged, col1, col2, corr)
-                        if fig:
-                            correlaciones_significativas.append({
-                                'variables': (col1, col2),
-                                'correlacion': corr,
-                                'grafico': fig
-                            })
-
-        # Preparar el diccionario de resultados
-        resultados = {
-            'correlaciones': correlaciones,
-            'volatilidades': volatilidades,
-            'tendencias': tendencias,
-            'riesgos': riesgos,
-            'sugerencias': sugerencias,
-            'df_merged': df_merged,
-            'correlaciones_significativas': correlaciones_significativas
-        }
-
-        return {
-            'correlaciones': correlaciones,
-            'volatilidades': volatilidades,
-            'tendencias': tendencias,
-            'riesgos': riesgos,
-            'sugerencias': sugerencias,
-            'df_merged': df_merged,
-            'correlaciones_significativas': correlaciones_significativas
-        }
-    except Exception as e:
-        print(f"Error en analisis_global_posicionamiento: {str(e)}")
-        return {
-            'error': f"Error en el análisis: {str(e)}"
-        }
-
-# --- Fin Función: Análisis Global de Posicionamiento ---
-
-# --- Función: mostrar_analisis_variables_economicas ---
-# Detección de ciclos económicos, análisis intermarket y recomendaciones de activos.
-# Integra variables macro del BCRA, análisis intermarket local e internacional,
-# y sugerencias de activos según el ciclo.
-# """
-def mostrar_analisis_variables_economicas(token_acceso, gemini_api_key=None):
-    st.markdown("---")
-    st.subheader("🧱 Análisis Intermarket y Ciclo Económico Integrado")
-{{ ... }}
+    st.header("🤖 Informe IA - Análisis Inteligente")
     
-    # Configuración de períodos
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        periodo_opciones = {
-            'Último Mes': '1mo',
-            'Últimos 3 Meses': '3mo',
-            'Último Año': '1y',
-            'Últos 2 Años': '2y',
-            'Últos 5 Años': '5y'
-        }
-        periodo_seleccionado = st.selectbox(
-            "Período de análisis",
-            options=list(periodo_opciones.keys()),
-            index=2,  # Por defecto "Último Año"
-            help="Período para el análisis de variables macro e intermarket"
-        )
-        periodo_analisis = periodo_opciones[periodo_seleccionado]
-    with col2:
-        ventana_momentum = st.slider(
-            "Ventana momentum (días)",
-            min_value=10,
-            max_value=252,
-            value=63,
-            help="Ventana para cálculo de momentum y tendencias"
-        )
-    with col3:
-        incluir_ia = st.checkbox(
-            "Incluir análisis IA",
-            value=True,
-            help="Usar IA para diagnóstico de ciclo y sugerencias"
-        )
+    # Obtener datos del portafolio
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
     
-    if st.button("🔍 Ejecutar Análisis Intermarket y Ciclo Económico", type="primary"):
-        with st.spinner("Analizando variables económicas, macro e intermarket..."):
-            
-            # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS LOCAL ==========
-            st.markdown("### 📈 Variables Económicas de Argentina")
-            st.markdown("### 📈 Variables Económicas de Argentina Datos")
-            
-            try:
-                # Inicializar ArgentinaDatos
-                ad = ArgentinaDatos()
-                
-                # Obtener análisis económico completo
-                economic_analysis = ad.get_economic_analysis()
-                
-                if economic_analysis['data']:
-                    # Mostrar resumen del análisis económico
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric(
-                            "Fase del Ciclo",
-                            economic_analysis['cycle_phase'],
-                            help="Fase actual del ciclo económico detectada"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Nivel de Riesgo",
-                            economic_analysis['risk_level'],
-                            help="Nivel de riesgo económico actual"
-                        )
-                    
-                    with col3:
-                        # Contar datos disponibles
-                        datos_disponibles = sum(1 for data in economic_analysis['data'].values() if data)
-                        st.metric(
-                            "Indicadores Disponibles",
-                            f"{datos_disponibles}/6",
-                            help="Cantidad de indicadores económicos disponibles"
-                        )
-                    
-                    # Mostrar gráficos de variables económicas
-                    st.markdown("#### 📊 Gráficos de Variables Económicas")
-                    
-                    # Gráfico de inflación
-                    if economic_analysis['data']['inflacion']:
-                        inflacion_chart = ad.create_inflacion_chart(economic_analysis['data']['inflacion'])
-                        if inflacion_chart:
-                            fig_inflacion = go.Figure(inflacion_chart)
-                            st.plotly_chart(fig_inflacion, use_container_width=True)
-                    
-                    # Gráfico de tasas
-                    if economic_analysis['data']['tasas']:
-                        tasas_chart = ad.create_tasas_chart(economic_analysis['data']['tasas'])
-                        if tasas_chart:
-                            fig_tasas = go.Figure(tasas_chart)
-                            st.plotly_chart(fig_tasas, use_container_width=True)
-                    
-                    # Gráfico de riesgo país
-                    if economic_analysis['data']['riesgo_pais']:
-                        riesgo_chart = ad.create_riesgo_pais_chart(economic_analysis['data']['riesgo_pais'])
-                        if riesgo_chart:
-                            fig_riesgo = go.Figure(riesgo_chart)
-                            st.plotly_chart(fig_riesgo, use_container_width=True)
-                    
-                    # Mostrar recomendaciones basadas en el análisis económico
-                    st.markdown("#### 💡 Recomendaciones Basadas en Variables Económicas")
-                    
-                    # Sectores favorables
-                    if economic_analysis['sectors']['favorable']:
-                        st.success("**Sectores Favorables:**")
-                        for sector in economic_analysis['sectors']['favorable']:
-                            st.write(f"• {sector}")
-                    
-                    # Sectores desfavorables
-                    if economic_analysis['sectors']['unfavorable']:
-                        st.warning("**Sectores Desfavorables:**")
-                        for sector in economic_analysis['sectors']['unfavorable']:
-                            st.write(f"• {sector}")
-                    
-                    # Recomendaciones específicas
-                    if economic_analysis['recommendations']:
-                        st.info("**Recomendaciones Específicas:**")
-                        for rec in economic_analysis['recommendations']:
-                            st.write(f"• {rec}")
-                    
-                    # Agregar datos económicos al análisis intermarket
-                    economic_data = economic_analysis
-                    
-                else:
-                    st.warning("No se pudieron obtener datos económicos de Argentina Datos")
-                    economic_data = None
-                    
-            except Exception as e:
-                st.error(f"Error obteniendo datos económicos: {e}")
-                economic_data = None
-            
-            # ========== 2. VARIABLES MACRO DEL BCRA (DATOS REALES) ==========
-            st.markdown("### 📊 Variables Macro del BCRA (Datos Reales)")
-            
-            # Obtener datos reales del BCRA
-            try:
-                datos_bcra = obtener_datos_bcra()
-                
-                if datos_bcra:
-                    # Mostrar métricas del BCRA
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric(
-                            "Inflación BCRA",
-                            f"{datos_bcra['inflacion_esperada']:.1f}%",
-                            "Mensual"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Tasa Política",
-                            f"{datos_bcra['tasa_politica']:.1f}%",
-                            "Anual"
-                        )
-                    
-                    with col3:
-                        st.metric(
-                            "Reservas",
-                            f"{datos_bcra['reservas']:,.0f}M USD",
-                            "Millones"
-                        )
-                    
-                    with col4:
-                        st.metric(
-                            "Crecimiento M2",
-                            f"{datos_bcra['m2_crecimiento']:.1f}%",
-                            "Anual"
-                        )
-                    
-                    # Análisis del ciclo económico basado en datos BCRA
-                    st.markdown("#### 🔄 Análisis de Ciclo Económico (BCRA)")
-                    
-                    # Determinar fase del ciclo
-                    inflacion = datos_bcra['inflacion_esperada']
-                    tasa_politica = datos_bcra['tasa_politica']
-                    reservas = datos_bcra['reservas']
-                    m2_crecimiento = datos_bcra['m2_crecimiento']
-                    
-                    # Lógica de clasificación del ciclo
-                    if inflacion > 10 and tasa_politica > 60:
-                        fase_ciclo_bcra = "Contracción"
-                        color_fase = "error"
-                        puntuacion_ciclo = -2
-                    elif inflacion < 5 and tasa_politica < 40:
-                        fase_ciclo_bcra = "Expansión"
-                        color_fase = "success"
-                        puntuacion_ciclo = 2
-                    else:
-                        fase_ciclo_bcra = "Transición"
-                        color_fase = "info"
-                        puntuacion_ciclo = 0
-                    
-                    # Mostrar diagnóstico
-                    if color_fase == "success":
-                        st.success(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
-                    elif color_fase == "error":
-                        st.error(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
-                    else:
-                        st.info(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
-                    
-                    bcra_data = datos_bcra
-                else:
-                    st.warning("No se pudieron obtener datos del BCRA")
-                    bcra_data = None
-                    
-            except Exception as e:
-                st.error(f"Error obteniendo datos BCRA: {e}")
-                bcra_data = None
-            
-            variables_macro = {}
-            
-            # Variables locales reales
-            tickers_macro_local = {
-                'MERVAL': '^MERV',
-                'Dólar Oficial': 'USDOLLAR=X',
-                'Dólar MEP': 'USDARS=X',
-                'Bonos CER': 'GD30',
-                'Bonos Dollar-Linked': 'GD30D',
-                'Riesgo País': '^VIX',
-            }
-            
-            # Variables internacionales
-            tickers_macro_global = {
-                'S&P 500': '^GSPC',
-                'VIX': '^VIX',
-                'Dólar Index': 'DX-Y.NYB',
-                'Oro': 'GC=F',
-                'Petróleo': 'CL=F',
-                'Cobre': 'HG=F',
-                'Treasury 10Y': '^TNX',
-                'Treasury 2Y': '^UST2YR',
-            }
-            
-            # Obtener datos
-            try:
-                # Datos locales
-                datos_local = yf.download(list(tickers_macro_local.values()), period=periodo_analisis)['Close']
-                for nombre, ticker in tickers_macro_local.items():
-                    if ticker in datos_local.columns and not datos_local[ticker].empty:
-                        serie = datos_local[ticker].dropna()
-                        if len(serie) > 0:
-                            retornos = serie.pct_change().dropna()
-                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
-                            volatilidad = retornos.std() * np.sqrt(252) * 100
-                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
-                            
-                            variables_macro[nombre] = {
-                                'valor_actual': serie.iloc[-1],
-                                'momentum': momentum,
-                                'volatilidad': volatilidad,
-                                'tendencia': tendencia,
-                                'serie': serie
-                            }
-                
-                # Datos globales
-                datos_global = yf.download(list(tickers_macro_global.values()), period=periodo_analisis)['Close']
-                for nombre, ticker in tickers_macro_global.items():
-                    if ticker in datos_global.columns and not datos_global[ticker].empty:
-                        serie = datos_global[ticker].dropna()
-                        if len(serie) > 0:
-                            retornos = serie.pct_change().dropna()
-                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
-                            volatilidad = retornos.std() * np.sqrt(252) * 100
-                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
-                            
-                            variables_macro[nombre] = {
-                                'valor_actual': serie.iloc[-1],
-                                'momentum': momentum,
-                                'volatilidad': volatilidad,
-                                'tendencia': tendencia,
-                                'serie': serie
-                            }
-                
-                # Mostrar métricas macro
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**Variables Locales**")
-                    for nombre, datos in variables_macro.items():
-                        if nombre in tickers_macro_local.values():
-                            st.metric(
-                                nombre,
-                                f"{datos['valor_actual']:.2f}",
-                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
-                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
-                            )
-                
-                with col2:
-                    st.markdown("**Variables Globales**")
-                    for nombre, datos in variables_macro.items():
-                        if nombre in tickers_macro_global.values():
-                            st.metric(
-                                nombre,
-                                f"{datos['valor_actual']:.2f}",
-                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
-                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
-                            )
-                
-            except Exception as e:
-                st.error(f"Error obteniendo datos macro: {e}")
-                return
-            
-            # ========== 3. ANÁLISIS INTERMARKET LOCAL (DATOS REALES) ==========
-            st.markdown("### 🌐 Análisis Intermarket Local (Datos Reales)")
-            
-            # Obtener datos reales de mercados locales
-            try:
-                # Variables locales reales
-                tickers_macro_local = {
-                    'MERVAL': '^MERV',
-                    'Dólar Oficial': 'USDOLLAR=X',
-                    'Dólar MEP': 'USDARS=X',
-                    'Bonos CER': 'GD30',
-                    'Bonos Dollar-Linked': 'GD30D',
-                    'Riesgo País': '^VIX',
-                }
-                
-                # Variables internacionales
-                tickers_macro_global = {
-                    'S&P 500': '^GSPC',
-                    'VIX': '^VIX',
-                    'Dólar Index': 'DX-Y.NYB',
-                    'Oro': 'GC=F',
-                    'Petróleo': 'CL=F',
-                    'Cobre': 'HG=F',
-                    'Treasury 10Y': '^TNX',
-                    'Treasury 2Y': '^UST2YR',
-                }
-                
-                # Obtener datos históricos
-                datos_local = yf.download(list(tickers_macro_local.values()), period=periodo_analisis)['Close']
-                datos_global = yf.download(list(tickers_macro_global.values()), period=periodo_analisis)['Close']
-                
-                # Procesar datos locales
-                variables_macro = {}
-                
-                for nombre, ticker in tickers_macro_local.items():
-                    if ticker in datos_local.columns and not datos_local[ticker].empty:
-                        serie = datos_local[ticker].dropna()
-                        if len(serie) > 0:
-                            retornos = serie.pct_change().dropna()
-                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
-                            volatilidad = retornos.std() * np.sqrt(252) * 100
-                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
-                            
-                            variables_macro[nombre] = {
-                                'valor_actual': serie.iloc[-1],
-                                'momentum': momentum,
-                                'volatilidad': volatilidad,
-                                'tendencia': tendencia,
-                                'serie': serie
-                            }
-                
-                # Procesar datos globales
-                for nombre, ticker in tickers_macro_global.items():
-                    if ticker in datos_global.columns and not datos_global[ticker].empty:
-                        serie = datos_global[ticker].dropna()
-                        if len(serie) > 0:
-                            retornos = serie.pct_change().dropna()
-                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
-                            volatilidad = retornos.std() * np.sqrt(252) * 100
-                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
-                            
-                            variables_macro[nombre] = {
-                                'valor_actual': serie.iloc[-1],
-                                'momentum': momentum,
-                                'volatilidad': volatilidad,
-                                'tendencia': tendencia,
-                                'serie': serie
-                            }
-                
-                # Mostrar métricas macro
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**Variables Locales**")
-                    for nombre, datos in variables_macro.items():
-                        if nombre in tickers_macro_local:
-                            st.metric(
-                                nombre,
-                                f"{datos['valor_actual']:.2f}",
-                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
-                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
-                            )
-                
-                with col2:
-                    st.markdown("**Variables Globales**")
-                    for nombre, datos in variables_macro.items():
-                        if nombre in tickers_macro_global:
-                            st.metric(
-                                nombre,
-                                f"{datos['valor_actual']:.2f}",
-                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
-                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
-                            )
-                
-                # ========== 4. MATRIZ DE CORRELACIONES ROBUSTA ==========
-                st.markdown("### 📊 Matriz de Correlaciones Intermarket")
-                
-                if len(variables_macro) >= 3:
-                    # Crear DataFrame de retornos
-                    retornos_df = pd.DataFrame()
-                    for nombre, datos in variables_macro.items():
-                        if 'serie' in datos:
-                            retornos_df[nombre] = datos['serie'].pct_change().dropna()
-                    
-                    if not retornos_df.empty:
-                        # Matriz de correlaciones
-                        correlaciones = retornos_df.corr()
-                        
-                        # Gráfico de correlaciones mejorado
-                        fig_corr = go.Figure(data=go.Heatmap(
-                            z=correlaciones.values,
-                            x=correlaciones.columns,
-                            y=correlaciones.columns,
-                            colorscale='RdBu',
-                            zmid=0,
-                            text=np.round(correlaciones.values, 2),
-                            texttemplate="%{text}",
-                            textfont={"size": 10},
-                            hoverongaps=False
-                        ))
-                        
-                        fig_corr.update_layout(
-                            title="Matriz de Correlaciones Intermarket",
-                            xaxis_title="Activos",
-                            yaxis_title="Activos",
-                            height=600,
-                            width=800
-                        )
-                        
-                        st.plotly_chart(fig_corr, use_container_width=True)
-                        
-                        # Análisis de divergencias mejorado
-                        st.markdown("#### 🔍 Análisis de Divergencias")
-                        
-                        # Buscar divergencias entre activos
-                        divergencias = []
-                        for i, activo1 in enumerate(correlaciones.columns):
-                            for j, activo2 in enumerate(correlaciones.columns):
-                                if i < j:  # Evitar duplicados
-                                    correlacion = correlaciones.iloc[i, j]
-                                    if abs(correlacion) < 0.3:  # Baja correlación
-                                        divergencias.append({
-                                            'Activo 1': activo1,
-                                            'Activo 2': activo2,
-                                            'Correlación': correlacion,
-                                            'Tipo': 'Divergencia' if correlacion < 0 else 'Baja correlación'
-                                        })
-                        
-                        if divergencias:
-                            df_divergencias = pd.DataFrame(divergencias)
-                            st.dataframe(df_divergencias.sort_values('Correlación'))
-                            
-                            # Mostrar oportunidades de arbitraje
-                            st.markdown("#### 💰 Oportunidades de Arbitraje")
-                            for div in divergencias[:5]:  # Mostrar top 5
-                                if div['Correlación'] < -0.5:
-                                    st.warning(f"**Divergencia fuerte:** {div['Activo 1']} vs {div['Activo 2']} (r={div['Correlación']:.2f})")
-                                elif div['Correlación'] < 0:
-                                    st.info(f"**Divergencia moderada:** {div['Activo 1']} vs {div['Activo 2']} (r={div['Correlación']:.2f})")
-                        else:
-                            st.info("No se detectaron divergencias significativas")
-                
-            except Exception as e:
-                st.error(f"Error obteniendo datos macro: {e}")
-                return
-            
-            # ========== 5. ANÁLISIS CAPM CON ACTIVOS DE PANELES ==========
-            st.markdown("### 📈 Análisis CAPM con Activos de Paneles")
-            
-            # Obtener activos de los paneles de la API
-            try:
-                paneles_disponibles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
-                tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, paneles_disponibles, 'Argentina')
-                
-                if tickers_por_panel:
-                    st.success(f"✅ Obtenidos {sum(len(tickers) for tickers in tickers_por_panel.values())} activos de los paneles")
-                    
-                    # Seleccionar activos para análisis CAPM
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        panel_seleccionado = st.selectbox(
-                            "Panel para análisis CAPM",
-                            list(tickers_por_panel.keys()),
-                            help="Seleccione el panel de activos para análisis CAPM"
-                        )
-                    
-                    with col2:
-                        cantidad_activos = st.slider(
-                            "Cantidad de activos a analizar",
-                            min_value=5,
-                            max_value=50,
-                            value=20,
-                            help="Cantidad de activos para análisis CAPM"
-                        )
-                    
-                    # Obtener activos del panel seleccionado
-                    activos_panel = tickers_por_panel.get(panel_seleccionado, [])
-                    
-                    if activos_panel:
-                        # Tomar muestra aleatoria de activos
-                        import random
-                        activos_muestra = random.sample(activos_panel, min(cantidad_activos, len(activos_panel)))
-                        
-                        st.info(f"Analizando {len(activos_muestra)} activos del panel {panel_seleccionado}")
-                        
-                        # Obtener datos históricos para análisis CAPM
-                        with st.spinner("Obteniendo datos históricos para análisis CAPM..."):
-                            datos_capm = {}
-                            for activo in activos_muestra:
-                                try:
-                                    # Obtener datos históricos del activo
-                                    df_activo = obtener_serie_historica_iol(
-                                        token_acceso, 'BCBA', activo, 
-                                        (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d'),
-                                        datetime.now().strftime('%Y-%m-%d'),
-                                        'SinAjustar'
-                                    )
-                                    
-                                    if df_activo is not None and not df_activo.empty:
-                                        datos_capm[activo] = df_activo
-                                except Exception as e:
-                                    continue
-                            
-                            if datos_capm:
-                                st.success(f"✅ Datos obtenidos para {len(datos_capm)} activos")
-                                
-                                # Realizar análisis CAPM
-                                resultados_capm = []
-                                
-                                for activo, df in datos_capm.items():
-                                    try:
-                                        # Calcular retornos del activo
-                                        if 'close' in df.columns:
-                                            precios_activo = df['close']
-                                            retornos_activo = precios_activo.pct_change().dropna()
-                                            
-                                            # Usar MERVAL como benchmark
-                                            if 'MERVAL' in variables_macro and 'serie' in variables_macro['MERVAL']:
-                                                precios_mercado = variables_macro['MERVAL']['serie']
-                                                retornos_mercado = precios_mercado.pct_change().dropna()
-                                                
-                                                # Alinear fechas
-                                                fechas_comunes = retornos_activo.index.intersection(retornos_mercado.index)
-                                                if len(fechas_comunes) > 30:  # Mínimo 30 días
-                                                    retornos_activo_alineados = retornos_activo.loc[fechas_comunes]
-                                                    retornos_mercado_alineados = retornos_mercado.loc[fechas_comunes]
-                                                    
-                                                    # Calcular CAPM
-                                                    capm_metrics = calcular_alpha_beta(
-                                                        retornos_activo_alineados, 
-                                                        retornos_mercado_alineados
-                                                    )
-                                                    
-                                                    resultados_capm.append({
-                                                        'Activo': activo,
-                                                        'Beta': capm_metrics['beta'],
-                                                        'Alpha': capm_metrics['alpha'],
-                                                        'R²': capm_metrics['r_squared'],
-                                                        'Sharpe': capm_metrics['sharpe_ratio'],
-                                                        'Volatilidad': capm_metrics['volatilidad']
-                                                    })
-                                    except Exception as e:
-                                        continue
-                                
-                                if resultados_capm:
-                                    # Mostrar resultados CAPM
-                                    st.markdown("#### 📊 Resultados del Análisis CAPM")
-                                    
-                                    df_capm = pd.DataFrame(resultados_capm)
-                                    st.dataframe(df_capm, use_container_width=True)
-                                    
-                                    # Clasificar estrategias
-                                    estrategias_clasificadas = {
-                                        'Index Tracker': [],
-                                        'Traditional Long-Only': [],
-                                        'Smart Beta': [],
-                                        'Hedge Fund': []
-                                    }
-                                    
-                                    for resultado in resultados_capm:
-                                        beta = resultado['Beta']
-                                        alpha = resultado['Alpha']
-                                        
-                                        if abs(beta - 1.0) < 0.1 and abs(alpha) < 0.01:
-                                            estrategias_clasificadas['Index Tracker'].append(resultado)
-                                        elif abs(beta - 1.0) < 0.1 and alpha > 0.01:
-                                            estrategias_clasificadas['Traditional Long-Only'].append(resultado)
-                                        elif beta > 1.2 or beta < 0.8:
-                                            estrategias_clasificadas['Smart Beta'].append(resultado)
-                                        elif abs(beta) < 0.3 and alpha > 0.01:
-                                            estrategias_clasificadas['Hedge Fund'].append(resultado)
-                                    
-                                    # Mostrar clasificación
-                                    st.markdown("#### 🎯 Clasificación por Estrategia")
-                                    
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        for estrategia, activos in estrategias_clasificadas.items():
-                                            if activos:
-                                                st.write(f"**{estrategia}** ({len(activos)} activos):")
-                                                for activo in activos[:5]:  # Mostrar primeros 5
-                                                    st.write(f"• {activo['Activo']} (β={activo['Beta']:.2f}, α={activo['Alpha']:.3f})")
-                                                if len(activos) > 5:
-                                                    st.write(f"... y {len(activos)-5} más")
-                                                st.write("")
-                                    
-                                    with col2:
-                                        # Gráfico de dispersión Beta vs Alpha
-                                        fig_scatter = go.Figure()
-                                        
-                                        for estrategia, activos in estrategias_clasificadas.items():
-                                            if activos:
-                                                betas = [a['Beta'] for a in activos]
-                                                alphas = [a['Alpha'] for a in activos]
-                                                nombres = [a['Activo'] for a in activos]
-                                                
-                                                fig_scatter.add_trace(go.Scatter(
-                                                    x=betas,
-                                                    y=alphas,
-                                                    mode='markers+text',
-                                                    name=estrategia,
-                                                    text=nombres,
-                                                    textposition="top center",
-                                                    hovertemplate="<b>%{text}</b><br>Beta: %{x:.2f}<br>Alpha: %{y:.3f}<extra></extra>"
-                                                ))
-                                        
-                                        fig_scatter.update_layout(
-                                            title="Dispersión Beta vs Alpha por Estrategia",
-                                            xaxis_title="Beta",
-                                            yaxis_title="Alpha",
-                                            height=500
-                                        )
-                                        
-                                        st.plotly_chart(fig_scatter, use_container_width=True)
-                                
-                            else:
-                                st.warning("No se pudieron obtener datos suficientes para análisis CAPM")
-                    else:
-                        st.warning(f"No hay activos disponibles en el panel {panel_seleccionado}")
-                else:
-                    st.error("No se pudieron obtener activos de los paneles")
-                    
-            except Exception as e:
-                st.error(f"Error en análisis CAPM: {e}")
-            
-            # ========== 6. ANÁLISIS INTERMARKET INTERNACIONAL ==========
-            st.markdown("### 🌍 Análisis Intermarket Internacional")
-            
-            # Curva de tasas (simulada)
-            if 'Treasury 10Y' in variables_macro and 'Treasury 2Y' in variables_macro:
-                tasa_10y = variables_macro['Treasury 10Y']['valor_actual']
-                tasa_2y = variables_macro['Treasury 2Y']['valor_actual']
-                spread_curva = tasa_10y - tasa_2y
-                
-                st.metric(
-                    "Spread Curva de Tasas (10Y - 2Y)",
-                    f"{spread_curva:.2f}%",
-                    "Recesión" if spread_curva < 0 else "Expansión",
-                    delta_color="inverse" if spread_curva < 0 else "normal"
-                )
-                
-                # Interpretación de la curva
-                if spread_curva < 0:
-                    st.warning("⚠️ Curva invertida - Señal de recesión potencial")
-                elif spread_curva < 0.5:
-                    st.info("📊 Curva plana - Transición de ciclo")
-                else:
-                    st.success("✅ Curva normal - Ciclo expansivo")
-            
-            # Análisis Dólar vs Commodities
-            if 'Dólar Index' in variables_macro and 'Oro' in variables_macro:
-                dolar_momentum = variables_macro['Dólar Index']['momentum']
-                oro_momentum = variables_macro['Oro']['momentum']
-                
-                st.markdown("**💱 Dólar vs Commodities**")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.metric("Dólar Index", f"{dolar_momentum:+.1f}%")
-                with col2:
-                    st.metric("Oro", f"{oro_momentum:+.1f}%")
-                
-                # Interpretación
-                if dolar_momentum > 0 and oro_momentum < 0:
-                    st.info("📈 Dólar fuerte, commodities débiles - Ciclo deflacionario")
-                elif dolar_momentum < 0 and oro_momentum > 0:
-                    st.info("📉 Dólar débil, commodities fuertes - Ciclo inflacionario")
-                else:
-                    st.info("🔄 Movimiento mixto - Ciclo de transición")
-            
-            # ========== 4. DETECCIÓN DE CICLO ECONÓMICO ==========
-            st.markdown("### 🔄 Detección de Ciclo Económico")
-            
-            # Puntuación de ciclo basada en múltiples indicadores
-            puntuacion_ciclo = 0
-            indicadores_ciclo = []
-            
-            # Indicador 1: Curva de tasas
-            if 'Treasury 10Y' in variables_macro and 'Treasury 2Y' in variables_macro:
-                spread = variables_macro['Treasury 10Y']['valor_actual'] - variables_macro['Treasury 2Y']['valor_actual']
-                if spread < 0:
-                    puntuacion_ciclo -= 2
-                    indicadores_ciclo.append("Curva invertida (-2)")
-                elif spread < 0.5:
-                    puntuacion_ciclo -= 1
-                    indicadores_ciclo.append("Curva plana (-1)")
-                else:
-                    puntuacion_ciclo += 1
-                    indicadores_ciclo.append("Curva normal (+1)")
-            
-            # Indicador 2: VIX
-            if 'VIX' in variables_macro:
-                vix_actual = variables_macro['VIX']['valor_actual']
-                if vix_actual > 30:
-                    puntuacion_ciclo -= 1
-                    indicadores_ciclo.append("VIX alto (-1)")
-                elif vix_actual < 15:
-                    puntuacion_ciclo += 1
-                    indicadores_ciclo.append("VIX bajo (+1)")
-                else:
-                    indicadores_ciclo.append("VIX normal (0)")
-            
-            # Indicador 3: Momentum del mercado
-            if 'S&P 500' in variables_macro:
-                sp500_momentum = variables_macro['S&P 500']['momentum']
-                if sp500_momentum > 10:
-                    puntuacion_ciclo += 1
-                    indicadores_ciclo.append("S&P 500 fuerte (+1)")
-                elif sp500_momentum < -10:
-                    puntuacion_ciclo -= 1
-                    indicadores_ciclo.append("S&P 500 débil (-1)")
-                else:
-                    indicadores_ciclo.append("S&P 500 neutral (0)")
-            
-            # Determinar fase del ciclo
-            if puntuacion_ciclo >= 2:
-                fase_ciclo = "Expansión"
-                color_ciclo = "success"
-            elif puntuacion_ciclo >= 0:
-                fase_ciclo = "Auge"
-                color_ciclo = "info"
-            elif puntuacion_ciclo >= -1:
-                fase_ciclo = "Contracción"
-                color_ciclo = "warning"
-            else:
-                fase_ciclo = "Recesión"
-                color_ciclo = "error"
-            
-            # Mostrar diagnóstico
-            st.markdown(f"**🎯 Diagnóstico de Ciclo: {fase_ciclo}**")
-            st.markdown(f"**Puntuación:** {puntuacion_ciclo}")
-            
-            # Mostrar indicadores
-            for indicador in indicadores_ciclo:
-                st.write(f"• {indicador}")
-            
-            # ========== 5. SUGERENCIAS DE ACTIVOS SEGÚN CICLO ==========
-            st.markdown("### 💡 Sugerencias de Activos por Ciclo")
-            
-            # Matriz de sugerencias
-            matriz_sugerencias = {
-                "Expansión": {
-                    "Argentina": ["Acciones locales", "CEDEARs", "Bonos CER"],
-                    "EEUU": ["S&P 500", "Tecnología", "Consumo Discrecional"],
-                    "Comentario": "Flujo de capitales, suba de consumo"
-                },
-                "Auge": {
-                    "Argentina": ["Acciones value", "Activos hard", "Oro"],
-                    "EEUU": ["Value stocks", "Real estate", "Commodities"],
-                    "Comentario": "Protección ante sobrevaloración"
-                },
-                "Contracción": {
-                    "Argentina": ["Bonos tasa fija", "Dólar MEP", "Dólar-linked"],
-                    "EEUU": ["Treasury bonds", "Defensive stocks", "Cash"],
-                    "Comentario": "Fuga al refugio, evitar acciones cíclicas"
-                },
-                "Recesión": {
-                    "Argentina": ["CEDEARs defensivos", "Oro", "Bonos soberanos"],
-                    "EEUU": ["Consumer staples", "Healthcare", "Utilities"],
-                    "Comentario": "Baja actividad, refugio y liquidez"
-                }
-            }
-            
-            sugerencias = matriz_sugerencias.get(fase_ciclo, {})
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**🇦🇷 Argentina**")
-                for activo in sugerencias.get("Argentina", []):
-                    st.write(f"• {activo}")
-            
-            with col2:
-                st.markdown("**🇺🇸 EEUU**")
-                for activo in sugerencias.get("EEUU", []):
-                    st.write(f"• {activo}")
-            
-            st.info(f"**💬 Comentario:** {sugerencias.get('Comentario', '')}")
-            
-            # ========== 6. ANÁLISIS IA (OPCIONAL) ==========
-            if incluir_ia and gemini_api_key:
-                st.markdown("### 🤖 Análisis IA del Ciclo")
-                
-                # Preparar datos para IA
-                resumen_variables = []
-                for nombre, datos in variables_macro.items():
-                    resumen_variables.append(
-                        f"{nombre}: Valor={datos['valor_actual']:.2f}, "
-                        f"Momentum={datos['momentum']:+.1f}%, "
-                        f"Tendencia={datos['tendencia']}"
-                    )
-                
-                # Prompt para IA
-                prompt_ia = f"""
-                Analiza el siguiente resumen de variables macroeconómicas y de mercado:
-
-                {chr(10).join(resumen_variables)}
-
-                Diagnóstico de ciclo actual: {fase_ciclo} (puntuación: {puntuacion_ciclo})
-
-                Proporciona:
-                1. Análisis detallado del ciclo económico actual
-                2. Factores intermarket más relevantes
-                3. Sugerencias específicas de activos para Argentina y EEUU
-                4. Riesgos y oportunidades principales
-
-                Responde en español, formato ejecutivo.
-                """
-                
-                try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=gemini_api_key)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    response = model.generate_content(prompt_ia)
-                    
-                    if response and response.text:
-                        st.markdown(response.text)
-                    else:
-                        st.warning("No se pudo obtener análisis de IA")
-                except Exception as e:
-                    st.error(f"Error en análisis IA: {e}")
-            
-            # ========== 7. GRÁFICOS INTERMARKET ==========
-            st.markdown("### 📈 Gráficos Intermarket")
-            
-            # Gráfico de evolución de variables clave
-            if len(variables_macro) >= 3:
-                fig_evolucion = go.Figure()
-                
-                # Normalizar series para comparación
-                for nombre, datos in variables_macro.items():
-                    if 'serie' in datos and len(datos['serie']) > 0:
-                        serie_norm = (datos['serie'] / datos['serie'].iloc[0]) * 100
-                        fig_evolucion.add_trace(go.Scatter(
-                            x=serie_norm.index,
-                            y=serie_norm.values,
-                            mode='lines',
-                            name=nombre,
-                            line=dict(width=2)
-                        ))
-                
-                fig_evolucion.update_layout(
-                    title="Evolución Normalizada de Variables Intermarket",
-                    xaxis_title="Fecha",
-                    yaxis_title="Valor Normalizado (%)",
-                    height=500,
-                    hovermode='x unified'
-                )
-                
-                st.plotly_chart(fig_evolucion, use_container_width=True)
-            
-            # ========== 8. RESUMEN EJECUTIVO ==========
-            st.markdown("### 📋 Resumen Ejecutivo")
-            
-            resumen_ejecutivo = f"""
-            **🎯 Ciclo Económico Detectado:** {fase_ciclo}
-            
-            **📊 Indicadores Clave:**
-            - Puntuación de ciclo: {puntuacion_ciclo}
-            - Principales divergencias: {len(divergencias) if 'divergencias' in locals() else 0} detectadas
-            - Volatilidad promedio: {np.mean([d['volatilidad'] for d in variables_macro.values()]):.1f}%
-            
-            **💡 Recomendaciones:**
-            - **Argentina:** {', '.join(sugerencias.get('Argentina', []))}
-            - **EEUU:** {', '.join(sugerencias.get('EEUU', []))}
-            
-            **⚠️ Riesgos Principales:**
-            - {'Curva de tasas invertida' if 'spread_curva' in locals() and spread_curva < 0 else 'Ninguno crítico detectado'}
-            - {'VIX elevado' if 'VIX' in variables_macro and variables_macro['VIX']['valor_actual'] > 30 else 'Volatilidad normal'}
-            
-            **📈 Oportunidades:**
-            - Ciclo actual favorece activos {fase_ciclo.lower()}
-            - {'Divergencias aprovechables' if 'divergencias' in locals() and len(divergencias) > 0 else 'Correlaciones normales'}
-            """
-            
-            st.markdown(resumen_ejecutivo)
-            
-            # Guardar resultados en session state
-            st.session_state['analisis_intermarket'] = {
-                'fase_ciclo': fase_ciclo,
-                'puntuacion': puntuacion_ciclo,
-                'variables_macro': variables_macro,
-                'sugerencias': sugerencias,
-                'fecha_analisis': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-
-            # Preparar el diccionario de resultados
-            resultados = {
-                'correlaciones': correlaciones,
-                'volatilidades': volatilidades,
-                'tendencias': tendencias,
-                'riesgos': riesgos,
-                'sugerencias': sugerencias,
-                'df_merged': df_merged,
-                'correlaciones_significativas': correlaciones_significativas,
-                'fase_ciclo': fase_ciclo,
-                'puntuacion_ciclo': puntuacion_ciclo,
-                'variables_macro': variables_macro
-            }
-
-            return resultados
-
-    except Exception as e:
-        st.error(f"Error en el análisis global: {str(e)}")
-        return None
-
-class CAPMAnalyzer:
-    """
-    Clase para análisis CAPM (Capital Asset Pricing Model) de activos individuales
-    """
-    
-    def __init__(self, risk_free_rate=0.0):
-        self.risk_free_rate = risk_free_rate
-        self.analyses = {}
-    
-    def calculate_asset_capm(self, asset_returns, market_returns, asset_name="Asset"):
-        """
-        Calcula métricas CAPM para un activo individual
-        
-        Args:
-            asset_returns (pd.Series): Retornos del activo
-            market_returns (pd.Series): Retornos del mercado (benchmark)
-            asset_name (str): Nombre del activo
-            
-        Returns:
-            dict: Métricas CAPM del activo
-        """
-        # Alinear series
-        aligned_data = pd.concat([asset_returns, market_returns], axis=1).dropna()
-        if len(aligned_data) < 10:
-            return None
-            
-        asset_aligned = aligned_data.iloc[:, 0]
-        market_aligned = aligned_data.iloc[:, 1]
-        
-        # Regresión CAPM: R_asset - Rf = α + β(R_market - Rf)
-        market_excess = market_aligned - self.risk_free_rate/252  # Diario
-        asset_excess = asset_aligned - self.risk_free_rate/252
-        
-        slope, intercept, r_value, p_value, std_err = linregress(market_excess, asset_excess)
-        
-        # Calcular métricas adicionales
-        tracking_error = np.std(asset_excess - slope * market_excess) * np.sqrt(252)
-        information_ratio = intercept * 252 / tracking_error if tracking_error != 0 else 0
-        treynor_ratio = (asset_aligned.mean() * 252 - self.risk_free_rate) / slope if slope != 0 else 0
-        
-        result = {
-            'asset_name': asset_name,
-            'alpha': intercept * 252,  # Anualizado
-            'beta': slope,
-            'r_squared': r_value ** 2,
-            'p_value': p_value,
-            'tracking_error': tracking_error,
-            'information_ratio': information_ratio,
-            'treynor_ratio': treynor_ratio,
-            'volatility': asset_aligned.std() * np.sqrt(252),
-            'sharpe_ratio': (asset_aligned.mean() * 252 - self.risk_free_rate) / (asset_aligned.std() * np.sqrt(252)),
-            'observations': len(aligned_data)
-        }
-        
-        self.analyses[asset_name] = result
-        return result
-    
-    def classify_asset_strategy(self, capm_metrics):
-        """
-        Clasifica el activo según su estrategia de inversión basada en CAPM
-        
-        Args:
-            capm_metrics (dict): Métricas CAPM del activo
-            
-        Returns:
-            dict: Clasificación de estrategia
-        """
-        beta = capm_metrics.get('beta', 1.0)
-        alpha = capm_metrics.get('alpha', 0)
-        r_squared = capm_metrics.get('r_squared', 0)
-        
-        # Clasificación según las estrategias especificadas
-        if abs(beta - 1.0) < 0.1 and abs(alpha) < 0.02:
-            strategy_type = "Index Tracker"
-            description = "Replica el rendimiento del benchmark (β ≈ 1, α ≈ 0)"
-            characteristics = ["Baja volatilidad", "Rendimiento en línea con mercado", "Bajo tracking error"]
-        elif beta >= 0.9 and beta <= 1.1 and alpha > 0.02:
-            strategy_type = "Traditional Long-Only"
-            description = "Supera al mercado con retorno adicional no correlacionado (β ≈ 1, α > 0)"
-            characteristics = ["Alfa positivo", "Riesgo similar al mercado", "Generación de valor agregado"]
-        elif beta > 1.1 or beta < 0.9:
-            strategy_type = "Smart Beta"
-            description = "Ajusta dinámicamente la exposición al mercado (β ≠ 1, α ≈ 0)"
-            characteristics = ["Beta dinámico", "Ajuste táctico", "Gestión de riesgo activa"]
-        elif abs(beta) < 0.3 and alpha > 0.02:
-            strategy_type = "Hedge Fund"
-            description = "Retornos absolutos no correlacionados con el mercado (β ≈ 0, α > 0)"
-            characteristics = ["Baja correlación", "Retornos absolutos", "Gestión alternativa"]
-        else:
-            strategy_type = "Mixed Strategy"
-            description = "Estrategia mixta con características combinadas"
-            characteristics = ["Perfil único", "Características mixtas", "Análisis individual requerido"]
-        
-        return {
-            'strategy_type': strategy_type,
-            'description': description,
-            'characteristics': characteristics,
-            'beta': beta,
-            'alpha': alpha,
-            'r_squared': r_squared
-        }
-
-class DefensiveAssetFinder:
-    """
-    Clase para encontrar activos defensivos basados en análisis CAPM
-    """
-    
-    def __init__(self, token_portador):
-        self.token_portador = token_portador
-        self.capm_analyzer = CAPMAnalyzer()
-    
-    def find_defensive_assets(self, market_returns, min_beta=0.3, max_beta=0.8, min_alpha=-0.05):
-        """
-        Encuentra activos defensivos basados en criterios CAPM
-        
-        Args:
-            market_returns (pd.Series): Retornos del mercado
-            min_beta (float): Beta mínimo para activos defensivos
-            max_beta (float): Beta máximo para activos defensivos
-            min_alpha (float): Alpha mínimo aceptable
-            
-        Returns:
-            list: Lista de activos defensivos con sus métricas
-        """
-        defensive_assets = []
-        
-        # Obtener lista de activos disponibles
-        try:
-            # Usar paneles conocidos de acciones defensivas
-            paneles_defensivos = ['Panel General', 'Panel Líderes']
-            tickers_por_panel = obtener_tickers_por_panel(
-                self.token_portador, 
-                paneles_defensivos, 
-                pais='Argentina'
-            )
-            
-            for panel, tickers in tickers_por_panel.items():
-                for ticker in tickers[:20]:  # Limitar a 20 por panel para eficiencia
-                    try:
-                        # Obtener datos históricos del ticker
-                        df_historico = obtener_serie_historica_iol(
-                            self.token_portador,
-                            'BCBA',  # Asumir mercado BCBA
-                            ticker,
-                            (datetime.now() - timedelta(days=252)).strftime('%Y-%m-%d'),
-                            datetime.now().strftime('%Y-%m-%d'),
-                            "SinAjustar"
-                        )
-                        
-                        if df_historico is not None and len(df_historico) > 50:
-                            # Calcular retornos
-                            asset_returns = df_historico['close'].pct_change().dropna()
-                            
-                            # Análisis CAPM
-                            capm_metrics = self.capm_analyzer.calculate_asset_capm(
-                                asset_returns, market_returns, ticker
-                            )
-                            
-                            if capm_metrics:
-                                beta = capm_metrics['beta']
-                                alpha = capm_metrics['alpha']
-                                
-                                # Verificar criterios defensivos
-                                if (min_beta <= beta <= max_beta and 
-                                    alpha >= min_alpha and 
-                                    capm_metrics['r_squared'] > 0.3):
-                                    
-                                    defensive_assets.append({
-                                        'ticker': ticker,
-                                        'capm_metrics': capm_metrics,
-                                        'strategy': self.capm_analyzer.classify_asset_strategy(capm_metrics),
-                                        'defensive_score': self._calculate_defensive_score(capm_metrics)
-                                    })
-                    
-                    except Exception as e:
-                        print(f"Error procesando {ticker}: {str(e)}")
-                        continue
-            
-            # Ordenar por score defensivo
-            defensive_assets.sort(key=lambda x: x['defensive_score'], reverse=True)
-            
-        except Exception as e:
-            print(f"Error en búsqueda de activos defensivos: {str(e)}")
-        
-        return defensive_assets
-    
-    def _calculate_defensive_score(self, capm_metrics):
-        """
-        Calcula un score defensivo basado en métricas CAPM
-        
-        Args:
-            capm_metrics (dict): Métricas CAPM del activo
-            
-        Returns:
-            float: Score defensivo (0-100)
-        """
-        beta = capm_metrics['beta']
-        alpha = capm_metrics['alpha']
-        volatility = capm_metrics['volatility']
-        sharpe = capm_metrics['sharpe_ratio']
-        
-        # Score basado en beta (menor = más defensivo)
-        beta_score = max(0, 100 - abs(beta - 0.5) * 100)
-        
-        # Score basado en alpha (mayor = mejor)
-        alpha_score = min(100, max(0, (alpha + 0.1) * 500))
-        
-        # Score basado en volatilidad (menor = más defensivo)
-        vol_score = max(0, 100 - volatility * 100)
-        
-        # Score basado en Sharpe (mayor = mejor)
-        sharpe_score = min(100, max(0, sharpe * 50 + 50))
-        
-        # Ponderación: Beta 40%, Alpha 30%, Volatilidad 20%, Sharpe 10%
-        total_score = (beta_score * 0.4 + alpha_score * 0.3 + 
-                      vol_score * 0.2 + sharpe_score * 0.1)
-        
-        return total_score
-
-class InvestmentStrategyRecommender:
-    """
-    Clase para generar recomendaciones de estrategias de inversión basadas en análisis CAPM
-    """
-    
-    def __init__(self, token_portador, gemini_api_key=None):
-        self.token_portador = token_portador
-        self.gemini_api_key = gemini_api_key
-        self.capm_analyzer = CAPMAnalyzer()
-        self.defensive_finder = DefensiveAssetFinder(token_portador)
-    
-    def generate_market_recommendations(self, market_conditions, portfolio_analysis=None):
-        """
-        Genera recomendaciones basadas en condiciones de mercado
-        
-        Args:
-            market_conditions (dict): Condiciones actuales del mercado
-            portfolio_analysis (dict): Análisis del portafolio actual (opcional)
-            
-        Returns:
-            dict: Recomendaciones de estrategia
-        """
-        recommendations = {
-            'market_phase': self._determine_market_phase(market_conditions),
-            'recommended_strategies': [],
-            'defensive_assets': [],
-            'risk_adjustments': {},
-            'implementation_notes': []
-        }
-        
-        # Determinar estrategias recomendadas según fase del mercado
-        market_phase = recommendations['market_phase']
-        
-        if market_phase == 'Bear Market' or market_phase == 'High Volatility':
-            recommendations['recommended_strategies'] = [
-                {
-                    'strategy': 'Defensive Positioning',
-                    'description': 'Reducir exposición a acciones cíclicas, aumentar activos defensivos',
-                    'target_beta': 0.3,
-                    'max_beta': 0.8,
-                    'priority': 'High'
-                },
-                {
-                    'strategy': 'Hedge Fund Approach',
-                    'description': 'Buscar activos con baja correlación y alpha positivo',
-                    'target_beta': 0.0,
-                    'max_beta': 0.3,
-                    'priority': 'Medium'
-                }
-            ]
-            
-            # Buscar activos defensivos
-            try:
-                market_returns = self._get_market_returns()
-                defensive_assets = self.defensive_finder.find_defensive_assets(
-                    market_returns, min_beta=0.2, max_beta=0.7, min_alpha=-0.03
-                )
-                recommendations['defensive_assets'] = defensive_assets[:10]  # Top 10
-            except Exception as e:
-                print(f"Error buscando activos defensivos: {str(e)}")
-        
-        elif market_phase == 'Bull Market':
-            recommendations['recommended_strategies'] = [
-                {
-                    'strategy': 'Smart Beta',
-                    'description': 'Aumentar exposición táctica con beta dinámico',
-                    'target_beta': 1.2,
-                    'max_beta': 1.5,
-                    'priority': 'High'
-                },
-                {
-                    'strategy': 'Traditional Long-Only',
-                    'description': 'Mantener exposición al mercado con alpha positivo',
-                    'target_beta': 1.0,
-                    'max_beta': 1.1,
-                    'priority': 'Medium'
-                }
-            ]
-        
-        elif market_phase == 'Sideways Market':
-            recommendations['recommended_strategies'] = [
-                {
-                    'strategy': 'Index Tracker',
-                    'description': 'Mantener exposición neutral al mercado',
-                    'target_beta': 1.0,
-                    'max_beta': 1.0,
-                    'priority': 'High'
-                },
-                {
-                    'strategy': 'Hedge Fund',
-                    'description': 'Buscar oportunidades no correlacionadas',
-                    'target_beta': 0.0,
-                    'max_beta': 0.3,
-                    'priority': 'Medium'
-                }
-            ]
-        
-        # Ajustes de riesgo
-        recommendations['risk_adjustments'] = self._calculate_risk_adjustments(
-            market_phase, portfolio_analysis
-        )
-        
-        # Notas de implementación
-        recommendations['implementation_notes'] = self._generate_implementation_notes(
-            recommendations
-        )
-        
-        return recommendations
-    
-    def _determine_market_phase(self, market_conditions):
-        """
-        Determina la fase actual del mercado
-        """
-        vix = market_conditions.get('VIX', {}).get('valor_actual', 20)
-        trend = market_conditions.get('tendencia_mercado', 'neutral')
-        volatility = market_conditions.get('volatilidad', 'normal')
-        
-        if vix > 30 or volatility == 'alta':
-            return 'High Volatility'
-        elif trend == 'bajista' or vix > 25:
-            return 'Bear Market'
-        elif trend == 'alcista' and vix < 20:
-            return 'Bull Market'
-        else:
-            return 'Sideways Market'
-    
-    def _get_market_returns(self):
-        """
-        Obtiene retornos del mercado (MERVAL)
-        """
-        try:
-            merval_data = yf.download('^MERV', 
-                                    start=(datetime.now() - timedelta(days=252)).strftime('%Y-%m-%d'),
-                                    end=datetime.now().strftime('%Y-%m-%d'))['Close']
-            return merval_data.pct_change().dropna()
-        except Exception as e:
-            print(f"Error obteniendo datos del MERVAL: {str(e)}")
-            return None
-    
-    def _calculate_risk_adjustments(self, market_phase, portfolio_analysis):
-        """
-        Calcula ajustes de riesgo según la fase del mercado
-        """
-        adjustments = {
-            'position_sizing': {},
-            'stop_loss': {},
-            'diversification': {}
-        }
-        
-        if market_phase in ['Bear Market', 'High Volatility']:
-            adjustments['position_sizing'] = {
-                'max_position': 0.05,  # 5% máximo por posición
-                'total_equity': 0.6,   # 60% máximo en acciones
-                'cash_reserve': 0.4    # 40% en efectivo
-            }
-            adjustments['stop_loss'] = {
-                'tight_stops': True,
-                'stop_percentage': 0.05  # 5% stop loss
-            }
-            adjustments['diversification'] = {
-                'min_positions': 15,
-                'max_sector_weight': 0.15  # 15% máximo por sector
-            }
-        
-        elif market_phase == 'Bull Market':
-            adjustments['position_sizing'] = {
-                'max_position': 0.10,  # 10% máximo por posición
-                'total_equity': 0.9,   # 90% máximo en acciones
-                'cash_reserve': 0.1    # 10% en efectivo
-            }
-            adjustments['stop_loss'] = {
-                'tight_stops': False,
-                'stop_percentage': 0.10  # 10% stop loss
-            }
-            adjustments['diversification'] = {
-                'min_positions': 10,
-                'max_sector_weight': 0.25  # 25% máximo por sector
-            }
-        
-        else:  # Sideways Market
-            adjustments['position_sizing'] = {
-                'max_position': 0.07,  # 7% máximo por posición
-                'total_equity': 0.75,  # 75% máximo en acciones
-                'cash_reserve': 0.25   # 25% en efectivo
-            }
-            adjustments['stop_loss'] = {
-                'tight_stops': True,
-                'stop_percentage': 0.07  # 7% stop loss
-            }
-            adjustments['diversification'] = {
-                'min_positions': 12,
-                'max_sector_weight': 0.20  # 20% máximo por sector
-            }
-        
-        return adjustments
-    
-    def _generate_implementation_notes(self, recommendations):
-        """
-        Genera notas de implementación para las recomendaciones
-        """
-        notes = []
-        
-        for strategy in recommendations['recommended_strategies']:
-            if strategy['strategy'] == 'Defensive Positioning':
-                notes.append({
-                    'type': 'warning',
-                    'message': 'Reducir exposición a sectores cíclicos (financiero, industrial)',
-                    'action': 'Aumentar peso en utilities, consumer staples, healthcare'
-                })
-                notes.append({
-                    'type': 'info',
-                    'message': 'Considerar bonos corporativos de alta calidad',
-                    'action': 'Evaluar bonos con rating A o superior'
-                })
-            
-            elif strategy['strategy'] == 'Smart Beta':
-                notes.append({
-                    'type': 'info',
-                    'message': 'Implementar rebalanceo táctico',
-                    'action': 'Ajustar pesos cada 2-4 semanas según condiciones'
-                })
-            
-            elif strategy['strategy'] == 'Hedge Fund Approach':
-                notes.append({
-                    'type': 'warning',
-                    'message': 'Buscar activos con correlación negativa',
-                    'action': 'Evaluar ETFs inversos o estrategias de cobertura'
-                })
-        
-        return notes
-
-def mostrar_analisis_capm_y_estrategias(token_acceso, gemini_api_key=None):
-    """
-    Muestra análisis CAPM y recomendaciones de estrategias de inversión
-    """
-    st.header("📊 Análisis CAPM y Estrategias de Inversión")
-    
-    # Inicializar el recomendador de estrategias
-    recommender = InvestmentStrategyRecommender(token_acceso, gemini_api_key)
-    
-    # Obtener condiciones de mercado del análisis intermarket
-    if 'analisis_intermarket' in st.session_state:
-        market_conditions = st.session_state['analisis_intermarket'].get('variables_macro', {})
-        fase_ciclo = st.session_state['analisis_intermarket'].get('fase_ciclo', 'Desconocida')
-        resultados_capm = st.session_state['analisis_intermarket'].get('resultados_capm', [])
-        bcra_data = st.session_state['analisis_intermarket'].get('bcra_data', {})
-        economic_data = st.session_state['analisis_intermarket'].get('economic_data', {})
-    else:
-        st.warning("⚠️ Ejecute primero el análisis intermarket para obtener condiciones de mercado")
+    if not portafolio or not estado_cuenta:
+        st.warning("No se pudieron obtener los datos necesarios para el informe IA")
         return
     
-    # Mostrar fase del mercado
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Fase del Ciclo", fase_ciclo)
-    
-    with col2:
-        vix_actual = market_conditions.get('VIX', {}).get('valor_actual', 0)
-        st.metric("VIX Actual", f"{vix_actual:.1f}")
-    
-    # Mostrar resultados CAPM si están disponibles
-    if resultados_capm:
-        st.subheader("📊 Resultados del Análisis CAPM")
-        
-        # Crear DataFrame con resultados
-        df_capm = pd.DataFrame(resultados_capm)
-        
-        # Mostrar métricas resumidas
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            beta_promedio = df_capm['Beta'].mean()
-            st.metric("Beta Promedio", f"{beta_promedio:.2f}")
-        
-        with col2:
-            alpha_promedio = df_capm['Alpha'].mean()
-            st.metric("Alpha Promedio", f"{alpha_promedio:.3f}")
-        
-        with col3:
-            r2_promedio = df_capm['R²'].mean()
-            st.metric("R² Promedio", f"{r2_promedio:.2f}")
-        
-        with col4:
-            sharpe_promedio = df_capm['Sharpe'].mean()
-            st.metric("Sharpe Promedio", f"{sharpe_promedio:.2f}")
-        
-        # Clasificar estrategias
-        estrategias_clasificadas = {
-            'Index Tracker': [],
-            'Traditional Long-Only': [],
-            'Smart Beta': [],
-            'Hedge Fund': []
-        }
-        
-        for _, row in df_capm.iterrows():
-            beta = row['Beta']
-            alpha = row['Alpha']
-            
-            if abs(beta - 1.0) < 0.1 and abs(alpha) < 0.01:
-                estrategias_clasificadas['Index Tracker'].append(row.to_dict())
-            elif abs(beta - 1.0) < 0.1 and alpha > 0.01:
-                estrategias_clasificadas['Traditional Long-Only'].append(row.to_dict())
-            elif beta > 1.2 or beta < 0.8:
-                estrategias_clasificadas['Smart Beta'].append(row.to_dict())
-            elif abs(beta) < 0.3 and alpha > 0.01:
-                estrategias_clasificadas['Hedge Fund'].append(row.to_dict())
-        
-        # Mostrar clasificación de estrategias
-        st.subheader("🎯 Clasificación por Estrategia")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            for estrategia, activos in estrategias_clasificadas.items():
-                if activos:
-                    st.write(f"**{estrategia}** ({len(activos)} activos):")
-                    for activo in activos[:5]:  # Mostrar primeros 5
-                        st.write(f"• {activo['Activo']} (β={activo['Beta']:.2f}, α={activo['Alpha']:.3f})")
-                    if len(activos) > 5:
-                        st.write(f"... y {len(activos)-5} más")
-                    st.write("")
-        
-        with col2:
-            # Gráfico de dispersión Beta vs Alpha
-            fig_scatter = go.Figure()
-            
-            for estrategia, activos in estrategias_clasificadas.items():
-                if activos:
-                    betas = [a['Beta'] for a in activos]
-                    alphas = [a['Alpha'] for a in activos]
-                    nombres = [a['Activo'] for a in activos]
-                    
-                    fig_scatter.add_trace(go.Scatter(
-                        x=betas,
-                        y=alphas,
-                        mode='markers+text',
-                        name=estrategia,
-                        text=nombres,
-                        textposition="top center",
-                        hovertemplate="<b>%{text}</b><br>Beta: %{x:.2f}<br>Alpha: %{y:.3f}<extra></extra>"
-                    ))
-            
-            fig_scatter.update_layout(
-                title="Dispersión Beta vs Alpha por Estrategia",
-                xaxis_title="Beta",
-                yaxis_title="Alpha",
-                height=500
-            )
-            
-            st.plotly_chart(fig_scatter, use_container_width=True)
-    
-    # Mostrar datos del BCRA y económicos si están disponibles
-    if bcra_data or economic_data:
-        st.subheader("📊 Contexto Económico y Macro")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if bcra_data:
-                st.markdown("**🏦 Datos del BCRA**")
-                st.write(f"• Inflación: {bcra_data.get('inflacion_esperada', 0):.1f}%")
-                st.write(f"• Tasa Política: {bcra_data.get('tasa_politica', 0):.1f}%")
-                st.write(f"• Reservas: {bcra_data.get('reservas', 0):,.0f}M USD")
-                st.write(f"• Crecimiento M2: {bcra_data.get('m2_crecimiento', 0):.1f}%")
-        
-        with col2:
-            if economic_data:
-                st.markdown("**📈 Variables Económicas**")
-                st.write(f"• Fase del Ciclo: {economic_data.get('cycle_phase', 'Desconocida')}")
-                st.write(f"• Nivel de Riesgo: {economic_data.get('risk_level', 'Desconocido')}")
-                if economic_data.get('sectors'):
-                    st.write("• Sectores Favorables:", ", ".join(economic_data['sectors'].get('favorable', [])))
-    
-    # Generar recomendaciones
-    with st.spinner("Generando recomendaciones de estrategias..."):
-        recommendations = recommender.generate_market_recommendations(market_conditions)
-    
-    # Mostrar estrategias recomendadas
-    st.subheader("🎯 Estrategias Recomendadas")
-    
-    # Extraer estrategias para el selector
-    estrategias_disponibles = []
-    for strategy in recommendations['recommended_strategies']:
-        estrategias_disponibles.append(strategy['strategy'])
-    
-    # Selector de estrategia para buscar activos
-    if estrategias_disponibles:
-        estrategia_seleccionada = st.selectbox(
-            "Seleccione una estrategia para buscar activos específicos:",
-            estrategias_disponibles,
-            help="Seleccione una estrategia para ver activos que cumplan con esa estrategia"
-        )
-        
-        if st.button("🔍 Buscar Activos por Estrategia", type="primary"):
-            mostrar_activos_recomendados_por_estrategia(token_acceso, estrategia_seleccionada)
-    
-    # Mostrar detalles de cada estrategia
-    for i, strategy in enumerate(recommendations['recommended_strategies']):
-        with st.expander(f"{i+1}. {strategy['strategy']} - {strategy['priority']} Priority"):
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.write(f"**Descripción:** {strategy['description']}")
-                st.write(f"**Beta Objetivo:** {strategy['target_beta']:.2f}")
-                st.write(f"**Beta Máximo:** {strategy['max_beta']:.2f}")
-            
-            with col2:
-                if strategy['priority'] == 'High':
-                    st.success("🟢 Alta Prioridad")
-                else:
-                    st.info("🔵 Prioridad Media")
-    
-    # Mostrar activos defensivos si están disponibles
-    if recommendations['defensive_assets']:
-        st.subheader("🛡️ Activos Defensivos Recomendados")
-        
-        # Crear DataFrame para mostrar
-        defensive_data = []
-        for asset in recommendations['defensive_assets'][:10]:  # Top 10
-            defensive_data.append({
-                'Ticker': asset['ticker'],
-                'Beta': f"{asset['capm_metrics']['beta']:.3f}",
-                'Alpha (%)': f"{asset['capm_metrics']['alpha']*100:.2f}",
-                'Volatilidad (%)': f"{asset['capm_metrics']['volatility']*100:.1f}",
-                'Sharpe': f"{asset['capm_metrics']['sharpe_ratio']:.2f}",
-                'Score Defensivo': f"{asset['defensive_score']:.1f}",
-                'Estrategia': asset['strategy']['strategy_type']
-            })
-        
-        df_defensive = pd.DataFrame(defensive_data)
-        st.dataframe(df_defensive, use_container_width=True)
-    
-    # Mostrar ajustes de riesgo
-    st.subheader("⚖️ Ajustes de Riesgo")
-    
-    risk_adj = recommendations['risk_adjustments']
-    
-    col1, col2, col3 = st.columns(3)
+    # Configuración de la IA
+    col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.write("**Tamaño de Posiciones**")
-        pos_sizing = risk_adj['position_sizing']
-        st.write(f"• Máximo por posición: {pos_sizing['max_position']*100:.0f}%")
-        st.write(f"• Total en acciones: {pos_sizing['total_equity']*100:.0f}%")
-        st.write(f"• Reserva en efectivo: {pos_sizing['cash_reserve']*100:.0f}%")
-    
-    with col2:
-        st.write("**Stop Loss**")
-        stop_loss = risk_adj['stop_loss']
-        st.write(f"• Stop loss: {stop_loss['stop_percentage']*100:.0f}%")
-        if stop_loss['tight_stops']:
-            st.write("• Stops ajustados: ✅")
-        else:
-            st.write("• Stops ajustados: ❌")
-    
-    with col3:
-        st.write("**Diversificación**")
-        diversification = risk_adj['diversification']
-        st.write(f"• Mínimo posiciones: {diversification['min_positions']}")
-        st.write(f"• Máximo por sector: {diversification['max_sector_weight']*100:.0f}%")
-    
-    # Mostrar notas de implementación
-    if recommendations['implementation_notes']:
-        st.subheader("📝 Notas de Implementación")
+        st.subheader("🔧 Configuración del Análisis IA")
         
-        for note in recommendations['implementation_notes']:
-            if note['type'] == 'warning':
-                st.warning(f"⚠️ {note['message']}")
-            else:
-                st.info(f"ℹ️ {note['message']}")
-            
-            st.write(f"**Acción:** {note['action']}")
-            st.divider()
-
-def analizar_portafolio_capm(portafolio, token_portador, dias_historial=252):
-    """
-    Analiza un portafolio usando métricas CAPM
-    """
-    if not portafolio:
-        return None
-    
-    # Obtener datos del MERVAL
-    try:
-        merval_data = yf.download('^MERV', 
-                                start=(datetime.now() - timedelta(days=dias_historial)).strftime('%Y-%m-%d'),
-                                end=datetime.now().strftime('%Y-%m-%d'))['Close']
-        market_returns = merval_data.pct_change().dropna()
-    except Exception as e:
-        print(f"Error obteniendo datos del MERVAL: {str(e)}")
-        return None
-    
-    # Inicializar analizador CAPM
-    capm_analyzer = CAPMAnalyzer()
-    portfolio_analysis = {
-        'assets_analysis': [],
-        'portfolio_metrics': {},
-        'strategy_classification': {}
-    }
-    
-    # Analizar cada activo
-    for simbolo, activo in portafolio.items():
-        try:
-            # Obtener datos históricos
-            df_historico = obtener_serie_historica_iol(
-                token_portador,
-                activo.get('mercado', 'BCBA'),
-                simbolo,
-                (datetime.now() - timedelta(days=dias_historial)).strftime('%Y-%m-%d'),
-                datetime.now().strftime('%Y-%m-%d'),
-                "SinAjustar"
-            )
-            
-            if df_historico is not None and len(df_historico) > 50:
-                asset_returns = df_historico['close'].pct_change().dropna()
-                
-                # Análisis CAPM del activo
-                capm_metrics = capm_analyzer.calculate_asset_capm(
-                    asset_returns, market_returns, simbolo
-                )
-                
-                if capm_metrics:
-                    strategy_class = capm_analyzer.classify_asset_strategy(capm_metrics)
-                    
-                    portfolio_analysis['assets_analysis'].append({
-                        'symbol': simbolo,
-                        'capm_metrics': capm_metrics,
-                        'strategy': strategy_class,
-                        'weight': activo.get('Valuación', 0) / sum(a.get('Valuación', 0) for a in portafolio.values())
-                    })
-        
-        except Exception as e:
-            print(f"Error analizando {simbolo}: {str(e)}")
-            continue
-    
-    # Calcular métricas del portafolio
-    if portfolio_analysis['assets_analysis']:
-        # Beta ponderado del portafolio
-        portfolio_beta = sum(
-            asset['capm_metrics']['beta'] * asset['weight'] 
-            for asset in portfolio_analysis['assets_analysis']
+        # API Key para Gemini (opcional)
+        gemini_api_key = st.text_input(
+            "Clave API de Gemini (opcional):",
+            type="password",
+            help="Para análisis más avanzado con IA de Google"
         )
         
-        # Alpha ponderado del portafolio
-        portfolio_alpha = sum(
-            asset['capm_metrics']['alpha'] * asset['weight'] 
-            for asset in portfolio_analysis['assets_analysis']
+        # Opciones de análisis
+        analisis_opciones = st.multiselect(
+            "Seleccione tipos de análisis:",
+            ["Análisis de Riesgo", "Recomendaciones de Rebalanceo", "Análisis de Correlaciones", 
+             "Predicción de Tendencias", "Análisis de Concentración", "Optimización de Portafolio"],
+            default=["Análisis de Riesgo", "Recomendaciones de Rebalanceo"]
         )
         
-        # Clasificar estrategia del portafolio
-        portfolio_strategy = capm_analyzer.classify_asset_strategy({
-            'beta': portfolio_beta,
-            'alpha': portfolio_alpha
-        })
-        
-        portfolio_analysis['portfolio_metrics'] = {
-            'portfolio_beta': portfolio_beta,
-            'portfolio_alpha': portfolio_alpha,
-            'total_assets': len(portfolio_analysis['assets_analysis'])
-        }
-        
-        portfolio_analysis['strategy_classification'] = portfolio_strategy
-    
-    return portfolio_analysis
-
-def mostrar_analisis_capm_portafolio(token_acceso, id_cliente):
-    """
-    Muestra análisis CAPM del portafolio actual del cliente
-    """
-    st.header("📊 Análisis CAPM del Portafolio")
-    
-    # Obtener portafolio del cliente
-    try:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if not portafolio:
-            st.warning("No se pudo obtener el portafolio del cliente")
-            return
-        
-        # Calcular valor total
-        valor_total = sum(activo.get('Valuación', 0) for activo in portafolio.values())
-        
-        if valor_total <= 0:
-            st.warning("El portafolio no tiene valor o no se pudo calcular")
-            return
-        
-        # Analizar portafolio con CAPM
-        with st.spinner("Analizando portafolio con métricas CAPM..."):
-            portfolio_analysis = analizar_portafolio_capm(portafolio, token_acceso)
-        
-        if not portfolio_analysis or not portfolio_analysis['assets_analysis']:
-            st.warning("No se pudo realizar el análisis CAPM del portafolio")
-            return
-        
-        # Mostrar métricas del portafolio
-        st.subheader("📈 Métricas del Portafolio")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Beta del Portafolio", f"{portfolio_analysis['portfolio_metrics']['portfolio_beta']:.3f}")
-        
-        with col2:
-            st.metric("Alpha del Portafolio", f"{portfolio_analysis['portfolio_metrics']['portfolio_alpha']*100:.2f}%")
-        
-        with col3:
-            st.metric("Total de Activos", portfolio_analysis['portfolio_metrics']['total_assets'])
-        
-        with col4:
-            strategy_type = portfolio_analysis['strategy_classification']['strategy_type']
-            st.metric("Estrategia", strategy_type)
-        
-        # Mostrar clasificación de estrategia
-        st.subheader("🎯 Clasificación de Estrategia")
-        
-        strategy = portfolio_analysis['strategy_classification']
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.write(f"**Tipo de Estrategia:** {strategy['strategy_type']}")
-            st.write(f"**Descripción:** {strategy['description']}")
-            st.write("**Características:**")
-            for char in strategy['characteristics']:
-                st.write(f"• {char}")
-        
-        with col2:
-            if strategy['strategy_type'] == "Index Tracker":
-                st.success("🟢 Estrategia Conservadora")
-            elif strategy['strategy_type'] == "Traditional Long-Only":
-                st.info("🔵 Estrategia Balanceada")
-            elif strategy['strategy_type'] == "Smart Beta":
-                st.warning("🟡 Estrategia Táctica")
-            elif strategy['strategy_type'] == "Hedge Fund":
-                st.error("🔴 Estrategia Alternativa")
-            else:
-                st.info("⚪ Estrategia Mixta")
-        
-        # Mostrar análisis por activo
-        st.subheader("📊 Análisis por Activo")
-        
-        # Crear DataFrame para mostrar
-        assets_data = []
-        for asset in portfolio_analysis['assets_analysis']:
-            assets_data.append({
-                'Símbolo': asset['symbol'],
-                'Beta': f"{asset['capm_metrics']['beta']:.3f}",
-                'Alpha (%)': f"{asset['capm_metrics']['alpha']*100:.2f}",
-                'Volatilidad (%)': f"{asset['capm_metrics']['volatility']*100:.1f}",
-                'Sharpe': f"{asset['capm_metrics']['sharpe_ratio']:.2f}",
-                'Peso (%)': f"{asset['weight']*100:.1f}",
-                'Estrategia': asset['strategy']['strategy_type']
-            })
-        
-        df_assets = pd.DataFrame(assets_data)
-        st.dataframe(df_assets, use_container_width=True)
-        
-        # Gráfico de dispersión Beta vs Alpha
-        st.subheader("📈 Dispersión Beta vs Alpha")
-        
-        fig = go.Figure()
-        
-        # Agrupar por estrategia
-        strategies = {}
-        for asset in portfolio_analysis['assets_analysis']:
-            strategy = asset['strategy']['strategy_type']
-            if strategy not in strategies:
-                strategies[strategy] = {'betas': [], 'alphas': [], 'symbols': []}
-            
-            strategies[strategy]['betas'].append(asset['capm_metrics']['beta'])
-            strategies[strategy]['alphas'].append(asset['capm_metrics']['alpha'])
-            strategies[strategy]['symbols'].append(asset['symbol'])
-        
-        # Colores por estrategia
-        colors = {
-            'Index Tracker': 'green',
-            'Traditional Long-Only': 'blue',
-            'Smart Beta': 'orange',
-            'Hedge Fund': 'red',
-            'Mixed Strategy': 'purple'
-        }
-        
-        for strategy, data in strategies.items():
-            fig.add_trace(go.Scatter(
-                x=data['betas'],
-                y=[alpha * 100 for alpha in data['alphas']],
-                mode='markers+text',
-                text=data['symbols'],
-                textposition="top center",
-                name=strategy,
-                marker=dict(
-                    size=10,
-                    color=colors.get(strategy, 'gray')
-                ),
-                hovertemplate='<b>%{text}</b><br>' +
-                            'Beta: %{x:.3f}<br>' +
-                            'Alpha: %{y:.2f}%<br>' +
-                            'Estrategia: ' + strategy +
-                            '<extra></extra>'
-            ))
-        
-        # Líneas de referencia
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Alpha = 0")
-        fig.add_vline(x=1, line_dash="dash", line_color="gray", annotation_text="Beta = 1")
-        
-        fig.update_layout(
-            title="Dispersión de Activos por Beta y Alpha",
-            xaxis_title="Beta",
-            yaxis_title="Alpha (%)",
-            height=500,
-            showlegend=True
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Recomendaciones específicas
-        st.subheader("💡 Recomendaciones Específicas")
-        
-        # Analizar concentración de riesgo
-        high_beta_assets = [a for a in portfolio_analysis['assets_analysis'] if a['capm_metrics']['beta'] > 1.2]
-        low_alpha_assets = [a for a in portfolio_analysis['assets_analysis'] if a['capm_metrics']['alpha'] < -0.05]
-        
-        if high_beta_assets:
-            st.warning("⚠️ **Activos de Alto Riesgo Detectados:**")
-            for asset in high_beta_assets:
-                st.write(f"• {asset['symbol']}: Beta = {asset['capm_metrics']['beta']:.3f}")
-            st.write("**Recomendación:** Considerar reducir exposición o implementar cobertura")
-        
-        if low_alpha_assets:
-            st.warning("⚠️ **Activos con Alpha Negativo:**")
-            for asset in low_alpha_assets:
-                st.write(f"• {asset['symbol']}: Alpha = {asset['capm_metrics']['alpha']*100:.2f}%")
-            st.write("**Recomendación:** Evaluar reemplazo por activos con mejor rendimiento")
-        
-        # Sugerencias de diversificación
-        strategy_counts = {}
-        for asset in portfolio_analysis['assets_analysis']:
-            strategy = asset['strategy']['strategy_type']
-            strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
-        
-        if len(strategy_counts) < 3:
-            st.info("ℹ️ **Diversificación de Estrategias:**")
-            st.write("El portafolio está concentrado en pocas estrategias. Considerar diversificar entre:")
-            st.write("• Index Tracker (estabilidad)")
-            st.write("• Smart Beta (táctica)")
-            st.write("• Hedge Fund (alternativa)")
-        
-    except Exception as e:
-        st.error(f"Error en el análisis CAPM del portafolio: {str(e)}")
-
-
-def obtener_datos_bcra():
-    """
-    Obtiene datos reales del BCRA para variables macroeconómicas.
-    Incluye expectativas de mercado, tasas, reservas, etc.
-    """
-    import requests
-    from bs4 import BeautifulSoup
-    import pandas as pd
-    from datetime import datetime, timedelta
-    import urllib3
-    
-    # Deshabilitar advertencias SSL
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    
-    datos_bcra = {}
-    
-    try:
-        # URL del BCRA con expectativas de mercado
-        url_expectativas = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Relevamiento_Expectativas_de_Mercado.asp"
-        
-        # Headers para simular navegador
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-        }
-        
-        # Configurar sesión con manejo robusto de SSL
-        session = requests.Session()
-        session.headers.update(headers)
-        
-        # Intentar obtener datos del BCRA con configuración SSL robusta
-        response = session.get(
-            url_expectativas, 
-            headers=headers, 
-            timeout=15, 
-            verify=False,
-            allow_redirects=True
-        )
-        
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Extraer datos de expectativas (ejemplo de estructura)
-            # Nota: La estructura real puede variar
-            try:
-                # Buscar tablas con datos de expectativas
-                tablas = soup.find_all('table')
-                
-                for tabla in tablas:
-                    # Buscar datos de inflación esperada
-                    if 'inflación' in tabla.get_text().lower() or 'ipc' in tabla.get_text().lower():
-                        filas = tabla.find_all('tr')
-                        for fila in filas:
-                            celdas = fila.find_all(['td', 'th'])
-                            if len(celdas) >= 2:
-                                texto = celdas[0].get_text().strip()
-                                valor = celdas[1].get_text().strip()
-                                
-                                if 'inflación' in texto.lower():
-                                    try:
-                                        datos_bcra['inflacion_esperada'] = float(valor.replace('%', '').replace(',', '.'))
-                                    except:
-                                        pass
-                
-                # Si no se encontraron datos en la página, usar valores de respaldo
-                if not datos_bcra:
-                    st.info("No se pudieron extraer datos del BCRA. Usando valores de respaldo actualizados.")
-                    datos_bcra = {
-                        'inflacion_esperada': 8.5,  # % mensual
-                        'tasa_politica': 50.0,      # % anual
-                        'reservas': 25000,          # millones USD
-                        'm2_crecimiento': 12.5      # % anual
-                    }
-                
-            except Exception as e:
-                st.info(f"Error procesando datos del BCRA: {e}. Usando valores de respaldo.")
-                # Usar valores de respaldo
-                datos_bcra = {
-                    'inflacion_esperada': 8.5,
-                    'tasa_politica': 50.0,
-                    'reservas': 25000,
-                    'm2_crecimiento': 12.5
-                }
-        else:
-            st.info(f"No se pudo acceder al BCRA (código {response.status_code}). Usando valores de respaldo.")
-            # Usar valores de respaldo
-            datos_bcra = {
-                'inflacion_esperada': 8.5,
-                'tasa_politica': 50.0,
-                'reservas': 25000,
-                'm2_crecimiento': 12.5
-            }
-            
-    except requests.exceptions.SSLError as e:
-        st.info(f"Error SSL al conectar con BCRA: {e}. Usando valores de respaldo.")
-        # Usar valores de respaldo
-        datos_bcra = {
-            'inflacion_esperada': 8.5,
-            'tasa_politica': 50.0,
-            'reservas': 25000,
-            'm2_crecimiento': 12.5
-        }
-    except requests.exceptions.RequestException as e:
-        st.info(f"Error de conexión con BCRA: {e}. Usando valores de respaldo.")
-        # Usar valores de respaldo
-        datos_bcra = {
-            'inflacion_esperada': 8.5,
-            'tasa_politica': 50.0,
-            'reservas': 25000,
-            'm2_crecimiento': 12.5
-        }
-    except Exception as e:
-        st.info(f"Error inesperado al obtener datos BCRA: {e}. Usando valores de respaldo.")
-        # Usar valores de respaldo
-        datos_bcra = {
-            'inflacion_esperada': 8.5,
-            'tasa_politica': 50.0,
-            'reservas': 25000,
-            'm2_crecimiento': 12.5
-        }
-    
-    return datos_bcra
-
-
-def actualizar_variables_macro_con_bcra():
-    """
-    Actualiza las variables macroeconómicas con datos reales del BCRA.
-    """
-    st.markdown("### 🔄 Actualización de Variables Macro del BCRA")
-    
-    if st.button("🔄 Actualizar Datos del BCRA", type="primary"):
-        with st.spinner("Obteniendo datos actualizados del BCRA..."):
-            
-            # Obtener datos del BCRA
-            datos_bcra = obtener_datos_bcra()
-            
-            # Mostrar datos obtenidos
-            st.success("✅ Datos del BCRA obtenidos exitosamente")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric(
-                    "Inflación Esperada",
-                    f"{datos_bcra['inflacion_esperada']:.1f}%",
-                    "Mensual"
-                )
-                st.metric(
-                    "Tasa de Política",
-                    f"{datos_bcra['tasa_politica']:.1f}%",
-                    "Anual"
-                )
-            
-            with col2:
-                st.metric(
-                    "Reservas Internacionales",
-                    f"{datos_bcra['reservas']:,.0f}M USD",
-                    "Millones"
-                )
-                st.metric(
-                    "Crecimiento M2",
-                    f"{datos_bcra['m2_crecimiento']:.1f}%",
-                    "Anual"
-                )
-            
-            # Guardar en session state para uso posterior
-            st.session_state['datos_bcra'] = datos_bcra
-            
-            # Análisis automático del ciclo económico
-            st.markdown("### 📊 Análisis del Ciclo Económico con Datos BCRA")
-            
-            # Determinar fase del ciclo basada en los datos
-            inflacion = datos_bcra['inflacion_esperada']
-            tasa = datos_bcra['tasa_politica']
-            reservas = datos_bcra['reservas']
-            m2 = datos_bcra['m2_crecimiento']
-            
-            # Lógica de clasificación del ciclo
-            puntuacion_ciclo = 0
-            
-            # Análisis de inflación
-            if inflacion > 10:
-                puntuacion_ciclo -= 2  # Alta inflación = contracción
-            elif inflacion < 5:
-                puntuacion_ciclo += 1  # Baja inflación = expansión
-            else:
-                puntuacion_ciclo += 0  # Inflación moderada
-            
-            # Análisis de tasas
-            if tasa > 60:
-                puntuacion_ciclo -= 1  # Tasas altas = contracción
-            elif tasa < 30:
-                puntuacion_ciclo += 1  # Tasas bajas = expansión
-            
-            # Análisis de reservas
-            if reservas > 30000:
-                puntuacion_ciclo += 1  # Reservas altas = estabilidad
-            elif reservas < 20000:
-                puntuacion_ciclo -= 1  # Reservas bajas = vulnerabilidad
-            
-            # Análisis de M2
-            if m2 > 15:
-                puntuacion_ciclo += 1  # Crecimiento monetario alto
-            elif m2 < 10:
-                puntuacion_ciclo -= 1  # Crecimiento monetario bajo
-            
-            # Determinar fase del ciclo
-            if puntuacion_ciclo >= 2:
-                fase_ciclo = "Expansión"
-                color_fase = "success"
-            elif puntuacion_ciclo <= -2:
-                fase_ciclo = "Contracción"
-                color_fase = "error"
-            else:
-                fase_ciclo = "Estabilización"
-                color_fase = "info"
-            
-            # Mostrar diagnóstico
-            st.markdown(f"**🎯 Diagnóstico del Ciclo Económico:**")
-            
-            if color_fase == "success":
-                st.success(f"**{fase_ciclo}** - Puntuación: {puntuacion_ciclo}")
-            elif color_fase == "error":
-                st.error(f"**{fase_ciclo}** - Puntuación: {puntuacion_ciclo}")
-            else:
-                st.info(f"**{fase_ciclo}** - Puntuación: {puntuacion_ciclo}")
-            
-            # Recomendaciones específicas
-            st.markdown("### 💡 Recomendaciones de Inversión")
-            
-            if fase_ciclo == "Expansión":
-                st.success("🚀 **Estrategia Ofensiva Recomendada**")
-                st.write("• Mantener exposición a activos de riesgo")
-                st.write("• Considerar acciones de crecimiento")
-                st.write("• Evaluar bonos corporativos")
-                st.write("• Monitorear indicadores de sobrecalentamiento")
-                
-            elif fase_ciclo == "Contracción":
-                st.warning("⚠️ **Estrategia Defensiva Recomendada**")
-                st.write("• Reducir exposición a activos de riesgo")
-                st.write("• Aumentar posición en efectivo")
-                st.write("• Considerar bonos del tesoro")
-                st.write("• Evaluar activos refugio (oro, dólar)")
-                
-            else:
-                st.info("⚖️ **Estrategia Balanceada Recomendada**")
-                st.write("• Mantener diversificación equilibrada")
-                st.write("• Monitorear señales de cambio de ciclo")
-                st.write("• Considerar estrategias de valor")
-                st.write("• Mantener liquidez moderada")
-            
-            # Guardar análisis en session state
-            st.session_state['analisis_ciclo_bcra'] = {
-                'fase_ciclo': fase_ciclo,
-                'puntuacion': puntuacion_ciclo,
-                'datos': datos_bcra,
-                'fecha_actualizacion': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-
-
-def integrar_datos_bcra_en_ciclo_economico():
-    """
-    Integra los datos del BCRA en el análisis del ciclo económico.
-    """
-    if 'datos_bcra' in st.session_state:
-        datos_bcra = st.session_state['datos_bcra']
-        
-        st.markdown("### 📊 Datos BCRA Integrados")
-        
-        # Crear métricas con datos reales
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Inflación BCRA",
-                f"{datos_bcra['inflacion_esperada']:.1f}%",
-                "Mensual"
-            )
-        
-        with col2:
-            st.metric(
-                "Tasa Política",
-                f"{datos_bcra['tasa_politica']:.1f}%",
-                "Anual"
-            )
-        
-        with col3:
-            st.metric(
-                "Reservas",
-                f"{datos_bcra['reservas']:,.0f}M USD",
-                "Millones"
-            )
-        
-        with col4:
-            st.metric(
-                "Crecimiento M2",
-                f"{datos_bcra['m2_crecimiento']:.1f}%",
-                "Anual"
-            )
-        
-        # Análisis de correlaciones históricas entre variables BCRA
-        st.markdown("#### 🔗 Análisis de Correlaciones Históricas BCRA")
-        
-        # Explicaciones de correlaciones históricas en Argentina
-        correlaciones_bcra = {
-            ('Inflación', 'Tasas de Interés'): {
-                'correlacion_historica': 0.75,
-                'explicacion': "En Argentina, la inflación y las tasas de interés tienen correlación positiva fuerte. El BCRA ajusta las tasas para controlar la inflación, siguiendo la regla de Taylor. Cuando la inflación sube, el BCRA sube las tasas para frenar la demanda agregada.",
-                'implicaciones': "Expectativa de suba de tasas si la inflación continúa alta",
-                'estrategia': "Considerar bonos CER y ajustables por inflación"
-            },
-            ('Inflación', 'Tipo de Cambio'): {
-                'correlacion_historica': 0.65,
-                'explicacion': "La inflación alta erosiona el valor de la moneda local, generando presión sobre el tipo de cambio. En Argentina, esto se ve agravado por la indexación de precios.",
-                'implicaciones': "Presión alcista sobre el dólar si la inflación persiste",
-                'estrategia': "Mantener exposición a activos dolarizados"
-            },
-            ('Tasas de Interés', 'Actividad Económica'): {
-                'correlacion_historica': -0.60,
-                'explicacion': "Las tasas altas frenan el crédito y la inversión, reduciendo la actividad económica. En Argentina, esto afecta especialmente a sectores sensibles a las tasas como construcción y consumo.",
-                'implicaciones': "Desaceleración económica si las tasas se mantienen altas",
-                'estrategia': "Reducir exposición a sectores sensibles a las tasas"
-            },
-            ('Reservas', 'Tipo de Cambio'): {
-                'correlacion_historica': -0.70,
-                'explicacion': "Las reservas internacionales actúan como colchón para el tipo de cambio. Reservas altas generan confianza y estabilidad cambiaria, mientras que reservas bajas generan presión devaluatoria.",
-                'implicaciones': "Estabilidad cambiaria si las reservas se mantienen",
-                'estrategia': "Monitorear evolución de reservas para timing de inversiones"
-            },
-            ('M2', 'Inflación'): {
-                'correlacion_historica': 0.55,
-                'explicacion': "El crecimiento de la masa monetaria (M2) alimenta la inflación con un lag de 6-12 meses. En Argentina, la emisión monetaria para financiar déficit fiscal es un factor clave.",
-                'implicaciones': "Presión inflacionaria futura si M2 continúa creciendo",
-                'estrategia': "Incluir activos indexados por inflación en el portafolio"
-            }
-        }
-        
-        # Mostrar análisis de correlaciones BCRA
-        for (var1, var2), analisis in correlaciones_bcra.items():
-            st.markdown(f"**{var1} <-> {var2}** (Correlación histórica: {analisis['correlacion_historica']:.2f})")
-            st.markdown(f"*Explicación:* {analisis['explicacion']}")
-            st.markdown(f"*Implicaciones actuales:* {analisis['implicaciones']}")
-            st.markdown(f"*Estrategia recomendada:* {analisis['estrategia']}")
-            st.markdown("---")
-        
-        # Análisis de divergencias actuales vs históricas
-        st.markdown("#### ⚡ Divergencias Actuales vs Históricas")
-        
-        # Simular análisis de divergencias (en un caso real, se calcularían con datos históricos)
-        divergencias_actuales = [
-            {
-                'par': 'Inflación - Tasas',
-                'historica': 0.75,
-                'actual': 0.60,
-                'divergencia': -0.15,
-                'explicacion': 'El BCRA está siendo más conservador en el ajuste de tasas, posiblemente por consideraciones de crecimiento económico'
-            },
-            {
-                'par': 'Reservas - Tipo de Cambio',
-                'historica': -0.70,
-                'actual': -0.50,
-                'divergencia': 0.20,
-                'explicacion': 'Las reservas están generando menos confianza que históricamente, posiblemente por expectativas de devaluación'
-            }
-        ]
-        
-        for div in divergencias_actuales:
-            st.markdown(f"**{div['par']}**: Histórica {div['historica']:.2f} → Actual {div['actual']:.2f} (Δ: {div['divergencia']:+.2f})")
-            st.markdown(f"*Explicación:* {div['explicacion']}")
-            st.markdown("---")
-        
-        return datos_bcra
-    else:
-        st.info("ℹ️ Ejecute 'Actualizar Datos del BCRA' para integrar datos oficiales")
-        return None
-
-
-def mostrar_analisis_variables_economicas(token_acceso, gemini_api_key=None):
-    """
-    Muestra análisis completo de variables económicas de Argentina Datos.
-    Incluye gráficos, análisis de ciclo económico y recomendaciones.
-    """
-    st.markdown("---")
-    st.subheader("📈 Análisis de Variables Económicas - Argentina Datos")
-    
-    # Configuración de parámetros
-    col1, col2, col3 = st.columns(3)
-    with col1:
+        # Período de análisis
         periodo_analisis = st.selectbox(
-            "Período de análisis",
-            ["1 mes", "3 meses", "6 meses", "1 año"],
-            index=1,
-            help="Período para el análisis de variables económicas"
-        )
-    with col2:
-        indicadores_seleccionados = st.multiselect(
-            "Indicadores a mostrar",
-            ["Inflación", "Tasas", "Riesgo País", "Dólar", "UVA"],
-            default=["Inflación", "Tasas", "Riesgo País"],
-            help="Seleccionar indicadores económicos a mostrar"
-        )
-    with col3:
-        incluir_ia = st.checkbox(
-            "Incluir análisis IA",
-            value=True,
-            help="Usar IA para análisis y recomendaciones"
-        )
-    
-    if st.button("📊 Generar Análisis de Variables Económicas", type="primary"):
-        with st.spinner("Obteniendo y analizando variables económicas..."):
-            
-            try:
-                # Inicializar ArgentinaDatos
-                ad = ArgentinaDatos()
-                
-                # Obtener análisis económico completo
-                economic_analysis = ad.get_economic_analysis()
-                
-                if economic_analysis['data']:
-                    # ========== 1. RESUMEN DEL ANÁLISIS ECONÓMICO ==========
-                    st.markdown("### 📋 Resumen del Análisis Económico")
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric(
-                            "Fase del Ciclo",
-                            economic_analysis['cycle_phase'],
-                            help="Fase actual del ciclo económico detectada"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Nivel de Riesgo",
-                            economic_analysis['risk_level'],
-                            help="Nivel de riesgo económico actual"
-                        )
-                    
-                    with col3:
-                        # Contar datos disponibles
-                        datos_disponibles = sum(1 for data in economic_analysis['data'].values() if data)
-                        st.metric(
-                            "Indicadores Disponibles",
-                            f"{datos_disponibles}/6",
-                            help="Cantidad de indicadores económicos disponibles"
-                        )
-                    
-                    with col4:
-                        # Calcular tendencia general
-                        tendencia = "Alcista" if economic_analysis['cycle_phase'] in ['Accommodative Monetary Policy', 'Disinflationary'] else "Bajista"
-                        st.metric(
-                            "Tendencia General",
-                            tendencia,
-                            help="Tendencia general del ciclo económico"
-                        )
-                    
-                    # ========== 2. GRÁFICOS DE VARIABLES ECONÓMICAS ==========
-                    st.markdown("### 📊 Gráficos de Variables Económicas")
-                    
-                    # Gráfico de inflación
-                    if "Inflación" in indicadores_seleccionados and economic_analysis['data']['inflacion']:
-                        st.markdown("#### 📈 Evolución de la Inflación")
-                        inflacion_chart = ad.create_inflacion_chart(economic_analysis['data']['inflacion'])
-                        if inflacion_chart:
-                            fig_inflacion = go.Figure(inflacion_chart)
-                            st.plotly_chart(fig_inflacion, use_container_width=True)
-                    
-                    # Gráfico de tasas
-                    if "Tasas" in indicadores_seleccionados and economic_analysis['data']['tasas']:
-                        st.markdown("#### 💰 Evolución de las Tasas de Interés")
-                        tasas_chart = ad.create_tasas_chart(economic_analysis['data']['tasas'])
-                        if tasas_chart:
-                            fig_tasas = go.Figure(tasas_chart)
-                            st.plotly_chart(fig_tasas, use_container_width=True)
-                    
-                    # Gráfico de riesgo país
-                    if "Riesgo País" in indicadores_seleccionados and economic_analysis['data']['riesgo_pais']:
-                        st.markdown("#### ⚠️ Evolución del Riesgo País")
-                        riesgo_chart = ad.create_riesgo_pais_chart(economic_analysis['data']['riesgo_pais'])
-                        if riesgo_chart:
-                            fig_riesgo = go.Figure(riesgo_chart)
-                            st.plotly_chart(fig_riesgo, use_container_width=True)
-                    
-                    # Gráfico de dólar
-                    if "Dólar" in indicadores_seleccionados and economic_analysis['data']['dolares']:
-                        st.markdown("#### 💵 Evolución del Dólar")
-                        dolares_chart = ad.create_dolares_chart(economic_analysis['data']['dolares'], periodo_analisis)
-                        if dolares_chart:
-                            fig_dolares = go.Figure(dolares_chart)
-                            st.plotly_chart(fig_dolares, use_container_width=True)
-                    
-                    # Gráfico de UVA
-                    if "UVA" in indicadores_seleccionados and economic_analysis['data']['uva']:
-                        st.markdown("#### 🏠 Evolución del UVA")
-                        uva_chart = ad.create_uva_chart(economic_analysis['data']['uva'])
-                        if uva_chart:
-                            fig_uva = go.Figure(uva_chart)
-                            st.plotly_chart(fig_uva, use_container_width=True)
-                    
-                    # ========== 3. ANÁLISIS DE CICLO ECONÓMICO ==========
-                    st.markdown("### 🔄 Análisis del Ciclo Económico")
-                    
-                    # Explicar la fase del ciclo
-                    if economic_analysis['cycle_phase'] == 'Inflationary Pressure':
-                        st.warning("**📈 Presión Inflacionaria Detectada**")
-                        st.write("""
-                        **Características de esta fase:**
-                        - Alta inflación que erosiona el poder adquisitivo
-                        - Presión sobre las tasas de interés
-                        - Inestabilidad en los mercados financieros
-                        - Dificultades para el crecimiento económico
-                        """)
-                        
-                    elif economic_analysis['cycle_phase'] == 'Tightening Monetary Policy':
-                        st.info("**🔒 Política Monetaria Restrictiva**")
-                        st.write("""
-                        **Características de esta fase:**
-                        - Tasas de interés elevadas para controlar la inflación
-                        - Menor acceso al crédito
-                        - Desaceleración del crecimiento económico
-                        - Presión sobre sectores sensibles a las tasas
-                        """)
-                        
-                    elif economic_analysis['cycle_phase'] == 'Accommodative Monetary Policy':
-                        st.success("**💰 Política Monetaria Expansiva**")
-                        st.write("""
-                        **Características de esta fase:**
-                        - Tasas de interés bajas para estimular la economía
-                        - Mayor acceso al crédito
-                        - Estimulación del crecimiento económico
-                        - Favorable para inversiones de largo plazo
-                        """)
-                        
-                    elif economic_analysis['cycle_phase'] == 'Disinflationary':
-                        st.info("**📉 Desinflación**")
-                        st.write("""
-                        **Características de esta fase:**
-                        - Reducción de la tasa de inflación
-                        - Estabilización de precios
-                        - Mejora en la confianza económica
-                        - Oportunidades para inversiones
-                        """)
-                    
-                    # ========== 4. RECOMENDACIONES DE INVERSIÓN ==========
-                    st.markdown("### 💡 Recomendaciones de Inversión")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if economic_analysis['sectors']['favorable']:
-                            st.success("**✅ Sectores Favorables**")
-                            for sector in economic_analysis['sectors']['favorable']:
-                                st.write(f"• {sector}")
-                    
-                    with col2:
-                        if economic_analysis['sectors']['unfavorable']:
-                            st.warning("**❌ Sectores Desfavorables**")
-                            for sector in economic_analysis['sectors']['unfavorable']:
-                                st.write(f"• {sector}")
-                    
-                    # Recomendaciones específicas
-                    if economic_analysis['recommendations']:
-                        st.info("**📋 Recomendaciones Específicas**")
-                        for i, rec in enumerate(economic_analysis['recommendations'], 1):
-                            st.write(f"{i}. {rec}")
-                    
-                    # ========== 5. ANÁLISIS CON IA ==========
-                    if incluir_ia and gemini_api_key:
-                        try:
-                            st.markdown("### 🤖 Análisis IA de Variables Económicas")
-                            
-                            # Preparar datos para IA
-                            resumen_economico = f"""
-                            Análisis de Variables Económicas de Argentina:
-                            
-                            **Fase del Ciclo Económico:**
-                            - Fase actual: {economic_analysis['cycle_phase']}
-                            - Nivel de riesgo: {economic_analysis['risk_level']}
-                            
-                            **Sectores de Inversión:**
-                            - Sectores favorables: {', '.join(economic_analysis['sectors']['favorable'])}
-                            - Sectores desfavorables: {', '.join(economic_analysis['sectors']['unfavorable'])}
-                            
-                            **Recomendaciones Generadas:**
-                            {chr(10).join([f"- {rec}" for rec in economic_analysis['recommendations']])}
-                            
-                            **Datos Disponibles:**
-                            - Inflación: {'Disponible' if economic_analysis['data']['inflacion'] else 'No disponible'}
-                            - Tasas: {'Disponible' if economic_analysis['data']['tasas'] else 'No disponible'}
-                            - Riesgo País: {'Disponible' if economic_analysis['data']['riesgo_pais'] else 'No disponible'}
-                            - Dólar: {'Disponible' if economic_analysis['data']['dolares'] else 'No disponible'}
-                            - UVA: {'Disponible' if economic_analysis['data']['uva'] else 'No disponible'}
-                            """
-                            
-                            # Llamar a IA para análisis
-                            genai.configure(api_key=gemini_api_key)
-                            model = genai.GenerativeModel('gemini-pro')
-                            
-                            prompt = f"""
-                            Analiza las siguientes variables económicas de Argentina y proporciona un análisis detallado:
-                            
-                            {resumen_economico}
-                            
-                            Proporciona:
-                            1. **Diagnóstico del ciclo económico argentino:** Explica en qué parte del ciclo se encuentra Argentina y qué significa esto
-                            2. **Análisis de sectores e instrumentos:** Qué sectores e instrumentos financieros son más adecuados para esta fase del ciclo
-                            3. **Estrategias de inversión:** Recomendaciones específicas de inversión para el contexto argentino
-                            4. **Gestión de riesgo:** Cómo gestionar el riesgo en el contexto económico actual
-                            5. **Horizonte temporal:** Qué horizonte temporal es más adecuado para las inversiones
-                            6. **Señales de alerta:** Qué indicadores monitorear para detectar cambios en el ciclo
-                            7. **Oportunidades específicas:** Qué oportunidades únicas presenta el mercado argentino en esta fase
-                            
-                            Responde en español de manera clara y práctica, enfocándote en el mercado argentino.
-                            """
-                            
-                            response = model.generate_content(prompt)
-                            st.write(response.text)
-                            
-                        except Exception as e:
-                            st.warning(f"No se pudo generar análisis IA: {e}")
-                
-                else:
-                    st.error("No se pudieron obtener datos económicos suficientes para el análisis")
-                    
-            except Exception as e:
-                st.error(f"Error en el análisis de variables económicas: {e}")
-
-
-def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
-    """
-    Grafica el ciclo económico real usando datos macroeconómicos.
-    Incluye indicadores como PBI, inflación, tasas, empleo, etc.
-    """
-    st.markdown("---")
-    st.subheader("📈 Ciclo Económico Real - Análisis Macroeconómico")
-    
-    # Configuración de parámetros
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        periodo_analisis = st.selectbox(
-            "Período de análisis",
-            ["1y", "2y", "5y", "10y"],
-            index=1,
-            help="Período para el análisis del ciclo económico"
-        )
-    with col2:
-        indicadores_seleccionados = st.multiselect(
-            "Indicadores a analizar",
-            ["PBI", "Inflación", "Tasas de Interés", "Empleo", "Consumo", "Inversión", "Comercio Exterior", "Confianza"],
-            default=["PBI", "Inflación", "Tasas de Interés", "Empleo"],
-            help="Seleccionar indicadores macroeconómicos"
-        )
-    with col3:
-        incluir_pronostico = st.checkbox(
-            "Incluir pronóstico",
-            value=True,
-            help="Incluir proyecciones de tendencia"
-        )
-    
-    # Agregar sección de datos BCRA
-    st.markdown("---")
-    st.markdown("### 🏦 Datos Oficiales del BCRA")
-    
-    # Botón para actualizar datos del BCRA
-    actualizar_variables_macro_con_bcra()
-    
-    # Integrar datos BCRA si están disponibles
-    datos_bcra = integrar_datos_bcra_en_ciclo_economico()
-    
-    st.markdown("---")
-    st.markdown("### 📈 Análisis de Mercados Financieros")
-    
-    if st.button("📊 Generar Gráfico del Ciclo Económico", type="primary"):
-        with st.spinner("Obteniendo datos macroeconómicos y generando gráficos..."):
-            
-            # ========== 1. DATOS MACROECONÓMICOS REALES ==========
-            st.markdown("### 📊 Indicadores Macroeconómicos")
-            
-            # Definir tickers para indicadores macro (usando proxies de yfinance)
-            indicadores_tickers = {
-                'PBI': '^MERV',  # Proxy usando MERVAL como indicador de actividad económica
-                'Inflación': '^VIX',  # Proxy usando VIX como indicador de incertidumbre
-                'Tasas de Interés': '^TNX',  # Treasury 10Y como proxy de tasas
-                'Empleo': '^DJI',  # Dow Jones como proxy de empleo/actividad
-                'Consumo': 'XLY',  # Consumer Discretionary ETF
-                'Inversión': 'XLK',  # Technology ETF como proxy de inversión
-                'Comercio Exterior': 'UUP',  # US Dollar Index
-                'Confianza': '^VIX'  # VIX como indicador de confianza
-            }
-            
-            # Función para obtener datos de empleo alternativos si yfinance falla
-            def obtener_datos_empleo_alternativos():
-                """Obtiene datos de empleo usando fuentes alternativas"""
-                try:
-                    # Intentar con diferentes proxies de empleo
-                    proxies_empleo = ['^DJI', '^GSPC', 'XLI']  # Dow Jones, S&P 500, Industrial ETF
-                    
-                    for proxy in proxies_empleo:
-                        try:
-                            datos = yf.download(proxy, period=periodo_analisis)['Close']
-                            if len(datos.dropna()) > 10:
-                                return datos
-                        except:
-                            continue
-                    
-                    # Si no se pueden obtener datos, generar datos simulados basados en tendencias económicas
-                    st.info("ℹ️ Generando datos de empleo simulados basados en tendencias económicas")
-                    
-                    # Crear serie temporal simulada
-                    fechas = pd.date_range(end=datetime.now(), periods=252, freq='D')
-                    # Simular datos de empleo con tendencia ligeramente positiva y volatilidad moderada
-                    np.random.seed(42)  # Para reproducibilidad
-                    tendencia = 0.0001  # Tendencia ligeramente positiva
-                    volatilidad = 0.015
-                    datos_simulados = []
-                    valor_inicial = 100
-                    
-                    for i in range(len(fechas)):
-                        if i == 0:
-                            datos_simulados.append(valor_inicial)
-                        else:
-                            cambio = np.random.normal(tendencia, volatilidad)
-                            nuevo_valor = datos_simulados[-1] * (1 + cambio)
-                            datos_simulados.append(nuevo_valor)
-                    
-                    return pd.Series(datos_simulados, index=fechas)
-                    
-                except Exception as e:
-                    st.warning(f"⚠️ Error obteniendo datos de empleo: {str(e)}")
-                    return None
-            
-            # Obtener datos históricos
-            datos_macro = {}
-            fechas_comunes = None
-            
-            try:
-                # Obtener datos para indicadores seleccionados
-                tickers_seleccionados = [indicadores_tickers[ind] for ind in indicadores_seleccionados if ind in indicadores_tickers]
-                
-                if tickers_seleccionados:
-                    # Descargar datos
-                    datos_raw = yf.download(tickers_seleccionados, period=periodo_analisis)['Close']
-                    
-                    # Procesar cada indicador
-                    for indicador in indicadores_seleccionados:
-                        if indicador in indicadores_tickers:
-                            ticker = indicadores_tickers[indicador]
-                            try:
-                                # Manejo especial para datos de empleo
-                                if indicador == 'Empleo':
-                                    serie = None
-                                    if ticker in datos_raw.columns:
-                                        serie = datos_raw[ticker].dropna()
-                                    
-                                    # Si no hay datos válidos, usar fuente alternativa
-                                    if serie is None or len(serie) < 10 or np.all(np.isnan(serie)):
-                                        st.info(f"🔄 Obteniendo datos alternativos para {indicador}")
-                                        serie = obtener_datos_empleo_alternativos()
-                                        if serie is None:
-                                            st.warning(f"⚠️ No se pudieron obtener datos para {indicador}")
-                                            continue
-                                else:
-                                    if ticker in datos_raw.columns:
-                                        serie = datos_raw[ticker].dropna()
-                                    else:
-                                        st.warning(f"⚠️ Ticker {ticker} no encontrado en los datos para {indicador}")
-                                        continue
-                                
-                                if len(serie) > 0:
-                                    # Verificar que hay datos válidos
-                                    if np.all(np.isnan(serie)) or len(serie) < 10:
-                                        st.warning(f"⚠️ Datos insuficientes para {indicador} ({ticker})")
-                                        continue
-                                    
-                                    # Normalizar serie (base 100)
-                                    serie_normalizada = (serie / serie.iloc[0]) * 100
-                                    
-                                    # Calcular métricas del ciclo
-                                    retornos = serie.pct_change().dropna()
-                                    momentum = (serie.iloc[-1] / serie.iloc[-63] - 1) * 100 if len(serie) >= 63 else 0
-                                    volatilidad = retornos.std() * np.sqrt(252) * 100 if len(retornos) > 0 else 0
-                                    
-                                    # Verificar que las métricas son válidas
-                                    if np.isnan(momentum) or np.isnan(volatilidad):
-                                        st.warning(f"⚠️ Métricas inválidas para {indicador}")
-                                        continue
-                                    
-                                    # Determinar fase del ciclo
-                                    if momentum > 5:
-                                        fase_ciclo = "Expansión"
-                                        color_fase = "green"
-                                    elif momentum > -5:
-                                        fase_ciclo = "Estabilización"
-                                        color_fase = "orange"
-                                    else:
-                                        fase_ciclo = "Contracción"
-                                        color_fase = "red"
-                                    
-                                    datos_macro[indicador] = {
-                                        'serie': serie_normalizada,
-                                        'momentum': momentum,
-                                        'volatilidad': volatilidad,
-                                        'fase_ciclo': fase_ciclo,
-                                        'color_fase': color_fase,
-                                        'valor_actual': serie.iloc[-1],
-                                        'valor_normalizado': serie_normalizada.iloc[-1]
-                                    }
-                                else:
-                                    st.warning(f"⚠️ No hay datos para {indicador} ({ticker})")
-                            except Exception as e:
-                                st.warning(f"⚠️ Error procesando {indicador}: {str(e)}")
-                                continue
-                    
-                    # Establecer fechas comunes para todos los indicadores
-                    if datos_macro:
-                        fechas_comunes = datos_macro[list(datos_macro.keys())[0]]['serie'].index
-                        for indicador in datos_macro:
-                            datos_macro[indicador]['serie'] = datos_macro[indicador]['serie'].reindex(fechas_comunes).fillna(method='ffill')
-                
-            except Exception as e:
-                st.error(f"Error obteniendo datos macroeconómicos: {e}")
-                return
-            
-            # ========== 2. GRÁFICO DEL CICLO ECONÓMICO ==========
-            if datos_macro:
-                st.markdown("### 📈 Visualización del Ciclo Económico")
-                
-                # Crear gráfico principal del ciclo
-                fig_ciclo = go.Figure()
-                
-                # Colores para las fases del ciclo
-                colores_fases = {
-                    'Expansión': 'green',
-                    'Estabilización': 'orange', 
-                    'Contracción': 'red'
-                }
-                
-                # Agregar cada indicador al gráfico
-                for indicador, datos in datos_macro.items():
-                    fig_ciclo.add_trace(go.Scatter(
-                        x=datos['serie'].index,
-                        y=datos['serie'].values,
-                        mode='lines+markers',
-                        name=f"{indicador} ({datos['fase_ciclo']})",
-                        line=dict(color=datos['color_fase'], width=2),
-                        marker=dict(size=4),
-                        hovertemplate=f'<b>{indicador}</b><br>' +
-                                    'Fecha: %{x}<br>' +
-                                    'Valor: %{y:.1f}<br>' +
-                                    f'Fase: {datos["fase_ciclo"]}<br>' +
-                                    f'Momentum: {datos["momentum"]:.1f}%<br>' +
-                                    '<extra></extra>'
-                    ))
-                
-                # Configurar layout
-                fig_ciclo.update_layout(
-                    title="Ciclo Económico Real - Indicadores Macroeconómicos",
-                    xaxis_title="Fecha",
-                    yaxis_title="Valor Normalizado (Base 100)",
-                    height=600,
-                    hovermode='x unified',
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
-                )
-                
-                # Agregar líneas de referencia para fases del ciclo
-                fig_ciclo.add_hline(y=100, line_dash="dash", line_color="gray", 
-                                  annotation_text="Línea Base", annotation_position="top right")
-                
-                st.plotly_chart(fig_ciclo, use_container_width=True)
-                
-                # ========== 3. ANÁLISIS DE CORRELACIÓN ENTRE INDICADORES ==========
-                st.markdown("### 🔗 Análisis de Correlación entre Indicadores")
-                
-                # Crear DataFrame de retornos para correlación
-                retornos_df = pd.DataFrame()
-                for indicador, datos in datos_macro.items():
-                    retornos_df[indicador] = datos['serie'].pct_change().dropna()
-                
-                if not retornos_df.empty and len(retornos_df.columns) > 1:
-                    # Matriz de correlaciones
-                    correlaciones = retornos_df.corr()
-                    
-                    # Análisis detallado de correlaciones
-                    st.markdown("#### 📊 Análisis Detallado de Correlaciones")
-                    
-                    # Identificar correlaciones significativas
-                    correlaciones_significativas = []
-                    for i in range(len(correlaciones.columns)):
-                        for j in range(i+1, len(correlaciones.columns)):
-                            valor_corr = correlaciones.iloc[i, j]
-                            if abs(valor_corr) > 0.3:  # Correlación moderada o fuerte
-                                correlaciones_significativas.append({
-                                    'Variable 1': correlaciones.columns[i],
-                                    'Variable 2': correlaciones.columns[j],
-                                    'Correlación': valor_corr,
-                                    'Tipo': 'Positiva' if valor_corr > 0 else 'Negativa',
-                                    'Fuerza': 'Fuerte' if abs(valor_corr) > 0.7 else 'Moderada' if abs(valor_corr) > 0.5 else 'Débil'
-                                })
-                    
-                    # Mostrar correlaciones significativas
-                    if correlaciones_significativas:
-                        st.markdown("**🔍 Correlaciones Significativas Detectadas:**")
-                        for corr in correlaciones_significativas:
-                            color = "green" if corr['Tipo'] == 'Positiva' else "red"
-                            st.markdown(f"• **{corr['Variable 1']} <-> {corr['Variable 2']}**: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})")
-                    
-                    # Análisis de divergencias y oportunidades de arbitraje
-                    st.markdown("#### ⚡ Análisis de Divergencias y Arbitraje")
-                    
-                    divergencias = []
-                    for i, indicador1 in enumerate(retornos_df.columns):
-                        for j, indicador2 in enumerate(retornos_df.columns):
-                            if i != j:
-                                # Calcular correlación histórica vs actual
-                                corr_historica = correlaciones.iloc[i, j]
-                                corr_reciente = retornos_df[indicador1].tail(30).corr(retornos_df[indicador2].tail(30))
-                                
-                                # Detectar divergencias significativas
-                                if abs(corr_historica - corr_reciente) > 0.3:
-                                    divergencias.append({
-                                        'Par': f"{indicador1} - {indicador2}",
-                                        'Correlación Histórica': corr_historica,
-                                        'Correlación Reciente': corr_reciente,
-                                        'Divergencia': corr_historica - corr_reciente,
-                                        'Oportunidad': 'Arbitraje' if abs(corr_historica - corr_reciente) > 0.5 else 'Monitoreo'
-                                    })
-                    
-                    if divergencias:
-                        st.markdown("**🚨 Divergencias Detectadas:**")
-                        for div in divergencias:
-                            st.markdown(f"• **{div['Par']}**: Histórica {div['Correlación Histórica']:.3f} → Reciente {div['Correlación Reciente']:.3f} (Δ: {div['Divergencia']:.3f}) - {div['Oportunidad']}")
-                    
-                    # Gráfico de correlaciones mejorado
-                    fig_corr = go.Figure(data=go.Heatmap(
-                        z=correlaciones.values,
-                        x=correlaciones.columns,
-                        y=correlaciones.columns,
-                        colorscale='RdBu',
-                        zmid=0,
-                        text=correlaciones.values.round(2),
-                        texttemplate="%{text}",
-                        textfont={"size": 12},
-                        hoverongaps=False,
-                        hovertemplate='<b>%{y} vs %{x}</b><br>' +
-                                    'Correlación: %{z:.3f}<br>' +
-                                    '<extra></extra>'
-                    ))
-                    
-                    fig_corr.update_layout(
-                        title="Matriz de Correlación entre Indicadores Macroeconómicos",
-                        width=700,
-                        height=600,
-                        xaxis_title="Variables",
-                        yaxis_title="Variables"
-                    )
-                    st.plotly_chart(fig_corr, use_container_width=True)
-                    
-                    # Explicación de correlaciones históricas
-                    st.markdown("#### 📚 Interpretación Histórica de Correlaciones")
-                    
-                    explicaciones_correlacion = {
-                        ('PBI', 'Inflación'): "Históricamente, el PBI y la inflación suelen tener correlación negativa en economías desarrolladas, pero en Argentina puede ser positiva debido a la indexación de precios.",
-                        ('PBI', 'Tasas de Interés'): "Correlación típicamente negativa: tasas altas frenan el crecimiento económico, tasas bajas lo estimulan.",
-                        ('Inflación', 'Tasas de Interés'): "Correlación positiva: el BCRA ajusta tasas para controlar la inflación.",
-                        ('Empleo', 'PBI'): "Correlación positiva: mayor actividad económica genera más empleo.",
-                        ('Consumo', 'PBI'): "Correlación positiva: el consumo es componente principal del PBI.",
-                        ('Inversión', 'Tasas de Interés'): "Correlación negativa: tasas altas desincentivan la inversión."
-                    }
-                    
-                    for (var1, var2), explicacion in explicaciones_correlacion.items():
-                        if var1 in correlaciones.columns and var2 in correlaciones.columns:
-                            corr_valor = correlaciones.loc[var1, var2]
-                            st.markdown(f"**{var1} <-> {var2}** (Correlación: {corr_valor:.3f}): {explicacion}")
-                    
-                    # Análisis de causalidad y lead-lag
-                    st.markdown("#### 🔄 Análisis de Causalidad y Lead-Lag")
-                    
-                    # Calcular correlaciones con diferentes lags
-                    lags_analysis = {}
-                    for indicador1 in retornos_df.columns:
-                        for indicador2 in retornos_df.columns:
-                            if indicador1 != indicador2:
-                                corr_lag1 = retornos_df[indicador1].corr(retornos_df[indicador2].shift(1))
-                                corr_lag2 = retornos_df[indicador1].corr(retornos_df[indicador2].shift(2))
-                                corr_lag3 = retornos_df[indicador1].corr(retornos_df[indicador2].shift(3))
-                                
-                                max_corr = max(abs(corr_lag1), abs(corr_lag2), abs(corr_lag3))
-                                if max_corr > 0.4:  # Solo mostrar correlaciones significativas
-                                    lags_analysis[f"{indicador1} → {indicador2}"] = {
-                                        'Lag 1': corr_lag1,
-                                        'Lag 2': corr_lag2,
-                                        'Lag 3': corr_lag3,
-                                        'Max Correlación': max_corr
-                                    }
-                    
-                    if lags_analysis:
-                        st.markdown("**⏰ Relaciones Temporales Detectadas:**")
-                        for par, lags in lags_analysis.items():
-                            st.markdown(f"• **{par}**: Max correlación {lags['Max Correlación']:.3f}")
-                    
-                    # Oportunidades de trading basadas en correlaciones
-                    st.markdown("#### 💰 Oportunidades de Trading Basadas en Correlaciones")
-                    
-                    oportunidades = []
-                    for corr in correlaciones_significativas:
-                        if corr['Fuerza'] in ['Fuerte', 'Moderada']:
-                            if corr['Tipo'] == 'Positiva':
-                                oportunidades.append(f"**{corr['Variable 1']} y {corr['Variable 2']}**: Correlación positiva fuerte ({corr['Correlación']:.3f}) - considerar pares de trading o cobertura.")
-                            else:
-                                oportunidades.append(f"**{corr['Variable 1']} y {corr['Variable 2']}**: Correlación negativa fuerte ({corr['Correlación']:.3f}) - oportunidad de diversificación y arbitraje.")
-                    
-                    if oportunidades:
-                        for op in oportunidades:
-                            st.markdown(f"• {op}")
-                
-                # ========== 4. RESUMEN DE FASES DEL CICLO ==========
-                st.markdown("### 📋 Resumen de Fases del Ciclo Económico")
-                
-                # Crear tabla de resumen
-                resumen_data = []
-                for indicador, datos in datos_macro.items():
-                    resumen_data.append({
-                        'Indicador': indicador,
-                        'Fase Actual': datos['fase_ciclo'],
-                        'Momentum (%)': f"{datos['momentum']:.1f}",
-                        'Volatilidad (%)': f"{datos['volatilidad']:.1f}",
-                        'Valor Actual': f"{datos['valor_actual']:.2f}",
-                        'Valor Normalizado': f"{datos['valor_normalizado']:.1f}"
-                    })
-                
-                df_resumen = pd.DataFrame(resumen_data)
-                st.dataframe(df_resumen, use_container_width=True)
-                
-                # ========== 5. ANÁLISIS DE TENDENCIAS Y PRONÓSTICOS ==========
-                if incluir_pronostico:
-                    st.markdown("### 🔮 Análisis de Tendencias y Proyecciones")
-                    
-                    # Calcular tendencias lineales
-                    tendencias = {}
-                    for indicador, datos in datos_macro.items():
-                        try:
-                            x = np.arange(len(datos['serie']))
-                            y = datos['serie'].values
-                            
-                            # Verificar que hay datos válidos
-                            if len(y) < 2 or np.all(np.isnan(y)) or np.all(y == y[0]):
-                                st.warning(f"⚠️ Datos insuficientes para calcular tendencia de {indicador}")
-                                continue
-                            
-                            # Eliminar valores NaN si los hay
-                            valid_mask = ~np.isnan(y)
-                            if not np.any(valid_mask):
-                                st.warning(f"⚠️ No hay datos válidos para {indicador}")
-                                continue
-                            
-                            x_valid = x[valid_mask]
-                            y_valid = y[valid_mask]
-                            
-                            if len(y_valid) < 2:
-                                st.warning(f"⚠️ Datos insuficientes para {indicador} después de limpiar NaN")
-                                continue
-                            
-                            # Ajuste lineal
-                            slope, intercept, r_value, p_value, std_err = stats.linregress(x_valid, y_valid)
-                            
-                            # Verificar que el ajuste fue exitoso
-                            if np.isnan(slope) or np.isnan(intercept):
-                                st.warning(f"⚠️ No se pudo calcular tendencia para {indicador}")
-                                continue
-                            
-                            # Proyección a 3 meses
-                            proyeccion_3m = slope * (len(x) + 63) + intercept
-                            
-                            # Verificar que la proyección es válida
-                            if np.isnan(proyeccion_3m):
-                                st.warning(f"⚠️ Proyección inválida para {indicador}")
-                                continue
-                            
-                            cambio_proyeccion = ((proyeccion_3m - datos['valor_normalizado']) / datos['valor_normalizado']) * 100
-                            
-                            tendencias[indicador] = {
-                                'pendiente': slope,
-                                'r_cuadrado': r_value**2,
-                                'proyeccion_3m': proyeccion_3m,
-                                'cambio_proyeccion': cambio_proyeccion,
-                                'tendencia': 'Alcista' if slope > 0 else 'Bajista'
-                            }
-                            
-                        except Exception as e:
-                            st.warning(f"⚠️ Error calculando tendencia para {indicador}: {str(e)}")
-                            continue
-                    
-                    # Mostrar proyecciones con explicaciones detalladas
-                    if tendencias:
-                        st.markdown("### 📈 Proyecciones a 3 Meses con Análisis Detallado")
-                        
-                        # Crear tabs para organizar mejor la información
-                        tab_proyecciones, tab_calidad, tab_explicaciones = st.tabs([
-                            "📊 Proyecciones", "📈 Calidad de Tendencias", "🔍 Explicaciones Detalladas"
-                        ])
-                        
-                        with tab_proyecciones:
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.markdown("**📈 Proyecciones a 3 meses**")
-                                for indicador, tendencia in tendencias.items():
-                                    try:
-                                        color_tendencia = "green" if tendencia['tendencia'] == 'Alcista' else "red"
-                                        st.metric(
-                                            indicador,
-                                            f"{tendencia['proyeccion_3m']:.1f}",
-                                            f"{tendencia['cambio_proyeccion']:+.1f}% ({tendencia['tendencia']})",
-                                            delta_color="normal" if tendencia['tendencia'] == 'Alcista' else "inverse"
-                                        )
-                                    except Exception as e:
-                                        st.warning(f"⚠️ Error mostrando proyección para {indicador}: {str(e)}")
-                            
-                            with col2:
-                                st.markdown("**📊 Calidad de las Tendencias**")
-                                for indicador, tendencia in tendencias.items():
-                                    try:
-                                        calidad = "Alta" if tendencia['r_cuadrado'] > 0.7 else "Media" if tendencia['r_cuadrado'] > 0.4 else "Baja"
-                                        st.metric(
-                                            f"{indicador} (R²)",
-                                            f"{tendencia['r_cuadrado']:.2f}",
-                                            calidad
-                                        )
-                                    except Exception as e:
-                                        st.warning(f"⚠️ Error mostrando calidad para {indicador}: {str(e)}")
-                        
-                        with tab_calidad:
-                            st.markdown("### 📊 Análisis de Calidad de Tendencias")
-                            
-                            # Crear DataFrame para análisis de calidad
-                            calidad_data = []
-                            for indicador, tendencia in tendencias.items():
-                                try:
-                                    calidad_data.append({
-                                        'Indicador': indicador,
-                                        'R²': f"{tendencia['r_cuadrado']:.3f}",
-                                        'Calidad': "Alta" if tendencia['r_cuadrado'] > 0.7 else "Media" if tendencia['r_cuadrado'] > 0.4 else "Baja",
-                                        'Pendiente': f"{tendencia['pendiente']:.4f}",
-                                        'Tendencia': tendencia['tendencia'],
-                                        'Proyección 3M': f"{tendencia['proyeccion_3m']:.1f}",
-                                        'Cambio %': f"{tendencia['cambio_proyeccion']:+.1f}%"
-                                    })
-                                except Exception as e:
-                                    st.warning(f"⚠️ Error procesando {indicador}: {str(e)}")
-                            
-                            if calidad_data:
-                                df_calidad = pd.DataFrame(calidad_data)
-                                st.dataframe(df_calidad, use_container_width=True)
-                                
-                                # Análisis de confiabilidad
-                                st.markdown("#### 🎯 Análisis de Confiabilidad")
-                                alta_confiabilidad = [d for d in calidad_data if d['Calidad'] == 'Alta']
-                                media_confiabilidad = [d for d in calidad_data if d['Calidad'] == 'Media']
-                                baja_confiabilidad = [d for d in calidad_data if d['Calidad'] == 'Baja']
-                                
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("Alta Confiabilidad", len(alta_confiabilidad))
-                                with col2:
-                                    st.metric("Media Confiabilidad", len(media_confiabilidad))
-                                with col3:
-                                    st.metric("Baja Confiabilidad", len(baja_confiabilidad))
-                        
-                        with tab_explicaciones:
-                            st.markdown("### 🔍 Explicaciones Detalladas de Cada Valor")
-                            
-                            for indicador, tendencia in tendencias.items():
-                                try:
-                                    with st.expander(f"📊 {indicador} - Análisis Detallado"):
-                                        col1, col2 = st.columns(2)
-                                        
-                                        with col1:
-                                            st.markdown("**📈 Métricas de Proyección**")
-                                            st.write(f"**Valor Proyectado:** {tendencia['proyeccion_3m']:.1f}")
-                                            st.write(f"**Cambio Esperado:** {tendencia['cambio_proyeccion']:+.1f}%")
-                                            st.write(f"**Dirección:** {tendencia['tendencia']}")
-                                            st.write(f"**Pendiente:** {tendencia['pendiente']:.4f}")
-                                        
-                                        with col2:
-                                            st.markdown("**📊 Métricas de Calidad**")
-                                            st.write(f"**R² (Coeficiente de Determinación):** {tendencia['r_cuadrado']:.3f}")
-                                            calidad = "Alta" if tendencia['r_cuadrado'] > 0.7 else "Media" if tendencia['r_cuadrado'] > 0.4 else "Baja"
-                                            st.write(f"**Calidad del Ajuste:** {calidad}")
-                                        
-                                        # Explicación del R²
-                                        st.markdown("**🔍 Interpretación del R²:**")
-                                        if tendencia['r_cuadrado'] > 0.7:
-                                            st.success(f"**Alta Confiabilidad ({tendencia['r_cuadrado']:.1%}):** La tendencia explica más del 70% de la variabilidad de los datos. Las proyecciones son muy confiables.")
-                                        elif tendencia['r_cuadrado'] > 0.4:
-                                            st.info(f"**Confiabilidad Media ({tendencia['r_cuadrado']:.1%}):** La tendencia explica entre 40-70% de la variabilidad. Las proyecciones son moderadamente confiables.")
-                                        else:
-                                            st.warning(f"**Baja Confiabilidad ({tendencia['r_cuadrado']:.1%}):** La tendencia explica menos del 40% de la variabilidad. Las proyecciones tienen baja confiabilidad.")
-                                        
-                                        # Explicación de la tendencia
-                                        st.markdown("**📈 Interpretación de la Tendencia:**")
-                                        if tendencia['tendencia'] == 'Alcista':
-                                            st.success(f"**Tendencia Alcista:** El indicador muestra una tendencia de crecimiento de {tendencia['pendiente']:.4f} unidades por período.")
-                                        else:
-                                            st.error(f"**Tendencia Bajista:** El indicador muestra una tendencia de decrecimiento de {abs(tendencia['pendiente']):.4f} unidades por período.")
-                                        
-                                        # Implicaciones económicas
-                                        st.markdown("**💡 Implicaciones Económicas:**")
-                                        if indicador == 'PBI':
-                                            if tendencia['tendencia'] == 'Alcista':
-                                                st.success("• **Crecimiento Económico:** Indica expansión de la actividad económica")
-                                                st.success("• **Empleo:** Probable mejora en el mercado laboral")
-                                                st.success("• **Consumo:** Mayor capacidad de consumo de las familias")
-                                            else:
-                                                st.warning("• **Desaceleración:** Indica contracción de la actividad económica")
-                                                st.warning("• **Empleo:** Posible deterioro del mercado laboral")
-                                                st.warning("• **Consumo:** Menor capacidad de consumo")
-                                        
-                                        elif indicador == 'Inflación':
-                                            if tendencia['tendencia'] == 'Alcista':
-                                                st.warning("• **Presión Inflacionaria:** Aumento de precios generalizados")
-                                                st.warning("• **Poder Adquisitivo:** Erosión del valor de la moneda")
-                                                st.warning("• **Tasas de Interés:** Probable suba de tasas por parte del BCRA")
-                                            else:
-                                                st.success("• **Estabilidad de Precios:** Control de la inflación")
-                                                st.success("• **Poder Adquisitivo:** Mantenimiento del valor de la moneda")
-                                                st.success("• **Tasas de Interés:** Posible baja de tasas")
-                                        
-                                        elif indicador == 'Tasas de Interés':
-                                            if tendencia['tendencia'] == 'Alcista':
-                                                st.warning("• **Política Monetaria Restrictiva:** Control de la inflación")
-                                                st.warning("• **Crédito:** Encarecimiento del financiamiento")
-                                                st.warning("• **Inversión:** Posible desaceleración de inversiones")
-                                            else:
-                                                st.success("• **Política Monetaria Expansiva:** Estimulación de la economía")
-                                                st.success("• **Crédito:** Abaratamiento del financiamiento")
-                                                st.success("• **Inversión:** Posible aumento de inversiones")
-                                        
-                                        elif indicador == 'Empleo':
-                                            if tendencia['tendencia'] == 'Alcista':
-                                                st.success("• **Mercado Laboral:** Mejora en la creación de empleos")
-                                                st.success("• **Consumo:** Mayor capacidad de gasto de las familias")
-                                                st.success("• **Economía:** Indicador de fortaleza económica")
-                                            else:
-                                                st.warning("• **Mercado Laboral:** Deterioro en la creación de empleos")
-                                                st.warning("• **Consumo:** Menor capacidad de gasto")
-                                                st.warning("• **Economía:** Indicador de debilidad económica")
-                                        
-                                        # Recomendaciones específicas
-                                        st.markdown("**🎯 Recomendaciones de Inversión:**")
-                                        if tendencia['r_cuadrado'] > 0.7:
-                                            st.success("**Alta Confiabilidad:** Puede basar decisiones de inversión en esta proyección")
-                                        elif tendencia['r_cuadrado'] > 0.4:
-                                            st.info("**Confiabilidad Media:** Use esta proyección como referencia, pero combine con otros indicadores")
-                                        else:
-                                            st.warning("**Baja Confiabilidad:** No base decisiones únicamente en esta proyección. Considere otros factores")
-                                        
-                                except Exception as e:
-                                    st.warning(f"⚠️ Error generando explicación para {indicador}: {str(e)}")
-                    else:
-                        st.warning("⚠️ No se pudieron calcular proyecciones para ningún indicador")
-                
-                # ========== 6. RECOMENDACIONES INTEGRADAS Y DETALLADAS ==========
-                st.markdown("### 💡 Recomendaciones Integradas de Inversión")
-                
-                # Crear tabs para organizar las recomendaciones
-                tab_diagnostico, tab_recomendaciones, tab_especificas = st.tabs([
-                    "🔍 Diagnóstico del Ciclo", "📊 Recomendaciones Generales", "🎯 Recomendaciones Específicas"
-                ])
-                
-                with tab_diagnostico:
-                    st.markdown("### 🔍 Diagnóstico Detallado del Ciclo Económico")
-                    
-                    # Contar fases
-                    fases_count = {}
-                    for datos in datos_macro.values():
-                        fase = datos['fase_ciclo']
-                        fases_count[fase] = fases_count.get(fase, 0) + 1
-                    
-                    # Determinar fase dominante
-                    fase_dominante = max(fases_count, key=fases_count.get) if fases_count else "Estabilización"
-                    
-                    # Calcular métricas adicionales para recomendaciones
-                    momentum_promedio = np.mean([d['momentum'] for d in datos_macro.values()])
-                    volatilidad_promedio = np.mean([d['volatilidad'] for d in datos_macro.values()])
-                    
-                    # Mostrar diagnóstico detallado
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Fase Dominante", fase_dominante)
-                        st.metric("Momentum Promedio", f"{momentum_promedio:.1f}%")
-                    
-                    with col2:
-                        st.metric("Volatilidad Promedio", f"{volatilidad_promedio:.1f}%")
-                        st.metric("Indicadores Analizados", len(datos_macro))
-                    
-                    with col3:
-                        # Calcular confianza del diagnóstico
-                        indicadores_consistentes = sum(1 for d in datos_macro.values() if d['fase_ciclo'] == fase_dominante)
-                        confianza_diagnostico = (indicadores_consistentes / len(datos_macro)) * 100
-                        st.metric("Confianza del Diagnóstico", f"{confianza_diagnostico:.0f}%")
-                    
-                    # Explicación del diagnóstico
-                    st.markdown("#### 📊 Explicación del Diagnóstico")
-                    
-                    if fase_dominante == "Expansión":
-                        st.success("**🚀 Fase de Expansión Económica Detectada**")
-                        st.markdown(f"""
-                        **¿Por qué se detectó esta fase?**
-                        - **Momentum promedio:** {momentum_promedio:.1f}% (positivo) - Los indicadores muestran crecimiento
-                        - **Volatilidad:** {volatilidad_promedio:.1f}% - Nivel de incertidumbre moderado
-                        - **Indicadores consistentes:** {indicadores_consistentes}/{len(datos_macro)} indicadores confirman la expansión
-                        - **Confianza del diagnóstico:** {confianza_diagnostico:.0f}% - Alta confiabilidad
-                        """)
-                        
-                    elif fase_dominante == "Contracción":
-                        st.warning("**⚠️ Fase de Contracción Económica Detectada**")
-                        st.markdown(f"""
-                        **¿Por qué se detectó esta fase?**
-                        - **Momentum promedio:** {momentum_promedio:.1f}% (negativo) - Los indicadores muestran decrecimiento
-                        - **Volatilidad:** {volatilidad_promedio:.1f}% - Nivel de incertidumbre alto
-                        - **Indicadores consistentes:** {indicadores_consistentes}/{len(datos_macro)} indicadores confirman la contracción
-                        - **Confianza del diagnóstico:** {confianza_diagnostico:.0f}% - Alta confiabilidad
-                        """)
-                        
-                    else:
-                        st.info("**⚖️ Fase de Estabilización Económica Detectada**")
-                        st.markdown(f"""
-                        **¿Por qué se detectó esta fase?**
-                        - **Momentum promedio:** {momentum_promedio:.1f}% (estable) - Los indicadores muestran estabilidad
-                        - **Volatilidad:** {volatilidad_promedio:.1f}% - Nivel de incertidumbre moderado
-                        - **Indicadores consistentes:** {indicadores_consistentes}/{len(datos_macro)} indicadores confirman la estabilización
-                        - **Confianza del diagnóstico:** {confianza_diagnostico:.0f}% - Confiabilidad moderada
-                        """)
-                    
-                    # Análisis de indicadores individuales
-                    st.markdown("#### 📈 Análisis por Indicador")
-                    for indicador, datos in datos_macro.items():
-                        with st.expander(f"📊 {indicador}"):
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(f"**Fase:** {datos['fase_ciclo']}")
-                                st.write(f"**Momentum:** {datos['momentum']:.1f}%")
-                                st.write(f"**Volatilidad:** {datos['volatilidad']:.1f}%")
-                            with col2:
-                                st.write(f"**Valor Actual:** {datos['valor_actual']:.2f}")
-                                st.write(f"**Valor Normalizado:** {datos['valor_normalizado']:.1f}")
-                                st.write(f"**Consistencia:** {'✅' if datos['fase_ciclo'] == fase_dominante else '❌'}")
-                
-                with tab_recomendaciones:
-                    st.markdown("### 📊 Recomendaciones Generales por Fase")
-                    
-                    if fase_dominante == "Expansión":
-                        st.success("**🚀 Estrategia para Fase de Expansión**")
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown("**📈 Recomendaciones Ofensivas:**")
-                            st.markdown("• **Exposición a Riesgo:** 60-70% en activos de riesgo")
-                            st.markdown("• **Sectores Favorables:** Tecnología, Consumo Discrecional, Financiero, Industrial")
-                            st.markdown("• **Estrategia:** Posicionamiento ofensivo con diversificación sectorial")
-                            st.markdown("• **Instrumentos:** Acciones de crecimiento, ETFs sectoriales, Bonos corporativos")
-                            st.markdown("• **Timing:** Mantener posiciones por 6-12 meses, rebalancear trimestralmente")
-                        
-                        with col2:
-                            st.markdown("**🎯 Justificación Económica:**")
-                            st.markdown("• **Crecimiento Económico:** Los indicadores muestran expansión sostenida")
-                            st.markdown("• **Confianza del Mercado:** Momentum positivo genera optimismo")
-                            st.markdown("• **Riesgo Controlado:** Volatilidad moderada permite exposición al riesgo")
-                            st.markdown("• **Oportunidades:** Sectores cíclicos se benefician del crecimiento")
-                            st.markdown("• **Timing:** Fase temprana de expansión permite capturar ganancias")
-                        
-                    elif fase_dominante == "Contracción":
-                        st.warning("**⚠️ Estrategia para Fase de Contracción**")
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown("**🛡️ Recomendaciones Defensivas:**")
-                            st.markdown("• **Exposición a Riesgo:** 30-40% en activos de riesgo")
-                            st.markdown("• **Sectores Defensivos:** Utilities, Consumo Básico, Healthcare, Telecomunicaciones")
-                            st.markdown("• **Estrategia:** Posicionamiento defensivo con activos refugio")
-                            st.markdown("• **Instrumentos:** Bonos del tesoro, Oro, ETFs defensivos, Dividendos")
-                            st.markdown("• **Timing:** Mantener posiciones defensivas hasta señales de recuperación")
-                        
-                        with col2:
-                            st.markdown("**🎯 Justificación Económica:**")
-                            st.markdown("• **Desaceleración:** Los indicadores muestran contracción económica")
-                            st.markdown("• **Alta Volatilidad:** Incertidumbre requiere posicionamiento defensivo")
-                            st.markdown("• **Preservación de Capital:** Prioridad sobre crecimiento en fases de contracción")
-                            st.markdown("• **Sectores Defensivos:** Menor sensibilidad a ciclos económicos")
-                            st.markdown("• **Timing:** Esperar señales claras de recuperación antes de aumentar riesgo")
-                        
-                    else:
-                        st.info("**⚖️ Estrategia para Fase de Estabilización**")
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown("**⚖️ Recomendaciones Equilibradas:**")
-                            st.markdown("• **Exposición a Riesgo:** 50-60% en activos de riesgo")
-                            st.markdown("• **Sectores Balanceados:** Mixto entre ofensivo y defensivo")
-                            st.markdown("• **Estrategia:** Diversificación equilibrada con enfoque en calidad")
-                            st.markdown("• **Instrumentos:** ETFs balanceados, Acciones de valor, Bonos de calidad")
-                            st.markdown("• **Timing:** Rebalancear mensualmente, monitorear señales de cambio de fase")
-                        
-                        with col2:
-                            st.markdown("**🎯 Justificación Económica:**")
-                            st.markdown("• **Transición:** Los indicadores muestran estabilidad con señales mixtas")
-                            st.markdown("• **Flexibilidad:** Posicionamiento equilibrado permite adaptarse a cambios")
-                            st.markdown("• **Calidad:** Enfoque en activos de calidad fundamental sólida")
-                            st.markdown("• **Diversificación:** Balance entre crecimiento y defensa")
-                            st.markdown("• **Timing:** Monitoreo activo para detectar cambios de fase")
-                
-                with tab_especificas:
-                    st.markdown("### 🎯 Recomendaciones Específicas por Contexto")
-                    
-                    # Recomendaciones basadas en correlaciones
-                    if 'correlaciones_significativas' in locals() and correlaciones_significativas:
-                        st.markdown("#### 🔗 Recomendaciones Basadas en Correlaciones")
-                        
-                        for corr in correlaciones_significativas:
-                            if corr['Fuerza'] in ['Fuerte', 'Moderada']:
-                                with st.expander(f"📊 {corr['Variable 1']} <-> {corr['Variable 2']} (r={corr['Correlación']:.3f})"):
-                                    if corr['Tipo'] == 'Positiva':
-                                        st.info(f"**Correlación Positiva Fuerte:** {corr['Correlación']:.3f}")
-                                        st.markdown("**Estrategia:** Considerar pares de trading o cobertura")
-                                        st.markdown("**Instrumentos:** ETFs sectoriales, opciones de cobertura")
-                                        st.markdown("**Timing:** Monitorear divergencias de la correlación histórica")
-                                    else:
-                                        st.warning(f"**Correlación Negativa Fuerte:** {corr['Correlación']:.3f}")
-                                        st.markdown("**Estrategia:** Oportunidad de diversificación y arbitraje")
-                                        st.markdown("**Instrumentos:** ETFs inversos, estrategias de pares")
-                                        st.markdown("**Timing:** Aprovechar divergencias temporales")
-                    
-                    # Recomendaciones específicas del contexto argentino
-                    st.markdown("#### 🇦🇷 Recomendaciones Específicas del Mercado Argentino")
-                    
-                    if datos_bcra:
-                        with st.expander("🏦 Contexto del BCRA"):
-                            st.markdown(f"""
-                            **📊 Datos Oficiales del BCRA:**
-                            - **Inflación Esperada:** {datos_bcra['inflacion_esperada']:.1f}% mensual
-                            - **Tasa de Política Monetaria:** {datos_bcra['tasa_politica']:.1f}% anual
-                            - **Reservas Internacionales:** {datos_bcra['reservas']:,.0f}M USD
-                            - **Crecimiento M2:** {datos_bcra['m2_crecimiento']:.1f}% anual
-                            """)
-                            
-                            st.markdown("**💡 Recomendaciones Específicas:**")
-                            st.markdown(f"• **Bonos CER:** Considerar bonos ajustables por inflación ({datos_bcra['inflacion_esperada']:.1f}% mensual)")
-                            st.markdown(f"• **Tasas de Interés:** Monitorear evolución de la tasa política ({datos_bcra['tasa_politica']:.1f}%)")
-                            st.markdown(f"• **Reservas:** Seguir evolución de reservas ({datos_bcra['reservas']:,.0f}M USD) para timing cambiario")
-                            st.markdown(f"• **M2:** Crecimiento monetario ({datos_bcra['m2_crecimiento']:.1f}%) puede generar presión inflacionaria")
-                    
-                    st.markdown("**🎯 Estrategias Locales Recomendadas:**")
-                    st.markdown("• **Instrumentos Locales:** Bonos CER, acciones defensivas, estrategias MEP/CCL")
-                    st.markdown("• **Gestión de Riesgo:** Mantener liquidez en USD, diversificar entre instrumentos locales e internacionales")
-                    st.markdown("• **Monitoreo:** Seguir indicadores del BCRA, inflación mensual, evolución del tipo de cambio")
-                    st.markdown("• **Timing:** Aprovechar oportunidades de arbitraje entre instrumentos locales e internacionales")
-                
-                # Nota: Las recomendaciones específicas ahora están organizadas en las pestañas de arriba
-                
-                # Análisis con IA si está disponible
-                if gemini_api_key:
-                    try:
-                        st.markdown("### 🤖 Análisis IA Avanzado del Ciclo Económico")
-                        
-                        # Preparar datos detallados para IA
-                        resumen_ciclo = f"""
-                        ANÁLISIS COMPLETO DEL CICLO ECONÓMICO ARGENTINO:
-                        
-                        **1. FASE DEL CICLO ECONÓMICO:**
-                        - Fase dominante: {fase_dominante}
-                        - Distribución de fases por indicador: {fases_count}
-                        - Momentum promedio: {np.mean([d['momentum'] for d in datos_macro.values()]):.1f}%
-                        - Volatilidad promedio: {np.mean([d['volatilidad'] for d in datos_macro.values()]):.1f}%
-                        
-                        **2. ANÁLISIS DE CORRELACIONES:**
-                        """
-                        
-                        # Agregar análisis detallado de correlaciones
-                        if 'correlaciones_significativas' in locals():
-                            resumen_ciclo += "\n**Correlaciones Significativas Detectadas:**\n"
-                            for corr in correlaciones_significativas:
-                                resumen_ciclo += f"- {corr['Variable 1']} <-> {corr['Variable 2']}: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})\n"
-                        
-                        if 'divergencias' in locals():
-                            resumen_ciclo += "\n**Divergencias y Oportunidades de Arbitraje:**\n"
-                            for div in divergencias:
-                                resumen_ciclo += f"- {div['Par']}: Histórica {div['Correlación Histórica']:.3f} → Reciente {div['Correlación Reciente']:.3f} (Δ: {div['Divergencia']:.3f})\n"
-                        
-                        # Agregar datos BCRA si están disponibles
-                        if datos_bcra:
-                            resumen_ciclo += f"""
-                        **3. DATOS OFICIALES DEL BCRA:**
-                        - Inflación esperada: {datos_bcra['inflacion_esperada']:.1f}% mensual
-                        - Tasa de política monetaria: {datos_bcra['tasa_politica']:.1f}% anual
-                        - Reservas internacionales: {datos_bcra['reservas']:,.0f}M USD
-                        - Crecimiento M2: {datos_bcra['m2_crecimiento']:.1f}% anual
-                        """
-                        
-                        # Agregar proyecciones si están disponibles
-                        if 'tendencias' in locals() and tendencias:
-                            resumen_ciclo += "\n**4. PROYECCIONES A 3 MESES:**\n"
-                            for indicador, tendencia in tendencias.items():
-                                try:
-                                    resumen_ciclo += f"- {indicador}: {tendencia['proyeccion_3m']:.1f} ({tendencia['cambio_proyeccion']:+.1f}%) - {tendencia['tendencia']} (R²: {tendencia['r_cuadrado']:.2f})\n"
-                                except Exception as e:
-                                    resumen_ciclo += f"- {indicador}: Error en proyección - {str(e)}\n"
-                        else:
-                            resumen_ciclo += "\n**4. PROYECCIONES A 3 MESES:** No disponibles - datos insuficientes\n"
-                        
-                        # Agregar análisis de causalidad si está disponible
-                        if 'lags_analysis' in locals():
-                            resumen_ciclo += "\n**5. RELACIONES TEMPORALES (CAUSALIDAD):**\n"
-                            for par, lags in lags_analysis.items():
-                                resumen_ciclo += f"- {par}: Max correlación {lags['Max Correlación']:.3f}\n"
-                        
-                        # Llamar a IA para análisis avanzado
-                        genai.configure(api_key=gemini_api_key)
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
-                        prompt = f"""
-                        Eres un analista económico experto en el mercado argentino. Analiza los siguientes datos y proporciona un análisis COMPLETO y DETALLADO:
-                        
-                        {resumen_ciclo}
-                        
-                        **REQUERIMIENTOS ESPECÍFICOS DEL ANÁLISIS:**
-                        
-                        1. **DIAGNÓSTICO DEL CICLO ECONÓMICO:**
-                           - Explica en qué fase del ciclo se encuentra Argentina y por qué
-                           - Analiza la coherencia entre los diferentes indicadores
-                           - Identifica contradicciones o señales mixtas
-                        
-                        2. **ANÁLISIS DE CORRELACIONES HISTÓRICAS:**
-                           - Explica el SIGNIFICADO ECONÓMICO de cada correlación detectada
-                           - ¿Por qué estas variables están correlacionadas históricamente?
-                           - ¿Qué factores económicos explican estas correlaciones?
-                           - ¿Cómo han evolucionado estas correlaciones en el contexto argentino?
-                        
-                        3. **INTERPRETACIÓN DE DIVERGENCIAS:**
-                           - Explica qué significan las divergencias detectadas
-                           - ¿Qué factores económicos pueden estar causando estas divergencias?
-                           - ¿Son señales de cambio estructural o temporal?
-                        
-                        4. **RECOMENDACIONES DE INVERSIÓN BASADAS EN CORRELACIONES:**
-                           - Estrategias específicas basadas en las correlaciones detectadas
-                           - Oportunidades de arbitraje entre instrumentos correlacionados
-                           - Estrategias de diversificación basadas en correlaciones negativas
-                           - Instrumentos financieros específicos recomendados
-                        
-                        5. **GESTIÓN DE RIESGO:**
-                           - Riesgos específicos del contexto argentino
-                           - Estrategias de cobertura basadas en correlaciones
-                           - Señales de alerta a monitorear
-                        
-                        6. **IMPACTO DE POLÍTICAS DEL BCRA:**
-                           - Cómo afectan las tasas de interés a las correlaciones
-                           - Impacto de la política monetaria en los mercados
-                           - Efectos de las reservas internacionales
-                        
-                        7. **HORIZONTE TEMPORAL Y TIMING:**
-                           - Cuándo implementar cada estrategia
-                           - Señales de entrada y salida
-                           - Duración recomendada de las posiciones
-                        
-                        8. **OPORTUNIDADES ESPECÍFICAS DEL MERCADO ARGENTINO:**
-                           - Instrumentos únicos del mercado local
-                           - Oportunidades de arbitraje MEP/CCL
-                           - Estrategias con bonos, acciones, y otros instrumentos
-                        
-                        **IMPORTANTE:** 
-                        - Explica el POR QUÉ de cada correlación y su significado económico
-                        - Proporciona recomendaciones CONCRETAS y ACCIONABLES
-                        - Considera el contexto específico argentino
-                        - Incluye análisis de riesgo-recompensa
-                        - Explica las limitaciones y riesgos de cada estrategia
-                        
-                        Responde en español de manera clara, detallada y práctica.
-                        """
-                        
-                        response = model.generate_content(prompt)
-                        
-                        # Mostrar el análisis de IA de manera estructurada
-                        st.markdown("#### 📊 Análisis IA Detallado")
-                        st.markdown(response.text)
-                        
-                        # Agregar sección de implementación práctica
-                        st.markdown("#### 🎯 Implementación Práctica de Estrategias")
-                        
-                        # Generar recomendaciones específicas basadas en el análisis
-                        if 'correlaciones_significativas' in locals() and correlaciones_significativas:
-                            st.markdown("**💡 Estrategias Basadas en Correlaciones Detectadas:**")
-                            
-                            for corr in correlaciones_significativas:
-                                if corr['Fuerza'] in ['Fuerte', 'Moderada']:
-                                    if corr['Tipo'] == 'Positiva':
-                                        st.markdown(f"• **{corr['Variable 1']} <-> {corr['Variable 2']}**: Correlación positiva fuerte - considerar estrategias de pares de trading")
-                                    else:
-                                        st.markdown(f"• **{corr['Variable 1']} <-> {corr['Variable 2']}**: Correlación negativa fuerte - oportunidad de diversificación y arbitraje")
-                        
-                        if 'divergencias' in locals() and divergencias:
-                            st.markdown("**⚡ Oportunidades de Arbitraje Detectadas:**")
-                            for div in divergencias:
-                                if div['Oportunidad'] == 'Arbitraje':
-                                    st.markdown(f"• **{div['Par']}**: Divergencia significativa - oportunidad de arbitraje")
-                        
-                    except Exception as e:
-                        st.warning(f"No se pudo generar análisis IA: {e}")
-                        st.error(f"Error detallado: {str(e)}")
-
-
-def recomendar_activos_por_estrategia_optimizada(token_acceso):
-    """
-    Sistema avanzado de recomendación de activos por estrategia con optimización Alpha/Beta
-    Analiza todos los activos de los paneles seleccionados y los clasifica según estrategias
-    """
-    st.subheader("🎯 Sistema de Recomendación de Activos por Estrategia")
-    st.markdown("Análisis completo de activos con optimización de estrategias Alpha y Beta")
-    
-    # Configuración de parámetros
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Menú desplegable para tipos de activos
-        paneles_activos = {
-            "Acciones": "Panel%20General",
-            "Bonos": "Bonos", 
-            "FCIs": "FCI",
-            "CEDEARs": "CEDEARs",
-            "ADRs": "ADRs",
-            "Títulos Públicos": "TitulosPublicos",
-            "Obligaciones Negociables": "ObligacionesNegociables"
-        }
-        
-        panel_seleccionado = st.selectbox(
-            "Panel de Activos:",
-            list(paneles_activos.keys()),
-            help="Seleccione el panel de activos a analizar"
+            "Período de análisis:",
+            ["Último mes", "Últimos 3 meses", "Últimos 6 meses", "Último año"],
+            index=2
         )
     
     with col2:
-        # Benchmarks disponibles
-        benchmarks_disponibles = {
-            "Merval": "^MERV",
-            "S&P 500": "^GSPC", 
-            "NASDAQ": "^IXIC",
-            "Dólar Blue": "USDBRL=X",
-            "Oro": "GC=F",
-            "Bitcoin": "BTC-USD",
-            "Bono AL30": "AL30D.BA",
-            "Bono GD30": "GD30D.BA"
-        }
+        st.subheader("📊 Métricas Rápidas")
         
-        benchmark_seleccionado = st.selectbox(
-            "Benchmark:",
-            list(benchmarks_disponibles.keys()),
-            help="Seleccione el benchmark de referencia"
-        )
-    
-    with col3:
-        # Estrategias de inversión
-        estrategias_inversion = {
-            "Index Tracker": {"beta_target": 1.0, "alpha_target": 0.0, "desc": "Réplica exacta del benchmark"},
-            "Traditional Long-Only": {"beta_target": 1.0, "alpha_target": 0.05, "desc": "Supera al mercado con retornos no correlacionados"},
-            "Smart Beta": {"beta_target": 0.8, "alpha_target": 0.03, "desc": "Ajusta dinámicamente el beta según condiciones del mercado"},
-            "Hedge Fund": {"beta_target": 0.0, "alpha_target": 0.08, "desc": "Retornos absolutos no correlacionados con el mercado"},
-            "Defensive": {"beta_target": 0.5, "alpha_target": 0.02, "desc": "Protección contra caídas del mercado"},
-            "Growth": {"beta_target": 1.2, "alpha_target": 0.06, "desc": "Exposición a activos de crecimiento"},
-            "Value": {"beta_target": 0.9, "alpha_target": 0.04, "desc": "Enfoque en activos infravalorados"},
-            "Momentum": {"beta_target": 1.1, "alpha_target": 0.07, "desc": "Seguimiento de tendencias"}
-        }
+        # Calcular métricas básicas
+        valor_total = sum(float(activo.get('valorMercado', 0)) for activo in portafolio)
+        activos_count = len(portafolio)
         
-        estrategia_seleccionada = st.selectbox(
-            "Estrategia:",
-            list(estrategias_inversion.keys()),
-            help="Seleccione la estrategia de inversión"
-        )
-    
-    # Parámetros adicionales
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        periodo_analisis = st.selectbox(
-            "Período de Análisis:",
-            ["6mo", "1y", "2y", "5y"],
-            index=1,
-            help="Período histórico para el análisis"
-        )
+        st.metric("Valor Total", f"${valor_total:,.2f}")
+        st.metric("Cantidad de Activos", activos_count)
         
-        ordenamiento = st.selectbox(
-            "Ordenar por:",
-            ["Alpha (Mejor)", "Beta (Óptimo)", "Sharpe Ratio", "R²", "Volatilidad (Menor)"],
-            help="Criterio de ordenamiento de activos"
-        )
-    
-    with col2:
-        min_alpha = st.number_input(
-            "Alpha Mínimo (%):",
-            min_value=-50.0,
-            max_value=50.0,
-            value=0.0,
-            step=0.5,
-            help="Filtro de alpha mínimo anualizado"
-        )
+        # Distribución por tipo
+        tipos_activo = {}
+        for activo in portafolio:
+            tipo = activo.get('tipoActivo', 'Otro')
+            valor = float(activo.get('valorMercado', 0))
+            tipos_activo[tipo] = tipos_activo.get(tipo, 0) + valor
         
-        max_volatilidad = st.number_input(
-            "Volatilidad Máxima (%):",
-            min_value=5.0,
-            max_value=100.0,
-            value=50.0,
-            step=1.0,
-            help="Filtro de volatilidad máxima anualizada"
-        )
+        if tipos_activo:
+            tipo_principal = max(tipos_activo, key=tipos_activo.get)
+            st.metric("Tipo Principal", tipo_principal)
     
-    # Botón de ejecución
-    if st.button("🚀 Ejecutar Análisis Completo", type="primary"):
-        try:
-            with st.spinner("🔄 Obteniendo datos históricos..."):
-                # ========== 1. OBTENER TODOS LOS ACTIVOS DEL PANEL ==========
-                st.markdown("### 📊 Obteniendo Activos del Panel")
+    # Generar informe
+    if st.button("🚀 Generar Informe IA", type="primary", use_container_width=True):
+        with st.spinner("Generando informe inteligente..."):
+            
+            # Crear tabs para diferentes secciones del informe
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📈 Análisis General", 
+                "⚖️ Gestión de Riesgo", 
+                "🎯 Recomendaciones",
+                "📊 Visualizaciones"
+            ])
+            
+            with tab1:
+                st.subheader("📈 Análisis General del Portafolio")
                 
-                # Obtener todos los activos del panel
-                activos_panel = obtener_tickers_por_panel(
-                    token_acceso, 
-                    [paneles_activos[panel_seleccionado]], 
-                    pais='Argentina'
-                )
-                
-                if not activos_panel:
-                    st.error("❌ No se pudieron obtener activos del panel seleccionado")
-                    return
-                
-                # Mostrar progreso
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                st.success(f"✅ Se encontraron {len(activos_panel)} activos en el panel {panel_seleccionado}")
-                
-                # ========== 2. OBTENER DATOS HISTÓRICOS ==========
-                st.markdown("### 📈 Obteniendo Datos Históricos")
-                
-                # Calcular fechas
-                fecha_hasta = datetime.now()
-                if periodo_analisis == "6mo":
-                    fecha_desde = fecha_hasta - timedelta(days=180)
-                elif periodo_analisis == "1y":
-                    fecha_desde = fecha_hasta - timedelta(days=365)
-                elif periodo_analisis == "2y":
-                    fecha_desde = fecha_hasta - timedelta(days=730)
-                else:  # 5y
-                    fecha_desde = fecha_hasta - timedelta(days=1825)
-                
-                # Obtener datos históricos de TODOS los activos
-                datos_activos = {}
-                activos_exitosos = []
-                
-                for i, activo in enumerate(activos_panel):
-                    try:
-                        status_text.text(f"📊 Procesando {activo} ({i+1}/{len(activos_panel)})")
-                        progress_bar.progress((i + 1) / len(activos_panel))
-                        
-                        df_activo = obtener_serie_historica_iol(
-                            token_acceso,
-                            "Buenos Aires",
-                            activo,
-                            fecha_desde.strftime("%Y-%m-%d"),
-                            fecha_hasta.strftime("%Y-%m-%d"),
-                            "Ajustada"
-                        )
-                        
-                        if df_activo is not None and not df_activo.empty:
-                            datos_activos[activo] = df_activo
-                            activos_exitosos.append(activo)
-                        else:
-                            st.warning(f"⚠️ Sin datos para {activo}")
-                            
-                    except Exception as e:
-                        st.warning(f"⚠️ Error obteniendo datos de {activo}: {str(e)}")
-                
-                st.success(f"✅ Se obtuvieron datos de {len(activos_exitosos)} activos")
-                
-                # ========== 3. OBTENER DATOS DEL BENCHMARK ==========
-                st.markdown("### 📊 Obteniendo Datos del Benchmark")
-                
-                try:
-                    benchmark_symbol = benchmarks_disponibles[benchmark_seleccionado]
-                    benchmark_data = yf.download(
-                        benchmark_symbol,
-                        start=fecha_desde,
-                        end=fecha_hasta,
-                        progress=False
-                    )
-                    
-                    if benchmark_data.empty:
-                        st.error(f"❌ No se pudieron obtener datos del benchmark {benchmark_symbol}")
-                        return
-                        
-                    st.success(f"✅ Datos del benchmark {benchmark_seleccionado} obtenidos")
-                    
-                except Exception as e:
-                    st.error(f"❌ Error obteniendo datos del benchmark: {str(e)}")
-                    return
-                
-                # ========== 4. CALCULAR MÉTRICAS CAPM PARA TODOS LOS ACTIVOS ==========
-                st.markdown("### 📊 Calculando Métricas CAPM")
-                
-                # Preparar datos del benchmark
-                benchmark_returns = benchmark_data['Adj Close'].pct_change().dropna()
-                
-                # Calcular métricas CAPM para cada activo
-                resultados_capm = []
-                
-                for simbolo, df_activo in datos_activos.items():
-                    try:
-                        # Obtener precios de cierre
-                        if 'ultimoPrecio' in df_activo.columns:
-                            precios_activo = df_activo['ultimoPrecio']
-                        elif 'precio' in df_activo.columns:
-                            precios_activo = df_activo['precio']
-                        else:
-                            continue
-                        
-                        # Calcular retornos
-                        retornos_activo = precios_activo.pct_change().dropna()
-                        
-                        # Alinear fechas
-                        retornos_alineados = pd.concat([retornos_activo, benchmark_returns], axis=1).dropna()
-                        
-                        if len(retornos_alineados) < 30:  # Mínimo de datos
-                            continue
-                        
-                        activo_returns = retornos_alineados.iloc[:, 0]
-                        benchmark_returns_aligned = retornos_alineados.iloc[:, 1]
-                        
-                        # Calcular métricas CAPM
-                        # Beta
-                        cov_matrix = np.cov(activo_returns, benchmark_returns_aligned)
-                        beta = cov_matrix[0, 1] / cov_matrix[1, 1] if cov_matrix[1, 1] != 0 else 0
-                        
-                        # Alpha (anualizado)
-                        alpha_diario = np.mean(activo_returns - beta * benchmark_returns_aligned)
-                        alpha_anualizado = (1 + alpha_diario) ** 252 - 1
-                        
-                        # R²
-                        correlation = np.corrcoef(activo_returns, benchmark_returns_aligned)[0, 1]
-                        r_squared = correlation ** 2
-                        
-                        # Volatilidad anualizada
-                        volatilidad = np.std(activo_returns) * np.sqrt(252)
-                        
-                        # Sharpe Ratio (asumiendo tasa libre de riesgo = 0)
-                        sharpe = np.mean(activo_returns) / np.std(activo_returns) * np.sqrt(252) if np.std(activo_returns) != 0 else 0
-                        
-                        # Clasificar estrategia según métricas
-                        estrategia_clasificada = clasificar_estrategia_por_metricas(
-                            alpha_anualizado, beta, sharpe, volatilidad, estrategias_inversion
-                        )
-                        
-                        # Calcular score de optimización para la estrategia seleccionada
-                        score_optimizacion = calcular_score_optimizacion(
-                            alpha_anualizado, beta, sharpe, volatilidad,
-                            estrategias_inversion[estrategia_seleccionada]
-                        )
-                        
-                        resultados_capm.append({
-                            'Activo': simbolo,
-                            'Alpha': alpha_anualizado,
-                            'Beta': beta,
-                            'R²': r_squared,
-                            'Volatilidad': volatilidad,
-                            'Sharpe': sharpe,
-                            'Estrategia': estrategia_clasificada,
-                            'Score_Optimizacion': score_optimizacion
-                        })
-                        
-                    except Exception as e:
-                        st.warning(f"⚠️ Error calculando métricas para {simbolo}: {str(e)}")
-                
-                if not resultados_capm:
-                    st.error("❌ No se pudieron calcular métricas para ningún activo")
-                    return
-                
-                # ========== 5. FILTRAR Y ORDENAR RESULTADOS ==========
-                st.markdown("### 🎯 Filtrando y Ordenando Resultados")
-                
-                # Crear DataFrame
-                df_capm = pd.DataFrame(resultados_capm)
-                
-                # Aplicar filtros
-                df_filtrado = df_capm[
-                    (df_capm['Alpha'] >= min_alpha / 100) &
-                    (df_capm['Volatilidad'] <= max_volatilidad / 100)
-                ].copy()
-                
-                # Ordenar según criterio seleccionado
-                if ordenamiento == "Alpha (Mejor)":
-                    df_filtrado = df_filtrado.sort_values('Alpha', ascending=False)
-                elif ordenamiento == "Beta (Óptimo)":
-                    # Ordenar por proximidad al beta objetivo de la estrategia
-                    beta_objetivo = estrategias_inversion[estrategia_seleccionada]["beta_target"]
-                    df_filtrado['Distancia_Beta'] = abs(df_filtrado['Beta'] - beta_objetivo)
-                    df_filtrado = df_filtrado.sort_values('Distancia_Beta')
-                elif ordenamiento == "Sharpe Ratio":
-                    df_filtrado = df_filtrado.sort_values('Sharpe', ascending=False)
-                elif ordenamiento == "R²":
-                    df_filtrado = df_filtrado.sort_values('R²', ascending=False)
-                elif ordenamiento == "Volatilidad (Menor)":
-                    df_filtrado = df_filtrado.sort_values('Volatilidad')
-                
-                # Ordenar también por score de optimización
-                df_filtrado = df_filtrado.sort_values('Score_Optimizacion', ascending=False)
-                
-                # ========== 6. CLASIFICAR POR ESTRATEGIAS ==========
-                st.markdown("### 🎯 Clasificación por Estrategias")
-                
-                # Clasificar estrategias
-                estrategias_clasificadas = {}
-                for estrategia in estrategias_inversion.keys():
-                    activos_estrategia = df_filtrado[df_filtrado['Estrategia'] == estrategia]
-                    if not activos_estrategia.empty:
-                        estrategias_clasificadas[estrategia] = activos_estrategia
-                
-                # ========== 7. MOSTRAR RESULTADOS ==========
-                st.markdown("### 📋 Resultados del Análisis")
-                
-                # Métricas resumidas
-                col1, col2, col3, col4 = st.columns(4)
+                # Análisis de composición
+                col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.metric("Total Activos Analizados", len(df_capm))
-                    st.metric("Activos con Alpha > 0", len(df_capm[df_capm['Alpha'] > 0]))
+                    st.write("**Composición por Tipo de Activo:**")
+                    if tipos_activo:
+                        # Crear gráfico de torta
+                        fig = go.Figure(data=[go.Pie(
+                            labels=list(tipos_activo.keys()),
+                            values=list(tipos_activo.values()),
+                            hole=0.3
+                        )])
+                        fig.update_layout(title="Distribución del Portafolio")
+                        st.plotly_chart(fig, use_container_width=True)
                 
                 with col2:
-                    st.metric("Activos Defensivos (Beta < 0.8)", len(df_capm[df_capm['Beta'] < 0.8]))
-                    st.metric("Activos de Crecimiento (Beta > 1.2)", len(df_capm[df_capm['Beta'] > 1.2]))
-                
-                with col3:
-                    st.metric("Activos con Sharpe > 1", len(df_capm[df_capm['Sharpe'] > 1]))
-                    st.metric("Activos con R² > 0.5", len(df_capm[df_capm['R²'] > 0.5]))
-                
-                with col4:
-                    st.metric("Activos Filtrados", len(df_filtrado))
-                    st.metric("Estrategias Encontradas", len(estrategias_clasificadas))
-                
-                # ========== 8. RECOMENDACIONES ESPECÍFICAS ==========
-                st.markdown("### 💡 Recomendaciones Específicas")
-                
-                # Encontrar mejores activos para la estrategia seleccionada
-                activos_estrategia_seleccionada = df_filtrado[
-                    df_filtrado['Estrategia'] == estrategia_seleccionada
-                ]
-                
-                if not activos_estrategia_seleccionada.empty:
-                    st.success(f"✅ **Top 5 Activos para {estrategia_seleccionada}:**")
+                    st.write("**Top 5 Activos por Valor:**")
+                    activos_ordenados = sorted(portafolio, key=lambda x: float(x.get('valorMercado', 0)), reverse=True)
                     
-                    # Mostrar top 5 activos
-                    top_5 = activos_estrategia_seleccionada.head(5)
-                    
-                    for i, (_, activo) in enumerate(top_5.iterrows()):
-                        col1, col2, col3 = st.columns([2, 1, 1])
+                    for i, activo in enumerate(activos_ordenados[:5], 1):
+                        simbolo = activo.get('simbolo', 'N/A')
+                        valor = float(activo.get('valorMercado', 0))
+                        porcentaje = (valor / valor_total * 100) if valor_total > 0 else 0
                         
-                        with col1:
-                            st.markdown(f"**{i+1}. {activo['Activo']}**")
-                            st.markdown(f"*{estrategias_inversion[estrategia_seleccionada]['desc']}*")
-                        
-                        with col2:
-                            st.metric("Alpha", f"{activo['Alpha']:.2%}")
-                            st.metric("Beta", f"{activo['Beta']:.2f}")
-                        
-                        with col3:
-                            st.metric("Sharpe", f"{activo['Sharpe']:.2f}")
-                            st.metric("Score", f"{activo['Score_Optimizacion']:.2f}")
-                        
-                        st.markdown("---")
-                else:
-                    st.warning(f"⚠️ No se encontraron activos que coincidan exactamente con la estrategia '{estrategia_seleccionada}'")
-                    
-                    # Mostrar estrategias alternativas
-                    st.info("**Estrategias alternativas disponibles:**")
-                    for estrategia, activos in estrategias_clasificadas.items():
-                        if not activos.empty:
-                            st.markdown(f"• **{estrategia}**: {len(activos)} activos")
+                        st.write(f"{i}. **{simbolo}** - ${valor:,.2f} ({porcentaje:.1f}%)")
+            
+            with tab2:
+                st.subheader("⚖️ Análisis de Riesgo")
                 
-                # ========== 9. VISUALIZACIONES ==========
-                st.markdown("### 📊 Visualizaciones")
-                
-                # Crear pestañas para diferentes visualizaciones
-                tab1, tab2, tab3, tab4 = st.tabs([
-                    "🎯 Distribución Alpha-Beta", 
-                    "📈 Ranking de Activos", 
-                    "🏷️ Clasificación por Estrategias",
-                    "📊 Métricas Comparativas"
-                ])
-                
-                with tab1:
-                    # Gráfico de dispersión Alpha vs Beta
-                    fig_scatter = go.Figure()
+                # Calcular métricas de riesgo
+                if "Análisis de Riesgo" in analisis_opciones:
                     
-                    # Colorear por estrategia
-                    for estrategia in estrategias_clasificadas.keys():
-                        activos_estrategia = estrategias_clasificadas[estrategia]
-                        fig_scatter.add_trace(go.Scatter(
-                            x=activos_estrategia['Beta'],
-                            y=activos_estrategia['Alpha'],
-                            mode='markers',
-                            name=estrategia,
-                            text=activos_estrategia['Activo'],
-                            hovertemplate='<b>%{text}</b><br>' +
-                                        'Alpha: %{y:.2%}<br>' +
-                                        'Beta: %{x:.2f}<br>' +
-                                        'Sharpe: %{customdata:.2f}<extra></extra>',
-                            customdata=activos_estrategia['Sharpe']
-                        ))
+                    # Concentración del portafolio
+                    concentracion = {}
+                    for activo in portafolio:
+                        simbolo = activo.get('simbolo', 'N/A')
+                        valor = float(activo.get('valorMercado', 0))
+                        concentracion[simbolo] = valor
                     
-                    # Agregar líneas de referencia
-                    fig_scatter.add_hline(y=0, line_dash="dash", line_color="gray")
-                    fig_scatter.add_vline(x=1, line_dash="dash", line_color="gray")
+                    # Top concentraciones
+                    top_concentraciones = sorted(concentracion.items(), key=lambda x: x[1], reverse=True)[:5]
                     
-                    # Marcar el punto objetivo de la estrategia seleccionada
-                    target_alpha = estrategias_inversion[estrategia_seleccionada]["alpha_target"]
-                    target_beta = estrategias_inversion[estrategia_seleccionada]["beta_target"]
-                    
-                    fig_scatter.add_trace(go.Scatter(
-                        x=[target_beta],
-                        y=[target_alpha],
-                        mode='markers',
-                        name=f'Objetivo {estrategia_seleccionada}',
-                        marker=dict(symbol='star', size=15, color='red'),
-                        showlegend=True
-                    ))
-                    
-                    fig_scatter.update_layout(
-                        title="Distribución Alpha vs Beta por Estrategia",
-                        xaxis_title="Beta",
-                        yaxis_title="Alpha Anualizado",
-                        height=600
-                    )
-                    
-                    st.plotly_chart(fig_scatter, use_container_width=True)
-                
-                with tab2:
-                    # Tabla de ranking
-                    st.markdown(f"**Top 20 Activos Ordenados por {ordenamiento}**")
-                    
-                    # Formatear DataFrame para mostrar
-                    df_mostrar = df_filtrado.head(20).copy()
-                    df_mostrar['Alpha'] = df_mostrar['Alpha'].apply(lambda x: f"{x:.2%}")
-                    df_mostrar['Beta'] = df_mostrar['Beta'].apply(lambda x: f"{x:.2f}")
-                    df_mostrar['R²'] = df_mostrar['R²'].apply(lambda x: f"{x:.2f}")
-                    df_mostrar['Volatilidad'] = df_mostrar['Volatilidad'].apply(lambda x: f"{x:.2%}")
-                    df_mostrar['Sharpe'] = df_mostrar['Sharpe'].apply(lambda x: f"{x:.2f}")
-                    df_mostrar['Score_Optimizacion'] = df_mostrar['Score_Optimizacion'].apply(lambda x: f"{x:.2f}")
-                    
-                    st.dataframe(
-                        df_mostrar[['Activo', 'Alpha', 'Beta', 'Sharpe', 'R²', 'Volatilidad', 'Estrategia', 'Score_Optimizacion']],
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                
-                with tab3:
-                    # Gráfico de barras por estrategia
-                    estrategia_counts = df_filtrado['Estrategia'].value_counts()
-                    
-                    fig_bars = go.Figure(data=[
-                        go.Bar(
-                            x=estrategia_counts.index,
-                            y=estrategia_counts.values,
-                            text=estrategia_counts.values,
-                            textposition='auto',
-                        )
-                    ])
-                    
-                    fig_bars.update_layout(
-                        title="Distribución de Activos por Estrategia",
-                        xaxis_title="Estrategia",
-                        yaxis_title="Número de Activos",
-                        height=500
-                    )
-                    
-                    st.plotly_chart(fig_bars, use_container_width=True)
-                    
-                    # Mostrar detalles por estrategia
-                    for estrategia, activos in estrategias_clasificadas.items():
-                        with st.expander(f"📊 {estrategia} ({len(activos)} activos)"):
-                            if not activos.empty:
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.markdown("**Mejores activos:**")
-                                    top_3 = activos.head(3)
-                                    for _, activo in top_3.iterrows():
-                                        st.markdown(f"• **{activo['Activo']}**: Alpha {activo['Alpha']:.2%}, Beta {activo['Beta']:.2f}")
-                                
-                                with col2:
-                                    st.markdown("**Estadísticas:**")
-                                    st.markdown(f"• Alpha promedio: {activos['Alpha'].mean():.2%}")
-                                    st.markdown(f"• Beta promedio: {activos['Beta'].mean():.2f}")
-                                    st.markdown(f"• Sharpe promedio: {activos['Sharpe'].mean():.2f}")
-                
-                with tab4:
-                    # Métricas comparativas
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        # Box plot de Alpha por estrategia
-                        fig_box_alpha = go.Figure()
-                        
-                        for estrategia in estrategias_clasificadas.keys():
-                            activos_estrategia = estrategias_clasificadas[estrategia]
-                            fig_box_alpha.add_trace(go.Box(
-                                y=activos_estrategia['Alpha'],
-                                name=estrategia,
-                                boxpoints='outliers'
-                            ))
-                        
-                        fig_box_alpha.update_layout(
-                            title="Distribución de Alpha por Estrategia",
-                            yaxis_title="Alpha Anualizado",
-                            height=400
-                        )
-                        
-                        st.plotly_chart(fig_box_alpha, use_container_width=True)
+                        st.write("**Concentración por Activo:**")
+                        for simbolo, valor in top_concentraciones:
+                            porcentaje = (valor / valor_total * 100) if valor_total > 0 else 0
+                            color = "🔴" if porcentaje > 20 else "🟡" if porcentaje > 10 else "🟢"
+                            st.write(f"{color} {simbolo}: {porcentaje:.1f}%")
                     
                     with col2:
-                        # Box plot de Beta por estrategia
-                        fig_box_beta = go.Figure()
+                        st.write("**Alertas de Riesgo:**")
                         
-                        for estrategia in estrategias_clasificadas.keys():
-                            activos_estrategia = estrategias_clasificadas[estrategia]
-                            fig_box_beta.add_trace(go.Box(
-                                y=activos_estrategia['Beta'],
-                                name=estrategia,
-                                boxpoints='outliers'
-                            ))
+                        # Verificar concentración excesiva
+                        max_concentracion = max(concentracion.values()) if concentracion else 0
+                        max_porcentaje = (max_concentracion / valor_total * 100) if valor_total > 0 else 0
                         
-                        fig_box_beta.update_layout(
-                            title="Distribución de Beta por Estrategia",
-                            yaxis_title="Beta",
-                            height=400
-                        )
+                        if max_porcentaje > 30:
+                            st.error(f"⚠️ Concentración excesiva: {max_porcentaje:.1f}% en un solo activo")
+                        elif max_porcentaje > 20:
+                            st.warning(f"⚠️ Concentración alta: {max_porcentaje:.1f}% en un solo activo")
+                        else:
+                            st.success("✅ Concentración diversificada")
                         
-                        st.plotly_chart(fig_box_beta, use_container_width=True)
+                        # Verificar diversificación
+                        if len(portafolio) < 5:
+                            st.warning("⚠️ Portafolio poco diversificado")
+                        else:
+                            st.success(f"✅ Buena diversificación: {len(portafolio)} activos")
+            
+            with tab3:
+                st.subheader("🎯 Recomendaciones IA")
                 
-                # ========== 10. RECOMENDACIONES FINALES ==========
-                st.markdown("### 🎯 Recomendaciones Finales")
-                
-                # Resumen ejecutivo
-                st.markdown(f"""
-                **📋 Resumen del Análisis:**
-                - **Panel analizado**: {panel_seleccionado}
-                - **Benchmark**: {benchmark_seleccionado}
-                - **Estrategia objetivo**: {estrategia_seleccionada}
-                - **Activos analizados**: {len(df_capm)}
-                - **Activos filtrados**: {len(df_filtrado)}
-                - **Estrategias encontradas**: {len(estrategias_clasificadas)}
-                """)
-                
-                # Recomendaciones específicas
-                if not activos_estrategia_seleccionada.empty:
-                    mejor_activo = activos_estrategia_seleccionada.iloc[0]
+                if "Recomendaciones de Rebalanceo" in analisis_opciones:
                     
-                    st.success(f"""
-                    **🏆 Mejor Activo para {estrategia_seleccionada}:**
-                    - **Activo**: {mejor_activo['Activo']}
-                    - **Alpha**: {mejor_activo['Alpha']:.2%}
-                    - **Beta**: {mejor_activo['Beta']:.2f}
-                    - **Sharpe Ratio**: {mejor_activo['Sharpe']:.2f}
-                    - **Score de Optimización**: {mejor_activo['Score_Optimizacion']:.2f}
-                    """)
+                    # Análisis básico de recomendaciones
+                    recomendaciones = []
+                    
+                    # Verificar concentración
+                    if max_concentracion > valor_total * 0.3:
+                        recomendaciones.append({
+                            "tipo": "🔴 Crítica",
+                            "titulo": "Reducir concentración",
+                            "descripcion": f"El activo más concentrado representa el {max_porcentaje:.1f}% del portafolio. Considere diversificar."
+                        })
+                    
+                    # Verificar diversificación
+                    if len(portafolio) < 5:
+                        recomendaciones.append({
+                            "tipo": "🟡 Importante",
+                            "titulo": "Aumentar diversificación",
+                            "descripcion": "Considere agregar más activos para mejorar la diversificación del portafolio."
+                        })
+                    
+                    # Verificar tipos de activos
+                    if len(tipos_activo) < 3:
+                        recomendaciones.append({
+                            "tipo": "🟡 Importante",
+                            "titulo": "Diversificar tipos de activos",
+                            "descripcion": "El portafolio está concentrado en pocos tipos de activos. Considere agregar diferentes clases de activos."
+                        })
+                    
+                    # Mostrar recomendaciones
+                    if recomendaciones:
+                        for rec in recomendaciones:
+                            with st.expander(f"{rec['tipo']} {rec['titulo']}"):
+                                st.write(rec['descripcion'])
+                    else:
+                        st.success("✅ No se detectaron problemas críticos en el portafolio")
+                    
+                    # Recomendaciones generales
+                    st.subheader("💡 Sugerencias de Mejora")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Estrategias Sugeridas:**")
+                        st.write("• Rebalanceo trimestral")
+                        st.write("• Monitoreo de correlaciones")
+                        st.write("• Evaluación de liquidez")
+                        st.write("• Análisis de volatilidad")
+                    
+                    with col2:
+                        st.write("**Próximos Pasos:**")
+                        st.write("• Revisar asignación por sector")
+                        st.write("• Evaluar exposición cambiaria")
+                        st.write("• Considerar activos defensivos")
+                        st.write("• Planificar horizonte temporal")
+            
+            with tab4:
+                st.subheader("📊 Visualizaciones Avanzadas")
                 
-                # Advertencias y consideraciones
-                st.markdown("""
-                **⚠️ Consideraciones Importantes:**
-                - Los resultados se basan en datos históricos y no garantizan rendimientos futuros
-                - Considere la liquidez y el volumen de operación de los activos recomendados
-                - Diversifique su cartera para reducir el riesgo específico
-                - Monitoree regularmente el rendimiento y ajuste según sea necesario
-                """)
+                if "Análisis de Correlaciones" in analisis_opciones:
+                    st.write("**Análisis de Correlaciones entre Activos:**")
+                    
+                    # Crear matriz de correlaciones simulada (en un caso real se usarían datos históricos)
+                    if len(portafolio) > 1:
+                        # Simular correlaciones (en implementación real se calcularían con datos históricos)
+                        simbolos = [activo.get('simbolo', f'Activo_{i}') for i, activo in enumerate(portafolio[:5])]
+                        
+                        # Matriz de correlación simulada
+                        np.random.seed(42)
+                        correlaciones = np.random.rand(len(simbolos), len(simbolos))
+                        correlaciones = (correlaciones + correlaciones.T) / 2
+                        np.fill_diagonal(correlaciones, 1)
+                        
+                        fig = go.Figure(data=go.Heatmap(
+                            z=correlaciones,
+                            x=simbolos,
+                            y=simbolos,
+                            colorscale='RdBu',
+                            zmid=0
+                        ))
+                        fig.update_layout(title="Matriz de Correlaciones")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Se necesitan al menos 2 activos para analizar correlaciones")
                 
-        except Exception as e:
-            st.error(f"❌ Error en el análisis: {str(e)}")
-            st.exception(e)
-
-
-def clasificar_estrategia_por_metricas(alpha, beta, sharpe, volatilidad, estrategias_inversion):
-    """
-    Clasifica un activo según sus métricas en una estrategia de inversión
-    """
-    mejor_estrategia = None
-    mejor_score = -float('inf')
+                if "Predicción de Tendencias" in analisis_opciones:
+                    st.write("**Análisis de Tendencias:**")
+                    
+                    # Gráfico de evolución del valor del portafolio (simulado)
+                    fechas = pd.date_range(start='2024-01-01', end='2024-12-31', freq='M')
+                    valores_simulados = np.cumsum(np.random.randn(len(fechas)) * 0.02 + 0.01) * valor_total + valor_total
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=fechas,
+                        y=valores_simulados,
+                        mode='lines+markers',
+                        name='Valor del Portafolio'
+                    ))
+                    fig.update_layout(
+                        title="Evolución Simulada del Portafolio",
+                        xaxis_title="Fecha",
+                        yaxis_title="Valor ($)"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
     
-    for estrategia, parametros in estrategias_inversion.items():
-        # Calcular score de proximidad a los parámetros objetivo
-        alpha_diff = abs(alpha - parametros["alpha_target"])
-        beta_diff = abs(beta - parametros["beta_target"])
-        
-        # Score basado en proximidad a objetivos (menor diferencia = mejor score)
-        score = -(alpha_diff + beta_diff) + sharpe * 0.1  # Bonus por Sharpe ratio
-        
-        if score > mejor_score:
-            mejor_score = score
-            mejor_estrategia = estrategia
-    
-    return mejor_estrategia
-
-
-def calcular_score_optimizacion(alpha, beta, sharpe, volatilidad, parametros_estrategia):
-    """
-    Calcula un score de optimización para un activo según los parámetros de una estrategia
-    """
-    # Parámetros objetivo
-    alpha_target = parametros_estrategia["alpha_target"]
-    beta_target = parametros_estrategia["beta_target"]
-    
-    # Calcular proximidad a objetivos
-    alpha_proximity = 1 / (1 + abs(alpha - alpha_target))
-    beta_proximity = 1 / (1 + abs(beta - beta_target))
-    
-    # Bonus por Sharpe ratio (mayor = mejor)
-    sharpe_bonus = max(0, sharpe) * 0.1
-    
-    # Penalización por volatilidad excesiva
-    volatilidad_penalty = max(0, volatilidad - 0.3) * 0.5  # Penalizar volatilidad > 30%
-    
-    # Score final
-    score = alpha_proximity * 0.4 + beta_proximity * 0.4 + sharpe_bonus - volatilidad_penalty
-    
-    return score
-
+    # Información adicional
+    st.divider()
+    st.info("💡 **Nota:** Este informe utiliza análisis básico de datos. Para análisis más avanzado, considere proporcionar una clave API de Gemini.")
 
 if __name__ == "__main__":
     main()
