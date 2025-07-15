@@ -4859,13 +4859,13 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
             
             # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS ==========
             st.markdown("### 📈 Variables Económicas de Argentina Datos")
+            
+            try:
+                # Inicializar ArgentinaDatos
+                ad = ArgentinaDatos()
                 
-                try:
-                    # Inicializar ArgentinaDatos
-                    ad = ArgentinaDatos()
-                    
-                    # Obtener análisis económico completo
-                    economic_analysis = ad.get_economic_analysis()
+                # Obtener análisis económico completo
+                economic_analysis = ad.get_economic_analysis()
                     
                     if economic_analysis['data']:
                         # Mostrar resumen del análisis económico
