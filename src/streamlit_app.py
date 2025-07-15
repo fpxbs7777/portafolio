@@ -4645,6 +4645,7 @@ def main():
                         if st.session_state.cliente_seleccionado:
                             st.divider()
                             st.subheader("📊 Análisis CAPM del Portafolio")
+                            st.warning("Análisis CAPM del portafolio en desarrollo. Próximamente disponible.")
                     
                     with tab5:
                         st.subheader("🎯 Análisis CAPM Interactivo")
@@ -4737,16 +4738,12 @@ def main():
                     - Análisis de factores de riesgo  
                     - Simulaciones de Monte Carlo  
                     - Estrategias de cobertura
+                    - Proyecciones de rendimiento
+                    - Datos de Mercado
+                    - Cotizaciones MEP en tiempo real  
+                    - Tasas de caución actualizadas  
+                    - Estado de cuenta consolidado
                     """)
-                - Proyecciones de rendimiento  
-                """)
-            with cols[2]:
-                st.markdown("""
-                **💱 Datos de Mercado**  
-                - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
-                - Estado de cuenta consolidado  
-                """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
