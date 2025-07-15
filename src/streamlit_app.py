@@ -4106,7 +4106,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "📈 Ciclo Económico", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4147,6 +4147,25 @@ def main():
                             mostrar_analisis_capm_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
                 else:
                     st.warning("Por favor inicie sesión para acceder al análisis intermarket")
+
+            elif opcion == "📈 Ciclo Económico":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    # Configuración de API key para IA
+                    if 'GEMINI_API_KEY' not in st.session_state:
+                        st.session_state.GEMINI_API_KEY = ''
+                    
+                    gemini_key = st.text_input(
+                        "🔑 API Key Gemini (opcional)",
+                        value=st.session_state.GEMINI_API_KEY,
+                        type="password",
+                        help="Para análisis IA avanzado del ciclo económico"
+                    )
+                    st.session_state.GEMINI_API_KEY = gemini_key
+                    
+                    # Llamar a la función de graficar ciclo económico
+                    graficar_ciclo_economico_real(st.session_state.token_acceso, gemini_key)
+                else:
+                    st.warning("Por favor inicie sesión para acceder al análisis del ciclo económico")
 
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
@@ -5699,6 +5718,340 @@ def mostrar_analisis_capm_portafolio(token_acceso, id_cliente):
         
     except Exception as e:
         st.error(f"Error en el análisis CAPM del portafolio: {str(e)}")
+
+
+def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
+    """
+    Grafica el ciclo económico real usando datos macroeconómicos.
+    Incluye indicadores como PBI, inflación, tasas, empleo, etc.
+    """
+    st.markdown("---")
+    st.subheader("📈 Ciclo Económico Real - Análisis Macroeconómico")
+    
+    # Configuración de parámetros
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        periodo_analisis = st.selectbox(
+            "Período de análisis",
+            ["1y", "2y", "5y", "10y"],
+            index=1,
+            help="Período para el análisis del ciclo económico"
+        )
+    with col2:
+        indicadores_seleccionados = st.multiselect(
+            "Indicadores a analizar",
+            ["PBI", "Inflación", "Tasas de Interés", "Empleo", "Consumo", "Inversión", "Comercio Exterior", "Confianza"],
+            default=["PBI", "Inflación", "Tasas de Interés", "Empleo"],
+            help="Seleccionar indicadores macroeconómicos"
+        )
+    with col3:
+        incluir_pronostico = st.checkbox(
+            "Incluir pronóstico",
+            value=True,
+            help="Incluir proyecciones de tendencia"
+        )
+    
+    if st.button("📊 Generar Gráfico del Ciclo Económico", type="primary"):
+        with st.spinner("Obteniendo datos macroeconómicos y generando gráficos..."):
+            
+            # ========== 1. DATOS MACROECONÓMICOS REALES ==========
+            st.markdown("### 📊 Indicadores Macroeconómicos")
+            
+            # Definir tickers para indicadores macro (usando proxies de yfinance)
+            indicadores_tickers = {
+                'PBI': '^MERV',  # Proxy usando MERVAL como indicador de actividad económica
+                'Inflación': '^VIX',  # Proxy usando VIX como indicador de incertidumbre
+                'Tasas de Interés': '^TNX',  # Treasury 10Y como proxy de tasas
+                'Empleo': '^DJI',  # Dow Jones como proxy de empleo/actividad
+                'Consumo': 'XLY',  # Consumer Discretionary ETF
+                'Inversión': 'XLK',  # Technology ETF como proxy de inversión
+                'Comercio Exterior': 'UUP',  # US Dollar Index
+                'Confianza': '^VIX'  # VIX como indicador de confianza
+            }
+            
+            # Obtener datos históricos
+            datos_macro = {}
+            fechas_comunes = None
+            
+            try:
+                # Obtener datos para indicadores seleccionados
+                tickers_seleccionados = [indicadores_tickers[ind] for ind in indicadores_seleccionados if ind in indicadores_tickers]
+                
+                if tickers_seleccionados:
+                    # Descargar datos
+                    datos_raw = yf.download(tickers_seleccionados, period=periodo_analisis)['Close']
+                    
+                    # Procesar cada indicador
+                    for indicador in indicadores_seleccionados:
+                        if indicador in indicadores_tickers:
+                            ticker = indicadores_tickers[indicador]
+                            if ticker in datos_raw.columns:
+                                serie = datos_raw[ticker].dropna()
+                                if len(serie) > 0:
+                                    # Normalizar serie (base 100)
+                                    serie_normalizada = (serie / serie.iloc[0]) * 100
+                                    
+                                    # Calcular métricas del ciclo
+                                    retornos = serie.pct_change().dropna()
+                                    momentum = (serie.iloc[-1] / serie.iloc[-63] - 1) * 100 if len(serie) >= 63 else 0
+                                    volatilidad = retornos.std() * np.sqrt(252) * 100
+                                    
+                                    # Determinar fase del ciclo
+                                    if momentum > 5:
+                                        fase_ciclo = "Expansión"
+                                        color_fase = "green"
+                                    elif momentum > -5:
+                                        fase_ciclo = "Estabilización"
+                                        color_fase = "orange"
+                                    else:
+                                        fase_ciclo = "Contracción"
+                                        color_fase = "red"
+                                    
+                                    datos_macro[indicador] = {
+                                        'serie': serie_normalizada,
+                                        'momentum': momentum,
+                                        'volatilidad': volatilidad,
+                                        'fase_ciclo': fase_ciclo,
+                                        'color_fase': color_fase,
+                                        'valor_actual': serie.iloc[-1],
+                                        'valor_normalizado': serie_normalizada.iloc[-1]
+                                    }
+                    
+                    # Establecer fechas comunes para todos los indicadores
+                    if datos_macro:
+                        fechas_comunes = datos_macro[list(datos_macro.keys())[0]]['serie'].index
+                        for indicador in datos_macro:
+                            datos_macro[indicador]['serie'] = datos_macro[indicador]['serie'].reindex(fechas_comunes).fillna(method='ffill')
+                
+            except Exception as e:
+                st.error(f"Error obteniendo datos macroeconómicos: {e}")
+                return
+            
+            # ========== 2. GRÁFICO DEL CICLO ECONÓMICO ==========
+            if datos_macro:
+                st.markdown("### 📈 Visualización del Ciclo Económico")
+                
+                # Crear gráfico principal del ciclo
+                fig_ciclo = go.Figure()
+                
+                # Colores para las fases del ciclo
+                colores_fases = {
+                    'Expansión': 'green',
+                    'Estabilización': 'orange', 
+                    'Contracción': 'red'
+                }
+                
+                # Agregar cada indicador al gráfico
+                for indicador, datos in datos_macro.items():
+                    fig_ciclo.add_trace(go.Scatter(
+                        x=datos['serie'].index,
+                        y=datos['serie'].values,
+                        mode='lines+markers',
+                        name=f"{indicador} ({datos['fase_ciclo']})",
+                        line=dict(color=datos['color_fase'], width=2),
+                        marker=dict(size=4),
+                        hovertemplate=f'<b>{indicador}</b><br>' +
+                                    'Fecha: %{x}<br>' +
+                                    'Valor: %{y:.1f}<br>' +
+                                    f'Fase: {datos["fase_ciclo"]}<br>' +
+                                    f'Momentum: {datos["momentum"]:.1f}%<br>' +
+                                    '<extra></extra>'
+                    ))
+                
+                # Configurar layout
+                fig_ciclo.update_layout(
+                    title="Ciclo Económico Real - Indicadores Macroeconómicos",
+                    xaxis_title="Fecha",
+                    yaxis_title="Valor Normalizado (Base 100)",
+                    height=600,
+                    hovermode='x unified',
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    )
+                )
+                
+                # Agregar líneas de referencia para fases del ciclo
+                fig_ciclo.add_hline(y=100, line_dash="dash", line_color="gray", 
+                                  annotation_text="Línea Base", annotation_position="top right")
+                
+                st.plotly_chart(fig_ciclo, use_container_width=True)
+                
+                # ========== 3. ANÁLISIS DE CORRELACIÓN ENTRE INDICADORES ==========
+                st.markdown("### 🔗 Análisis de Correlación entre Indicadores")
+                
+                # Crear DataFrame de retornos para correlación
+                retornos_df = pd.DataFrame()
+                for indicador, datos in datos_macro.items():
+                    retornos_df[indicador] = datos['serie'].pct_change().dropna()
+                
+                if not retornos_df.empty and len(retornos_df.columns) > 1:
+                    # Matriz de correlaciones
+                    correlaciones = retornos_df.corr()
+                    
+                    # Gráfico de correlaciones
+                    fig_corr = go.Figure(data=go.Heatmap(
+                        z=correlaciones.values,
+                        x=correlaciones.columns,
+                        y=correlaciones.columns,
+                        colorscale='RdBu',
+                        zmid=0,
+                        text=correlaciones.values.round(2),
+                        texttemplate="%{text}",
+                        textfont={"size": 12},
+                        hoverongaps=False
+                    ))
+                    
+                    fig_corr.update_layout(
+                        title="Correlación entre Indicadores Macroeconómicos",
+                        width=600,
+                        height=500
+                    )
+                    st.plotly_chart(fig_corr, use_container_width=True)
+                
+                # ========== 4. RESUMEN DE FASES DEL CICLO ==========
+                st.markdown("### 📋 Resumen de Fases del Ciclo Económico")
+                
+                # Crear tabla de resumen
+                resumen_data = []
+                for indicador, datos in datos_macro.items():
+                    resumen_data.append({
+                        'Indicador': indicador,
+                        'Fase Actual': datos['fase_ciclo'],
+                        'Momentum (%)': f"{datos['momentum']:.1f}",
+                        'Volatilidad (%)': f"{datos['volatilidad']:.1f}",
+                        'Valor Actual': f"{datos['valor_actual']:.2f}",
+                        'Valor Normalizado': f"{datos['valor_normalizado']:.1f}"
+                    })
+                
+                df_resumen = pd.DataFrame(resumen_data)
+                st.dataframe(df_resumen, use_container_width=True)
+                
+                # ========== 5. ANÁLISIS DE TENDENCIAS Y PRONÓSTICOS ==========
+                if incluir_pronostico:
+                    st.markdown("### 🔮 Análisis de Tendencias y Proyecciones")
+                    
+                    # Calcular tendencias lineales
+                    tendencias = {}
+                    for indicador, datos in datos_macro.items():
+                        x = np.arange(len(datos['serie']))
+                        y = datos['serie'].values
+                        
+                        # Ajuste lineal
+                        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+                        
+                        # Proyección a 3 meses
+                        proyeccion_3m = slope * (len(x) + 63) + intercept
+                        cambio_proyeccion = ((proyeccion_3m - datos['valor_normalizado']) / datos['valor_normalizado']) * 100
+                        
+                        tendencias[indicador] = {
+                            'pendiente': slope,
+                            'r_cuadrado': r_value**2,
+                            'proyeccion_3m': proyeccion_3m,
+                            'cambio_proyeccion': cambio_proyeccion,
+                            'tendencia': 'Alcista' if slope > 0 else 'Bajista'
+                        }
+                    
+                    # Mostrar proyecciones
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**📈 Proyecciones a 3 meses**")
+                        for indicador, tendencia in tendencias.items():
+                            color_tendencia = "green" if tendencia['tendencia'] == 'Alcista' else "red"
+                            st.metric(
+                                indicador,
+                                f"{tendencia['proyeccion_3m']:.1f}",
+                                f"{tendencia['cambio_proyeccion']:+.1f}% ({tendencia['tendencia']})",
+                                delta_color="normal" if tendencia['tendencia'] == 'Alcista' else "inverse"
+                            )
+                    
+                    with col2:
+                        st.markdown("**📊 Calidad de las Tendencias**")
+                        for indicador, tendencia in tendencias.items():
+                            calidad = "Alta" if tendencia['r_cuadrado'] > 0.7 else "Media" if tendencia['r_cuadrado'] > 0.4 else "Baja"
+                            st.metric(
+                                f"{indicador} (R²)",
+                                f"{tendencia['r_cuadrado']:.2f}",
+                                calidad
+                            )
+                
+                # ========== 6. RECOMENDACIONES BASADAS EN EL CICLO ==========
+                st.markdown("### 💡 Recomendaciones de Inversión Basadas en el Ciclo")
+                
+                # Contar fases
+                fases_count = {}
+                for datos in datos_macro.values():
+                    fase = datos['fase_ciclo']
+                    fases_count[fase] = fases_count.get(fase, 0) + 1
+                
+                # Determinar fase dominante
+                fase_dominante = max(fases_count, key=fases_count.get) if fases_count else "Estabilización"
+                
+                # Generar recomendaciones
+                if fase_dominante == "Expansión":
+                    st.success("🚀 **Fase de Expansión Económica Detectada**")
+                    st.write("• **Recomendación:** Mantener exposición a activos de riesgo")
+                    st.write("• **Sectores favorables:** Tecnología, Consumo Discrecional, Financiero")
+                    st.write("• **Estrategia:** Posicionamiento ofensivo con diversificación")
+                    
+                elif fase_dominante == "Contracción":
+                    st.warning("⚠️ **Fase de Contracción Económica Detectada**")
+                    st.write("• **Recomendación:** Reducir exposición a activos de riesgo")
+                    st.write("• **Sectores defensivos:** Utilities, Consumo Básico, Healthcare")
+                    st.write("• **Estrategia:** Posicionamiento defensivo con activos refugio")
+                    
+                else:
+                    st.info("⚖️ **Fase de Estabilización Económica Detectada**")
+                    st.write("• **Recomendación:** Mantener equilibrio en el portafolio")
+                    st.write("• **Sectores balanceados:** Mixto entre ofensivo y defensivo")
+                    st.write("• **Estrategia:** Diversificación equilibrada")
+                
+                # Análisis con IA si está disponible
+                if gemini_api_key:
+                    try:
+                        st.markdown("### 🤖 Análisis IA del Ciclo Económico")
+                        
+                        # Preparar datos para IA
+                        resumen_ciclo = f"""
+                        Análisis del ciclo económico actual:
+                        - Fase dominante: {fase_dominante}
+                        - Indicadores analizados: {', '.join(indicadores_seleccionados)}
+                        - Distribución de fases: {fases_count}
+                        - Momentum promedio: {np.mean([d['momentum'] for d in datos_macro.values()]):.1f}%
+                        """
+                        
+                        # Llamar a IA para análisis
+                        genai.configure(api_key=gemini_api_key)
+                        model = genai.GenerativeModel('gemini-pro')
+                        
+                        prompt = f"""
+                        Analiza el siguiente ciclo económico y proporciona recomendaciones de inversión específicas:
+                        
+                        {resumen_ciclo}
+                        
+                        Proporciona:
+                        1. Diagnóstico del ciclo económico actual
+                        2. Recomendaciones específicas de activos/sectores
+                        3. Estrategias de gestión de riesgo
+                        4. Horizonte temporal recomendado
+                        5. Señales de alerta a monitorear
+                        
+                        Responde en español de manera clara y práctica.
+                        """
+                        
+                        response = model.generate_content(prompt)
+                        st.write(response.text)
+                        
+                    except Exception as e:
+                        st.warning(f"No se pudo generar análisis IA: {e}")
+            
+            else:
+                st.error("No se pudieron obtener datos macroeconómicos suficientes para el análisis")
+
 
 if __name__ == "__main__":
     main()
