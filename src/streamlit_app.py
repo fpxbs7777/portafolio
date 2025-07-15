@@ -5211,9 +5211,6 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
             'correlaciones_significativas': correlaciones_significativas
         }
 
-        return resultados
-                            })
-
         return {
             'correlaciones': correlaciones,
             'volatilidades': volatilidades,
@@ -5221,7 +5218,12 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
             'riesgos': riesgos,
             'sugerencias': sugerencias,
             'df_merged': df_merged,
-            'graficos_correlacion': correlaciones_significativas
+            'correlaciones_significativas': correlaciones_significativas
+        }
+    except Exception as e:
+        print(f"Error en analisis_global_posicionamiento: {str(e)}")
+        return {
+            'error': f"Error en el análisis: {str(e)}"
         }
     except Exception as e:
         print(f"Error en analisis_global_posicionamiento: {str(e)}")
