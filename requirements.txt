@@ -14,7 +14,4 @@ httpx
 google.generativeai
 markdown2
 seaborn
-Flask
-requests
-pandas
-python-doten
+
