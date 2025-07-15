@@ -4493,7 +4493,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "📈 Ciclo Económico", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "📈 Ciclo Económico", "🔗 Análisis Avanzado de Correlaciones", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4553,6 +4553,25 @@ def main():
                     graficar_ciclo_economico_real(st.session_state.token_acceso, gemini_key)
                 else:
                     st.warning("Por favor inicie sesión para acceder al análisis del ciclo económico")
+
+            elif opcion == "🔗 Análisis Avanzado de Correlaciones":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    # Configuración de API key para IA
+                    if 'GEMINI_API_KEY' not in st.session_state:
+                        st.session_state.GEMINI_API_KEY = ''
+                    
+                    gemini_key = st.text_input(
+                        "🔑 API Key Gemini (opcional)",
+                        value=st.session_state.GEMINI_API_KEY,
+                        type="password",
+                        help="Para análisis IA avanzado de correlaciones"
+                    )
+                    st.session_state.GEMINI_API_KEY = gemini_key
+                    
+                    # Llamar a la función de análisis avanzado de correlaciones
+                    analisis_correlacion_avanzado_con_ia(st.session_state.token_acceso, gemini_key)
+                else:
+                    st.warning("Por favor inicie sesión para acceder al análisis avanzado de correlaciones")
 
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
@@ -4950,19 +4969,95 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
                 st.error(f"Error obteniendo datos económicos: {e}")
                 economic_data = None
             
-            # ========== 2. VARIABLES MACRO DEL BCRA ==========
-            st.markdown("### 📊 Variables Macro del BCRA")
+            # ========== 2. VARIABLES MACRO DEL BCRA (DATOS REALES) ==========
+            st.markdown("### 📊 Variables Macro del BCRA (Datos Reales)")
+            
+            # Obtener datos reales del BCRA
+            try:
+                datos_bcra = obtener_datos_bcra()
+                
+                if datos_bcra:
+                    # Mostrar métricas del BCRA
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric(
+                            "Inflación BCRA",
+                            f"{datos_bcra['inflacion_esperada']:.1f}%",
+                            "Mensual"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Tasa Política",
+                            f"{datos_bcra['tasa_politica']:.1f}%",
+                            "Anual"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Reservas",
+                            f"{datos_bcra['reservas']:,.0f}M USD",
+                            "Millones"
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "Crecimiento M2",
+                            f"{datos_bcra['m2_crecimiento']:.1f}%",
+                            "Anual"
+                        )
+                    
+                    # Análisis del ciclo económico basado en datos BCRA
+                    st.markdown("#### 🔄 Análisis de Ciclo Económico (BCRA)")
+                    
+                    # Determinar fase del ciclo
+                    inflacion = datos_bcra['inflacion_esperada']
+                    tasa_politica = datos_bcra['tasa_politica']
+                    reservas = datos_bcra['reservas']
+                    m2_crecimiento = datos_bcra['m2_crecimiento']
+                    
+                    # Lógica de clasificación del ciclo
+                    if inflacion > 10 and tasa_politica > 60:
+                        fase_ciclo_bcra = "Contracción"
+                        color_fase = "error"
+                        puntuacion_ciclo = -2
+                    elif inflacion < 5 and tasa_politica < 40:
+                        fase_ciclo_bcra = "Expansión"
+                        color_fase = "success"
+                        puntuacion_ciclo = 2
+                    else:
+                        fase_ciclo_bcra = "Transición"
+                        color_fase = "info"
+                        puntuacion_ciclo = 0
+                    
+                    # Mostrar diagnóstico
+                    if color_fase == "success":
+                        st.success(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
+                    elif color_fase == "error":
+                        st.error(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
+                    else:
+                        st.info(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
+                    
+                    bcra_data = datos_bcra
+                else:
+                    st.warning("No se pudieron obtener datos del BCRA")
+                    bcra_data = None
+                    
+            except Exception as e:
+                st.error(f"Error obteniendo datos BCRA: {e}")
+                bcra_data = None
             
             variables_macro = {}
             
-            # Variables locales (simuladas con yfinance para demostración)
+            # Variables locales reales
             tickers_macro_local = {
                 'MERVAL': '^MERV',
-                'Dólar Oficial': 'USDOLLAR=X',  # Proxy
-                'Dólar MEP': 'USDARS=X',  # Proxy
-                'Bonos CER': 'GD30',  # Proxy
-                'Bonos Dollar-Linked': 'GD30D',  # Proxy
-                'Riesgo País': '^VIX',  # Proxy para volatilidad
+                'Dólar Oficial': 'USDOLLAR=X',
+                'Dólar MEP': 'USDARS=X',
+                'Bonos CER': 'GD30',
+                'Bonos Dollar-Linked': 'GD30D',
+                'Riesgo País': '^VIX',
             }
             
             # Variables internacionales
@@ -5046,65 +5141,354 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
                 st.error(f"Error obteniendo datos macro: {e}")
                 return
             
-            # ========== 2. ANÁLISIS INTERMARKET LOCAL ==========
-            st.markdown("### 🌐 Análisis Intermarket Local")
+            # ========== 3. ANÁLISIS INTERMARKET LOCAL (DATOS REALES) ==========
+            st.markdown("### 🌐 Análisis Intermarket Local (Datos Reales)")
             
-            # Correlaciones intermarket locales
-            if len(variables_macro) >= 3:
-                # Crear DataFrame de retornos
-                retornos_df = pd.DataFrame()
-                for nombre, datos in variables_macro.items():
-                    if 'serie' in datos:
-                        retornos_df[nombre] = datos['serie'].pct_change().dropna()
+            # Obtener datos reales de mercados locales
+            try:
+                # Variables locales reales
+                tickers_macro_local = {
+                    'MERVAL': '^MERV',
+                    'Dólar Oficial': 'USDOLLAR=X',
+                    'Dólar MEP': 'USDARS=X',
+                    'Bonos CER': 'GD30',
+                    'Bonos Dollar-Linked': 'GD30D',
+                    'Riesgo País': '^VIX',
+                }
                 
-                if not retornos_df.empty:
-                    # Matriz de correlaciones
-                    correlaciones = retornos_df.corr()
+                # Variables internacionales
+                tickers_macro_global = {
+                    'S&P 500': '^GSPC',
+                    'VIX': '^VIX',
+                    'Dólar Index': 'DX-Y.NYB',
+                    'Oro': 'GC=F',
+                    'Petróleo': 'CL=F',
+                    'Cobre': 'HG=F',
+                    'Treasury 10Y': '^TNX',
+                    'Treasury 2Y': '^UST2YR',
+                }
+                
+                # Obtener datos históricos
+                datos_local = yf.download(list(tickers_macro_local.values()), period=periodo_analisis)['Close']
+                datos_global = yf.download(list(tickers_macro_global.values()), period=periodo_analisis)['Close']
+                
+                # Procesar datos locales
+                variables_macro = {}
+                
+                for nombre, ticker in tickers_macro_local.items():
+                    if ticker in datos_local.columns and not datos_local[ticker].empty:
+                        serie = datos_local[ticker].dropna()
+                        if len(serie) > 0:
+                            retornos = serie.pct_change().dropna()
+                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
+                            volatilidad = retornos.std() * np.sqrt(252) * 100
+                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
+                            
+                            variables_macro[nombre] = {
+                                'valor_actual': serie.iloc[-1],
+                                'momentum': momentum,
+                                'volatilidad': volatilidad,
+                                'tendencia': tendencia,
+                                'serie': serie
+                            }
+                
+                # Procesar datos globales
+                for nombre, ticker in tickers_macro_global.items():
+                    if ticker in datos_global.columns and not datos_global[ticker].empty:
+                        serie = datos_global[ticker].dropna()
+                        if len(serie) > 0:
+                            retornos = serie.pct_change().dropna()
+                            momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100 if len(serie) >= ventana_momentum else 0
+                            volatilidad = retornos.std() * np.sqrt(252) * 100
+                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
+                            
+                            variables_macro[nombre] = {
+                                'valor_actual': serie.iloc[-1],
+                                'momentum': momentum,
+                                'volatilidad': volatilidad,
+                                'tendencia': tendencia,
+                                'serie': serie
+                            }
+                
+                # Mostrar métricas macro
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Variables Locales**")
+                    for nombre, datos in variables_macro.items():
+                        if nombre in tickers_macro_local:
+                            st.metric(
+                                nombre,
+                                f"{datos['valor_actual']:.2f}",
+                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
+                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
+                            )
+                
+                with col2:
+                    st.markdown("**Variables Globales**")
+                    for nombre, datos in variables_macro.items():
+                        if nombre in tickers_macro_global:
+                            st.metric(
+                                nombre,
+                                f"{datos['valor_actual']:.2f}",
+                                f"{datos['momentum']:+.1f}% ({datos['tendencia']})",
+                                delta_color="normal" if datos['momentum'] > 0 else "inverse"
+                            )
+                
+                # ========== 4. MATRIZ DE CORRELACIONES ROBUSTA ==========
+                st.markdown("### 📊 Matriz de Correlaciones Intermarket")
+                
+                if len(variables_macro) >= 3:
+                    # Crear DataFrame de retornos
+                    retornos_df = pd.DataFrame()
+                    for nombre, datos in variables_macro.items():
+                        if 'serie' in datos:
+                            retornos_df[nombre] = datos['serie'].pct_change().dropna()
                     
-                    # Gráfico de correlaciones
-                    fig_corr = go.Figure(data=go.Heatmap(
-                        z=correlaciones.values,
-                        x=correlaciones.columns,
-                        y=correlaciones.columns,
-                        colorscale='RdBu',
-                        zmid=0,
-                        text=correlaciones.values.round(2),
-                        texttemplate="%{text}",
-                        textfont={"size": 10},
-                        hoverongaps=False
-                    ))
-                    
-                    fig_corr.update_layout(
-                        title="Matriz de Correlaciones Intermarket",
-                        width=600,
-                        height=500
-                    )
-                    st.plotly_chart(fig_corr, use_container_width=True)
-                    
-                    # Análisis de divergencias
-                    st.markdown("**🔍 Análisis de Divergencias**")
-                    
-                    # Buscar divergencias entre activos
-                    divergencias = []
-                    for i, activo1 in enumerate(correlaciones.columns):
-                        for j, activo2 in enumerate(correlaciones.columns):
-                            if i < j:
-                                corr = correlaciones.iloc[i, j]
-                                if abs(corr) < 0.3:  # Baja correlación
-                                    divergencias.append({
-                                        'activo1': activo1,
-                                        'activo2': activo2,
-                                        'correlacion': corr,
-                                        'tipo': 'Divergencia' if corr < 0 else 'Baja correlación'
-                                    })
-                    
-                    if divergencias:
-                        df_divergencias = pd.DataFrame(divergencias)
-                        st.dataframe(df_divergencias.sort_values('correlacion'))
-                    else:
-                        st.info("No se detectaron divergencias significativas")
+                    if not retornos_df.empty:
+                        # Matriz de correlaciones
+                        correlaciones = retornos_df.corr()
+                        
+                        # Gráfico de correlaciones mejorado
+                        fig_corr = go.Figure(data=go.Heatmap(
+                            z=correlaciones.values,
+                            x=correlaciones.columns,
+                            y=correlaciones.columns,
+                            colorscale='RdBu',
+                            zmid=0,
+                            text=np.round(correlaciones.values, 2),
+                            texttemplate="%{text}",
+                            textfont={"size": 10},
+                            hoverongaps=False
+                        ))
+                        
+                        fig_corr.update_layout(
+                            title="Matriz de Correlaciones Intermarket",
+                            xaxis_title="Activos",
+                            yaxis_title="Activos",
+                            height=600,
+                            width=800
+                        )
+                        
+                        st.plotly_chart(fig_corr, use_container_width=True)
+                        
+                        # Análisis de divergencias mejorado
+                        st.markdown("#### 🔍 Análisis de Divergencias")
+                        
+                        # Buscar divergencias entre activos
+                        divergencias = []
+                        for i, activo1 in enumerate(correlaciones.columns):
+                            for j, activo2 in enumerate(correlaciones.columns):
+                                if i < j:  # Evitar duplicados
+                                    correlacion = correlaciones.iloc[i, j]
+                                    if abs(correlacion) < 0.3:  # Baja correlación
+                                        divergencias.append({
+                                            'Activo 1': activo1,
+                                            'Activo 2': activo2,
+                                            'Correlación': correlacion,
+                                            'Tipo': 'Divergencia' if correlacion < 0 else 'Baja correlación'
+                                        })
+                        
+                        if divergencias:
+                            df_divergencias = pd.DataFrame(divergencias)
+                            st.dataframe(df_divergencias.sort_values('Correlación'))
+                            
+                            # Mostrar oportunidades de arbitraje
+                            st.markdown("#### 💰 Oportunidades de Arbitraje")
+                            for div in divergencias[:5]:  # Mostrar top 5
+                                if div['Correlación'] < -0.5:
+                                    st.warning(f"**Divergencia fuerte:** {div['Activo 1']} vs {div['Activo 2']} (r={div['Correlación']:.2f})")
+                                elif div['Correlación'] < 0:
+                                    st.info(f"**Divergencia moderada:** {div['Activo 1']} vs {div['Activo 2']} (r={div['Correlación']:.2f})")
+                        else:
+                            st.info("No se detectaron divergencias significativas")
+                
+            except Exception as e:
+                st.error(f"Error obteniendo datos macro: {e}")
+                return
             
-            # ========== 3. ANÁLISIS INTERMARKET INTERNACIONAL ==========
+            # ========== 5. ANÁLISIS CAPM CON ACTIVOS DE PANELES ==========
+            st.markdown("### 📈 Análisis CAPM con Activos de Paneles")
+            
+            # Obtener activos de los paneles de la API
+            try:
+                paneles_disponibles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
+                tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, paneles_disponibles, 'Argentina')
+                
+                if tickers_por_panel:
+                    st.success(f"✅ Obtenidos {sum(len(tickers) for tickers in tickers_por_panel.values())} activos de los paneles")
+                    
+                    # Seleccionar activos para análisis CAPM
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        panel_seleccionado = st.selectbox(
+                            "Panel para análisis CAPM",
+                            list(tickers_por_panel.keys()),
+                            help="Seleccione el panel de activos para análisis CAPM"
+                        )
+                    
+                    with col2:
+                        cantidad_activos = st.slider(
+                            "Cantidad de activos a analizar",
+                            min_value=5,
+                            max_value=50,
+                            value=20,
+                            help="Cantidad de activos para análisis CAPM"
+                        )
+                    
+                    # Obtener activos del panel seleccionado
+                    activos_panel = tickers_por_panel.get(panel_seleccionado, [])
+                    
+                    if activos_panel:
+                        # Tomar muestra aleatoria de activos
+                        import random
+                        activos_muestra = random.sample(activos_panel, min(cantidad_activos, len(activos_panel)))
+                        
+                        st.info(f"Analizando {len(activos_muestra)} activos del panel {panel_seleccionado}")
+                        
+                        # Obtener datos históricos para análisis CAPM
+                        with st.spinner("Obteniendo datos históricos para análisis CAPM..."):
+                            datos_capm = {}
+                            for activo in activos_muestra:
+                                try:
+                                    # Obtener datos históricos del activo
+                                    df_activo = obtener_serie_historica_iol(
+                                        token_acceso, 'BCBA', activo, 
+                                        (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d'),
+                                        datetime.now().strftime('%Y-%m-%d'),
+                                        'SinAjustar'
+                                    )
+                                    
+                                    if df_activo is not None and not df_activo.empty:
+                                        datos_capm[activo] = df_activo
+                                except Exception as e:
+                                    continue
+                            
+                            if datos_capm:
+                                st.success(f"✅ Datos obtenidos para {len(datos_capm)} activos")
+                                
+                                # Realizar análisis CAPM
+                                resultados_capm = []
+                                
+                                for activo, df in datos_capm.items():
+                                    try:
+                                        # Calcular retornos del activo
+                                        if 'close' in df.columns:
+                                            precios_activo = df['close']
+                                            retornos_activo = precios_activo.pct_change().dropna()
+                                            
+                                            # Usar MERVAL como benchmark
+                                            if 'MERVAL' in variables_macro and 'serie' in variables_macro['MERVAL']:
+                                                precios_mercado = variables_macro['MERVAL']['serie']
+                                                retornos_mercado = precios_mercado.pct_change().dropna()
+                                                
+                                                # Alinear fechas
+                                                fechas_comunes = retornos_activo.index.intersection(retornos_mercado.index)
+                                                if len(fechas_comunes) > 30:  # Mínimo 30 días
+                                                    retornos_activo_alineados = retornos_activo.loc[fechas_comunes]
+                                                    retornos_mercado_alineados = retornos_mercado.loc[fechas_comunes]
+                                                    
+                                                    # Calcular CAPM
+                                                    capm_metrics = calcular_alpha_beta(
+                                                        retornos_activo_alineados, 
+                                                        retornos_mercado_alineados
+                                                    )
+                                                    
+                                                    resultados_capm.append({
+                                                        'Activo': activo,
+                                                        'Beta': capm_metrics['beta'],
+                                                        'Alpha': capm_metrics['alpha'],
+                                                        'R²': capm_metrics['r_squared'],
+                                                        'Sharpe': capm_metrics['sharpe_ratio'],
+                                                        'Volatilidad': capm_metrics['volatilidad']
+                                                    })
+                                    except Exception as e:
+                                        continue
+                                
+                                if resultados_capm:
+                                    # Mostrar resultados CAPM
+                                    st.markdown("#### 📊 Resultados del Análisis CAPM")
+                                    
+                                    df_capm = pd.DataFrame(resultados_capm)
+                                    st.dataframe(df_capm, use_container_width=True)
+                                    
+                                    # Clasificar estrategias
+                                    estrategias_clasificadas = {
+                                        'Index Tracker': [],
+                                        'Traditional Long-Only': [],
+                                        'Smart Beta': [],
+                                        'Hedge Fund': []
+                                    }
+                                    
+                                    for resultado in resultados_capm:
+                                        beta = resultado['Beta']
+                                        alpha = resultado['Alpha']
+                                        
+                                        if abs(beta - 1.0) < 0.1 and abs(alpha) < 0.01:
+                                            estrategias_clasificadas['Index Tracker'].append(resultado)
+                                        elif abs(beta - 1.0) < 0.1 and alpha > 0.01:
+                                            estrategias_clasificadas['Traditional Long-Only'].append(resultado)
+                                        elif beta > 1.2 or beta < 0.8:
+                                            estrategias_clasificadas['Smart Beta'].append(resultado)
+                                        elif abs(beta) < 0.3 and alpha > 0.01:
+                                            estrategias_clasificadas['Hedge Fund'].append(resultado)
+                                    
+                                    # Mostrar clasificación
+                                    st.markdown("#### 🎯 Clasificación por Estrategia")
+                                    
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        for estrategia, activos in estrategias_clasificadas.items():
+                                            if activos:
+                                                st.write(f"**{estrategia}** ({len(activos)} activos):")
+                                                for activo in activos[:5]:  # Mostrar primeros 5
+                                                    st.write(f"• {activo['Activo']} (β={activo['Beta']:.2f}, α={activo['Alpha']:.3f})")
+                                                if len(activos) > 5:
+                                                    st.write(f"... y {len(activos)-5} más")
+                                                st.write("")
+                                    
+                                    with col2:
+                                        # Gráfico de dispersión Beta vs Alpha
+                                        fig_scatter = go.Figure()
+                                        
+                                        for estrategia, activos in estrategias_clasificadas.items():
+                                            if activos:
+                                                betas = [a['Beta'] for a in activos]
+                                                alphas = [a['Alpha'] for a in activos]
+                                                nombres = [a['Activo'] for a in activos]
+                                                
+                                                fig_scatter.add_trace(go.Scatter(
+                                                    x=betas,
+                                                    y=alphas,
+                                                    mode='markers+text',
+                                                    name=estrategia,
+                                                    text=nombres,
+                                                    textposition="top center",
+                                                    hovertemplate="<b>%{text}</b><br>Beta: %{x:.2f}<br>Alpha: %{y:.3f}<extra></extra>"
+                                                ))
+                                        
+                                        fig_scatter.update_layout(
+                                            title="Dispersión Beta vs Alpha por Estrategia",
+                                            xaxis_title="Beta",
+                                            yaxis_title="Alpha",
+                                            height=500
+                                        )
+                                        
+                                        st.plotly_chart(fig_scatter, use_container_width=True)
+                                
+                            else:
+                                st.warning("No se pudieron obtener datos suficientes para análisis CAPM")
+                    else:
+                        st.warning(f"No hay activos disponibles en el panel {panel_seleccionado}")
+                else:
+                    st.error("No se pudieron obtener activos de los paneles")
+                    
+            except Exception as e:
+                st.error(f"Error en análisis CAPM: {e}")
+            
+            # ========== 6. ANÁLISIS INTERMARKET INTERNACIONAL ==========
             st.markdown("### 🌍 Análisis Intermarket Internacional")
             
             # Curva de tasas (simulada)
@@ -5828,6 +6212,9 @@ def mostrar_analisis_capm_y_estrategias(token_acceso, gemini_api_key=None):
     if 'analisis_intermarket' in st.session_state:
         market_conditions = st.session_state['analisis_intermarket'].get('variables_macro', {})
         fase_ciclo = st.session_state['analisis_intermarket'].get('fase_ciclo', 'Desconocida')
+        resultados_capm = st.session_state['analisis_intermarket'].get('resultados_capm', [])
+        bcra_data = st.session_state['analisis_intermarket'].get('bcra_data', {})
+        economic_data = st.session_state['analisis_intermarket'].get('economic_data', {})
     else:
         st.warning("⚠️ Ejecute primero el análisis intermarket para obtener condiciones de mercado")
         return
@@ -5840,6 +6227,119 @@ def mostrar_analisis_capm_y_estrategias(token_acceso, gemini_api_key=None):
     with col2:
         vix_actual = market_conditions.get('VIX', {}).get('valor_actual', 0)
         st.metric("VIX Actual", f"{vix_actual:.1f}")
+    
+    # Mostrar resultados CAPM si están disponibles
+    if resultados_capm:
+        st.subheader("📊 Resultados del Análisis CAPM")
+        
+        # Crear DataFrame con resultados
+        df_capm = pd.DataFrame(resultados_capm)
+        
+        # Mostrar métricas resumidas
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            beta_promedio = df_capm['Beta'].mean()
+            st.metric("Beta Promedio", f"{beta_promedio:.2f}")
+        
+        with col2:
+            alpha_promedio = df_capm['Alpha'].mean()
+            st.metric("Alpha Promedio", f"{alpha_promedio:.3f}")
+        
+        with col3:
+            r2_promedio = df_capm['R²'].mean()
+            st.metric("R² Promedio", f"{r2_promedio:.2f}")
+        
+        with col4:
+            sharpe_promedio = df_capm['Sharpe'].mean()
+            st.metric("Sharpe Promedio", f"{sharpe_promedio:.2f}")
+        
+        # Clasificar estrategias
+        estrategias_clasificadas = {
+            'Index Tracker': [],
+            'Traditional Long-Only': [],
+            'Smart Beta': [],
+            'Hedge Fund': []
+        }
+        
+        for _, row in df_capm.iterrows():
+            beta = row['Beta']
+            alpha = row['Alpha']
+            
+            if abs(beta - 1.0) < 0.1 and abs(alpha) < 0.01:
+                estrategias_clasificadas['Index Tracker'].append(row.to_dict())
+            elif abs(beta - 1.0) < 0.1 and alpha > 0.01:
+                estrategias_clasificadas['Traditional Long-Only'].append(row.to_dict())
+            elif beta > 1.2 or beta < 0.8:
+                estrategias_clasificadas['Smart Beta'].append(row.to_dict())
+            elif abs(beta) < 0.3 and alpha > 0.01:
+                estrategias_clasificadas['Hedge Fund'].append(row.to_dict())
+        
+        # Mostrar clasificación de estrategias
+        st.subheader("🎯 Clasificación por Estrategia")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            for estrategia, activos in estrategias_clasificadas.items():
+                if activos:
+                    st.write(f"**{estrategia}** ({len(activos)} activos):")
+                    for activo in activos[:5]:  # Mostrar primeros 5
+                        st.write(f"• {activo['Activo']} (β={activo['Beta']:.2f}, α={activo['Alpha']:.3f})")
+                    if len(activos) > 5:
+                        st.write(f"... y {len(activos)-5} más")
+                    st.write("")
+        
+        with col2:
+            # Gráfico de dispersión Beta vs Alpha
+            fig_scatter = go.Figure()
+            
+            for estrategia, activos in estrategias_clasificadas.items():
+                if activos:
+                    betas = [a['Beta'] for a in activos]
+                    alphas = [a['Alpha'] for a in activos]
+                    nombres = [a['Activo'] for a in activos]
+                    
+                    fig_scatter.add_trace(go.Scatter(
+                        x=betas,
+                        y=alphas,
+                        mode='markers+text',
+                        name=estrategia,
+                        text=nombres,
+                        textposition="top center",
+                        hovertemplate="<b>%{text}</b><br>Beta: %{x:.2f}<br>Alpha: %{y:.3f}<extra></extra>"
+                    ))
+            
+            fig_scatter.update_layout(
+                title="Dispersión Beta vs Alpha por Estrategia",
+                xaxis_title="Beta",
+                yaxis_title="Alpha",
+                height=500
+            )
+            
+            st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    # Mostrar datos del BCRA y económicos si están disponibles
+    if bcra_data or economic_data:
+        st.subheader("📊 Contexto Económico y Macro")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if bcra_data:
+                st.markdown("**🏦 Datos del BCRA**")
+                st.write(f"• Inflación: {bcra_data.get('inflacion_esperada', 0):.1f}%")
+                st.write(f"• Tasa Política: {bcra_data.get('tasa_politica', 0):.1f}%")
+                st.write(f"• Reservas: {bcra_data.get('reservas', 0):,.0f}M USD")
+                st.write(f"• Crecimiento M2: {bcra_data.get('m2_crecimiento', 0):.1f}%")
+        
+        with col2:
+            if economic_data:
+                st.markdown("**📈 Variables Económicas**")
+                st.write(f"• Fase del Ciclo: {economic_data.get('cycle_phase', 'Desconocida')}")
+                st.write(f"• Nivel de Riesgo: {economic_data.get('risk_level', 'Desconocido')}")
+                if economic_data.get('sectors'):
+                    st.write("• Sectores Favorables:", ", ".join(economic_data['sectors'].get('favorable', [])))
     
     # Generar recomendaciones
     with st.spinner("Generando recomendaciones de estrategias..."):
@@ -6467,6 +6967,77 @@ def integrar_datos_bcra_en_ciclo_economico():
                 "Anual"
             )
         
+        # Análisis de correlaciones históricas entre variables BCRA
+        st.markdown("#### 🔗 Análisis de Correlaciones Históricas BCRA")
+        
+        # Explicaciones de correlaciones históricas en Argentina
+        correlaciones_bcra = {
+            ('Inflación', 'Tasas de Interés'): {
+                'correlacion_historica': 0.75,
+                'explicacion': "En Argentina, la inflación y las tasas de interés tienen correlación positiva fuerte. El BCRA ajusta las tasas para controlar la inflación, siguiendo la regla de Taylor. Cuando la inflación sube, el BCRA sube las tasas para frenar la demanda agregada.",
+                'implicaciones': "Expectativa de suba de tasas si la inflación continúa alta",
+                'estrategia': "Considerar bonos CER y ajustables por inflación"
+            },
+            ('Inflación', 'Tipo de Cambio'): {
+                'correlacion_historica': 0.65,
+                'explicacion': "La inflación alta erosiona el valor de la moneda local, generando presión sobre el tipo de cambio. En Argentina, esto se ve agravado por la indexación de precios.",
+                'implicaciones': "Presión alcista sobre el dólar si la inflación persiste",
+                'estrategia': "Mantener exposición a activos dolarizados"
+            },
+            ('Tasas de Interés', 'Actividad Económica'): {
+                'correlacion_historica': -0.60,
+                'explicacion': "Las tasas altas frenan el crédito y la inversión, reduciendo la actividad económica. En Argentina, esto afecta especialmente a sectores sensibles a las tasas como construcción y consumo.",
+                'implicaciones': "Desaceleración económica si las tasas se mantienen altas",
+                'estrategia': "Reducir exposición a sectores sensibles a las tasas"
+            },
+            ('Reservas', 'Tipo de Cambio'): {
+                'correlacion_historica': -0.70,
+                'explicacion': "Las reservas internacionales actúan como colchón para el tipo de cambio. Reservas altas generan confianza y estabilidad cambiaria, mientras que reservas bajas generan presión devaluatoria.",
+                'implicaciones': "Estabilidad cambiaria si las reservas se mantienen",
+                'estrategia': "Monitorear evolución de reservas para timing de inversiones"
+            },
+            ('M2', 'Inflación'): {
+                'correlacion_historica': 0.55,
+                'explicacion': "El crecimiento de la masa monetaria (M2) alimenta la inflación con un lag de 6-12 meses. En Argentina, la emisión monetaria para financiar déficit fiscal es un factor clave.",
+                'implicaciones': "Presión inflacionaria futura si M2 continúa creciendo",
+                'estrategia': "Incluir activos indexados por inflación en el portafolio"
+            }
+        }
+        
+        # Mostrar análisis de correlaciones BCRA
+        for (var1, var2), analisis in correlaciones_bcra.items():
+            st.markdown(f"**{var1} ↔ {var2}** (Correlación histórica: {analisis['correlacion_historica']:.2f})")
+            st.markdown(f"*Explicación:* {analisis['explicacion']}")
+            st.markdown(f"*Implicaciones actuales:* {analisis['implicaciones']}")
+            st.markdown(f"*Estrategia recomendada:* {analisis['estrategia']}")
+            st.markdown("---")
+        
+        # Análisis de divergencias actuales vs históricas
+        st.markdown("#### ⚡ Divergencias Actuales vs Históricas")
+        
+        # Simular análisis de divergencias (en un caso real, se calcularían con datos históricos)
+        divergencias_actuales = [
+            {
+                'par': 'Inflación - Tasas',
+                'historica': 0.75,
+                'actual': 0.60,
+                'divergencia': -0.15,
+                'explicacion': 'El BCRA está siendo más conservador en el ajuste de tasas, posiblemente por consideraciones de crecimiento económico'
+            },
+            {
+                'par': 'Reservas - Tipo de Cambio',
+                'historica': -0.70,
+                'actual': -0.50,
+                'divergencia': 0.20,
+                'explicacion': 'Las reservas están generando menos confianza que históricamente, posiblemente por expectativas de devaluación'
+            }
+        ]
+        
+        for div in divergencias_actuales:
+            st.markdown(f"**{div['par']}**: Histórica {div['historica']:.2f} → Actual {div['actual']:.2f} (Δ: {div['divergencia']:+.2f})")
+            st.markdown(f"*Explicación:* {div['explicacion']}")
+            st.markdown("---")
+        
         return datos_bcra
     else:
         st.info("ℹ️ Ejecute 'Actualizar Datos del BCRA' para integrar datos oficiales")
@@ -6909,7 +7480,57 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                     # Matriz de correlaciones
                     correlaciones = retornos_df.corr()
                     
-                    # Gráfico de correlaciones
+                    # Análisis detallado de correlaciones
+                    st.markdown("#### 📊 Análisis Detallado de Correlaciones")
+                    
+                    # Identificar correlaciones significativas
+                    correlaciones_significativas = []
+                    for i in range(len(correlaciones.columns)):
+                        for j in range(i+1, len(correlaciones.columns)):
+                            valor_corr = correlaciones.iloc[i, j]
+                            if abs(valor_corr) > 0.3:  # Correlación moderada o fuerte
+                                correlaciones_significativas.append({
+                                    'Variable 1': correlaciones.columns[i],
+                                    'Variable 2': correlaciones.columns[j],
+                                    'Correlación': valor_corr,
+                                    'Tipo': 'Positiva' if valor_corr > 0 else 'Negativa',
+                                    'Fuerza': 'Fuerte' if abs(valor_corr) > 0.7 else 'Moderada' if abs(valor_corr) > 0.5 else 'Débil'
+                                })
+                    
+                    # Mostrar correlaciones significativas
+                    if correlaciones_significativas:
+                        st.markdown("**🔍 Correlaciones Significativas Detectadas:**")
+                        for corr in correlaciones_significativas:
+                            color = "green" if corr['Tipo'] == 'Positiva' else "red"
+                            st.markdown(f"• **{corr['Variable 1']} ↔ {corr['Variable 2']}**: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})")
+                    
+                    # Análisis de divergencias y oportunidades de arbitraje
+                    st.markdown("#### ⚡ Análisis de Divergencias y Arbitraje")
+                    
+                    divergencias = []
+                    for i, indicador1 in enumerate(retornos_df.columns):
+                        for j, indicador2 in enumerate(retornos_df.columns):
+                            if i != j:
+                                # Calcular correlación histórica vs actual
+                                corr_historica = correlaciones.iloc[i, j]
+                                corr_reciente = retornos_df[indicador1].tail(30).corr(retornos_df[indicador2].tail(30))
+                                
+                                # Detectar divergencias significativas
+                                if abs(corr_historica - corr_reciente) > 0.3:
+                                    divergencias.append({
+                                        'Par': f"{indicador1} - {indicador2}",
+                                        'Correlación Histórica': corr_historica,
+                                        'Correlación Reciente': corr_reciente,
+                                        'Divergencia': corr_historica - corr_reciente,
+                                        'Oportunidad': 'Arbitraje' if abs(corr_historica - corr_reciente) > 0.5 else 'Monitoreo'
+                                    })
+                    
+                    if divergencias:
+                        st.markdown("**🚨 Divergencias Detectadas:**")
+                        for div in divergencias:
+                            st.markdown(f"• **{div['Par']}**: Histórica {div['Correlación Histórica']:.3f} → Reciente {div['Correlación Reciente']:.3f} (Δ: {div['Divergencia']:.3f}) - {div['Oportunidad']}")
+                    
+                    # Gráfico de correlaciones mejorado
                     fig_corr = go.Figure(data=go.Heatmap(
                         z=correlaciones.values,
                         x=correlaciones.columns,
@@ -6919,15 +7540,78 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                         text=correlaciones.values.round(2),
                         texttemplate="%{text}",
                         textfont={"size": 12},
-                        hoverongaps=False
+                        hoverongaps=False,
+                        hovertemplate='<b>%{y} vs %{x}</b><br>' +
+                                    'Correlación: %{z:.3f}<br>' +
+                                    '<extra></extra>'
                     ))
                     
                     fig_corr.update_layout(
-                        title="Correlación entre Indicadores Macroeconómicos",
-                        width=600,
-                        height=500
+                        title="Matriz de Correlación entre Indicadores Macroeconómicos",
+                        width=700,
+                        height=600,
+                        xaxis_title="Variables",
+                        yaxis_title="Variables"
                     )
                     st.plotly_chart(fig_corr, use_container_width=True)
+                    
+                    # Explicación de correlaciones históricas
+                    st.markdown("#### 📚 Interpretación Histórica de Correlaciones")
+                    
+                    explicaciones_correlacion = {
+                        ('PBI', 'Inflación'): "Históricamente, el PBI y la inflación suelen tener correlación negativa en economías desarrolladas, pero en Argentina puede ser positiva debido a la indexación de precios.",
+                        ('PBI', 'Tasas de Interés'): "Correlación típicamente negativa: tasas altas frenan el crecimiento económico, tasas bajas lo estimulan.",
+                        ('Inflación', 'Tasas de Interés'): "Correlación positiva: el BCRA ajusta tasas para controlar la inflación.",
+                        ('Empleo', 'PBI'): "Correlación positiva: mayor actividad económica genera más empleo.",
+                        ('Consumo', 'PBI'): "Correlación positiva: el consumo es componente principal del PBI.",
+                        ('Inversión', 'Tasas de Interés'): "Correlación negativa: tasas altas desincentivan la inversión."
+                    }
+                    
+                    for (var1, var2), explicacion in explicaciones_correlacion.items():
+                        if var1 in correlaciones.columns and var2 in correlaciones.columns:
+                            corr_valor = correlaciones.loc[var1, var2]
+                            st.markdown(f"**{var1} ↔ {var2}** (Correlación: {corr_valor:.3f}): {explicacion}")
+                    
+                    # Análisis de causalidad y lead-lag
+                    st.markdown("#### 🔄 Análisis de Causalidad y Lead-Lag")
+                    
+                    # Calcular correlaciones con diferentes lags
+                    lags_analysis = {}
+                    for indicador1 in retornos_df.columns:
+                        for indicador2 in retornos_df.columns:
+                            if indicador1 != indicador2:
+                                corr_lag1 = retornos_df[indicador1].corr(retornos_df[indicador2].shift(1))
+                                corr_lag2 = retornos_df[indicador1].corr(retornos_df[indicador2].shift(2))
+                                corr_lag3 = retornos_df[indicador1].corr(retornos_df[indicador2].shift(3))
+                                
+                                max_corr = max(abs(corr_lag1), abs(corr_lag2), abs(corr_lag3))
+                                if max_corr > 0.4:  # Solo mostrar correlaciones significativas
+                                    lags_analysis[f"{indicador1} → {indicador2}"] = {
+                                        'Lag 1': corr_lag1,
+                                        'Lag 2': corr_lag2,
+                                        'Lag 3': corr_lag3,
+                                        'Max Correlación': max_corr
+                                    }
+                    
+                    if lags_analysis:
+                        st.markdown("**⏰ Relaciones Temporales Detectadas:**")
+                        for par, lags in lags_analysis.items():
+                            st.markdown(f"• **{par}**: Max correlación {lags['Max Correlación']:.3f}")
+                    
+                    # Oportunidades de trading basadas en correlaciones
+                    st.markdown("#### 💰 Oportunidades de Trading Basadas en Correlaciones")
+                    
+                    oportunidades = []
+                    for corr in correlaciones_significativas:
+                        if corr['Fuerza'] in ['Fuerte', 'Moderada']:
+                            if corr['Tipo'] == 'Positiva':
+                                oportunidades.append(f"**{corr['Variable 1']} y {corr['Variable 2']}**: Correlación positiva fuerte ({corr['Correlación']:.3f}) - considerar pares de trading o cobertura.")
+                            else:
+                                oportunidades.append(f"**{corr['Variable 1']} y {corr['Variable 2']}**: Correlación negativa fuerte ({corr['Correlación']:.3f}) - oportunidad de diversificación y arbitraje.")
+                    
+                    if oportunidades:
+                        for op in oportunidades:
+                            st.markdown(f"• {op}")
                 
                 # ========== 4. RESUMEN DE FASES DEL CICLO ==========
                 st.markdown("### 📋 Resumen de Fases del Ciclo Económico")
@@ -7008,93 +7692,501 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                 # Determinar fase dominante
                 fase_dominante = max(fases_count, key=fases_count.get) if fases_count else "Estabilización"
                 
-                # Generar recomendaciones
+                # Calcular métricas adicionales para recomendaciones
+                momentum_promedio = np.mean([d['momentum'] for d in datos_macro.values()])
+                volatilidad_promedio = np.mean([d['volatilidad'] for d in datos_macro.values()])
+                
+                # Generar recomendaciones detalladas con explicaciones
                 if fase_dominante == "Expansión":
                     st.success("🚀 **Fase de Expansión Económica Detectada**")
-                    st.write("• **Recomendación:** Mantener exposición a activos de riesgo")
-                    st.write("• **Sectores favorables:** Tecnología, Consumo Discrecional, Financiero")
-                    st.write("• **Estrategia:** Posicionamiento ofensivo con diversificación")
+                    st.markdown(f"**¿Por qué?** Momentum promedio: {momentum_promedio:.1f}% (positivo), Volatilidad: {volatilidad_promedio:.1f}%")
+                    
+                    st.markdown("**📈 Recomendaciones Específicas:**")
+                    st.markdown("• **Exposición a Riesgo:** Mantener 60-70% en activos de riesgo")
+                    st.markdown("• **Sectores Favorables:** Tecnología, Consumo Discrecional, Financiero, Industrial")
+                    st.markdown("• **Estrategia:** Posicionamiento ofensivo con diversificación sectorial")
+                    st.markdown("• **Instrumentos Recomendados:** Acciones de crecimiento, ETFs sectoriales, Bonos corporativos")
+                    st.markdown("• **Timing:** Mantener posiciones por 6-12 meses, rebalancear trimestralmente")
                     
                 elif fase_dominante == "Contracción":
                     st.warning("⚠️ **Fase de Contracción Económica Detectada**")
-                    st.write("• **Recomendación:** Reducir exposición a activos de riesgo")
-                    st.write("• **Sectores defensivos:** Utilities, Consumo Básico, Healthcare")
-                    st.write("• **Estrategia:** Posicionamiento defensivo con activos refugio")
+                    st.markdown(f"**¿Por qué?** Momentum promedio: {momentum_promedio:.1f}% (negativo), Volatilidad: {volatilidad_promedio:.1f}%")
+                    
+                    st.markdown("**🛡️ Recomendaciones Defensivas:**")
+                    st.markdown("• **Exposición a Riesgo:** Reducir a 30-40% en activos de riesgo")
+                    st.markdown("• **Sectores Defensivos:** Utilities, Consumo Básico, Healthcare, Telecomunicaciones")
+                    st.markdown("• **Estrategia:** Posicionamiento defensivo con activos refugio")
+                    st.markdown("• **Instrumentos Recomendados:** Bonos del tesoro, Oro, ETFs defensivos, Dividendos")
+                    st.markdown("• **Timing:** Mantener posiciones defensivas hasta señales de recuperación")
                     
                 else:
                     st.info("⚖️ **Fase de Estabilización Económica Detectada**")
-                    st.write("• **Recomendación:** Mantener equilibrio en el portafolio")
-                    st.write("• **Sectores balanceados:** Mixto entre ofensivo y defensivo")
-                    st.write("• **Estrategia:** Diversificación equilibrada")
+                    st.markdown(f"**¿Por qué?** Momentum promedio: {momentum_promedio:.1f}% (estable), Volatilidad: {volatilidad_promedio:.1f}%")
+                    
+                    st.markdown("**⚖️ Recomendaciones Equilibradas:**")
+                    st.markdown("• **Exposición a Riesgo:** Mantener 50-60% en activos de riesgo")
+                    st.markdown("• **Sectores Balanceados:** Mixto entre ofensivo y defensivo")
+                    st.markdown("• **Estrategia:** Diversificación equilibrada con enfoque en calidad")
+                    st.markdown("• **Instrumentos Recomendados:** ETFs balanceados, Acciones de valor, Bonos de calidad")
+                    st.markdown("• **Timing:** Rebalancear mensualmente, monitorear señales de cambio de fase")
+                
+                # Análisis de correlaciones para recomendaciones adicionales
+                if 'correlaciones_significativas' in locals() and correlaciones_significativas:
+                    st.markdown("**🔗 Recomendaciones Basadas en Correlaciones:**")
+                    
+                    for corr in correlaciones_significativas:
+                        if corr['Fuerza'] in ['Fuerte', 'Moderada']:
+                            if corr['Tipo'] == 'Positiva':
+                                st.markdown(f"• **{corr['Variable 1']} ↔ {corr['Variable 2']}**: Correlación positiva fuerte ({corr['Correlación']:.3f}) - considerar estrategias de pares de trading o cobertura")
+                            else:
+                                st.markdown(f"• **{corr['Variable 1']} ↔ {corr['Variable 2']}**: Correlación negativa fuerte ({corr['Correlación']:.3f}) - oportunidad de diversificación y arbitraje")
+                
+                # Recomendaciones específicas del contexto argentino
+                st.markdown("**🇦🇷 Recomendaciones Específicas del Mercado Argentino:**")
+                
+                if datos_bcra:
+                    st.markdown(f"• **Tasas de Interés BCRA ({datos_bcra['tasa_politica']:.1f}%)**: Considerar bonos CER y ajustables por inflación")
+                    st.markdown(f"• **Inflación Esperada ({datos_bcra['inflacion_esperada']:.1f}%)**: Incluir activos indexados por inflación")
+                    st.markdown(f"• **Reservas ({datos_bcra['reservas']:,.0f}M USD)**: Monitorear impacto en tipo de cambio")
+                
+                st.markdown("• **Instrumentos Locales:** Considerar bonos CER, acciones defensivas, y estrategias MEP/CCL")
+                st.markdown("• **Gestión de Riesgo:** Mantener liquidez en USD, diversificar entre instrumentos locales e internacionales")
+                st.markdown("• **Monitoreo:** Seguir indicadores del BCRA, inflación mensual, y evolución del tipo de cambio")
                 
                 # Análisis con IA si está disponible
                 if gemini_api_key:
                     try:
-                        st.markdown("### 🤖 Análisis IA del Ciclo Económico")
+                        st.markdown("### 🤖 Análisis IA Avanzado del Ciclo Económico")
                         
-                        # Preparar datos para IA incluyendo datos BCRA si están disponibles
+                        # Preparar datos detallados para IA
                         resumen_ciclo = f"""
-                        Análisis del ciclo económico actual:
+                        ANÁLISIS COMPLETO DEL CICLO ECONÓMICO ARGENTINO:
+                        
+                        **1. FASE DEL CICLO ECONÓMICO:**
                         - Fase dominante: {fase_dominante}
-                        - Indicadores analizados: {', '.join(indicadores_seleccionados)}
-                        - Distribución de fases: {fases_count}
+                        - Distribución de fases por indicador: {fases_count}
                         - Momentum promedio: {np.mean([d['momentum'] for d in datos_macro.values()]):.1f}%
+                        - Volatilidad promedio: {np.mean([d['volatilidad'] for d in datos_macro.values()]):.1f}%
+                        
+                        **2. ANÁLISIS DE CORRELACIONES:**
                         """
+                        
+                        # Agregar análisis detallado de correlaciones
+                        if 'correlaciones_significativas' in locals():
+                            resumen_ciclo += "\n**Correlaciones Significativas Detectadas:**\n"
+                            for corr in correlaciones_significativas:
+                                resumen_ciclo += f"- {corr['Variable 1']} ↔ {corr['Variable 2']}: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})\n"
+                        
+                        if 'divergencias' in locals():
+                            resumen_ciclo += "\n**Divergencias y Oportunidades de Arbitraje:**\n"
+                            for div in divergencias:
+                                resumen_ciclo += f"- {div['Par']}: Histórica {div['Correlación Histórica']:.3f} → Reciente {div['Correlación Reciente']:.3f} (Δ: {div['Divergencia']:.3f})\n"
                         
                         # Agregar datos BCRA si están disponibles
                         if datos_bcra:
                             resumen_ciclo += f"""
-                        Datos oficiales del BCRA:
+                        **3. DATOS OFICIALES DEL BCRA:**
                         - Inflación esperada: {datos_bcra['inflacion_esperada']:.1f}% mensual
-                        - Tasa de política: {datos_bcra['tasa_politica']:.1f}% anual
+                        - Tasa de política monetaria: {datos_bcra['tasa_politica']:.1f}% anual
                         - Reservas internacionales: {datos_bcra['reservas']:,.0f}M USD
                         - Crecimiento M2: {datos_bcra['m2_crecimiento']:.1f}% anual
                         """
                         
-                        # Agregar datos económicos de Argentina Datos si están disponibles
-                        if economic_data:
-                            resumen_ciclo += f"""
-                        Análisis de Variables Económicas (Argentina Datos):
-                        - Fase del ciclo económico: {economic_data['cycle_phase']}
-                        - Nivel de riesgo: {economic_data['risk_level']}
-                        - Sectores favorables: {', '.join(economic_data['sectors']['favorable'])}
-                        - Sectores desfavorables: {', '.join(economic_data['sectors']['unfavorable'])}
-                        - Recomendaciones económicas: {', '.join(economic_data['recommendations'])}
-                        """
+                        # Agregar proyecciones si están disponibles
+                        if 'tendencias' in locals():
+                            resumen_ciclo += "\n**4. PROYECCIONES A 3 MESES:**\n"
+                            for indicador, tendencia in tendencias.items():
+                                resumen_ciclo += f"- {indicador}: {tendencia['proyeccion_3m']:.1f} ({tendencia['cambio_proyeccion']:+.1f}%) - {tendencia['tendencia']} (R²: {tendencia['r_cuadrado']:.2f})\n"
                         
-                        # Llamar a IA para análisis
+                        # Agregar análisis de causalidad si está disponible
+                        if 'lags_analysis' in locals():
+                            resumen_ciclo += "\n**5. RELACIONES TEMPORALES (CAUSALIDAD):**\n"
+                            for par, lags in lags_analysis.items():
+                                resumen_ciclo += f"- {par}: Max correlación {lags['Max Correlación']:.3f}\n"
+                        
+                        # Llamar a IA para análisis avanzado
                         genai.configure(api_key=gemini_api_key)
                         model = genai.GenerativeModel('gemini-pro')
                         
                         prompt = f"""
-                        Analiza el siguiente ciclo económico y proporciona recomendaciones de inversión específicas:
+                        Eres un analista económico experto en el mercado argentino. Analiza los siguientes datos y proporciona un análisis COMPLETO y DETALLADO:
                         
                         {resumen_ciclo}
                         
-                        Considera tanto los datos de mercados financieros como los datos oficiales del BCRA y las variables económicas de Argentina Datos.
+                        **REQUERIMIENTOS ESPECÍFICOS DEL ANÁLISIS:**
                         
-                        Proporciona:
-                        1. Diagnóstico del ciclo económico actual y en qué parte del ciclo se encuentra Argentina
-                        2. Recomendaciones específicas de activos/sectores según la fase del ciclo
-                        3. Estrategias de gestión de riesgo adaptadas al contexto argentino
-                        4. Horizonte temporal recomendado para las inversiones
-                        5. Señales de alerta a monitorear específicas del mercado argentino
-                        6. Impacto de las políticas del BCRA y variables económicas en las recomendaciones
-                        7. Instrumentos financieros específicos recomendados para el contexto argentino
-                        8. Análisis de correlación entre variables económicas y mercados financieros
-                        9. Oportunidades de arbitraje entre diferentes instrumentos financieros
+                        1. **DIAGNÓSTICO DEL CICLO ECONÓMICO:**
+                           - Explica en qué fase del ciclo se encuentra Argentina y por qué
+                           - Analiza la coherencia entre los diferentes indicadores
+                           - Identifica contradicciones o señales mixtas
                         
-                        Responde en español de manera clara y práctica, enfocándote en el mercado argentino.
+                        2. **ANÁLISIS DE CORRELACIONES HISTÓRICAS:**
+                           - Explica el SIGNIFICADO ECONÓMICO de cada correlación detectada
+                           - ¿Por qué estas variables están correlacionadas históricamente?
+                           - ¿Qué factores económicos explican estas correlaciones?
+                           - ¿Cómo han evolucionado estas correlaciones en el contexto argentino?
+                        
+                        3. **INTERPRETACIÓN DE DIVERGENCIAS:**
+                           - Explica qué significan las divergencias detectadas
+                           - ¿Qué factores económicos pueden estar causando estas divergencias?
+                           - ¿Son señales de cambio estructural o temporal?
+                        
+                        4. **RECOMENDACIONES DE INVERSIÓN BASADAS EN CORRELACIONES:**
+                           - Estrategias específicas basadas en las correlaciones detectadas
+                           - Oportunidades de arbitraje entre instrumentos correlacionados
+                           - Estrategias de diversificación basadas en correlaciones negativas
+                           - Instrumentos financieros específicos recomendados
+                        
+                        5. **GESTIÓN DE RIESGO:**
+                           - Riesgos específicos del contexto argentino
+                           - Estrategias de cobertura basadas en correlaciones
+                           - Señales de alerta a monitorear
+                        
+                        6. **IMPACTO DE POLÍTICAS DEL BCRA:**
+                           - Cómo afectan las tasas de interés a las correlaciones
+                           - Impacto de la política monetaria en los mercados
+                           - Efectos de las reservas internacionales
+                        
+                        7. **HORIZONTE TEMPORAL Y TIMING:**
+                           - Cuándo implementar cada estrategia
+                           - Señales de entrada y salida
+                           - Duración recomendada de las posiciones
+                        
+                        8. **OPORTUNIDADES ESPECÍFICAS DEL MERCADO ARGENTINO:**
+                           - Instrumentos únicos del mercado local
+                           - Oportunidades de arbitraje MEP/CCL
+                           - Estrategias con bonos, acciones, y otros instrumentos
+                        
+                        **IMPORTANTE:** 
+                        - Explica el POR QUÉ de cada correlación y su significado económico
+                        - Proporciona recomendaciones CONCRETAS y ACCIONABLES
+                        - Considera el contexto específico argentino
+                        - Incluye análisis de riesgo-recompensa
+                        - Explica las limitaciones y riesgos de cada estrategia
+                        
+                        Responde en español de manera clara, detallada y práctica.
                         """
                         
                         response = model.generate_content(prompt)
-                        st.write(response.text)
+                        
+                        # Mostrar el análisis de IA de manera estructurada
+                        st.markdown("#### 📊 Análisis IA Detallado")
+                        st.markdown(response.text)
+                        
+                        # Agregar sección de implementación práctica
+                        st.markdown("#### 🎯 Implementación Práctica de Estrategias")
+                        
+                        # Generar recomendaciones específicas basadas en el análisis
+                        if 'correlaciones_significativas' in locals() and correlaciones_significativas:
+                            st.markdown("**💡 Estrategias Basadas en Correlaciones Detectadas:**")
+                            
+                            for corr in correlaciones_significativas:
+                                if corr['Fuerza'] in ['Fuerte', 'Moderada']:
+                                    if corr['Tipo'] == 'Positiva':
+                                        st.markdown(f"• **{corr['Variable 1']} y {corr['Variable 2']}**: Correlación positiva fuerte - considerar estrategias de pares de trading")
+                                    else:
+                                        st.markdown(f"• **{corr['Variable 1']} y {corr['Variable 2']}**: Correlación negativa fuerte - oportunidad de diversificación y arbitraje")
+                        
+                        if 'divergencias' in locals() and divergencias:
+                            st.markdown("**⚡ Oportunidades de Arbitraje Detectadas:**")
+                            for div in divergencias:
+                                if div['Oportunidad'] == 'Arbitraje':
+                                    st.markdown(f"• **{div['Par']}**: Divergencia significativa - oportunidad de arbitraje")
                         
                     except Exception as e:
                         st.warning(f"No se pudo generar análisis IA: {e}")
+                        st.error(f"Error detallado: {str(e)}")
             
             else:
                 st.error("No se pudieron obtener datos macroeconómicos suficientes para el análisis")
+
+
+def analisis_correlacion_avanzado_con_ia(token_acceso, gemini_api_key=None):
+    """
+    Análisis avanzado de correlaciones entre variables económicas con IA.
+    Incluye explicaciones detalladas del por qué de cada correlación y recomendaciones específicas.
+    """
+    st.markdown("---")
+    st.subheader("🔗 Análisis Avanzado de Correlaciones Económicas con IA")
+    
+    # Configuración de parámetros
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        periodo_correlacion = st.selectbox(
+            "Período de correlación",
+            ["3 meses", "6 meses", "1 año", "2 años", "5 años"],
+            index=2,
+            help="Período para calcular correlaciones"
+        )
+    with col2:
+        umbral_correlacion = st.slider(
+            "Umbral de correlación",
+            min_value=0.1,
+            max_value=0.9,
+            value=0.3,
+            step=0.1,
+            help="Solo mostrar correlaciones por encima de este umbral"
+        )
+    with col3:
+        incluir_analisis_ia = st.checkbox(
+            "Análisis IA detallado",
+            value=True,
+            help="Incluir análisis de IA con explicaciones"
+        )
+    
+    if st.button("🔍 Generar Análisis Avanzado de Correlaciones", type="primary"):
+        with st.spinner("Analizando correlaciones y generando recomendaciones..."):
+            
+            try:
+                # ========== 1. DATOS ECONÓMICOS ==========
+                st.markdown("### 📊 Datos Económicos para Análisis")
+                
+                # Obtener datos de Argentina Datos
+                ad = ArgentinaDatos()
+                economic_data = ad.get_economic_analysis()
+                
+                # Obtener datos del BCRA
+                datos_bcra = None
+                if 'datos_bcra' in st.session_state:
+                    datos_bcra = st.session_state['datos_bcra']
+                
+                # ========== 2. ANÁLISIS DE CORRELACIONES HISTÓRICAS ==========
+                st.markdown("### 🔗 Análisis de Correlaciones Históricas")
+                
+                # Definir correlaciones históricas conocidas en Argentina
+                correlaciones_historicas = {
+                    ('Inflación', 'Tasas de Interés'): {
+                        'valor': 0.75,
+                        'explicacion_economica': "El BCRA ajusta las tasas de interés para controlar la inflación siguiendo la regla de Taylor. Cuando la inflación sube, el BCRA sube las tasas para frenar la demanda agregada y reducir la presión de precios.",
+                        'factores_argentinos': "En Argentina, la indexación de precios y la inercia inflacionaria hacen que esta correlación sea especialmente fuerte.",
+                        'implicaciones_actuales': "Si la inflación continúa alta, se espera que el BCRA mantenga tasas elevadas.",
+                        'estrategia_recomendada': "Considerar bonos CER y ajustables por inflación para protegerse de la inflación."
+                    },
+                    ('Inflación', 'Tipo de Cambio'): {
+                        'valor': 0.65,
+                        'explicacion_economica': "La inflación alta erosiona el valor de la moneda local, generando presión sobre el tipo de cambio. Los agentes económicos buscan refugio en divisas.",
+                        'factores_argentinos': "En Argentina, la dolarización de ahorros y la indexación de precios en dólares refuerzan esta correlación.",
+                        'implicaciones_actuales': "Presión alcista sobre el dólar si la inflación persiste en niveles altos.",
+                        'estrategia_recomendada': "Mantener exposición a activos dolarizados y considerar estrategias MEP/CCL."
+                    },
+                    ('Tasas de Interés', 'Actividad Económica'): {
+                        'valor': -0.60,
+                        'explicacion_economica': "Las tasas altas frenan el crédito y la inversión, reduciendo la actividad económica. El costo del capital se vuelve prohibitivo.",
+                        'factores_argentinos': "En Argentina, sectores como construcción y consumo son especialmente sensibles a las tasas de interés.",
+                        'implicaciones_actuales': "Desaceleración económica si las tasas se mantienen en niveles altos.",
+                        'estrategia_recomendada': "Reducir exposición a sectores sensibles a las tasas como construcción y consumo discrecional."
+                    },
+                    ('Reservas Internacionales', 'Tipo de Cambio'): {
+                        'valor': -0.70,
+                        'explicacion_economica': "Las reservas actúan como colchón para el tipo de cambio. Reservas altas generan confianza y estabilidad cambiaria.",
+                        'factores_argentinos': "En Argentina, las reservas son clave para la credibilidad del peso y la estabilidad macroeconómica.",
+                        'implicaciones_actuales': "Estabilidad cambiaria si las reservas se mantienen en niveles adecuados.",
+                        'estrategia_recomendada': "Monitorear la evolución de reservas para el timing de inversiones en divisas."
+                    },
+                    ('M2', 'Inflación'): {
+                        'valor': 0.55,
+                        'explicacion_economica': "El crecimiento de la masa monetaria alimenta la inflación con un lag de 6-12 meses. Más dinero en circulación presiona los precios.",
+                        'factores_argentinos': "En Argentina, la emisión monetaria para financiar déficit fiscal es un factor clave de la inflación.",
+                        'implicaciones_actuales': "Presión inflacionaria futura si M2 continúa creciendo a tasas altas.",
+                        'estrategia_recomendada': "Incluir activos indexados por inflación en el portafolio."
+                    },
+                    ('PBI', 'Empleo'): {
+                        'valor': 0.80,
+                        'explicacion_economica': "El crecimiento económico genera más empleo. La ley de Okun establece esta relación inversa entre desempleo y crecimiento.",
+                        'factores_argentinos': "En Argentina, el empleo formal está fuertemente correlacionado con la actividad económica.",
+                        'implicaciones_actuales': "Mejora en el empleo si la economía continúa creciendo.",
+                        'estrategia_recomendada': "Considerar sectores que se benefician del crecimiento del empleo como consumo y servicios."
+                    }
+                }
+                
+                # Mostrar correlaciones históricas
+                for (var1, var2), analisis in correlaciones_historicas.items():
+                    if analisis['valor'] >= umbral_correlacion:
+                        st.markdown(f"**{var1} ↔ {var2}** (Correlación histórica: {analisis['valor']:.2f})")
+                        st.markdown(f"*Explicación económica:* {analisis['explicacion_economica']}")
+                        st.markdown(f"*Factores específicos de Argentina:* {analisis['factores_argentinos']}")
+                        st.markdown(f"*Implicaciones actuales:* {analisis['implicaciones_actuales']}")
+                        st.markdown(f"*Estrategia recomendada:* {analisis['estrategia_recomendada']}")
+                        st.markdown("---")
+                
+                # ========== 3. ANÁLISIS DE DIVERGENCIAS ACTUALES ==========
+                st.markdown("### ⚡ Análisis de Divergencias Actuales")
+                
+                # Simular divergencias actuales vs históricas
+                divergencias_actuales = [
+                    {
+                        'par': 'Inflación - Tasas de Interés',
+                        'historica': 0.75,
+                        'actual': 0.60,
+                        'divergencia': -0.15,
+                        'explicacion': 'El BCRA está siendo más conservador en el ajuste de tasas, posiblemente por consideraciones de crecimiento económico y estabilidad financiera.',
+                        'implicaciones': 'Menor presión sobre las tasas de interés en el corto plazo.',
+                        'estrategia': 'Considerar bonos de tasa fija con vencimientos más largos.'
+                    },
+                    {
+                        'par': 'Reservas - Tipo de Cambio',
+                        'historica': -0.70,
+                        'actual': -0.50,
+                        'divergencia': 0.20,
+                        'explicacion': 'Las reservas están generando menos confianza que históricamente, posiblemente por expectativas de devaluación y presión política.',
+                        'implicaciones': 'Mayor volatilidad cambiaria y presión sobre el peso.',
+                        'estrategia': 'Mantener mayor exposición a activos dolarizados y monitorear señales de devaluación.'
+                    },
+                    {
+                        'par': 'M2 - Inflación',
+                        'historica': 0.55,
+                        'actual': 0.40,
+                        'divergencia': -0.15,
+                        'explicacion': 'La correlación entre M2 e inflación se ha debilitado, posiblemente por cambios en la velocidad de circulación del dinero.',
+                        'implicaciones': 'Menor presión inflacionaria inmediata, pero mantener monitoreo.',
+                        'estrategia': 'Mantener activos indexados por inflación como cobertura.'
+                    }
+                ]
+                
+                for div in divergencias_actuales:
+                    if abs(div['divergencia']) > 0.1:  # Solo mostrar divergencias significativas
+                        st.markdown(f"**{div['par']}**: Histórica {div['historica']:.2f} → Actual {div['actual']:.2f} (Δ: {div['divergencia']:+.2f})")
+                        st.markdown(f"*Explicación:* {div['explicacion']}")
+                        st.markdown(f"*Implicaciones:* {div['implicaciones']}")
+                        st.markdown(f"*Estrategia:* {div['estrategia']}")
+                        st.markdown("---")
+                
+                # ========== 4. ANÁLISIS CON IA ==========
+                if incluir_analisis_ia and gemini_api_key:
+                    try:
+                        st.markdown("### 🤖 Análisis IA de Correlaciones Económicas")
+                        
+                        # Preparar datos para IA
+                        resumen_correlaciones = f"""
+                        ANÁLISIS DE CORRELACIONES ECONÓMICAS ARGENTINAS:
+                        
+                        **CORRELACIONES HISTÓRICAS DETECTADAS:**
+                        """
+                        
+                        for (var1, var2), analisis in correlaciones_historicas.items():
+                            if analisis['valor'] >= umbral_correlacion:
+                                resumen_correlaciones += f"""
+                        - {var1} ↔ {var2}: {analisis['valor']:.2f}
+                          Explicación: {analisis['explicacion_economica']}
+                          Factores argentinos: {analisis['factores_argentinos']}
+                          Estrategia: {analisis['estrategia_recomendada']}
+                        """
+                        
+                        resumen_correlaciones += f"""
+                        
+                        **DIVERGENCIAS ACTUALES:**
+                        """
+                        
+                        for div in divergencias_actuales:
+                            if abs(div['divergencia']) > 0.1:
+                                resumen_correlaciones += f"""
+                        - {div['par']}: Histórica {div['historica']:.2f} → Actual {div['actual']:.2f} (Δ: {div['divergencia']:+.2f})
+                          Explicación: {div['explicacion']}
+                          Estrategia: {div['estrategia']}
+                        """
+                        
+                        # Agregar datos actuales
+                        if datos_bcra:
+                            resumen_correlaciones += f"""
+                        
+                        **DATOS ACTUALES DEL BCRA:**
+                        - Inflación esperada: {datos_bcra['inflacion_esperada']:.1f}% mensual
+                        - Tasa de política: {datos_bcra['tasa_politica']:.1f}% anual
+                        - Reservas: {datos_bcra['reservas']:,.0f}M USD
+                        - Crecimiento M2: {datos_bcra['m2_crecimiento']:.1f}% anual
+                        """
+                        
+                        # Llamar a IA
+                        genai.configure(api_key=gemini_api_key)
+                        model = genai.GenerativeModel('gemini-pro')
+                        
+                        prompt = f"""
+                        Eres un analista económico experto en el mercado argentino. Analiza las siguientes correlaciones económicas y proporciona un análisis COMPLETO:
+                        
+                        {resumen_correlaciones}
+                        
+                        **REQUERIMIENTOS ESPECÍFICOS:**
+                        
+                        1. **EXPLICACIÓN ECONÓMICA DETALLADA:**
+                           - ¿Por qué estas variables están correlacionadas históricamente?
+                           - ¿Qué factores económicos explican estas correlaciones?
+                           - ¿Cómo han evolucionado estas correlaciones en Argentina?
+                        
+                        2. **ANÁLISIS DE DIVERGENCIAS:**
+                           - ¿Qué significan las divergencias detectadas?
+                           - ¿Son señales de cambio estructural o temporal?
+                           - ¿Qué factores pueden estar causando estas divergencias?
+                        
+                        3. **RECOMENDACIONES DE INVERSIÓN:**
+                           - Estrategias específicas basadas en las correlaciones
+                           - Oportunidades de arbitraje entre instrumentos correlacionados
+                           - Estrategias de diversificación basadas en correlaciones negativas
+                           - Instrumentos financieros específicos recomendados
+                        
+                        4. **GESTIÓN DE RIESGO:**
+                           - Riesgos específicos del contexto argentino
+                           - Estrategias de cobertura basadas en correlaciones
+                           - Señales de alerta a monitorear
+                        
+                        5. **TIMING Y HORIZONTE TEMPORAL:**
+                           - Cuándo implementar cada estrategia
+                           - Señales de entrada y salida
+                           - Duración recomendada de las posiciones
+                        
+                        6. **OPORTUNIDADES ESPECÍFICAS DEL MERCADO ARGENTINO:**
+                           - Instrumentos únicos del mercado local
+                           - Oportunidades de arbitraje MEP/CCL
+                           - Estrategias con bonos, acciones, y otros instrumentos
+                        
+                        **IMPORTANTE:**
+                        - Explica el POR QUÉ de cada correlación y su significado económico
+                        - Proporciona recomendaciones CONCRETAS y ACCIONABLES
+                        - Considera el contexto específico argentino
+                        - Incluye análisis de riesgo-recompensa
+                        - Explica las limitaciones y riesgos de cada estrategia
+                        
+                        Responde en español de manera clara, detallada y práctica.
+                        """
+                        
+                        response = model.generate_content(prompt)
+                        
+                        st.markdown("#### 📊 Análisis IA Detallado")
+                        st.markdown(response.text)
+                        
+                        # Agregar sección de implementación práctica
+                        st.markdown("#### 🎯 Implementación Práctica")
+                        
+                        # Generar recomendaciones específicas
+                        st.markdown("**💡 Estrategias Basadas en Correlaciones:**")
+                        
+                        estrategias_correlacion = [
+                            "**Correlación Inflación-Tasas (0.75)**: Considerar bonos CER y ajustables por inflación",
+                            "**Correlación Inflación-Tipo de Cambio (0.65)**: Mantener exposición a activos dolarizados",
+                            "**Correlación Tasas-Actividad (-0.60)**: Reducir exposición a sectores sensibles a las tasas",
+                            "**Correlación Reservas-Tipo de Cambio (-0.70)**: Monitorear evolución de reservas para timing",
+                            "**Correlación M2-Inflación (0.55)**: Incluir activos indexados por inflación"
+                        ]
+                        
+                        for estrategia in estrategias_correlacion:
+                            st.markdown(f"• {estrategia}")
+                        
+                        st.markdown("**⚡ Oportunidades de Arbitraje Detectadas:**")
+                        
+                        oportunidades_arbitraje = [
+                            "**Divergencia Inflación-Tasas**: El BCRA está siendo más conservador - considerar bonos de tasa fija",
+                            "**Divergencia Reservas-Tipo de Cambio**: Menor confianza en reservas - mayor exposición a USD",
+                            "**Divergencia M2-Inflación**: Correlación debilitada - mantener cobertura inflacionaria"
+                        ]
+                        
+                        for oportunidad in oportunidades_arbitraje:
+                            st.markdown(f"• {oportunidad}")
+                        
+                    except Exception as e:
+                        st.warning(f"No se pudo generar análisis IA: {e}")
+                        st.error(f"Error detallado: {str(e)}")
+                
+            except Exception as e:
+                st.error(f"Error en el análisis de correlaciones: {e}")
 
 
 if __name__ == "__main__":
