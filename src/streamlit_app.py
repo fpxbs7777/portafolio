@@ -4695,11 +4695,10 @@ def main():
                     st.warning("Por favor inicie sesión para acceder al análisis integral de mercados")
 
             elif opcion == "👨\u200d💼 Panel del Asesor":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_movimientos_asesor()
-                else:
-                    st.warning("Por favor inicie sesión para acceder al panel de asesor")
+                mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
+        else:
+            st.info("👆 Ingrese sus credenciales para comenzar")
             
             # Panel de bienvenida
             st.markdown("""
