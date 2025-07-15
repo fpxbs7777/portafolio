@@ -5233,6 +5233,7 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
 # Integra variables macro del BCRA, análisis intermarket local e internacional,
 # y sugerencias de activos según el ciclo.
 # """
+def mostrar_analisis_variables_economicas(token_acceso, gemini_api_key=None):
     st.markdown("---")
     st.subheader("🧱 Análisis Intermarket y Ciclo Económico Integrado")
 {{ ... }}
