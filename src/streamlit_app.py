@@ -4106,7 +4106,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "📊 Análisis CAPM y Estrategias", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4135,6 +4135,28 @@ def main():
                     analisis_intermarket_completo(st.session_state.token_acceso, gemini_key)
                 else:
                     st.warning("Por favor inicie sesión para acceder al análisis intermarket")
+            elif opcion == "📊 Análisis CAPM y Estrategias":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    # Configuración de API key para IA
+                    if 'GEMINI_API_KEY' not in st.session_state:
+                        st.session_state.GEMINI_API_KEY = ''
+                    
+                    gemini_key = st.text_input(
+                        "🔑 API Key Gemini (opcional)",
+                        value=st.session_state.GEMINI_API_KEY,
+                        type="password",
+                        help="Para análisis IA avanzado de estrategias"
+                    )
+                    st.session_state.GEMINI_API_KEY = gemini_key
+                    
+                    mostrar_analisis_capm_y_estrategias(st.session_state.token_acceso, gemini_key)
+                    
+                    # Si hay un cliente seleccionado, mostrar también análisis del portafolio
+                    if st.session_state.cliente_seleccionado:
+                        st.divider()
+                        mostrar_analisis_capm_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+                else:
+                    st.warning("Por favor inicie sesión para acceder al análisis CAPM")
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
@@ -4852,6 +4874,640 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
                 'sugerencias': sugerencias,
                 'fecha_analisis': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
+
+class CAPMAnalyzer:
+    """
+    Clase para análisis CAPM (Capital Asset Pricing Model) de activos individuales
+    """
+    
+    def __init__(self, risk_free_rate=0.0):
+        self.risk_free_rate = risk_free_rate
+        self.analyses = {}
+    
+    def calculate_asset_capm(self, asset_returns, market_returns, asset_name="Asset"):
+        """
+        Calcula métricas CAPM para un activo individual
+        
+        Args:
+            asset_returns (pd.Series): Retornos del activo
+            market_returns (pd.Series): Retornos del mercado (benchmark)
+            asset_name (str): Nombre del activo
+            
+        Returns:
+            dict: Métricas CAPM del activo
+        """
+        # Alinear series
+        aligned_data = pd.concat([asset_returns, market_returns], axis=1).dropna()
+        if len(aligned_data) < 10:
+            return None
+            
+        asset_aligned = aligned_data.iloc[:, 0]
+        market_aligned = aligned_data.iloc[:, 1]
+        
+        # Regresión CAPM: R_asset - Rf = α + β(R_market - Rf)
+        market_excess = market_aligned - self.risk_free_rate/252  # Diario
+        asset_excess = asset_aligned - self.risk_free_rate/252
+        
+        slope, intercept, r_value, p_value, std_err = linregress(market_excess, asset_excess)
+        
+        # Calcular métricas adicionales
+        tracking_error = np.std(asset_excess - slope * market_excess) * np.sqrt(252)
+        information_ratio = intercept * 252 / tracking_error if tracking_error != 0 else 0
+        treynor_ratio = (asset_aligned.mean() * 252 - self.risk_free_rate) / slope if slope != 0 else 0
+        
+        result = {
+            'asset_name': asset_name,
+            'alpha': intercept * 252,  # Anualizado
+            'beta': slope,
+            'r_squared': r_value ** 2,
+            'p_value': p_value,
+            'tracking_error': tracking_error,
+            'information_ratio': information_ratio,
+            'treynor_ratio': treynor_ratio,
+            'volatility': asset_aligned.std() * np.sqrt(252),
+            'sharpe_ratio': (asset_aligned.mean() * 252 - self.risk_free_rate) / (asset_aligned.std() * np.sqrt(252)),
+            'observations': len(aligned_data)
+        }
+        
+        self.analyses[asset_name] = result
+        return result
+    
+    def classify_asset_strategy(self, capm_metrics):
+        """
+        Clasifica el activo según su estrategia de inversión basada en CAPM
+        
+        Args:
+            capm_metrics (dict): Métricas CAPM del activo
+            
+        Returns:
+            dict: Clasificación de estrategia
+        """
+        beta = capm_metrics.get('beta', 1.0)
+        alpha = capm_metrics.get('alpha', 0)
+        r_squared = capm_metrics.get('r_squared', 0)
+        
+        # Clasificación según las estrategias especificadas
+        if abs(beta - 1.0) < 0.1 and abs(alpha) < 0.02:
+            strategy_type = "Index Tracker"
+            description = "Replica el rendimiento del benchmark (β ≈ 1, α ≈ 0)"
+            characteristics = ["Baja volatilidad", "Rendimiento en línea con mercado", "Bajo tracking error"]
+        elif beta >= 0.9 and beta <= 1.1 and alpha > 0.02:
+            strategy_type = "Traditional Long-Only"
+            description = "Supera al mercado con retorno adicional no correlacionado (β ≈ 1, α > 0)"
+            characteristics = ["Alfa positivo", "Riesgo similar al mercado", "Generación de valor agregado"]
+        elif beta > 1.1 or beta < 0.9:
+            strategy_type = "Smart Beta"
+            description = "Ajusta dinámicamente la exposición al mercado (β ≠ 1, α ≈ 0)"
+            characteristics = ["Beta dinámico", "Ajuste táctico", "Gestión de riesgo activa"]
+        elif abs(beta) < 0.3 and alpha > 0.02:
+            strategy_type = "Hedge Fund"
+            description = "Retornos absolutos no correlacionados con el mercado (β ≈ 0, α > 0)"
+            characteristics = ["Baja correlación", "Retornos absolutos", "Gestión alternativa"]
+        else:
+            strategy_type = "Mixed Strategy"
+            description = "Estrategia mixta con características combinadas"
+            characteristics = ["Perfil único", "Características mixtas", "Análisis individual requerido"]
+        
+        return {
+            'strategy_type': strategy_type,
+            'description': description,
+            'characteristics': characteristics,
+            'beta': beta,
+            'alpha': alpha,
+            'r_squared': r_squared
+        }
+
+class DefensiveAssetFinder:
+    """
+    Clase para encontrar activos defensivos basados en análisis CAPM
+    """
+    
+    def __init__(self, token_portador):
+        self.token_portador = token_portador
+        self.capm_analyzer = CAPMAnalyzer()
+    
+    def find_defensive_assets(self, market_returns, min_beta=0.3, max_beta=0.8, min_alpha=-0.05):
+        """
+        Encuentra activos defensivos basados en criterios CAPM
+        
+        Args:
+            market_returns (pd.Series): Retornos del mercado
+            min_beta (float): Beta mínimo para activos defensivos
+            max_beta (float): Beta máximo para activos defensivos
+            min_alpha (float): Alpha mínimo aceptable
+            
+        Returns:
+            list: Lista de activos defensivos con sus métricas
+        """
+        defensive_assets = []
+        
+        # Obtener lista de activos disponibles
+        try:
+            # Usar paneles conocidos de acciones defensivas
+            paneles_defensivos = ['Panel General', 'Panel Líderes']
+            tickers_por_panel = obtener_tickers_por_panel(
+                self.token_portador, 
+                paneles_defensivos, 
+                pais='Argentina'
+            )
+            
+            for panel, tickers in tickers_por_panel.items():
+                for ticker in tickers[:20]:  # Limitar a 20 por panel para eficiencia
+                    try:
+                        # Obtener datos históricos del ticker
+                        df_historico = obtener_serie_historica_iol(
+                            self.token_portador,
+                            'BCBA',  # Asumir mercado BCBA
+                            ticker,
+                            (datetime.now() - timedelta(days=252)).strftime('%Y-%m-%d'),
+                            datetime.now().strftime('%Y-%m-%d'),
+                            "SinAjustar"
+                        )
+                        
+                        if df_historico is not None and len(df_historico) > 50:
+                            # Calcular retornos
+                            asset_returns = df_historico['close'].pct_change().dropna()
+                            
+                            # Análisis CAPM
+                            capm_metrics = self.capm_analyzer.calculate_asset_capm(
+                                asset_returns, market_returns, ticker
+                            )
+                            
+                            if capm_metrics:
+                                beta = capm_metrics['beta']
+                                alpha = capm_metrics['alpha']
+                                
+                                # Verificar criterios defensivos
+                                if (min_beta <= beta <= max_beta and 
+                                    alpha >= min_alpha and 
+                                    capm_metrics['r_squared'] > 0.3):
+                                    
+                                    defensive_assets.append({
+                                        'ticker': ticker,
+                                        'capm_metrics': capm_metrics,
+                                        'strategy': self.capm_analyzer.classify_asset_strategy(capm_metrics),
+                                        'defensive_score': self._calculate_defensive_score(capm_metrics)
+                                    })
+                    
+                    except Exception as e:
+                        print(f"Error procesando {ticker}: {str(e)}")
+                        continue
+            
+            # Ordenar por score defensivo
+            defensive_assets.sort(key=lambda x: x['defensive_score'], reverse=True)
+            
+        except Exception as e:
+            print(f"Error en búsqueda de activos defensivos: {str(e)}")
+        
+        return defensive_assets
+    
+    def _calculate_defensive_score(self, capm_metrics):
+        """
+        Calcula un score defensivo basado en métricas CAPM
+        
+        Args:
+            capm_metrics (dict): Métricas CAPM del activo
+            
+        Returns:
+            float: Score defensivo (0-100)
+        """
+        beta = capm_metrics['beta']
+        alpha = capm_metrics['alpha']
+        volatility = capm_metrics['volatility']
+        sharpe = capm_metrics['sharpe_ratio']
+        
+        # Score basado en beta (menor = más defensivo)
+        beta_score = max(0, 100 - abs(beta - 0.5) * 100)
+        
+        # Score basado en alpha (mayor = mejor)
+        alpha_score = min(100, max(0, (alpha + 0.1) * 500))
+        
+        # Score basado en volatilidad (menor = más defensivo)
+        vol_score = max(0, 100 - volatility * 100)
+        
+        # Score basado en Sharpe (mayor = mejor)
+        sharpe_score = min(100, max(0, sharpe * 50 + 50))
+        
+        # Ponderación: Beta 40%, Alpha 30%, Volatilidad 20%, Sharpe 10%
+        total_score = (beta_score * 0.4 + alpha_score * 0.3 + 
+                      vol_score * 0.2 + sharpe_score * 0.1)
+        
+        return total_score
+
+class InvestmentStrategyRecommender:
+    """
+    Clase para generar recomendaciones de estrategias de inversión basadas en análisis CAPM
+    """
+    
+    def __init__(self, token_portador, gemini_api_key=None):
+        self.token_portador = token_portador
+        self.gemini_api_key = gemini_api_key
+        self.capm_analyzer = CAPMAnalyzer()
+        self.defensive_finder = DefensiveAssetFinder(token_portador)
+    
+    def generate_market_recommendations(self, market_conditions, portfolio_analysis=None):
+        """
+        Genera recomendaciones basadas en condiciones de mercado
+        
+        Args:
+            market_conditions (dict): Condiciones actuales del mercado
+            portfolio_analysis (dict): Análisis del portafolio actual (opcional)
+            
+        Returns:
+            dict: Recomendaciones de estrategia
+        """
+        recommendations = {
+            'market_phase': self._determine_market_phase(market_conditions),
+            'recommended_strategies': [],
+            'defensive_assets': [],
+            'risk_adjustments': {},
+            'implementation_notes': []
+        }
+        
+        # Determinar estrategias recomendadas según fase del mercado
+        market_phase = recommendations['market_phase']
+        
+        if market_phase == 'Bear Market' or market_phase == 'High Volatility':
+            recommendations['recommended_strategies'] = [
+                {
+                    'strategy': 'Defensive Positioning',
+                    'description': 'Reducir exposición a acciones cíclicas, aumentar activos defensivos',
+                    'target_beta': 0.3,
+                    'max_beta': 0.8,
+                    'priority': 'High'
+                },
+                {
+                    'strategy': 'Hedge Fund Approach',
+                    'description': 'Buscar activos con baja correlación y alpha positivo',
+                    'target_beta': 0.0,
+                    'max_beta': 0.3,
+                    'priority': 'Medium'
+                }
+            ]
+            
+            # Buscar activos defensivos
+            try:
+                market_returns = self._get_market_returns()
+                defensive_assets = self.defensive_finder.find_defensive_assets(
+                    market_returns, min_beta=0.2, max_beta=0.7, min_alpha=-0.03
+                )
+                recommendations['defensive_assets'] = defensive_assets[:10]  # Top 10
+            except Exception as e:
+                print(f"Error buscando activos defensivos: {str(e)}")
+        
+        elif market_phase == 'Bull Market':
+            recommendations['recommended_strategies'] = [
+                {
+                    'strategy': 'Smart Beta',
+                    'description': 'Aumentar exposición táctica con beta dinámico',
+                    'target_beta': 1.2,
+                    'max_beta': 1.5,
+                    'priority': 'High'
+                },
+                {
+                    'strategy': 'Traditional Long-Only',
+                    'description': 'Mantener exposición al mercado con alpha positivo',
+                    'target_beta': 1.0,
+                    'max_beta': 1.1,
+                    'priority': 'Medium'
+                }
+            ]
+        
+        elif market_phase == 'Sideways Market':
+            recommendations['recommended_strategies'] = [
+                {
+                    'strategy': 'Index Tracker',
+                    'description': 'Mantener exposición neutral al mercado',
+                    'target_beta': 1.0,
+                    'max_beta': 1.0,
+                    'priority': 'High'
+                },
+                {
+                    'strategy': 'Hedge Fund',
+                    'description': 'Buscar oportunidades no correlacionadas',
+                    'target_beta': 0.0,
+                    'max_beta': 0.3,
+                    'priority': 'Medium'
+                }
+            ]
+        
+        # Ajustes de riesgo
+        recommendations['risk_adjustments'] = self._calculate_risk_adjustments(
+            market_phase, portfolio_analysis
+        )
+        
+        # Notas de implementación
+        recommendations['implementation_notes'] = self._generate_implementation_notes(
+            recommendations
+        )
+        
+        return recommendations
+    
+    def _determine_market_phase(self, market_conditions):
+        """
+        Determina la fase actual del mercado
+        """
+        vix = market_conditions.get('VIX', {}).get('valor_actual', 20)
+        trend = market_conditions.get('tendencia_mercado', 'neutral')
+        volatility = market_conditions.get('volatilidad', 'normal')
+        
+        if vix > 30 or volatility == 'alta':
+            return 'High Volatility'
+        elif trend == 'bajista' or vix > 25:
+            return 'Bear Market'
+        elif trend == 'alcista' and vix < 20:
+            return 'Bull Market'
+        else:
+            return 'Sideways Market'
+    
+    def _get_market_returns(self):
+        """
+        Obtiene retornos del mercado (MERVAL)
+        """
+        try:
+            merval_data = yf.download('^MERV', 
+                                    start=(datetime.now() - timedelta(days=252)).strftime('%Y-%m-%d'),
+                                    end=datetime.now().strftime('%Y-%m-%d'))['Close']
+            return merval_data.pct_change().dropna()
+        except Exception as e:
+            print(f"Error obteniendo datos del MERVAL: {str(e)}")
+            return None
+    
+    def _calculate_risk_adjustments(self, market_phase, portfolio_analysis):
+        """
+        Calcula ajustes de riesgo según la fase del mercado
+        """
+        adjustments = {
+            'position_sizing': {},
+            'stop_loss': {},
+            'diversification': {}
+        }
+        
+        if market_phase in ['Bear Market', 'High Volatility']:
+            adjustments['position_sizing'] = {
+                'max_position': 0.05,  # 5% máximo por posición
+                'total_equity': 0.6,   # 60% máximo en acciones
+                'cash_reserve': 0.4    # 40% en efectivo
+            }
+            adjustments['stop_loss'] = {
+                'tight_stops': True,
+                'stop_percentage': 0.05  # 5% stop loss
+            }
+            adjustments['diversification'] = {
+                'min_positions': 15,
+                'max_sector_weight': 0.15  # 15% máximo por sector
+            }
+        
+        elif market_phase == 'Bull Market':
+            adjustments['position_sizing'] = {
+                'max_position': 0.10,  # 10% máximo por posición
+                'total_equity': 0.9,   # 90% máximo en acciones
+                'cash_reserve': 0.1    # 10% en efectivo
+            }
+            adjustments['stop_loss'] = {
+                'tight_stops': False,
+                'stop_percentage': 0.10  # 10% stop loss
+            }
+            adjustments['diversification'] = {
+                'min_positions': 10,
+                'max_sector_weight': 0.25  # 25% máximo por sector
+            }
+        
+        else:  # Sideways Market
+            adjustments['position_sizing'] = {
+                'max_position': 0.07,  # 7% máximo por posición
+                'total_equity': 0.75,  # 75% máximo en acciones
+                'cash_reserve': 0.25   # 25% en efectivo
+            }
+            adjustments['stop_loss'] = {
+                'tight_stops': True,
+                'stop_percentage': 0.07  # 7% stop loss
+            }
+            adjustments['diversification'] = {
+                'min_positions': 12,
+                'max_sector_weight': 0.20  # 20% máximo por sector
+            }
+        
+        return adjustments
+    
+    def _generate_implementation_notes(self, recommendations):
+        """
+        Genera notas de implementación para las recomendaciones
+        """
+        notes = []
+        
+        for strategy in recommendations['recommended_strategies']:
+            if strategy['strategy'] == 'Defensive Positioning':
+                notes.append({
+                    'type': 'warning',
+                    'message': 'Reducir exposición a sectores cíclicos (financiero, industrial)',
+                    'action': 'Aumentar peso en utilities, consumer staples, healthcare'
+                })
+                notes.append({
+                    'type': 'info',
+                    'message': 'Considerar bonos corporativos de alta calidad',
+                    'action': 'Evaluar bonos con rating A o superior'
+                })
+            
+            elif strategy['strategy'] == 'Smart Beta':
+                notes.append({
+                    'type': 'info',
+                    'message': 'Implementar rebalanceo táctico',
+                    'action': 'Ajustar pesos cada 2-4 semanas según condiciones'
+                })
+            
+            elif strategy['strategy'] == 'Hedge Fund Approach':
+                notes.append({
+                    'type': 'warning',
+                    'message': 'Buscar activos con correlación negativa',
+                    'action': 'Evaluar ETFs inversos o estrategias de cobertura'
+                })
+        
+        return notes
+
+def mostrar_analisis_capm_portafolio(token_acceso, id_cliente):
+    """
+    Muestra análisis CAPM del portafolio actual del cliente
+    """
+    st.header("📊 Análisis CAPM del Portafolio")
+    
+    # Obtener portafolio del cliente
+    try:
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if not portafolio:
+            st.warning("No se pudo obtener el portafolio del cliente")
+            return
+        
+        # Calcular valor total
+        valor_total = sum(activo.get('Valuación', 0) for activo in portafolio.values())
+        
+        if valor_total <= 0:
+            st.warning("El portafolio no tiene valor o no se pudo calcular")
+            return
+        
+        # Analizar portafolio con CAPM
+        with st.spinner("Analizando portafolio con métricas CAPM..."):
+            portfolio_analysis = analizar_portafolio_capm(portafolio, token_acceso)
+        
+        if not portfolio_analysis or not portfolio_analysis['assets_analysis']:
+            st.warning("No se pudo realizar el análisis CAPM del portafolio")
+            return
+        
+        # Mostrar métricas del portafolio
+        st.subheader("📈 Métricas del Portafolio")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Beta del Portafolio", f"{portfolio_analysis['portfolio_metrics']['portfolio_beta']:.3f}")
+        
+        with col2:
+            st.metric("Alpha del Portafolio", f"{portfolio_analysis['portfolio_metrics']['portfolio_alpha']*100:.2f}%")
+        
+        with col3:
+            st.metric("Total de Activos", portfolio_analysis['portfolio_metrics']['total_assets'])
+        
+        with col4:
+            strategy_type = portfolio_analysis['strategy_classification']['strategy_type']
+            st.metric("Estrategia", strategy_type)
+        
+        # Mostrar clasificación de estrategia
+        st.subheader("🎯 Clasificación de Estrategia")
+        
+        strategy = portfolio_analysis['strategy_classification']
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.write(f"**Tipo de Estrategia:** {strategy['strategy_type']}")
+            st.write(f"**Descripción:** {strategy['description']}")
+            st.write("**Características:**")
+            for char in strategy['characteristics']:
+                st.write(f"• {char}")
+        
+        with col2:
+            if strategy['strategy_type'] == "Index Tracker":
+                st.success("🟢 Estrategia Conservadora")
+            elif strategy['strategy_type'] == "Traditional Long-Only":
+                st.info("🔵 Estrategia Balanceada")
+            elif strategy['strategy_type'] == "Smart Beta":
+                st.warning("🟡 Estrategia Táctica")
+            elif strategy['strategy_type'] == "Hedge Fund":
+                st.error("🔴 Estrategia Alternativa")
+            else:
+                st.info("⚪ Estrategia Mixta")
+        
+        # Mostrar análisis por activo
+        st.subheader("📊 Análisis por Activo")
+        
+        # Crear DataFrame para mostrar
+        assets_data = []
+        for asset in portfolio_analysis['assets_analysis']:
+            assets_data.append({
+                'Símbolo': asset['symbol'],
+                'Beta': f"{asset['capm_metrics']['beta']:.3f}",
+                'Alpha (%)': f"{asset['capm_metrics']['alpha']*100:.2f}",
+                'Volatilidad (%)': f"{asset['capm_metrics']['volatility']*100:.1f}",
+                'Sharpe': f"{asset['capm_metrics']['sharpe_ratio']:.2f}",
+                'Peso (%)': f"{asset['weight']*100:.1f}",
+                'Estrategia': asset['strategy']['strategy_type']
+            })
+        
+        df_assets = pd.DataFrame(assets_data)
+        st.dataframe(df_assets, use_container_width=True)
+        
+        # Gráfico de dispersión Beta vs Alpha
+        st.subheader("📈 Dispersión Beta vs Alpha")
+        
+        fig = go.Figure()
+        
+        # Agrupar por estrategia
+        strategies = {}
+        for asset in portfolio_analysis['assets_analysis']:
+            strategy = asset['strategy']['strategy_type']
+            if strategy not in strategies:
+                strategies[strategy] = {'betas': [], 'alphas': [], 'symbols': []}
+            
+            strategies[strategy]['betas'].append(asset['capm_metrics']['beta'])
+            strategies[strategy]['alphas'].append(asset['capm_metrics']['alpha'])
+            strategies[strategy]['symbols'].append(asset['symbol'])
+        
+        # Colores por estrategia
+        colors = {
+            'Index Tracker': 'green',
+            'Traditional Long-Only': 'blue',
+            'Smart Beta': 'orange',
+            'Hedge Fund': 'red',
+            'Mixed Strategy': 'purple'
+        }
+        
+        for strategy, data in strategies.items():
+            fig.add_trace(go.Scatter(
+                x=data['betas'],
+                y=[alpha * 100 for alpha in data['alphas']],
+                mode='markers+text',
+                text=data['symbols'],
+                textposition="top center",
+                name=strategy,
+                marker=dict(
+                    size=10,
+                    color=colors.get(strategy, 'gray')
+                ),
+                hovertemplate='<b>%{text}</b><br>' +
+                            'Beta: %{x:.3f}<br>' +
+                            'Alpha: %{y:.2f}%<br>' +
+                            'Estrategia: ' + strategy +
+                            '<extra></extra>'
+            ))
+        
+        # Líneas de referencia
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Alpha = 0")
+        fig.add_vline(x=1, line_dash="dash", line_color="gray", annotation_text="Beta = 1")
+        
+        fig.update_layout(
+            title="Dispersión de Activos por Beta y Alpha",
+            xaxis_title="Beta",
+            yaxis_title="Alpha (%)",
+            height=500,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Recomendaciones específicas
+        st.subheader("💡 Recomendaciones Específicas")
+        
+        # Analizar concentración de riesgo
+        high_beta_assets = [a for a in portfolio_analysis['assets_analysis'] if a['capm_metrics']['beta'] > 1.2]
+        low_alpha_assets = [a for a in portfolio_analysis['assets_analysis'] if a['capm_metrics']['alpha'] < -0.05]
+        
+        if high_beta_assets:
+            st.warning("⚠️ **Activos de Alto Riesgo Detectados:**")
+            for asset in high_beta_assets:
+                st.write(f"• {asset['symbol']}: Beta = {asset['capm_metrics']['beta']:.3f}")
+            st.write("**Recomendación:** Considerar reducir exposición o implementar cobertura")
+        
+        if low_alpha_assets:
+            st.warning("⚠️ **Activos con Alpha Negativo:**")
+            for asset in low_alpha_assets:
+                st.write(f"• {asset['symbol']}: Alpha = {asset['capm_metrics']['alpha']*100:.2f}%")
+            st.write("**Recomendación:** Evaluar reemplazo por activos con mejor rendimiento")
+        
+        # Sugerencias de diversificación
+        strategy_counts = {}
+        for asset in portfolio_analysis['assets_analysis']:
+            strategy = asset['strategy']['strategy_type']
+            strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
+        
+        if len(strategy_counts) < 3:
+            st.info("ℹ️ **Diversificación de Estrategias:**")
+            st.write("El portafolio está concentrado en pocas estrategias. Considerar diversificar entre:")
+            st.write("• Index Tracker (estabilidad)")
+            st.write("• Smart Beta (táctica)")
+            st.write("• Hedge Fund (alternativa)")
+        
+    except Exception as e:
+        st.error(f"Error en el análisis CAPM del portafolio: {str(e)}")
 
 if __name__ == "__main__":
     main()
