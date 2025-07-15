@@ -2098,7 +2098,6 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
-{{ ... }}
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
@@ -3389,39 +3388,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 **⚠️ Revisar Balance Riesgo-Retorno**  
                 El riesgo podría ser alto en relación al retorno esperado.
                 """)
-    else:
-        st.warning("No se encontraron activos en el portafolio")
-
-def mostrar_estado_cuenta(estado_cuenta):
-    st.markdown("### 💰 Estado de Cuenta")
-    
-    if not estado_cuenta:
-        st.warning("No hay datos de estado de cuenta disponibles")
-        return
-    
-    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-    cuentas = estado_cuenta.get('cuentas', [])
-    
-    cols = st.columns(3)
-    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-    cols[1].metric("Número de Cuentas", len(cuentas))
-    
-    if cuentas:
-        st.subheader("📊 Detalle de Cuentas")
-        
-        datos_cuentas = []
-        for cuenta in cuentas:
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                'Total': f"${cuenta.get('total', 0):,.2f}",
-            })
-        
-        df_cuentas = pd.DataFrame(datos_cuentas)
-        st.dataframe(df_cuentas, use_container_width=True, height=300)
 
 def mostrar_cotizaciones_mercado(token_acceso):
     st.markdown("### 💱 Cotizaciones y Mercado")
@@ -4093,7 +4059,7 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
 
     # --- INICIO mostrar_optimizacion_portafolio ---
         # Diagnóstico IA de ciclo económico y sugerencia de sectores
-        st.markdown("---")
+    st.markdown("---")
         st.subheader("🧠 Diagnóstico IA de ciclo económico y sugerencia de sectores")
         if 'GEMINI_API_KEY' not in st.session_state:
             st.session_state.GEMINI_API_KEY = 'AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E'
@@ -4379,9 +4345,9 @@ def mostrar_movimientos_asesor():
         st.subheader("🔍 Buscar Movimientos")
         
         col1, col2 = st.columns(2)
-        with col1:
+    with col1:
             fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30))
-        with col2:
+    with col2:
             fecha_hasta = st.date_input("Fecha hasta", value=date.today())
         
         # Selección múltiple de clientes
@@ -4467,7 +4433,6 @@ def mostrar_analisis_portafolio():
     # Crear tabs con iconos
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Rebalanceo"
@@ -4481,19 +4446,12 @@ def mostrar_analisis_portafolio():
             st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
-    
-    with tab3:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
     
-    with tab4:
+    with tab3:
         mostrar_cotizaciones_mercado(token_acceso)
     
-    with tab5:
+    with tab4:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
@@ -5236,7 +5194,6 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
 def mostrar_analisis_variables_economicas(token_acceso, gemini_api_key=None):
     st.markdown("---")
     st.subheader("🧱 Análisis Intermarket y Ciclo Económico Integrado")
-{{ ... }}
     
     # Configuración de períodos
     col1, col2, col3 = st.columns(3)
