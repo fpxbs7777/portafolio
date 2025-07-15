@@ -3801,6 +3801,178 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         - **VaR 95%**: Valor en riesgo al 95% de confianza
         """)
 
+    # --- Análisis Intermarket Profesional previo a la optimización ---
+    import yfinance as yf
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    st.markdown('---')
+    st.subheader('🔗 Análisis Intermarket Profesional (Contexto Global)')
+    with st.spinner('Descargando datos intermarket de referencia...'):
+        tickers_intermarket = {
+            'Merval': '^MERV',
+            'S&P 500': '^GSPC',
+            'DXY': 'DX-Y.NYB',
+            'VIX': '^VIX',
+            'Soja': 'ZS=F'
+        }
+        precios_inter = {}
+        for k, v in tickers_intermarket.items():
+            try:
+                data = yf.download(v, period='1y')['Adj Close']
+                if not data.empty:
+                    precios_inter[k] = data.dropna()
+            except Exception:
+                continue
+        df_inter = pd.DataFrame(precios_inter).dropna()
+        retornos_inter = df_inter.pct_change().dropna()
+    # Señal simple intermarket
+    dxy_trend = retornos_inter['DXY'].tail(20).sum() if 'DXY' in retornos_inter else 0
+    soja_trend = retornos_inter['Soja'].tail(20).sum() if 'Soja' in retornos_inter else 0
+    vix_actual = df_inter['VIX'].iloc[-1] if 'VIX' in df_inter else 20
+    merval_momentum = retornos_inter['Merval'].tail(10).sum() if 'Merval' in retornos_inter else 0
+    if dxy_trend < -0.01 and soja_trend > 0.03 and vix_actual < 20 and merval_momentum > 0.02:
+        regimen = "ALCISTA"
+        recomendacion = "Contexto favorable para activos de riesgo y commodities."
+        explicacion = "El dólar débil, commodities fuertes, baja volatilidad y momentum positivo en Merval sugieren un entorno alcista."
+    elif dxy_trend > 0.01 or vix_actual > 25:
+        regimen = "DEFENSIVO"
+        recomendacion = "Contexto defensivo: preferencia por activos refugio y baja exposición a riesgo."
+        explicacion = "El dólar fuerte o alta volatilidad (VIX) sugieren cautela y preferencia por activos defensivos."
+    else:
+        regimen = "NEUTRAL"
+        recomendacion = "Contexto neutral: portafolio balanceado y esperar señales claras."
+        explicacion = "No hay señales claras de tendencia, se recomienda mantener un portafolio diversificado."
+    st.info(f"Régimen Intermarket: **{regimen}**. {recomendacion}")
+    st.caption(f"Explicación: {explicacion}")
+    # Mostrar gráfico de activos de referencia
+    fig, ax = plt.subplots()
+    activos_graf = ['Merval', 'S&P 500', 'DXY', 'VIX', 'Soja']
+    for activo in activos_graf:
+        if activo in df_inter:
+            precios_norm = df_inter[activo] / df_inter[activo].iloc[0] * 100
+            ax.plot(precios_norm.index, precios_norm, label=activo)
+    ax.legend()
+    ax.set_title("Evolución de activos de referencia (base 100)")
+    st.pyplot(fig)
+    # --- FIN BLOQUE INTERMARKET ---
+
+    # --- Análisis de Ciclo Económico BCRA ---
+    with st.expander("🔎 Análisis Automático del Ciclo Económico (BCRA)", expanded=False):
+        st.markdown("**Variables consideradas:** Reservas, tasa de política monetaria, inflación, agregados monetarios.")
+        # Obtener datos reales del BCRA
+        try:
+            # Reservas internacionales (último dato)
+            url_reservas = "https://api.estadisticasbcra.com/reservas"
+            url_leliq = "https://api.estadisticasbcra.com/leliq"
+            url_inflacion = "https://api.estadisticasbcra.com/inflacion_mensual_oficial"
+            url_m2 = "https://api.estadisticasbcra.com/base_monetaria"
+            headers = {"Authorization": "Bearer TU_API_KEY_BCRA"}
+            reservas = requests.get(url_reservas, headers=headers).json()[-1]["valor"]
+            tasa_leliq = requests.get(url_leliq, headers=headers).json()[-1]["valor"]
+            inflacion = requests.get(url_inflacion, headers=headers).json()[-1]["valor"] / 100
+            m2 = requests.get(url_m2, headers=headers).json()
+            m2_crecimiento = (m2[-1]["valor"] - m2[-22]["valor"]) / m2[-22]["valor"] if len(m2) > 22 else None
+        except Exception as e:
+            st.warning(f"No se pudieron obtener datos reales del BCRA: {e}. Se usarán valores simulados.")
+            reservas = 25000
+            tasa_leliq = 50
+            inflacion = 0.08
+            m2_crecimiento = None
+        # Lógica simple de etapa
+        if reservas > 35000 and inflacion < 0.05 and tasa_leliq < 60:
+            etapa = "Expansión"
+            explicacion_ciclo = "Reservas altas, inflación baja y tasas moderadas: contexto favorable para activos de riesgo."
+            sugerencia = "Portafolio agresivo: sobreponderar acciones, cíclicos y emergentes."
+        elif inflacion > 0.10 or tasa_leliq > 80:
+            etapa = "Recesión"
+            explicacion_ciclo = "Inflación/tasas muy altas: contexto defensivo, preferir liquidez y renta fija."
+            sugerencia = "Portafolio defensivo: priorizar bonos, FCIs de money market y activos refugio."
+        elif reservas > 30000 and inflacion < 0.08:
+            etapa = "Auge"
+            explicacion_ciclo = "Reservas sólidas y baja inflación: buen momento para balancear riesgo y retorno."
+            sugerencia = "Portafolio balanceado: combinar acciones, bonos y algo de liquidez."
+        else:
+            etapa = "Recuperación/Neutral"
+            explicacion_ciclo = "Variables mixtas, posible recuperación o transición."
+            sugerencia = "Portafolio diversificado: mantener exposición equilibrada y flexibilidad."
+        st.success(f"Etapa detectada: **{etapa}**")
+        st.caption(f"Explicación: {explicacion_ciclo}")
+        cols = st.columns(4)
+        cols[0].metric("Reservas", f"{reservas:,.0f}M USD")
+        cols[1].metric("Tasa LELIQ", f"{tasa_leliq:.2f}% anual")
+        cols[2].metric("Inflación mensual", f"{inflacion*100:.2f}%")
+        cols[3].metric("Crecimiento M2", f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D")
+        # --- SUGERENCIA DE ESTRATEGIA SEGÚN CICLO ---
+        st.markdown(f"""
+        <div style='background:#eaf6fb;border-left:6px solid #007cf0;padding:1.2em 1.5em;margin:1.2em 0 1.5em 0;border-radius:10px;'>
+        <b>💡 Sugerencia de Estrategia de Optimización:</b><br>
+        <span style='font-size:1.15em;font-weight:700;color:#0056b3'>{sugerencia}</span><br>
+        <span style='color:#007cf0;font-size:1em;'>{explicacion_ciclo}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # --- Análisis de Ciclo Económico BCRA ---
+    with st.expander("🔎 Análisis Automático del Ciclo Económico (BCRA)", expanded=False):
+        st.markdown("**Variables consideradas:** Reservas, tasa de política monetaria, inflación, agregados monetarios.")
+        # Obtener datos reales del BCRA
+        try:
+            # Reservas internacionales (último dato)
+            url_reservas = "https://api.estadisticasbcra.com/reservas"
+            url_leliq = "https://api.estadisticasbcra.com/leliq"
+            url_inflacion = "https://api.estadisticasbcra.com/inflacion_mensual_oficial"
+            url_m2 = "https://api.estadisticasbcra.com/base_monetaria"
+            headers = {"Authorization": "BEARER TU_API_KEY_BCRA"}  # Reemplazar por tu API KEY de estadisticasbcra.com
+            # Reservas
+            reservas_df = pd.DataFrame(requests.get(url_reservas, headers=headers).json())
+            reservas = reservas_df.iloc[-1]['valor'] if not reservas_df.empty else None
+            # Tasa LELIQ
+            leliq_df = pd.DataFrame(requests.get(url_leliq, headers=headers).json())
+            tasa_leliq = leliq_df.iloc[-1]['valor'] if not leliq_df.empty else None
+            # Inflación mensual
+            inflacion_df = pd.DataFrame(requests.get(url_inflacion, headers=headers).json())
+            inflacion = inflacion_df.iloc[-1]['valor']/100 if not inflacion_df.empty else None
+            # M2 (usamos base monetaria como proxy)
+            m2_df = pd.DataFrame(requests.get(url_m2, headers=headers).json())
+            if len(m2_df) > 1:
+                m2_crecimiento = (m2_df.iloc[-1]['valor'] - m2_df.iloc[-2]['valor']) / m2_df.iloc[-2]['valor']
+            else:
+                m2_crecimiento = None
+        except Exception as e:
+            st.warning(f"No se pudieron obtener datos reales del BCRA: {e}. Se usarán valores simulados.")
+            reservas = 25000
+            tasa_leliq = 50
+            inflacion = 0.08
+            m2_crecimiento = 0.03
+        # Lógica simple de ciclo
+        if inflacion is not None and tasa_leliq is not None and m2_crecimiento is not None and reservas is not None:
+            if inflacion > 0.06 and tasa_leliq > 40 and m2_crecimiento > 0.02 and reservas < 20000:
+                etapa = "Recesión"
+                explicacion_ciclo = "Alta inflación, tasas elevadas, crecimiento monetario y reservas bajas sugieren recesión."
+            elif inflacion < 0.04 and tasa_leliq < 35 and m2_crecimiento < 0.01 and reservas > 35000:
+                etapa = "Expansión"
+                explicacion_ciclo = "Baja inflación, tasas bajas, crecimiento monetario controlado y reservas altas sugieren expansión."
+            elif inflacion > 0.05 and tasa_leliq > 45 and reservas > 30000:
+                etapa = "Auge"
+                explicacion_ciclo = "Inflación y tasas altas pero reservas sólidas sugieren auge, pero con riesgos de sobrecalentamiento."
+            else:
+                etapa = "Recuperación/Neutral"
+                explicacion_ciclo = "Variables mixtas, posible recuperación o transición."
+            st.success(f"Etapa detectada: **{etapa}**")
+            st.caption(f"Explicación: {explicacion_ciclo}")
+            # Validar y mostrar variables
+            reservas_str = f"{reservas:,.0f}M USD" if reservas is not None else "N/D"
+            tasa_leliq_str = f"{tasa_leliq:.2f}% anual" if tasa_leliq is not None else "N/D"
+            inflacion_str = f"{inflacion*100:.2f}%" if inflacion is not None else "N/D"
+            m2_crecimiento_str = f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D"
+            st.markdown(f"- Reservas: {reservas_str}\n- Tasa LELIQ: {tasa_leliq_str}\n- Inflación mensual: {inflacion_str}\n- Crecimiento M2: {m2_crecimiento_str}")
+        else:
+            st.warning("No se pudieron obtener todas las variables para el análisis de ciclo económico.")
+    # --- FIN BLOQUE CICLO ECONÓMICO ---
+
+    # ... resto del código de optimización ...
+
+    # ... después de mostrar los resultados de optimización ...
     # Mini tab de asimetría de retornos
     with st.expander("📉 Asimetría de los Retornos (Skewness)", expanded=False):
         estrategias_labels = []
@@ -3868,9 +4040,38 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         except Exception as e:
             st.warning(f"No se pudo obtener el ranking sectorial: {e}")
 
-    # ... resto del código de optimización ...
+    # --- Diagnóstico IA de ciclo económico y sugerencia de sectores ---
+    def diagnostico_ciclo_y_sugerencia(all_variables_data, gemini_api_key, sectores_arg=None):
+        """
+        Usa IA para diagnosticar el ciclo económico y sugerir sectores/activos de Argentina y EEUU.
+        """
+        import google.generativeai as genai
+        resumen = []
+        for nombre, info in all_variables_data.items():
+            m = info.get('metrics', {})
+            resumen.append(
+                f"{nombre}: Actual={m.get('valor_actual', 0):.2f}, Cambio={m.get('cambio_porcentual', 0):+.1f}%, VolATR={m.get('volatilidad_atr', 0):.2f}%, Tend={m.get('tendencia_direccion', 'N/A')}"
+            )
+        # --- Sectores argentinos relevantes ---
+        sectores_arg = sectores_arg or {
+            'Bancos': ['GGAL', 'BMA', 'SUPV', 'BBAR'],
+            'Energía': ['YPFD', 'PAMP', 'CEPU', 'TGSU2'],
+            'Consumo': ['SUPV', 'EDN', 'ALUA'],
+            'Materiales': ['TXAR', 'ALUA'],
+            'Tecnología': ['MELI'],
+            'Servicios Públicos': ['EDN', 'TGSU2', 'CEPU'],
+            'Agro': ['AGRO'],
+            'Telecomunicaciones': ['TECO2'],
+            'Industriales': ['TRAN', 'TGNO4'],
+        }
+        sectores_arg_str = "\n".join([f"- {k}: {', '.join(v)}" for k, v in sectores_arg.items()])
+        prompt = f"""
+Actúa como economista jefe. Analiza el siguiente resumen de variables macroeconómicas argentinas y de EEUU:
 
-    # ... después de mostrar los resultados de optimización ...
+{chr(10).join(resumen)}
+
+Sectores argentinos relevantes y sus principales tickers:
+{sectores_arg_str}
 
 1. Diagnostica el ciclo económico actual de Argentina y global (expansión, recesión, etc.).
 2. Sugiere 2-3 sectores o tipos de activos argentinos (de la lista) y 2-3 de EEUU que suelen rendir mejor en este ciclo, usando factores de Intermarket (ITM), momentum y variables macro si es relevante.
@@ -4812,6 +5013,38 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
         dict: Análisis completo con correlaciones, volatilidades y sugerencias
     """
     try:
+        # Configuración de períodos
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            periodo_opciones = {
+                'Último Mes': '1mo',
+                'Últimos 3 Meses': '3mo',
+                'Último Año': '1y',
+                'Últos 2 Años': '2y',
+                'Últos 5 Años': '5y'
+            }
+            periodo_seleccionado = st.selectbox(
+                "Período de análisis",
+                options=list(periodo_opciones.keys()),
+                index=2,  # Por defecto "Último Año"
+                help="Período para el análisis de variables macro e intermarket"
+            )
+            periodo_analisis = periodo_opciones[periodo_seleccionado]
+        with col2:
+            ventana_momentum = st.slider(
+                "Ventana momentum (días)",
+                min_value=10,
+                max_value=252,
+                value=63,
+                help="Ventana para cálculo de momentum y tendencias"
+            )
+        with col3:
+            incluir_ia = st.checkbox(
+                "Incluir análisis IA",
+                value=True,
+                help="Usar IA para diagnóstico de ciclo y sugerencias"
+            )
+        
         # Configuración inicial
         fecha_hasta = datetime.now()
         fecha_desde = fecha_hasta - timedelta(days=365)
@@ -5007,235 +5240,118 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
             'riesgos': riesgos,
             'sugerencias': sugerencias,
             'df_merged': df_merged,
-            'correlaciones_significativas': correlaciones_significativas
+            'correlaciones_significativas': correlaciones_significativas,
+            'economic_analysis': None
         }
 
-        return {
-            'correlaciones': correlaciones,
-            'volatilidades': volatilidades,
-            'tendencias': tendencias,
-            'riesgos': riesgos,
-            'sugerencias': sugerencias,
-            'df_merged': df_merged,
-            'correlaciones_significativas': correlaciones_significativas
-        }
-    except Exception as e:
-        print(f"Error en analisis_global_posicionamiento: {str(e)}")
-        return {
-            'error': f"Error en el análisis: {str(e)}"
-        }
-
-# --- Fin Función: Análisis Global de Posicionamiento ---
-
-
-
-    # Configuración de períodos
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        periodo_opciones = {
-            'Último Mes': '1mo',
-            'Últimos 3 Meses': '3mo',
-            'Último Año': '1y',
-            'Últos 2 Años': '2y',
-            'Últos 5 Años': '5y'
-        }
-        periodo_seleccionado = st.selectbox(
-            "Período de análisis",
-            options=list(periodo_opciones.keys()),
-            index=2,  # Por defecto "Último Año"
-            help="Período para el análisis de variables macro e intermarket"
-        )
-        periodo_analisis = periodo_opciones[periodo_seleccionado]
-    with col2:
-        ventana_momentum = st.slider(
-            "Ventana momentum (días)",
-            min_value=10,
-            max_value=252,
-            value=63,
-            help="Ventana para cálculo de momentum y tendencias"
-        )
-    with col3:
-        incluir_ia = st.checkbox(
-            "Incluir análisis IA",
-            value=True,
-            help="Usar IA para diagnóstico de ciclo y sugerencias"
-        )
-    
-    if st.button("🔍 Ejecutar Análisis Intermarket y Ciclo Económico", type="primary"):
-        with st.spinner("Analizando variables económicas, macro e intermarket..."):
+        # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS LOCAL ==========
+        st.markdown("### 📈 Variables Económicas de Argentina")
+        economic_data = None
+        
+        try:
+            # Inicializar ArgentinaDatos
+            ad = ArgentinaDatos()
             
-            # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS LOCAL ==========
-            st.markdown("### 📈 Variables Económicas de Argentina")
-            st.markdown("### 📈 Variables Económicas de Argentina Datos")
+            # Obtener análisis económico completo
+            economic_analysis = ad.get_economic_analysis()
             
-            try:
-                # Inicializar ArgentinaDatos
-                ad = ArgentinaDatos()
+            if economic_analysis and 'data' in economic_analysis and economic_analysis['data']:
+                # Actualizar resultados con el análisis económico
+                resultados['economic_analysis'] = economic_analysis
                 
-                # Obtener análisis económico completo
-                economic_analysis = ad.get_economic_analysis()
+                # Mostrar resumen del análisis económico
+                col1, col2, col3 = st.columns(3)
                 
-                if economic_analysis['data']:
-                    # Mostrar resumen del análisis económico
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric(
-                            "Fase del Ciclo",
-                            economic_analysis['cycle_phase'],
-                            help="Fase actual del ciclo económico detectada"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Nivel de Riesgo",
-                            economic_analysis['risk_level'],
-                            help="Nivel de riesgo económico actual"
-                        )
-                    
-                    with col3:
-                        # Contar datos disponibles
-                        datos_disponibles = sum(1 for data in economic_analysis['data'].values() if data)
-                        st.metric(
-                            "Indicadores Disponibles",
-                            f"{datos_disponibles}/6",
-                            help="Cantidad de indicadores económicos disponibles"
-                        )
-                    
-                    # Mostrar gráficos de variables económicas
-                    st.markdown("#### 📊 Gráficos de Variables Económicas")
-                    
-                    # Gráfico de inflación
-                    if economic_analysis['data']['inflacion']:
+                with col1:
+                    st.metric(
+                        "Fase del Ciclo",
+                        economic_analysis.get('cycle_phase', 'N/A'),
+                        help="Fase actual del ciclo económico detectada"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Nivel de Riesgo",
+                        economic_analysis.get('risk_level', 'N/A'),
+                        help="Nivel de riesgo económico actual"
+                    )
+                
+                with col3:
+                    # Contar datos disponibles
+                    datos_disponibles = sum(1 for data in economic_analysis.get('data', {}).values() if data)
+                    st.metric(
+                        "Indicadores Disponibles",
+                        f"{datos_disponibles}/6",
+                        help="Cantidad de indicadores económicos disponibles"
+                    )
+                
+                # Mostrar gráficos de variables económicas
+                st.markdown("#### 📊 Gráficos de Variables Económicas")
+                
+                # Gráfico de inflación
+                if 'inflacion' in economic_analysis.get('data', {}) and economic_analysis['data']['inflacion']:
+                    try:
                         inflacion_chart = ad.create_inflacion_chart(economic_analysis['data']['inflacion'])
                         if inflacion_chart:
                             fig_inflacion = go.Figure(inflacion_chart)
                             st.plotly_chart(fig_inflacion, use_container_width=True)
-                    
-                    # Gráfico de tasas
-                    if economic_analysis['data']['tasas']:
+                    except Exception as e:
+                        st.error(f"Error generando gráfico de inflación: {e}")
+                
+                # Gráfico de tasas
+                if 'tasas' in economic_analysis.get('data', {}) and economic_analysis['data']['tasas']:
+                    try:
                         tasas_chart = ad.create_tasas_chart(economic_analysis['data']['tasas'])
                         if tasas_chart:
                             fig_tasas = go.Figure(tasas_chart)
                             st.plotly_chart(fig_tasas, use_container_width=True)
-                    
-                    # Gráfico de riesgo país
-                    if economic_analysis['data']['riesgo_pais']:
+                    except Exception as e:
+                        st.error(f"Error generando gráfico de tasas: {e}")
+                
+                # Gráfico de riesgo país
+                if 'riesgo_pais' in economic_analysis.get('data', {}) and economic_analysis['data']['riesgo_pais']:
+                    try:
                         riesgo_chart = ad.create_riesgo_pais_chart(economic_analysis['data']['riesgo_pais'])
                         if riesgo_chart:
                             fig_riesgo = go.Figure(riesgo_chart)
                             st.plotly_chart(fig_riesgo, use_container_width=True)
-                    
-                    # Mostrar recomendaciones basadas en el análisis económico
+                    except Exception as e:
+                        st.error(f"Error generando gráfico de riesgo país: {e}")
+                
+                # Mostrar recomendaciones basadas en el análisis económico
+                if 'sectors' in economic_analysis:
                     st.markdown("#### 💡 Recomendaciones Basadas en Variables Económicas")
                     
                     # Sectores favorables
-                    if economic_analysis['sectors']['favorable']:
+                    if economic_analysis['sectors'].get('favorable'):
                         st.success("**Sectores Favorables:**")
                         for sector in economic_analysis['sectors']['favorable']:
                             st.write(f"• {sector}")
                     
                     # Sectores desfavorables
-                    if economic_analysis['sectors']['unfavorable']:
+                    if economic_analysis['sectors'].get('unfavorable'):
                         st.warning("**Sectores Desfavorables:**")
                         for sector in economic_analysis['sectors']['unfavorable']:
                             st.write(f"• {sector}")
-                    
-                    # Recomendaciones específicas
-                    if economic_analysis['recommendations']:
-                        st.info("**Recomendaciones Específicas:**")
-                        for rec in economic_analysis['recommendations']:
-                            st.write(f"• {rec}")
-                    
-                    # Agregar datos económicos al análisis intermarket
-                    economic_data = economic_analysis
-                    
-                else:
-                    st.warning("No se pudieron obtener datos económicos de Argentina Datos")
-                    economic_data = None
-                    
-            except Exception as e:
-                st.error(f"Error obteniendo datos económicos: {e}")
-                economic_data = None
-            
-            # ========== 2. VARIABLES MACRO DEL BCRA (DATOS REALES) ==========
-            st.markdown("### 📊 Variables Macro del BCRA (Datos Reales)")
-            
-            # Obtener datos reales del BCRA
-            try:
-                datos_bcra = obtener_datos_bcra()
                 
-                if datos_bcra:
-                    # Mostrar métricas del BCRA
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric(
-                            "Inflación BCRA",
-                            f"{datos_bcra['inflacion_esperada']:.1f}%",
-                            "Mensual"
-                        )
-                    
-                    with col2:
-                        st.metric(
-                            "Tasa Política",
-                            f"{datos_bcra['tasa_politica']:.1f}%",
-                            "Anual"
-                        )
-                    
-                    with col3:
-                        st.metric(
-                            "Reservas",
-                            f"{datos_bcra['reservas']:,.0f}M USD",
-                            "Millones"
-                        )
-                    
-                    with col4:
-                        st.metric(
-                            "Crecimiento M2",
-                            f"{datos_bcra['m2_crecimiento']:.1f}%",
-                            "Anual"
-                        )
-                    
-                    # Análisis del ciclo económico basado en datos BCRA
-                    st.markdown("#### 🔄 Análisis de Ciclo Económico (BCRA)")
-                    
-                    # Determinar fase del ciclo
-                    inflacion = datos_bcra['inflacion_esperada']
-                    tasa_politica = datos_bcra['tasa_politica']
-                    reservas = datos_bcra['reservas']
-                    m2_crecimiento = datos_bcra['m2_crecimiento']
-                    
-                    # Lógica de clasificación del ciclo
-                    if inflacion > 10 and tasa_politica > 60:
-                        fase_ciclo_bcra = "Contracción"
-                        color_fase = "error"
-                        puntuacion_ciclo = -2
-                    elif inflacion < 5 and tasa_politica < 40:
-                        fase_ciclo_bcra = "Expansión"
-                        color_fase = "success"
-                        puntuacion_ciclo = 2
-                    else:
-                        fase_ciclo_bcra = "Transición"
-                        color_fase = "info"
-                        puntuacion_ciclo = 0
-                    
-                    # Mostrar diagnóstico
-                    if color_fase == "success":
-                        st.success(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
-                    elif color_fase == "error":
-                        st.error(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
-                    else:
-                        st.info(f"**{fase_ciclo_bcra}** - Puntuación: {puntuacion_ciclo}")
-                    
-                    bcra_data = datos_bcra
-                else:
-                    st.warning("No se pudieron obtener datos del BCRA")
-                    bcra_data = None
-                    
-            except Exception as e:
-                st.error(f"Error obteniendo datos BCRA: {e}")
-                bcra_data = None
+                # Recomendaciones específicas
+                if 'recommendations' in economic_analysis and economic_analysis['recommendations']:
+                    st.info("**Recomendaciones Específicas:**")
+                    for rec in economic_analysis['recommendations']:
+                        st.write(f"• {rec}")
+                
+                # Agregar datos económicos al análisis intermarket
+                economic_data = economic_analysis
+                
+            else:
+                st.warning("No se encontraron datos económicos disponibles")
+                economic_data = None
+                
+        except Exception as e:
+            st.error(f"Error en el análisis económico: {str(e)}")
+            economic_data = None
+            
+            # Skip BCRA data analysis as requested
             
             variables_macro = {}
             
@@ -5722,71 +5838,7 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
                 else:
                     st.info("🔄 Movimiento mixto - Ciclo de transición")
             
-            # ========== 4. DETECCIÓN DE CICLO ECONÓMICO ==========
-            st.markdown("### 🔄 Detección de Ciclo Económico")
-            
-            # Puntuación de ciclo basada en múltiples indicadores
-            puntuacion_ciclo = 0
-            indicadores_ciclo = []
-            
-            # Indicador 1: Curva de tasas
-            if 'Treasury 10Y' in variables_macro and 'Treasury 2Y' in variables_macro:
-                spread = variables_macro['Treasury 10Y']['valor_actual'] - variables_macro['Treasury 2Y']['valor_actual']
-                if spread < 0:
-                    puntuacion_ciclo -= 2
-                    indicadores_ciclo.append("Curva invertida (-2)")
-                elif spread < 0.5:
-                    puntuacion_ciclo -= 1
-                    indicadores_ciclo.append("Curva plana (-1)")
-                else:
-                    puntuacion_ciclo += 1
-                    indicadores_ciclo.append("Curva normal (+1)")
-            
-            # Indicador 2: VIX
-            if 'VIX' in variables_macro:
-                vix_actual = variables_macro['VIX']['valor_actual']
-                if vix_actual > 30:
-                    puntuacion_ciclo -= 1
-                    indicadores_ciclo.append("VIX alto (-1)")
-                elif vix_actual < 15:
-                    puntuacion_ciclo += 1
-                    indicadores_ciclo.append("VIX bajo (+1)")
-                else:
-                    indicadores_ciclo.append("VIX normal (0)")
-            
-            # Indicador 3: Momentum del mercado
-            if 'S&P 500' in variables_macro:
-                sp500_momentum = variables_macro['S&P 500']['momentum']
-                if sp500_momentum > 10:
-                    puntuacion_ciclo += 1
-                    indicadores_ciclo.append("S&P 500 fuerte (+1)")
-                elif sp500_momentum < -10:
-                    puntuacion_ciclo -= 1
-                    indicadores_ciclo.append("S&P 500 débil (-1)")
-                else:
-                    indicadores_ciclo.append("S&P 500 neutral (0)")
-            
-            # Determinar fase del ciclo
-            if puntuacion_ciclo >= 2:
-                fase_ciclo = "Expansión"
-                color_ciclo = "success"
-            elif puntuacion_ciclo >= 0:
-                fase_ciclo = "Auge"
-                color_ciclo = "info"
-            elif puntuacion_ciclo >= -1:
-                fase_ciclo = "Contracción"
-                color_ciclo = "warning"
-            else:
-                fase_ciclo = "Recesión"
-                color_ciclo = "error"
-            
-            # Mostrar diagnóstico
-            st.markdown(f"**🎯 Diagnóstico de Ciclo: {fase_ciclo}**")
-            st.markdown(f"**Puntuación:** {puntuacion_ciclo}")
-            
-            # Mostrar indicadores
-            for indicador in indicadores_ciclo:
-                st.write(f"• {indicador}")
+            # Skip economic cycle detection as requested
             
             # ========== 5. SUGERENCIAS DE ACTIVOS SEGÚN CICLO ==========
             st.markdown("### 💡 Sugerencias de Activos por Ciclo")
@@ -5838,11 +5890,12 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
                 # Preparar datos para IA
                 resumen_variables = []
                 for nombre, datos in variables_macro.items():
-                    resumen_variables.append(
+                    resumen = (
                         f"{nombre}: Valor={datos['valor_actual']:.2f}, "
                         f"Momentum={datos['momentum']:+.1f}%, "
                         f"Tendencia={datos['tendencia']}"
                     )
+                    resumen_variables.append(resumen)
                 
                 # Prompt para IA
                 prompt_ia = f"""
