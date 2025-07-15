@@ -4866,89 +4866,89 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
                 
                 # Obtener análisis económico completo
                 economic_analysis = ad.get_economic_analysis()
+                
+                if economic_analysis['data']:
+                    # Mostrar resumen del análisis económico
+                    col1, col2, col3 = st.columns(3)
                     
-                    if economic_analysis['data']:
-                        # Mostrar resumen del análisis económico
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric(
-                                "Fase del Ciclo",
-                                economic_analysis['cycle_phase'],
-                                help="Fase actual del ciclo económico detectada"
-                            )
-                        
-                        with col2:
-                            st.metric(
-                                "Nivel de Riesgo",
-                                economic_analysis['risk_level'],
-                                help="Nivel de riesgo económico actual"
-                            )
-                        
-                        with col3:
-                            # Contar datos disponibles
-                            datos_disponibles = sum(1 for data in economic_analysis['data'].values() if data)
-                            st.metric(
-                                "Indicadores Disponibles",
-                                f"{datos_disponibles}/6",
-                                help="Cantidad de indicadores económicos disponibles"
-                            )
-                        
-                        # Mostrar gráficos de variables económicas
-                        st.markdown("#### 📊 Gráficos de Variables Económicas")
-                        
-                        # Gráfico de inflación
-                        if economic_analysis['data']['inflacion']:
-                            inflacion_chart = ad.create_inflacion_chart(economic_analysis['data']['inflacion'])
-                            if inflacion_chart:
-                                fig_inflacion = go.Figure(inflacion_chart)
-                                st.plotly_chart(fig_inflacion, use_container_width=True)
-                        
-                        # Gráfico de tasas
-                        if economic_analysis['data']['tasas']:
-                            tasas_chart = ad.create_tasas_chart(economic_analysis['data']['tasas'])
-                            if tasas_chart:
-                                fig_tasas = go.Figure(tasas_chart)
-                                st.plotly_chart(fig_tasas, use_container_width=True)
-                        
-                        # Gráfico de riesgo país
-                        if economic_analysis['data']['riesgo_pais']:
-                            riesgo_chart = ad.create_riesgo_pais_chart(economic_analysis['data']['riesgo_pais'])
-                            if riesgo_chart:
-                                fig_riesgo = go.Figure(riesgo_chart)
-                                st.plotly_chart(fig_riesgo, use_container_width=True)
-                        
-                        # Mostrar recomendaciones basadas en el análisis económico
-                        st.markdown("#### 💡 Recomendaciones Basadas en Variables Económicas")
-                        
-                        # Sectores favorables
-                        if economic_analysis['sectors']['favorable']:
-                            st.success("**Sectores Favorables:**")
-                            for sector in economic_analysis['sectors']['favorable']:
-                                st.write(f"• {sector}")
-                        
-                        # Sectores desfavorables
-                        if economic_analysis['sectors']['unfavorable']:
-                            st.warning("**Sectores Desfavorables:**")
-                            for sector in economic_analysis['sectors']['unfavorable']:
-                                st.write(f"• {sector}")
-                        
-                        # Recomendaciones específicas
-                        if economic_analysis['recommendations']:
-                            st.info("**Recomendaciones Específicas:**")
-                            for rec in economic_analysis['recommendations']:
-                                st.write(f"• {rec}")
-                        
-                        # Agregar datos económicos al análisis intermarket
-                        economic_data = economic_analysis
-                        
-                    else:
-                        st.warning("No se pudieron obtener datos económicos de Argentina Datos")
-                        economic_data = None
-                        
-                except Exception as e:
-                    st.error(f"Error obteniendo datos económicos: {e}")
+                    with col1:
+                        st.metric(
+                            "Fase del Ciclo",
+                            economic_analysis['cycle_phase'],
+                            help="Fase actual del ciclo económico detectada"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Nivel de Riesgo",
+                            economic_analysis['risk_level'],
+                            help="Nivel de riesgo económico actual"
+                        )
+                    
+                    with col3:
+                        # Contar datos disponibles
+                        datos_disponibles = sum(1 for data in economic_analysis['data'].values() if data)
+                        st.metric(
+                            "Indicadores Disponibles",
+                            f"{datos_disponibles}/6",
+                            help="Cantidad de indicadores económicos disponibles"
+                        )
+                    
+                    # Mostrar gráficos de variables económicas
+                    st.markdown("#### 📊 Gráficos de Variables Económicas")
+                    
+                    # Gráfico de inflación
+                    if economic_analysis['data']['inflacion']:
+                        inflacion_chart = ad.create_inflacion_chart(economic_analysis['data']['inflacion'])
+                        if inflacion_chart:
+                            fig_inflacion = go.Figure(inflacion_chart)
+                            st.plotly_chart(fig_inflacion, use_container_width=True)
+                    
+                    # Gráfico de tasas
+                    if economic_analysis['data']['tasas']:
+                        tasas_chart = ad.create_tasas_chart(economic_analysis['data']['tasas'])
+                        if tasas_chart:
+                            fig_tasas = go.Figure(tasas_chart)
+                            st.plotly_chart(fig_tasas, use_container_width=True)
+                    
+                    # Gráfico de riesgo país
+                    if economic_analysis['data']['riesgo_pais']:
+                        riesgo_chart = ad.create_riesgo_pais_chart(economic_analysis['data']['riesgo_pais'])
+                        if riesgo_chart:
+                            fig_riesgo = go.Figure(riesgo_chart)
+                            st.plotly_chart(fig_riesgo, use_container_width=True)
+                    
+                    # Mostrar recomendaciones basadas en el análisis económico
+                    st.markdown("#### 💡 Recomendaciones Basadas en Variables Económicas")
+                    
+                    # Sectores favorables
+                    if economic_analysis['sectors']['favorable']:
+                        st.success("**Sectores Favorables:**")
+                        for sector in economic_analysis['sectors']['favorable']:
+                            st.write(f"• {sector}")
+                    
+                    # Sectores desfavorables
+                    if economic_analysis['sectors']['unfavorable']:
+                        st.warning("**Sectores Desfavorables:**")
+                        for sector in economic_analysis['sectors']['unfavorable']:
+                            st.write(f"• {sector}")
+                    
+                    # Recomendaciones específicas
+                    if economic_analysis['recommendations']:
+                        st.info("**Recomendaciones Específicas:**")
+                        for rec in economic_analysis['recommendations']:
+                            st.write(f"• {rec}")
+                    
+                    # Agregar datos económicos al análisis intermarket
+                    economic_data = economic_analysis
+                    
+                else:
+                    st.warning("No se pudieron obtener datos económicos de Argentina Datos")
                     economic_data = None
+                    
+            except Exception as e:
+                st.error(f"Error obteniendo datos económicos: {e}")
+                economic_data = None
             
             # ========== 2. VARIABLES MACRO DEL BCRA ==========
             st.markdown("### 📊 Variables Macro del BCRA")
