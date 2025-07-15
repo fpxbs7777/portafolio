@@ -5013,6 +5013,38 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
         dict: Análisis completo con correlaciones, volatilidades y sugerencias
     """
     try:
+        # Configuración de períodos
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            periodo_opciones = {
+                'Último Mes': '1mo',
+                'Últimos 3 Meses': '3mo',
+                'Último Año': '1y',
+                'Últos 2 Años': '2y',
+                'Últos 5 Años': '5y'
+            }
+            periodo_seleccionado = st.selectbox(
+                "Período de análisis",
+                options=list(periodo_opciones.keys()),
+                index=2,  # Por defecto "Último Año"
+                help="Período para el análisis de variables macro e intermarket"
+            )
+            periodo_analisis = periodo_opciones[periodo_seleccionado]
+        with col2:
+            ventana_momentum = st.slider(
+                "Ventana momentum (días)",
+                min_value=10,
+                max_value=252,
+                value=63,
+                help="Ventana para cálculo de momentum y tendencias"
+            )
+        with col3:
+            incluir_ia = st.checkbox(
+                "Incluir análisis IA",
+                value=True,
+                help="Usar IA para diagnóstico de ciclo y sugerencias"
+            )
+        
         # Configuración inicial
         fecha_hasta = datetime.now()
         fecha_desde = fecha_hasta - timedelta(days=365)
@@ -5227,43 +5259,6 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
         }
 
 # --- Fin Función: Análisis Global de Posicionamiento ---
-
-
-
-    # Configuración de períodos
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        periodo_opciones = {
-            'Último Mes': '1mo',
-            'Últimos 3 Meses': '3mo',
-            'Último Año': '1y',
-            'Últos 2 Años': '2y',
-            'Últos 5 Años': '5y'
-        }
-        periodo_seleccionado = st.selectbox(
-            "Período de análisis",
-            options=list(periodo_opciones.keys()),
-            index=2,  # Por defecto "Último Año"
-            help="Período para el análisis de variables macro e intermarket"
-        )
-        periodo_analisis = periodo_opciones[periodo_seleccionado]
-    with col2:
-        ventana_momentum = st.slider(
-            "Ventana momentum (días)",
-            min_value=10,
-            max_value=252,
-            value=63,
-            help="Ventana para cálculo de momentum y tendencias"
-        )
-    with col3:
-        incluir_ia = st.checkbox(
-            "Incluir análisis IA",
-            value=True,
-            help="Usar IA para diagnóstico de ciclo y sugerencias"
-        )
-    
-    if st.button("🔍 Ejecutar Análisis Intermarket y Ciclo Económico", type="primary"):
-        with st.spinner("Analizando variables económicas, macro e intermarket..."):
             
             # ========== 1. ANÁLISIS DE VARIABLES ECONÓMICAS LOCAL ==========
             st.markdown("### 📈 Variables Económicas de Argentina")
