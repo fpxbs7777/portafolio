@@ -7169,7 +7169,7 @@ def integrar_datos_bcra_en_ciclo_economico():
         
         # Mostrar análisis de correlaciones BCRA
         for (var1, var2), analisis in correlaciones_bcra.items():
-            st.markdown(f"**{var1} ↔ {var2}** (Correlación histórica: {analisis['correlacion_historica']:.2f})")
+            st.markdown(f"**{var1} <-> {var2}** (Correlación histórica: {analisis['correlacion_historica']:.2f})")
             st.markdown(f"*Explicación:* {analisis['explicacion']}")
             st.markdown(f"*Implicaciones actuales:* {analisis['implicaciones']}")
             st.markdown(f"*Estrategia recomendada:* {analisis['estrategia']}")
@@ -7740,7 +7740,7 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                         st.markdown("**🔍 Correlaciones Significativas Detectadas:**")
                         for corr in correlaciones_significativas:
                             color = "green" if corr['Tipo'] == 'Positiva' else "red"
-                            st.markdown(f"• **{corr['Variable 1']} ↔ {corr['Variable 2']}**: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})")
+                            st.markdown(f"• **{corr['Variable 1']} <-> {corr['Variable 2']}**: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})")
                     
                     # Análisis de divergencias y oportunidades de arbitraje
                     st.markdown("#### ⚡ Análisis de Divergencias y Arbitraje")
@@ -7808,7 +7808,7 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                     for (var1, var2), explicacion in explicaciones_correlacion.items():
                         if var1 in correlaciones.columns and var2 in correlaciones.columns:
                             corr_valor = correlaciones.loc[var1, var2]
-                            st.markdown(f"**{var1} ↔ {var2}** (Correlación: {corr_valor:.3f}): {explicacion}")
+                            st.markdown(f"**{var1} <-> {var2}** (Correlación: {corr_valor:.3f}): {explicacion}")
                     
                     # Análisis de causalidad y lead-lag
                     st.markdown("#### 🔄 Análisis de Causalidad y Lead-Lag")
@@ -8257,7 +8257,7 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                         
                         for corr in correlaciones_significativas:
                             if corr['Fuerza'] in ['Fuerte', 'Moderada']:
-                                with st.expander(f"📊 {corr['Variable 1']} ↔ {corr['Variable 2']} (r={corr['Correlación']:.3f})"):
+                                with st.expander(f"📊 {corr['Variable 1']} <-> {corr['Variable 2']} (r={corr['Correlación']:.3f})"):
                                     if corr['Tipo'] == 'Positiva':
                                         st.info(f"**Correlación Positiva Fuerte:** {corr['Correlación']:.3f}")
                                         st.markdown("**Estrategia:** Considerar pares de trading o cobertura")
@@ -8318,7 +8318,7 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                         if 'correlaciones_significativas' in locals():
                             resumen_ciclo += "\n**Correlaciones Significativas Detectadas:**\n"
                             for corr in correlaciones_significativas:
-                                resumen_ciclo += f"- {corr['Variable 1']} ↔ {corr['Variable 2']}: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})\n"
+                                resumen_ciclo += f"- {corr['Variable 1']} <-> {corr['Variable 2']}: {corr['Correlación']:.3f} ({corr['Tipo']}, {corr['Fuerza']})\n"
                         
                         if 'divergencias' in locals():
                             resumen_ciclo += "\n**Divergencias y Oportunidades de Arbitraje:**\n"
@@ -8343,7 +8343,7 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                                     resumen_ciclo += f"- {indicador}: {tendencia['proyeccion_3m']:.1f} ({tendencia['cambio_proyeccion']:+.1f}%) - {tendencia['tendencia']} (R²: {tendencia['r_cuadrado']:.2f})\n"
                                 except Exception as e:
                                     resumen_ciclo += f"- {indicador}: Error en proyección - {str(e)}\n"
-                        else:
+                else:
                             resumen_ciclo += "\n**4. PROYECCIONES A 3 MESES:** No disponibles - datos insuficientes\n"
                         
                         # Agregar análisis de causalidad si está disponible
@@ -8431,9 +8431,9 @@ def graficar_ciclo_economico_real(token_acceso, gemini_api_key=None):
                             for corr in correlaciones_significativas:
                                 if corr['Fuerza'] in ['Fuerte', 'Moderada']:
                                     if corr['Tipo'] == 'Positiva':
-                                        st.markdown(f"• **{corr['Variable 1']} y {corr['Variable 2']}**: Correlación positiva fuerte - considerar estrategias de pares de trading")
+                                        st.markdown(f"• **{corr['Variable 1']} <-> {corr['Variable 2']}**: Correlación positiva fuerte - considerar estrategias de pares de trading")
                                     else:
-                                        st.markdown(f"• **{corr['Variable 1']} y {corr['Variable 2']}**: Correlación negativa fuerte - oportunidad de diversificación y arbitraje")
+                                        st.markdown(f"• **{corr['Variable 1']} <-> {corr['Variable 2']}**: Correlación negativa fuerte - oportunidad de diversificación y arbitraje")
                         
                         if 'divergencias' in locals() and divergencias:
                             st.markdown("**⚡ Oportunidades de Arbitraje Detectadas:**")
@@ -8550,7 +8550,7 @@ def analisis_correlacion_avanzado_con_ia(token_acceso, gemini_api_key=None):
                 # Mostrar correlaciones históricas
                 for (var1, var2), analisis in correlaciones_historicas.items():
                     if analisis['valor'] >= umbral_correlacion:
-                        st.markdown(f"**{var1} ↔ {var2}** (Correlación histórica: {analisis['valor']:.2f})")
+                        st.markdown(f"**{var1} <-> {var2}** (Correlación histórica: {analisis['valor']:.2f})")
                         st.markdown(f"*Explicación económica:* {analisis['explicacion_economica']}")
                         st.markdown(f"*Factores específicos de Argentina:* {analisis['factores_argentinos']}")
                         st.markdown(f"*Implicaciones actuales:* {analisis['implicaciones_actuales']}")
@@ -8594,6 +8594,19 @@ def analisis_correlacion_avanzado_con_ia(token_acceso, gemini_api_key=None):
                 for div in divergencias_actuales:
                     if abs(div['divergencia']) > 0.1:  # Solo mostrar divergencias significativas
                         st.markdown(f"**{div['par']}**: Histórica {div['historica']:.2f} → Actual {div['actual']:.2f} (Δ: {div['divergencia']:+.2f})")
+                        st.markdown(f"*Explicación:* {div['explicacion']}")
+                        st.markdown(f"*Implicaciones:* {div['implicaciones']}")
+                        st.markdown(f"*Estrategia:* {div['estrategia']}")
+                        st.markdown("---")
+                
+                # ========== 4. ANÁLISIS CON IA ==========
+                if incluir_analisis_ia and gemini_api_key:
+                    try:
+                        st.markdown("### 🤖 Análisis IA de Correlaciones Económicas")
+                        
+                        # Preparar datos para IA
+                        resumen_correlaciones = f"""
+                        ANÁLISIS DE CORRELACIONES ECONÓMICAS ARGENTINAS:
                         
                         **CORRELACIONES HISTÓRICAS DETECTADAS:**
                         """
@@ -8601,7 +8614,7 @@ def analisis_correlacion_avanzado_con_ia(token_acceso, gemini_api_key=None):
                         for (var1, var2), analisis in correlaciones_historicas.items():
                             if analisis['valor'] >= umbral_correlacion:
                                 resumen_correlaciones += f"""
-                        - {var1} ↔ {var2}: {analisis['valor']:.2f}
+                        - {var1} <-> {var2}: {analisis['valor']:.2f}
                           Explicación: {analisis['explicacion_economica']}
                           Factores argentinos: {analisis['factores_argentinos']}
                           Estrategia: {analisis['estrategia_recomendada']}
