@@ -5225,18 +5225,14 @@ def analisis_global_posicionamiento(token_acceso, activos_globales=None):
         return {
             'error': f"Error en el análisis: {str(e)}"
         }
-    except Exception as e:
-        print(f"Error en analisis_global_posicionamiento: {str(e)}")
-        return {
-            'error': f"Error en el análisis: {str(e)}"
-        }
 
 # --- Fin Función: Análisis Global de Posicionamiento ---
 
-# --- Función: mostrar_analisis_variables_economicas --- detección de ciclos económicos.
-    Integra variables macro del BCRA, análisis intermarket local e internacional,
-    y sugerencias de activos según el ciclo.
-    """
+# --- Función: mostrar_analisis_variables_economicas ---
+# Detección de ciclos económicos, análisis intermarket y recomendaciones de activos.
+# Integra variables macro del BCRA, análisis intermarket local e internacional,
+# y sugerencias de activos según el ciclo.
+# """
     st.markdown("---")
     st.subheader("🧱 Análisis Intermarket y Ciclo Económico Integrado")
 {{ ... }}
