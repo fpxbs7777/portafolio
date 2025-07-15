@@ -8594,19 +8594,6 @@ def analisis_correlacion_avanzado_con_ia(token_acceso, gemini_api_key=None):
                 for div in divergencias_actuales:
                     if abs(div['divergencia']) > 0.1:  # Solo mostrar divergencias significativas
                         st.markdown(f"**{div['par']}**: Histórica {div['historica']:.2f} → Actual {div['actual']:.2f} (Δ: {div['divergencia']:+.2f})")
-                        st.markdown(f"*Explicación:* {div['explicacion']}")
-                        st.markdown(f"*Implicaciones:* {div['implicaciones']}")
-                        st.markdown(f"*Estrategia:* {div['estrategia']}")
-                        st.markdown("---")
-                
-                # ========== 4. ANÁLISIS CON IA ==========
-                if incluir_analisis_ia and gemini_api_key:
-                    try:
-                        st.markdown("### 🤖 Análisis IA de Correlaciones Económicas")
-                        
-                        # Preparar datos para IA
-                        resumen_correlaciones = f"""
-                        ANÁLISIS DE CORRELACIONES ECONÓMICAS ARGENTINAS:
                         
                         **CORRELACIONES HISTÓRICAS DETECTADAS:**
                         """
