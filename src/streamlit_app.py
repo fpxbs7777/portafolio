@@ -18,6 +18,7 @@ import asyncio
 import matplotlib.pyplot as plt
 from scipy.stats import skew
 import google.generativeai as genai
+from bs4 import BeautifulSoup
 
 warnings.filterwarnings('ignore')
 
@@ -3789,13 +3790,14 @@ def mostrar_analisis_portafolio():
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Rebalanceo",
-        "🤖 Diagnóstico IA"
+        "🤖 Diagnóstico IA",
+        "🪙 Análisis de Bonos"
     ])
     with tab1:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
@@ -3846,6 +3848,42 @@ def mostrar_analisis_portafolio():
                 st.markdown(diagnostico)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
+    with tab7:
+        st.header("🪙 Análisis de Bonos")
+        # Input manual de ticker de bono
+        ticker_bono = st.text_input("Ingrese el ticker del bono (ej: AE38)", value="AE38")
+        if st.button("Buscar datos técnicos del bono"):
+            with st.spinner("Buscando datos técnicos en IOL..."):
+                datos_bono = obtener_datos_tecnicos_bono_iol(ticker_bono)
+            if datos_bono:
+                st.subheader(f"Datos técnicos de {ticker_bono}")
+                st.table(list(datos_bono.items()))
+            else:
+                st.warning("No se encontraron datos técnicos para el bono ingresado.")
+        # Si el portafolio tiene bonos, listarlos y permitir seleccionar uno
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        bonos_portafolio = []
+        if portafolio and 'activos' in portafolio:
+            for activo in portafolio['activos']:
+                tipo = activo.get('tipo', '').lower()
+                simbolo = activo.get('titulo', {}).get('simbolo', '')
+                if 'bono' in tipo or 'obligacion' in tipo or 'titulo' in tipo:
+                    bonos_portafolio.append(simbolo)
+        if bonos_portafolio:
+            st.markdown("---")
+            st.subheader("Bonos en el portafolio")
+            bono_sel = st.selectbox("Seleccione un bono del portafolio para ver sus datos técnicos:", bonos_portafolio)
+            if st.button("Ver datos técnicos del bono seleccionado"):
+                with st.spinner("Buscando datos técnicos en IOL..."):
+                    datos_bono = obtener_datos_tecnicos_bono_iol(bono_sel)
+                if datos_bono:
+                    st.subheader(f"Datos técnicos de {bono_sel}")
+                    st.table(list(datos_bono.items()))
+                else:
+                    st.warning("No se encontraron datos técnicos para el bono seleccionado.")
+        # (Base para curva de TIR: aquí se puede agregar la lógica para scrapear y graficar la curva de TIR de bonos del panel)
+        st.markdown("---")
+        st.info("Próximamente: Gráfico de curva de TIR de bonos por clase. Si tienes tickers de bonos, puedes probar el scraping de datos técnicos arriba.")
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -4561,6 +4599,26 @@ def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador
     # ... resto del código ...
     # En el prompt IA, incluir resumen['intermarket']
     # ...
+
+def obtener_datos_tecnicos_bono_iol(simbolo):
+    url = f"https://iol.invertironline.com/titulo/cotizacion/BCBA/{simbolo}/fundamentalesTecnicos"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code != 200:
+        return None
+    soup = BeautifulSoup(resp.text, "html.parser")
+    tabla = soup.find("th", string="Datos técnicos del bono")
+    if not tabla:
+        return None
+    tabla = tabla.find_parent("table")
+    datos = {}
+    for row in tabla.find_all("tr"):
+        cols = row.find_all("td")
+        if len(cols) == 2:
+            key = cols[0].get_text(strip=True)
+            value = cols[1].get_text(strip=True)
+            datos[key] = value
+    return datos
 
 if __name__ == "__main__":
     main()
