@@ -557,8 +557,9 @@ BENCHMARK_FACTORS = {
     'GBTC': 'Grayscale Bitcoin Trust - Bitcoin',
     'ETHE': 'Grayscale Ethereum Trust - Ethereum',
     'BITO': 'ProShares Bitcoin Strategy ETF - Estrategia Bitcoin',
-    'BITI': 'ProShares Short Bitcoin Strategy ETF - Estrategia corta Bitcoin',
+    'BITI': 'ProShares Short Bitcoin Strategy ETF - Estrategia corta Bitcoin'
 }
+# Fin del diccionario BENCHMARK_FACTORS
 
 def calcular_beta_alpha(returns_asset, returns_benchmark):
     """
@@ -10085,61 +10086,6 @@ def mostrar_datos_argentinadatos_bcra():
 
 if __name__ == "__main__":
     main()
-    'THD': 'iShares MSCI Tailandia',
-    'FXI': 'iShares China Large-Cap',
-    'ASHR': 'iShares China A-Shares',
-    
-    # COMMODITIES
-    'GLD': 'SPDR Gold Trust',
-    'SLV': 'iShares Silver Trust',
-    'USO': 'United States Oil Fund',
-    'UNG': 'United States Natural Gas Fund',
-    'DBA': 'Invesco DB Agriculture Fund',
-    'DBC': 'Invesco DB Commodity Index',
-    
-    # BONOS
-    'TLT': 'iShares 20+ Year Treasury Bond',
-    'IEF': 'iShares 7-10 Year Treasury Bond',
-    'SHY': 'iShares 1-3 Year Treasury Bond',
-    'LQD': 'iShares iBoxx Investment Grade Corporate Bond',
-    'HYG': 'iShares iBoxx High Yield Corporate Bond',
-    'EMB': 'iShares J.P. Morgan USD Emerging Markets Bond',
-    
-    # DIVISAS
-    'UUP': 'Invesco DB US Dollar Index Bullish Fund',
-    'FXE': 'Invesco CurrencyShares Euro Trust',
-    'FXY': 'Invesco CurrencyShares Japanese Yen Trust',
-    'FXB': 'Invesco CurrencyShares British Pound Sterling Trust',
-    'FXC': 'Invesco CurrencyShares Canadian Dollar Trust',
-    'FXA': 'Invesco CurrencyShares Australian Dollar Trust',
-    
-    # REAL ESTATE
-    'VNQ': 'Vanguard Real Estate ETF',
-    'IYR': 'iShares U.S. Real Estate ETF',
-    'SCHH': 'Schwab U.S. REIT ETF',
-    'RWR': 'SPDR Dow Jones REIT ETF',
-    
-    # ALTERNATIVOS
-    'ARKK': 'ARK Innovation ETF',
-    'ARKW': 'ARK Next Generation Internet ETF',
-    'ARKG': 'ARK Genomic Revolution ETF',
-    'ARKF': 'ARK Fintech Innovation ETF',
-    'ARKQ': 'ARK Autonomous Technology & Robotics ETF',
-    'ARKX': 'ARK Space Exploration & Innovation ETF',
-    
-    # FACTORES
-    'MTUM': 'iShares MSCI Momentum Factor ETF',
-    'VLUE': 'iShares MSCI USA Value Factor ETF',
-    'QUAL': 'iShares MSCI USA Quality Factor ETF',
-    'SIZE': 'iShares MSCI USA Size Factor ETF',
-    'USMV': 'iShares MSCI USA Min Vol Factor ETF',
-    
-    # CRYPTO
-    'GBTC': 'Grayscale Bitcoin Trust',
-    'ETHE': 'Grayscale Ethereum Trust',
-    'BITO': 'ProShares Bitcoin Strategy ETF',
-    'BITI': 'ProShares Short Bitcoin Strategy ETF',
-}
 
 def calcular_beta_alpha(returns_asset, returns_benchmark):
     """
