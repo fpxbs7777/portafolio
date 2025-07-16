@@ -3793,12 +3793,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "🔄 Rebalanceo",
+        "🌍 Análisis Global IA"
     ])
 
     with tab1:
@@ -3823,6 +3824,17 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+    
+    with tab6:
+        st.markdown("""
+        # 🌍 Análisis Global IA
+        
+        Este tab está reservado para el análisis global de variables económicas y de portafolio usando IA y fuentes externas (BCRA, ArgentinaDatos, yfinance, etc.).
+        
+        Próximamente aquí se integrarán métricas macroeconómicas, cotizaciones, tasas, riesgo país y análisis generados por IA (Gemini/GPT).
+        
+        _Si necesitas que se integre alguna variable o fuente específica, indícalo._
+        """)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
