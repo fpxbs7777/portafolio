@@ -386,82 +386,6 @@ def obtener_tasas_caucion(token_portador):
         st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
         return None
 
-def mostrar_tasas_caucion(token_portador):
-    """
-    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
-    """
-    st.subheader("📊 Tasas de Caución")
-    
-    try:
-        with st.spinner('Obteniendo tasas de caución...'):
-            df_cauciones = obtener_tasas_caucion(token_portador)
-            
-            # Verificar si se obtuvieron datos
-            if df_cauciones is None or df_cauciones.empty:
-                st.warning("No se encontraron datos de tasas de caución.")
-                return
-                
-            # Verificar columnas requeridas
-            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
-            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
-            if missing_columns:
-                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
-                return
-            
-            # Mostrar tabla con las tasas
-            st.dataframe(
-                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
-                             else ['simbolo', 'plazo', 'ultimoPrecio']]
-                .rename(columns={
-                    'simbolo': 'Instrumento',
-                    'plazo': 'Plazo',
-                    'ultimoPrecio': 'Tasa',
-                    'monto': 'Monto (en millones)'
-                }),
-                use_container_width=True,
-                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
-            )
-            
-            # Crear gráfico de curva de tasas si hay suficientes puntos
-            if len(df_cauciones) > 1:
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=df_cauciones['plazo_dias'],
-                    y=df_cauciones['tasa_limpia'],
-                    mode='lines+markers+text',
-                    name='Tasa',
-                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
-                    textposition='top center',
-                    line=dict(color='#1f77b4', width=2),
-                    marker=dict(size=10, color='#1f77b4')
-                ))
-                
-                fig.update_layout(
-                    title='Curva de Tasas de Caución',
-                    xaxis_title='Plazo (días)',
-                    yaxis_title='Tasa Anual (%)',
-                    template='plotly_white',
-                    height=500,
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Mostrar resumen estadístico
-            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
-                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
-                with col2:
-                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
-                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
-                    
-    except Exception as e:
-        st.error(f"Error al mostrar las tasas de caución: {str(e)}")
-        st.exception(e)  # Mostrar el traceback completo para depuración
-
 def parse_datetime_string(datetime_string):
     """
     Parsea una cadena de fecha/hora usando múltiples formatos
@@ -3855,98 +3779,6 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         """
         components.html(tv_widget, height=680)
 
-def mostrar_movimientos_asesor():
-    st.title("👨‍💼 Panel del Asesor")
-    
-    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
-        st.error("Debe iniciar sesión primero")
-        return
-        
-    token_acceso = st.session_state.token_acceso
-    
-    # Obtener lista de clientes
-    clientes = obtener_lista_clientes(token_acceso)
-    if not clientes:
-        st.warning("No se encontraron clientes")
-        return
-    
-    # Formulario de búsqueda
-    with st.form("form_buscar_movimientos"):
-        st.subheader("🔍 Buscar Movimientos")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30))
-        with col2:
-            fecha_hasta = st.date_input("Fecha hasta", value=date.today())
-        
-        # Selección múltiple de clientes
-        cliente_opciones = [{"label": f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} ({c.get('numeroCliente', c.get('id', ''))})", 
-                           "value": c.get('numeroCliente', c.get('id'))} for c in clientes]
-        
-        clientes_seleccionados = st.multiselect(
-            "Seleccione clientes",
-            options=[c['value'] for c in cliente_opciones],
-            format_func=lambda x: next((c['label'] for c in cliente_opciones if c['value'] == x), x),
-            default=[cliente_opciones[0]['value']] if cliente_opciones else []
-        )
-        
-        # Filtros adicionales
-        col1, col2 = st.columns(2)
-        with col1:
-            tipo_fecha = st.selectbox(
-                "Tipo de fecha",
-                ["fechaOperacion", "fechaLiquidacion"],
-                index=0
-            )
-            estado = st.selectbox(
-                "Estado",
-                ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
-            )
-        with col2:
-            tipo_operacion = st.text_input("Tipo de operación")
-            moneda = st.text_input("Moneda", "ARS")
-        
-        buscar = st.form_submit_button("🔍 Buscar movimientos")
-    
-    if buscar and clientes_seleccionados:
-        with st.spinner("Buscando movimientos..."):
-            movimientos = obtener_movimientos_asesor(
-                token_portador=token_acceso,
-                clientes=clientes_seleccionados,
-                fecha_desde=fecha_desde.isoformat(),
-                fecha_hasta=fecha_hasta.isoformat(),
-                tipo_fecha=tipo_fecha,
-                estado=estado or None,
-                tipo_operacion=tipo_operacion or None,
-                moneda=moneda or None
-            )
-            
-            if movimientos and isinstance(movimientos, list):
-                df = pd.DataFrame(movimientos)
-                if not df.empty:
-                    st.subheader("📋 Resultados de la búsqueda")
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # Mostrar resumen
-                    st.subheader("📊 Resumen de Movimientos")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Total Movimientos", len(df))
-                    
-                    if 'monto' in df.columns:
-                        col2.metric("Monto Total", f"${df['monto'].sum():,.2f}")
-                    
-                    if 'estado' in df.columns:
-                        estados = df['estado'].value_counts().to_dict()
-                        col3.metric("Estados", ", ".join([f"{k} ({v})" for k, v in estados.items()]))
-                else:
-                    st.info("No se encontraron movimientos con los filtros seleccionados")
-            else:
-                st.warning("No se encontraron movimientos o hubo un error en la consulta")
-                if movimientos and not isinstance(movimientos, list):
-                    st.json(movimientos)  # Mostrar respuesta cruda para depuración
-
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
@@ -4102,7 +3934,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio"),
                 index=0,
             )
 
@@ -4114,14 +3946,6 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
-                else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
-                mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
