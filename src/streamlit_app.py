@@ -3800,10 +3800,8 @@ def mostrar_analisis_portafolio():
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
-            # --- Diagnóstico Global Unificado IA ---
             st.markdown("---")
             st.subheader("🧠 Diagnóstico Global Unificado (IA)")
-            # Calcular métricas del portafolio
             activos = portafolio.get('activos', [])
             datos_activos = {}
             valor_total = 0
@@ -3824,15 +3822,11 @@ def mostrar_analisis_portafolio():
                     datos_activos[simbolo] = {'Valuación': valuacion}
                     valor_total += valuacion
             metricas = calcular_metricas_portafolio(datos_activos, valor_total, token_acceso)
-            # Obtener fechas
             fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
             fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
-            # API KEY Gemini
-            if 'GEMINI_API_KEY' not in st.session_state:
-                st.session_state.GEMINI_API_KEY = ''
             if st.button("🔍 Diagnóstico Global IA", key="btn_diag_global_ia"):
                 with st.spinner("Consultando IA profesional..."):
-                    diagnostico = diagnostico_global_unificado(datos_activos, metricas, token_acceso, fecha_desde, fecha_hasta, st.session_state.GEMINI_API_KEY)
+                    diagnostico = diagnostico_global_unificado(datos_activos, metricas, token_acceso, fecha_desde, fecha_hasta)
                 st.markdown(diagnostico)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
@@ -4231,16 +4225,20 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     return series_historicas, seleccion_final
 
 # --- NUEVO: Diagnóstico Global Unificado con IA ---
-def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador, fecha_desde, fecha_hasta, gemini_api_key):
+GEMINI_API_KEY = "AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E"
+
+def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador, fecha_desde, fecha_hasta):
     """
     Integra todas las variables relevantes (portafolio, intermarket, benchmarks, dólar, BCRA, tasas, ciclo económico, etc.),
     las unifica en un resumen estructurado y consulta a la IA para diagnóstico y recomendaciones profesionales.
+    Optimiza el uso de tokens y cachea el resultado para evitar gastos innecesarios.
     """
     import yfinance as yf
     import requests
     import numpy as np
     import pandas as pd
     import datetime
+    import streamlit as st
     # 1. Recolectar métricas del portafolio
     resumen = {}
     resumen['portafolio'] = metricas_portafolio or {}
@@ -4308,51 +4306,39 @@ def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador
     except Exception:
         resumen['tasa_caucion_prom'] = None
     # 6. Ciclo económico: se detectará por IA
-    # 7. Preparar prompt para IA
+    # 7. Preparar prompt para IA (breve y ejecutivo)
     prompt = f"""
-Eres un analista financiero profesional y ético. Analiza el siguiente resumen de variables reales y calculadas:
-
---- PORTAFOLIO ---
-Métricas: {resumen['portafolio']}
-Valor total: {resumen['valor_total']}
-
---- INTERMARKET Y BENCHMARKS (6 meses) ---
-"""
-    for k, v in precios_inter.items():
-        prompt += f"{k}: actual={v['actual']:.2f}, inicio={v['inicio']:.2f}, retorno={v['ret_6m']:.2f}%, volatilidad={v['vol_6m']:.2f}%\n"
-    prompt += f"""
---- DÓLAR ---
-MEP: {resumen['dolar_mep']}
-
---- BCRA ---
-Reservas: {resumen['bcra']['reservas']}
-Tasa LELIQ: {resumen['bcra']['tasa_leliq']}
-Inflación mensual: {resumen['bcra']['inflacion']}
-Crecimiento M2: {resumen['bcra']['m2_crecimiento']}
-
---- TASAS DE CAUCIÓN ---
-Promedio: {resumen['tasa_caucion_prom']}
+Analiza el siguiente resumen de variables reales y calculadas:
+PORTAFOLIO: {resumen['portafolio']}, Valor total: {resumen['valor_total']}
+INTERMARKET: {[(k, v['ret_6m']) for k,v in precios_inter.items()]}
+DÓLAR MEP: {resumen['dolar_mep']}
+BCRA: Reservas={resumen['bcra']['reservas']}, LELIQ={resumen['bcra']['tasa_leliq']}, Inflación={resumen['bcra']['inflacion']}, M2={resumen['bcra']['m2_crecimiento']}
+TASA CAUCIÓN PROM: {resumen['tasa_caucion_prom']}
 
 1. Diagnostica el ciclo económico actual (expansión, auge, recesión, recuperación, neutral, etc.)
-2. Fundamenta el diagnóstico usando todas las variables (no omitas ninguna relevante).
-3. Sugiere estrategias, sectores y activos recomendados para el contexto detectado.
+2. Fundamenta el diagnóstico usando todas las variables.
+3. Sugiere estrategias y sectores recomendados para el contexto detectado.
 4. Advierte riesgos y oportunidades reales.
-5. Responde en español, en formato ejecutivo y profesional.
+Responde en español, en formato ejecutivo y profesional, en menos de 10 líneas.
 """
-    # 8. Consultar IA
-    import google.generativeai as genai
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel(
-        'gemini-1.5-flash',
-        generation_config=genai.types.GenerationConfig(
-            temperature=0.4,
-            max_output_tokens=900,
-            top_p=0.9,
-            top_k=30
+    # 8. Cachear resultado en session_state para evitar gasto innecesario de tokens
+    cache_key = f"diagnostico_ia_{hash(str(resumen))}_{fecha_desde}_{fecha_hasta}"
+    if not hasattr(st.session_state, cache_key):
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel(
+            'gemini-1.5-flash',
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.3,
+                max_output_tokens=350,  # Limitar tokens
+                top_p=0.8,
+                top_k=20
+            )
         )
-    )
-    response = model.generate_content(prompt)
-    return response.text if response and response.text else "No se pudo obtener diagnóstico IA."
+        response = model.generate_content(prompt)
+        diagnostico = response.text if response and response.text else "No se pudo obtener diagnóstico IA."
+        setattr(st.session_state, cache_key, diagnostico)
+    return getattr(st.session_state, cache_key)
 
 if __name__ == "__main__":
     main()
