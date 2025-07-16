@@ -1169,12 +1169,11 @@ def compute_efficient_frontier(rics, notional, target_return, include_min_varian
     return portfolios, valid_returns, volatilities
 
 class PortfolioManager:
-    def __init__(self, activos, token, fecha_desde, fecha_hasta, dias_ventana=None):
+    def __init__(self, activos, token, fecha_desde, fecha_hasta):
         self.activos = activos
         self.token = token
         self.fecha_desde = fecha_desde
         self.fecha_hasta = fecha_hasta
-        self.dias_ventana = dias_ventana  # Nuevo parámetro
         self.data_loaded = False
         self.returns = None
         self.prices = None
@@ -1268,9 +1267,6 @@ class PortfolioManager:
                 df_precios = df_precios.groupby(df_precios.index).last()
             df_precios = df_precios.fillna(method='ffill')
             df_precios = df_precios.dropna()
-            # --- Recorte de ventana ---
-            if self.dias_ventana is not None and self.dias_ventana > 0 and len(df_precios) > self.dias_ventana:
-                df_precios = df_precios.tail(self.dias_ventana)
             if df_precios.empty:
                 st.error("❌ No hay datos suficientes después del preprocesamiento")
                 return False
@@ -3081,17 +3077,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, max_value=3.0, value=0.8, step=0.01)
     st.caption("Si no es posible alcanzar el Sharpe exacto, se mostrará el portafolio más cercano.")
 
-    # --- INTEGRACIÓN DEL HORIZONTE DE INVERSIÓN ---
-    # Si existe dias_analisis en el contexto, úsalo. Si no, por defecto 180 días
-    dias_analisis = 180
-    if 'dias_analisis' in locals():
-        dias_analisis = dias_analisis
-    elif 'horizonte_inversion' in locals():
-        dias_analisis = horizonte_inversion[1] if isinstance(horizonte_inversion, tuple) else 180
-    # ---
-
-    # Cargar datos y preparar manager con ventana de días
-    manager_inst = PortfolioManager(universe_activos, token_acceso, fecha_desde, fecha_hasta, dias_ventana=dias_analisis)
+    # Cargar datos y preparar manager
+    manager_inst = PortfolioManager(universe_activos, token_acceso, fecha_desde, fecha_hasta)
     if not manager_inst.load_data():
         st.error("No se pudieron cargar los datos históricos para optimización.")
         return
@@ -3103,15 +3090,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             mejor_sharpe = -1e9
             mejor_result = None
             mejor_ret = None
-            # Usar el rango real de retornos anualizados de la ventana
-            mean_ret = manager_inst.mean_returns if hasattr(manager_inst, 'mean_returns') else None
-            if mean_ret is not None and not mean_ret.empty:
-                min_ret = float(mean_ret.min())
-                max_ret = float(mean_ret.max())
-                ret_range = np.linspace(min_ret, max_ret, 30)
-            else:
-                ret_range = [x/100 for x in range(2, 25, 1)]
-            for ret in ret_range:
+            for ret in [x/100 for x in range(2, 25, 1)]:
                 res = manager_inst.compute_portfolio(strategy='markowitz', target_return=ret)
                 if not res or not hasattr(res, 'returns') or not hasattr(res, 'risk'):
                     continue
@@ -4225,36 +4204,6 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     if total_activos == 0 or not series_historicas:
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
-
-# --- Clase mínima ArgentinaDatos para evitar NameError y permitir análisis macroeconómico ---
-class ArgentinaDatos:
-    def __init__(self):
-        pass
-
-    def get_dolares(self):
-        return []
-
-    def get_inflacion(self):
-        return []
-
-    def get_tasas(self):
-        return []
-
-    def get_uva(self):
-        return []
-
-    def get_riesgo_pais(self):
-        return []
-
-    def get_all_economic_data(self):
-        return {
-            'dolares': self.get_dolares(),
-            'inflacion': self.get_inflacion(),
-            'tasas': self.get_tasas(),
-            'uva': self.get_uva(),
-            'riesgo_pais': self.get_riesgo_pais(),
-        }
-# --- Fin clase mínima ArgentinaDatos ---
 
 if __name__ == "__main__":
     main()
