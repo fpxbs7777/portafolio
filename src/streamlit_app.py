@@ -6321,7 +6321,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🇦🇷 Datos Económicos", "🏦 BCRA Dashboard", "📊 Paneles de Cotización", "📈 Análisis Beta/Correlación", "🔗 Datos Integrados (ArgentinaDatos+BCRA+yfinance)"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🔗 Dashboard Unificado", "📊 Paneles de Cotización"),
                 index=0,
             )
 
@@ -6341,16 +6341,10 @@ def main():
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "🇦🇷 Datos Económicos":
-                mostrar_datos_argentina()
-            elif opcion == "🏦 BCRA Dashboard":
-                mostrar_bcra_dashboard()
+            elif opcion == "🔗 Dashboard Unificado":
+                mostrar_datos_unificados()
             elif opcion == "📊 Paneles de Cotización":
                 mostrar_paneles_cotizacion()
-            elif opcion == "📈 Análisis Beta/Correlación":
-                mostrar_analisis_beta_correlacion()
-            elif opcion == "🔗 Datos Integrados (ArgentinaDatos+BCRA+yfinance)":
-                mostrar_datos_argentinadatos_bcra()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
@@ -6612,6 +6606,382 @@ def analizar_datos_almacenados(archivo_json):
         st.error(f"Error al analizar datos: {str(e)}")
         return None
 
+def analizar_estrategias_panel(series_data, benchmark_ticker, periodo='1y', umbral_significancia=0.05):
+    """
+    Analiza las estrategias de inversión de todas las series de un panel.
+    
+    Args:
+        series_data: Lista de diccionarios con datos de series
+        benchmark_ticker: Ticker del benchmark para comparación
+        periodo: Período de análisis
+        umbral_significancia: Umbral de significancia estadística
+        
+    Returns:
+        pd.DataFrame: DataFrame con análisis de estrategias
+    """
+    resultados = []
+    
+    # Obtener datos del benchmark
+    benchmark_returns = obtener_serie_historica_yfinance(benchmark_ticker, periodo)
+    if benchmark_returns is None:
+        st.error(f"No se pudieron obtener datos del benchmark {benchmark_ticker}")
+        return pd.DataFrame()
+    
+    # Progreso
+    progress_bar = st.progress(0)
+    total_series = len(series_data)
+    
+    for i, serie in enumerate(series_data):
+        try:
+            # Obtener ticker de la serie
+            ticker = serie.get('simbolo', '')
+            if not ticker:
+                continue
+                
+            # Obtener datos históricos de la serie
+            asset_returns = obtener_serie_historica_yfinance(ticker, periodo)
+            
+            if asset_returns is not None and len(asset_returns) > 30:
+                # Calcular alpha y beta
+                beta, alpha, r_squared, p_value = calcular_beta_alpha(asset_returns, benchmark_returns)
+                
+                if beta is not None and alpha is not None:
+                    # Clasificar estrategia
+                    estrategia = clasificar_estrategia_avanzada(beta, alpha, r_squared, p_value, umbral_significancia)
+                    
+                    # Calcular métricas adicionales
+                    sharpe_ratio = calcular_sharpe_ratio(asset_returns)
+                    volatilidad = asset_returns.std() * np.sqrt(252)
+                    retorno_anual = asset_returns.mean() * 252
+                    
+                    resultados.append({
+                        'Ticker': ticker,
+                        'Nombre': serie.get('nombre', ''),
+                        'Panel': serie.get('panel', ''),
+                        'Beta': beta,
+                        'Alpha': alpha,
+                        'R_Squared': r_squared,
+                        'P_Value': p_value,
+                        'Estrategia': estrategia,
+                        'Sharpe_Ratio': sharpe_ratio,
+                        'Volatilidad': volatilidad,
+                        'Retorno_Anual': retorno_anual,
+                        'Significancia': 'Significativo' if p_value <= umbral_significancia else 'No Significativo'
+                    })
+            
+            # Actualizar progreso
+            progress_bar.progress((i + 1) / total_series)
+            
+        except Exception as e:
+            st.warning(f"Error analizando {serie.get('simbolo', '')}: {str(e)}")
+            continue
+    
+    progress_bar.empty()
+    return pd.DataFrame(resultados)
+
+def clasificar_estrategia_avanzada(beta, alpha, r_squared, p_value, umbral_significancia=0.05):
+    """
+    Clasificación avanzada de estrategias de inversión según alpha y beta.
+    
+    Args:
+        beta: Coeficiente beta
+        alpha: Coeficiente alpha
+        r_squared: R-cuadrado de la regresión
+        p_value: Valor p de la regresión
+        umbral_significancia: Umbral de significancia estadística
+        
+    Returns:
+        str: Clasificación detallada de la estrategia
+    """
+    if beta is None or alpha is None:
+        return "Datos Insuficientes"
+    
+    # Verificar significancia estadística
+    if p_value > umbral_significancia:
+        return "Sin Significancia Estadística"
+    
+    # Clasificación según criterios de estrategias de inversión
+    
+    # Index Tracker: β ≈ 1, α ≈ 0
+    if abs(beta - 1) < 0.1 and abs(alpha) < 0.001:
+        return "Index Tracker"
+    
+    # Traditional Long-Only Asset Manager: β ≈ 1, α > 0
+    elif abs(beta - 1) < 0.1 and alpha > 0.001:
+        return "Tradicional Long-Only"
+    
+    # Smart Beta: α ≈ 0, β dinámico
+    elif abs(alpha) < 0.001:
+        if beta > 1.2:
+            return "Smart Beta (Alto Leverage)"
+        elif beta < 0.8:
+            return "Smart Beta (Defensivo)"
+        else:
+            return "Smart Beta (Neutral)"
+    
+    # Hedge Fund: β ≈ 0, α > 0
+    elif abs(beta) < 0.2 and alpha > 0.001:
+        return "Hedge Fund"
+    
+    # Estrategias especializadas
+    elif beta > 1.5:
+        return "Alto Leverage"
+    elif beta < 0.5:
+        return "Defensivo"
+    elif alpha > 0.01:
+        return "Alto Alpha"
+    elif alpha < -0.01:
+        return "Alpha Negativo"
+    else:
+        return "Estrategia Mixta"
+
+def calcular_sharpe_ratio(returns, risk_free_rate=0.02):
+    """
+    Calcula el ratio de Sharpe.
+    
+    Args:
+        returns: Series de retornos
+        risk_free_rate: Tasa libre de riesgo anual
+        
+    Returns:
+        float: Ratio de Sharpe
+    """
+    if len(returns) < 30:
+        return None
+    
+    excess_returns = returns - risk_free_rate/252
+    return excess_returns.mean() / returns.std() * np.sqrt(252)
+
+def optimizar_portafolio_por_estrategia(df_estrategias, estrategia_objetivo, capital_total=100000):
+    """
+    Optimiza un portafolio basado en una estrategia específica.
+    
+    Args:
+        df_estrategias: DataFrame con análisis de estrategias
+        estrategia_objetivo: Estrategia objetivo para optimización
+        capital_total: Capital total disponible
+        
+    Returns:
+        dict: Resultados de optimización
+    """
+    # Filtrar por estrategia
+    df_filtrado = df_estrategias[df_estrategias['Estrategia'] == estrategia_objetivo].copy()
+    
+    if df_filtrado.empty:
+        return None
+    
+    # Ordenar por Sharpe ratio
+    df_filtrado = df_filtrado.sort_values('Sharpe_Ratio', ascending=False)
+    
+    # Seleccionar top 10 activos
+    top_activos = df_filtrado.head(10)
+    
+    # Calcular pesos basados en Sharpe ratio
+    sharpe_ratios = top_activos['Sharpe_Ratio'].values
+    pesos = sharpe_ratios / sharpe_ratios.sum()
+    
+    # Crear portafolio
+    portafolio = {
+        'estrategia': estrategia_objetivo,
+        'activos': top_activos['Ticker'].tolist(),
+        'pesos': pesos.tolist(),
+        'capital_por_activo': (pesos * capital_total).tolist(),
+        'sharpe_promedio': top_activos['Sharpe_Ratio'].mean(),
+        'beta_promedio': top_activos['Beta'].mean(),
+        'alpha_promedio': top_activos['Alpha'].mean()
+    }
+    
+    return portafolio
+
+def crear_grafico_estrategias_panel(df_estrategias, benchmark_ticker):
+    """
+    Crea gráficos de análisis de estrategias del panel.
+    
+    Args:
+        df_estrategias: DataFrame con análisis de estrategias
+        benchmark_ticker: Ticker del benchmark
+        
+    Returns:
+        dict: Diccionario con gráficos
+    """
+    if df_estrategias.empty:
+        return {}
+    
+    graficos = {}
+    
+    # 1. Gráfico Alpha vs Beta por Estrategia
+    fig_alpha_beta = go.Figure()
+    
+    colores_estrategia = {
+        'Index Tracker': '#1f77b4',
+        'Tradicional Long-Only': '#ff7f0e',
+        'Smart Beta (Alto Leverage)': '#2ca02c',
+        'Smart Beta (Defensivo)': '#d62728',
+        'Smart Beta (Neutral)': '#9467bd',
+        'Hedge Fund': '#8c564b',
+        'Alto Leverage': '#e377c2',
+        'Defensivo': '#7f7f7f',
+        'Alto Alpha': '#bcbd22',
+        'Alpha Negativo': '#17becf',
+        'Estrategia Mixta': '#ff9896'
+    }
+    
+    for estrategia in df_estrategias['Estrategia'].unique():
+        data_estrategia = df_estrategias[df_estrategias['Estrategia'] == estrategia]
+        
+        fig_alpha_beta.add_trace(go.Scatter(
+            x=data_estrategia['Beta'],
+            y=data_estrategia['Alpha'],
+            mode='markers',
+            name=estrategia,
+            marker=dict(
+                size=10,
+                color=colores_estrategia.get(estrategia, '#7f7f7f'),
+                opacity=0.7
+            ),
+            text=data_estrategia['Ticker'],
+            hovertemplate='<b>%{text}</b><br>Beta: %{x:.3f}<br>Alpha: %{y:.3f}<br>Estrategia: ' + estrategia + '<extra></extra>'
+        ))
+    
+    # Líneas de referencia
+    fig_alpha_beta.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Alpha = 0")
+    fig_alpha_beta.add_vline(x=1, line_dash="dash", line_color="gray", annotation_text="Beta = 1")
+    fig_alpha_beta.add_vline(x=0, line_dash="dash", line_color="gray", annotation_text="Beta = 0")
+    
+    fig_alpha_beta.update_layout(
+        title=f"Análisis Alpha vs Beta por Estrategia vs {BENCHMARK_FACTORS.get(benchmark_ticker, benchmark_ticker)}",
+        xaxis_title="Beta",
+        yaxis_title="Alpha",
+        template="plotly_white",
+        height=600
+    )
+    
+    graficos['alpha_beta'] = fig_alpha_beta
+    
+    # 2. Distribución de Estrategias
+    fig_distribucion = go.Figure()
+    
+    estrategia_counts = df_estrategias['Estrategia'].value_counts()
+    
+    fig_distribucion.add_trace(go.Bar(
+        x=estrategia_counts.index,
+        y=estrategia_counts.values,
+        marker_color=[colores_estrategia.get(estr, '#7f7f7f') for estr in estrategia_counts.index]
+    ))
+    
+    fig_distribucion.update_layout(
+        title="Distribución de Estrategias de Inversión",
+        xaxis_title="Estrategia",
+        yaxis_title="Cantidad de Activos",
+        template="plotly_white",
+        height=400
+    )
+    
+    graficos['distribucion'] = fig_distribucion
+    
+    # 3. Sharpe Ratio por Estrategia
+    fig_sharpe = go.Figure()
+    
+    sharpe_por_estrategia = df_estrategias.groupby('Estrategia')['Sharpe_Ratio'].mean().sort_values(ascending=True)
+    
+    fig_sharpe.add_trace(go.Bar(
+        x=sharpe_por_estrategia.values,
+        y=sharpe_por_estrategia.index,
+        orientation='h',
+        marker_color=[colores_estrategia.get(estr, '#7f7f7f') for estr in sharpe_por_estrategia.index]
+    ))
+    
+    fig_sharpe.update_layout(
+        title="Ratio de Sharpe Promedio por Estrategia",
+        xaxis_title="Sharpe Ratio",
+        yaxis_title="Estrategia",
+        template="plotly_white",
+        height=500
+    )
+    
+    graficos['sharpe'] = fig_sharpe
+    
+    return graficos
+
+def generar_reporte_estrategias_panel(df_estrategias, benchmark_ticker, panel_nombre):
+    """
+    Genera un reporte detallado de análisis de estrategias.
+    
+    Args:
+        df_estrategias: DataFrame con análisis de estrategias
+        benchmark_ticker: Ticker del benchmark
+        panel_nombre: Nombre del panel analizado
+        
+    Returns:
+        str: Reporte en formato markdown
+    """
+    if df_estrategias.empty:
+        return "No hay datos suficientes para generar el reporte."
+    
+    reporte = f"""
+# 📊 Reporte de Análisis de Estrategias - Panel {panel_nombre}
+
+## 📈 Resumen Ejecutivo
+
+**Benchmark:** {benchmark_ticker} - {BENCHMARK_FACTORS.get(benchmark_ticker, 'N/A')}
+**Total de Activos Analizados:** {len(df_estrategias)}
+**Período de Análisis:** 1 año
+
+## 🎯 Distribución de Estrategias
+
+"""
+    
+    # Estadísticas por estrategia
+    estrategia_stats = df_estrategias.groupby('Estrategia').agg({
+        'Ticker': 'count',
+        'Beta': ['mean', 'std'],
+        'Alpha': ['mean', 'std'],
+        'Sharpe_Ratio': 'mean',
+        'Volatilidad': 'mean',
+        'Retorno_Anual': 'mean'
+    }).round(4)
+    
+    reporte += "### 📊 Estadísticas por Estrategia\n\n"
+    reporte += "| Estrategia | Cantidad | Beta Prom | Alpha Prom | Sharpe Prom | Volatilidad Prom | Retorno Prom |\n"
+    reporte += "|------------|----------|-----------|------------|-------------|------------------|--------------|\n"
+    
+    for estrategia in estrategia_stats.index:
+        stats = estrategia_stats.loc[estrategia]
+        reporte += f"| {estrategia} | {stats[('Ticker', 'count')]} | {stats[('Beta', 'mean')]:.3f} | {stats[('Alpha', 'mean')]:.4f} | {stats[('Sharpe_Ratio', 'mean')]:.3f} | {stats[('Volatilidad', 'mean')]:.2%} | {stats[('Retorno_Anual', 'mean')]:.2%} |\n"
+    
+    # Mejores activos por estrategia
+    reporte += "\n## 🏆 Mejores Activos por Estrategia\n\n"
+    
+    for estrategia in df_estrategias['Estrategia'].unique():
+        df_estrategia = df_estrategias[df_estrategias['Estrategia'] == estrategia]
+        if not df_estrategia.empty:
+            mejor_activo = df_estrategia.loc[df_estrategia['Sharpe_Ratio'].idxmax()]
+            reporte += f"### {estrategia}\n"
+            reporte += f"- **Mejor Activo:** {mejor_activo['Ticker']} ({mejor_activo['Nombre']})\n"
+            reporte += f"- **Sharpe Ratio:** {mejor_activo['Sharpe_Ratio']:.3f}\n"
+            reporte += f"- **Beta:** {mejor_activo['Beta']:.3f}\n"
+            reporte += f"- **Alpha:** {mejor_activo['Alpha']:.4f}\n\n"
+    
+    # Recomendaciones
+    reporte += "\n## 💡 Recomendaciones de Inversión\n\n"
+    
+    # Estrategia con mejor Sharpe promedio
+    mejor_estrategia_sharpe = df_estrategias.groupby('Estrategia')['Sharpe_Ratio'].mean().idxmax()
+    reporte += f"**Estrategia con Mejor Rendimiento:** {mejor_estrategia_sharpe}\n\n"
+    
+    # Activos con mejor alpha
+    mejores_alpha = df_estrategias.nlargest(5, 'Alpha')[['Ticker', 'Alpha', 'Estrategia']]
+    reporte += "**Top 5 Activos por Alpha:**\n"
+    for _, activo in mejores_alpha.iterrows():
+        reporte += f"- {activo['Ticker']}: Alpha = {activo['Alpha']:.4f} ({activo['Estrategia']})\n"
+    
+    reporte += "\n**Top 5 Activos por Sharpe Ratio:**\n"
+    mejores_sharpe = df_estrategias.nlargest(5, 'Sharpe_Ratio')[['Ticker', 'Sharpe_Ratio', 'Estrategia']]
+    for _, activo in mejores_sharpe.iterrows():
+        reporte += f"- {activo['Ticker']}: Sharpe = {activo['Sharpe_Ratio']:.3f} ({activo['Estrategia']})\n"
+    
+    return reporte
+
 def mostrar_paneles_cotizacion():
     """
     Función principal para mostrar todos los paneles de cotización y sus series.
@@ -6639,8 +7009,8 @@ def mostrar_paneles_cotizacion():
     # Opciones de análisis
     st.subheader("📋 Opciones de Análisis")
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🏢 Fondos Comunes", "📈 Instrumentos", "📊 Paneles", "📉 Series Históricas", "💾 Almacenamiento", "🔍 Análisis Avanzado"
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "🏢 Fondos Comunes", "📈 Instrumentos", "📊 Paneles", "📉 Series Históricas", "💾 Almacenamiento", "🔍 Análisis Avanzado", "🎯 Análisis de Estrategias"
     ])
     
     with tab1:
@@ -7304,6 +7674,245 @@ def mostrar_paneles_cotizacion():
             else:
                 st.warning("No se obtuvieron resultados del análisis")
     
+    with tab7:
+        st.subheader("🎯 Análisis de Estrategias por Panel")
+        st.markdown("### Clasificación y Optimización de Estrategias de Inversión")
+        
+        # Configuración del análisis
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("⚙️ Configuración")
+            
+            # Selección de benchmark
+            benchmark_seleccionado = st.selectbox(
+                "Seleccione Benchmark:",
+                options=list(BENCHMARK_FACTORS.keys()),
+                format_func=lambda x: f"{x} - {BENCHMARK_FACTORS[x]}",
+                index=0,
+                key="benchmark_estrategias"
+            )
+            
+            # Período de análisis
+            periodo_estrategia = st.selectbox(
+                "Período de Análisis:",
+                options=['1mo', '3mo', '6mo', '1y', '2y', '5y'],
+                index=3,
+                key="periodo_estrategia"
+            )
+            
+            # Umbral de significancia
+            umbral_significancia = st.slider(
+                "Umbral de Significancia (p-value):",
+                min_value=0.01,
+                max_value=0.10,
+                value=0.05,
+                step=0.01,
+                key="umbral_estrategia"
+            )
+            
+            # Capital para optimización
+            capital_total = st.number_input(
+                "Capital Total para Optimización ($):",
+                min_value=1000,
+                max_value=1000000,
+                value=100000,
+                step=10000,
+                key="capital_optimizacion"
+            )
+        
+        with col2:
+            st.subheader("📋 Información")
+            st.info(f"""
+            **Benchmark Seleccionado:** {benchmark_seleccionado} - {BENCHMARK_FACTORS[benchmark_seleccionado]}
+            
+            **Período:** {periodo_estrategia}
+            
+            **Umbral de Significancia:** {umbral_significancia}
+            
+            **Capital:** ${capital_total:,.0f}
+            """)
+        
+        # Selección de paneles para análisis
+        st.subheader("🔍 Selección de Paneles para Análisis")
+        
+        # Obtener paneles disponibles
+        paneles_disponibles = obtener_paneles_cotizacion(token_acceso, pais)
+        if paneles_disponibles:
+            nombres_paneles = [panel.get('nombre', f"Panel {i}") for i, panel in enumerate(paneles_disponibles)]
+            paneles_seleccionados = st.multiselect(
+                "Seleccione paneles para analizar:",
+                options=nombres_paneles,
+                default=nombres_paneles[:2] if len(nombres_paneles) >= 2 else nombres_paneles,
+                key="paneles_estrategias"
+            )
+        else:
+            st.warning("No se pudieron obtener paneles. Usando tickers de ejemplo.")
+            paneles_seleccionados = []
+        
+        # Ejecutar análisis de estrategias
+        if st.button("🚀 Ejecutar Análisis Completo de Estrategias", use_container_width=True):
+            if not paneles_seleccionados:
+                st.warning("Selecciona al menos un panel para analizar")
+                return
+            
+            # Procesar cada panel seleccionado
+            for panel_nombre in paneles_seleccionados:
+                st.subheader(f"📊 Análisis del Panel: {panel_nombre}")
+                
+                # Obtener datos del panel
+                panel_data = next((p for p in paneles_disponibles if p.get('nombre') == panel_nombre), None)
+                if not panel_data:
+                    st.warning(f"No se encontraron datos para el panel {panel_nombre}")
+                    continue
+                
+                # Obtener instrumentos del panel
+                instrumentos_panel = obtener_instrumentos_por_panel(
+                    token_acceso,
+                    panel_data.get('instrumento', 'Acciones'),
+                    panel_nombre,
+                    pais
+                )
+                
+                if not instrumentos_panel:
+                    st.warning(f"No se encontraron instrumentos en el panel {panel_nombre}")
+                    continue
+                
+                st.success(f"✅ Se encontraron {len(instrumentos_panel)} instrumentos en {panel_nombre}")
+                
+                # Analizar estrategias del panel
+                with st.spinner(f"Analizando estrategias del panel {panel_nombre}..."):
+                    df_estrategias = analizar_estrategias_panel(
+                        instrumentos_panel, 
+                        benchmark_seleccionado, 
+                        periodo_estrategia, 
+                        umbral_significancia
+                    )
+                
+                if not df_estrategias.empty:
+                    # Mostrar resultados
+                    st.subheader(f"📈 Resultados del Panel {panel_nombre}")
+                    
+                    # Métricas generales
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total Activos", len(df_estrategias))
+                    with col2:
+                        st.metric("Estrategias Identificadas", df_estrategias['Estrategia'].nunique())
+                    with col3:
+                        mejor_sharpe = df_estrategias['Sharpe_Ratio'].max()
+                        st.metric("Mejor Sharpe Ratio", f"{mejor_sharpe:.3f}")
+                    with col4:
+                        mejor_alpha = df_estrategias['Alpha'].max()
+                        st.metric("Mejor Alpha", f"{mejor_alpha:.4f}")
+                    
+                    # Gráficos de análisis
+                    st.subheader("📊 Visualizaciones")
+                    
+                    graficos = crear_grafico_estrategias_panel(df_estrategias, benchmark_seleccionado)
+                    
+                    if 'alpha_beta' in graficos:
+                        st.plotly_chart(graficos['alpha_beta'], use_container_width=True)
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if 'distribucion' in graficos:
+                            st.plotly_chart(graficos['distribucion'], use_container_width=True)
+                    
+                    with col2:
+                        if 'sharpe' in graficos:
+                            st.plotly_chart(graficos['sharpe'], use_container_width=True)
+                    
+                    # Tabla de resultados
+                    st.subheader("📋 Detalle de Resultados")
+                    st.dataframe(
+                        df_estrategias[['Ticker', 'Nombre', 'Beta', 'Alpha', 'Sharpe_Ratio', 'Estrategia', 'Significancia']].round(4),
+                        use_container_width=True
+                    )
+                    
+                    # Optimización por estrategia
+                    st.subheader("🎯 Optimización por Estrategia")
+                    
+                    estrategias_disponibles = df_estrategias['Estrategia'].unique()
+                    estrategia_optimizar = st.selectbox(
+                        "Seleccione estrategia para optimizar:",
+                        options=estrategias_disponibles,
+                        key=f"estrategia_{panel_nombre}"
+                    )
+                    
+                    if st.button(f"🚀 Optimizar Portafolio {estrategia_optimizar}", key=f"optimizar_{panel_nombre}"):
+                        portafolio_optimizado = optimizar_portafolio_por_estrategia(
+                            df_estrategias, 
+                            estrategia_optimizar, 
+                            capital_total
+                        )
+                        
+                        if portafolio_optimizado:
+                            st.success(f"✅ Portafolio optimizado para {estrategia_optimizar}")
+                            
+                            # Mostrar resultados de optimización
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.subheader("📊 Composición del Portafolio")
+                                for i, (activo, peso, capital) in enumerate(zip(
+                                    portafolio_optimizado['activos'],
+                                    portafolio_optimizado['pesos'],
+                                    portafolio_optimizado['capital_por_activo']
+                                )):
+                                    st.write(f"**{activo}:** {peso:.1%} (${capital:,.0f})")
+                            
+                            with col2:
+                                st.subheader("📈 Métricas del Portafolio")
+                                st.metric("Sharpe Promedio", f"{portafolio_optimizado['sharpe_promedio']:.3f}")
+                                st.metric("Beta Promedio", f"{portafolio_optimizado['beta_promedio']:.3f}")
+                                st.metric("Alpha Promedio", f"{portafolio_optimizado['alpha_promedio']:.4f}")
+                        else:
+                            st.warning(f"No se pudo optimizar el portafolio para {estrategia_optimizar}")
+                    
+                    # Generar reporte
+                    if st.button(f"📄 Generar Reporte {panel_nombre}", key=f"reporte_{panel_nombre}"):
+                        reporte = generar_reporte_estrategias_panel(df_estrategias, benchmark_seleccionado, panel_nombre)
+                        st.markdown(reporte)
+                        
+                        # Opción para descargar reporte
+                        st.download_button(
+                            label=f"💾 Descargar Reporte {panel_nombre}",
+                            data=reporte,
+                            file_name=f"reporte_estrategias_{panel_nombre}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                            mime="text/markdown"
+                        )
+                else:
+                    st.warning(f"No se obtuvieron resultados del análisis para {panel_nombre}")
+        
+        # Información sobre estrategias
+        with st.expander("📚 Información sobre Estrategias de Inversión"):
+            st.markdown("""
+            ### Clasificación de Estrategias de Inversión
+            
+            **Index Tracker:**
+            - Replica el rendimiento de un benchmark
+            - β ≈ 1, α ≈ 0
+            - Ejemplo: ETF que replica S&P 500
+            
+            **Tradicional Long-Only:**
+            - Supera el mercado con retorno extra no correlacionado
+            - β ≈ 1, α > 0
+            - Ejemplo: Fondos mutuos tradicionales
+            
+            **Smart Beta:**
+            - Supera el mercado ajustando dinámicamente los pesos
+            - β > 1 cuando el mercado sube, β < 1 cuando baja, α ≈ 0
+            - Ejemplo: ETFs factor-based
+            
+            **Hedge Fund:**
+            - Entrega retornos absolutos no correlacionados con el mercado
+            - β ≈ 0, α > 0
+            - Ejemplo: Estrategias long/short
+            """)
+    
     def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
         """
         Devuelve un diccionario con listas de tickers reales por panel para el universo aleatorio.
@@ -7767,6 +8376,810 @@ def mostrar_informe_ia(token_acceso, id_cliente):
     # Información adicional
     st.divider()
     st.info("💡 **Nota:** Este informe utiliza análisis básico de datos. Para análisis más avanzado, considere proporcionar una clave API de Gemini.")
+
+def mostrar_datos_unificados():
+    """
+    Función unificada que combina datos económicos, BCRA, intermarket y CAPM en un solo tab
+    """
+    st.title("🔗 Dashboard Unificado de Datos Económicos")
+    st.markdown("### Análisis Integrado: ArgentinaDatos + BCRA + yfinance + CAPM")
+    
+    # Configuración de pestañas principales
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🇦🇷 Datos Económicos", 
+        "🏦 BCRA Dashboard", 
+        "📈 Análisis Intermarket", 
+        "📊 Análisis CAPM", 
+        "📋 Resumen General"
+    ])
+    
+    with tab1:
+        st.header("🇦🇷 Datos Económicos de Argentina")
+        
+        # Configuración de parámetros
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            periodo = st.selectbox("Período", ["1 mes", "3 meses", "6 meses", "1 año"], index=0)
+        with col2:
+            casas_dolares = st.multiselect(
+                "Casas de cambio (USD)",
+                ["blue", "oficial", "contadoconliqui", "promedio", "mayorista"],
+                default=["blue", "oficial"]
+            )
+        with col3:
+            candlestick_casa = st.selectbox("Casa para candlestick", ["blue", "oficial"], index=0)
+        
+        # Inicializar ArgentinaDatos
+        argentina_datos = ArgentinaDatos()
+        
+        # Obtener todos los datos económicos
+        with st.spinner("Obteniendo datos económicos..."):
+            try:
+                all_data = argentina_datos.get_all_economic_data()
+                all_charts = argentina_datos.create_all_charts(
+                    periodo=periodo,
+                    casas=casas_dolares,
+                    candlestick_casa=candlestick_casa
+                )
+                
+                # Mostrar métricas principales
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    if all_data.get('dolares'):
+                        ultimo_dolar = all_data['dolares'][-1] if all_data['dolares'] else None
+                        if ultimo_dolar:
+                            st.metric(
+                                "USD Blue",
+                                f"${ultimo_dolar.get('value', 0):,.2f}",
+                                f"{ultimo_dolar.get('change', 0):+.2f}%"
+                            )
+                
+                with col2:
+                    if all_data.get('inflacion'):
+                        ultima_inflacion = all_data['inflacion'][-1] if all_data['inflacion'] else None
+                        if ultima_inflacion:
+                            st.metric(
+                                "Inflación Mensual",
+                                f"{ultima_inflacion.get('value', 0):.2f}%",
+                                f"{ultima_inflacion.get('change', 0):+.2f}%"
+                            )
+                
+                with col3:
+                    if all_data.get('tasas'):
+                        ultima_tasa = all_data['tasas'][-1] if all_data['tasas'] else None
+                        if ultima_tasa:
+                            st.metric(
+                                "Tasa de Interés",
+                                f"{ultima_tasa.get('value', 0):.2f}%",
+                                f"{ultima_tasa.get('change', 0):+.2f}%"
+                            )
+                
+                with col4:
+                    if all_data.get('riesgo_pais'):
+                        ultimo_riesgo = all_data['riesgo_pais'][-1] if all_data['riesgo_pais'] else None
+                        if ultimo_riesgo:
+                            st.metric(
+                                "Riesgo País",
+                                f"{ultimo_riesgo.get('value', 0):,.0f}",
+                                f"{ultimo_riesgo.get('change', 0):+.0f}"
+                            )
+                
+                # Mostrar gráficos
+                if all_charts.get('dolares'):
+                    st.plotly_chart(all_charts['dolares'], use_container_width=True)
+                
+                if all_charts.get('dolares_candlestick'):
+                    st.plotly_chart(all_charts['dolares_candlestick'], use_container_width=True)
+                
+                if all_charts.get('inflacion'):
+                    st.plotly_chart(all_charts['inflacion'], use_container_width=True)
+                
+                if all_charts.get('tasas'):
+                    st.plotly_chart(all_charts['tasas'], use_container_width=True)
+                
+                if all_charts.get('uva'):
+                    st.plotly_chart(all_charts['uva'], use_container_width=True)
+                
+                if all_charts.get('riesgo_pais'):
+                    st.plotly_chart(all_charts['riesgo_pais'], use_container_width=True)
+                
+                # Tabla de datos
+                st.subheader("📊 Datos Detallados")
+                if all_data.get('dolares'):
+                    df_dolares = pd.DataFrame(all_data['dolares'])
+                    st.dataframe(df_dolares, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"Error al obtener datos económicos: {str(e)}")
+                st.info("Mostrando datos de ejemplo...")
+                
+                # Datos de ejemplo
+                st.warning("⚠️ Datos de ejemplo - API no disponible")
+    
+    with tab2:
+        st.header("🏦 BCRA Dashboard")
+        
+        # Obtener variables BCRA
+        variables_bcra = get_bcra_variables()
+        
+        if variables_bcra:
+            # Selección de variable
+            variable_seleccionada = st.selectbox(
+                "Seleccione una variable BCRA:",
+                options=list(variables_bcra.keys()),
+                format_func=lambda x: variables_bcra[x]['description']
+            )
+            
+            if variable_seleccionada:
+                variable_info = variables_bcra[variable_seleccionada]
+                
+                # Configuración de fechas
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha_desde_bcra = st.date_input(
+                        "Fecha desde:",
+                        value=date.today() - timedelta(days=365),
+                        max_value=date.today()
+                    )
+                with col2:
+                    fecha_hasta_bcra = st.date_input(
+                        "Fecha hasta:",
+                        value=date.today(),
+                        max_value=date.today()
+                    )
+                
+                # Obtener datos históricos
+                if st.button("📊 Cargar Datos BCRA", type="primary"):
+                    with st.spinner("Obteniendo datos del BCRA..."):
+                        try:
+                            data = get_historical_data(
+                                variable_info['id'],
+                                fecha_desde_bcra,
+                                fecha_hasta_bcra
+                            )
+                            
+                            if data is not None and not data.empty:
+                                # Calcular métricas
+                                metrics = calculate_metrics(data)
+                                
+                                # Mostrar métricas
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Valor Actual", f"{metrics['current']:.2f}")
+                                with col2:
+                                    st.metric("Máximo", f"{metrics['max']:.2f}")
+                                with col3:
+                                    st.metric("Mínimo", f"{metrics['min']:.2f}")
+                                with col4:
+                                    st.metric("Promedio", f"{metrics['mean']:.2f}")
+                                
+                                # Crear gráfico
+                                fig = create_professional_chart(
+                                    data, 
+                                    variable_info['description'],
+                                    variable_seleccionada
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Análisis con IA
+                                if st.checkbox("🤖 Generar Análisis con IA"):
+                                    gemini_api_key = st.text_input(
+                                        "Clave API de Gemini (opcional):",
+                                        type="password",
+                                        help="Ingrese su clave API de Gemini para análisis avanzado"
+                                    )
+                                    
+                                    if gemini_api_key:
+                                        with st.spinner("Generando análisis..."):
+                                            report = generate_bcra_analysis_report(
+                                                data, 
+                                                variable_seleccionada,
+                                                variable_info['description']
+                                            )
+                                            st.markdown(report)
+                                    else:
+                                        st.info("💡 Ingrese una clave API de Gemini para análisis avanzado")
+                                
+                                # Tabla de datos
+                                st.subheader("📋 Datos Históricos")
+                                st.dataframe(data, use_container_width=True)
+                                
+                            else:
+                                st.warning("No se encontraron datos para el período seleccionado")
+                                
+                        except Exception as e:
+                            st.error(f"Error al obtener datos del BCRA: {str(e)}")
+        else:
+            st.error("No se pudieron cargar las variables del BCRA")
+    
+    with tab3:
+        st.header("📈 Análisis Intermarket con yfinance")
+        
+        # Configuración de análisis
+        col1, col2 = st.columns(2)
+        with col1:
+            ticker = st.text_input("Ticker (ej: AAPL, GOOGL, MERV):", value="AAPL")
+        with col2:
+            periodo_yf = st.selectbox("Período:", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=3)
+        
+        if st.button("📊 Analizar", type="primary"):
+            if ticker:
+                with st.spinner(f"Obteniendo datos de {ticker}..."):
+                    try:
+                        # Obtener datos de yfinance
+                        data_yf = obtener_datos_yfinance(ticker, periodo_yf)
+                        
+                        if data_yf is not None and not data_yf.empty:
+                            # Calcular retornos
+                            data_yf['Returns'] = data_yf['Close'].pct_change()
+                            
+                            # Métricas básicas
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Precio Actual", f"${data_yf['Close'].iloc[-1]:.2f}")
+                            with col2:
+                                returns_total = (data_yf['Close'].iloc[-1] / data_yf['Close'].iloc[0] - 1) * 100
+                                st.metric("Retorno Total", f"{returns_total:.2f}%")
+                            with col3:
+                                volatility = data_yf['Returns'].std() * np.sqrt(252) * 100
+                                st.metric("Volatilidad Anual", f"{volatility:.2f}%")
+                            with col4:
+                                max_price = data_yf['High'].max()
+                                st.metric("Máximo Histórico", f"${max_price:.2f}")
+                            
+                            # Gráfico de precios
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=data_yf.index,
+                                y=data_yf['Close'],
+                                mode='lines',
+                                name='Precio de Cierre',
+                                line=dict(color='#1f77b4', width=2)
+                            ))
+                            fig.update_layout(
+                                title=f"Evolución de Precios - {ticker}",
+                                xaxis_title="Fecha",
+                                yaxis_title="Precio ($)",
+                                height=500
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Gráfico de volumen
+                            fig_vol = go.Figure()
+                            fig_vol.add_trace(go.Bar(
+                                x=data_yf.index,
+                                y=data_yf['Volume'],
+                                name='Volumen',
+                                marker_color='#ff7f0e'
+                            ))
+                            fig_vol.update_layout(
+                                title=f"Volumen de Operaciones - {ticker}",
+                                xaxis_title="Fecha",
+                                yaxis_title="Volumen",
+                                height=400
+                            )
+                            st.plotly_chart(fig_vol, use_container_width=True)
+                            
+                            # Estadísticas descriptivas
+                            st.subheader("📊 Estadísticas Descriptivas")
+                            stats_df = data_yf[['Open', 'High', 'Low', 'Close', 'Volume']].describe()
+                            st.dataframe(stats_df, use_container_width=True)
+                            
+                        else:
+                            st.error(f"No se pudieron obtener datos para {ticker}")
+                            
+                    except Exception as e:
+                        st.error(f"Error al obtener datos: {str(e)}")
+    
+    with tab4:
+        st.header("📊 Análisis CAPM (Capital Asset Pricing Model)")
+        
+        # Configuración del análisis CAPM
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            asset_ticker = st.text_input("Activo (ej: AAPL):", value="AAPL")
+        with col2:
+            benchmark_ticker = st.selectbox(
+                "Benchmark:",
+                options=list(BENCHMARK_FACTORS.keys()),
+                format_func=lambda x: BENCHMARK_FACTORS[x],
+                index=0
+            )
+        with col3:
+            risk_free_rate = st.number_input(
+                "Tasa Libre de Riesgo (%):",
+                min_value=0.0,
+                max_value=20.0,
+                value=2.0,
+                step=0.1
+            ) / 100
+        
+        if st.button("📈 Calcular CAPM", type="primary"):
+            if asset_ticker and benchmark_ticker:
+                with st.spinner("Calculando parámetros CAPM..."):
+                    try:
+                        # Obtener datos del activo y benchmark
+                        asset_data = obtener_serie_historica_yfinance(asset_ticker)
+                        benchmark_data = obtener_serie_historica_yfinance(benchmark_ticker)
+                        
+                        if asset_data is not None and benchmark_data is not None:
+                            # Calcular retornos
+                            asset_returns = asset_data['Close'].pct_change().dropna()
+                            benchmark_returns = benchmark_data['Close'].pct_change().dropna()
+                            
+                            # Alinear fechas
+                            common_dates = asset_returns.index.intersection(benchmark_returns.index)
+                            asset_returns = asset_returns[common_dates]
+                            benchmark_returns = benchmark_returns[common_dates]
+                            
+                            # Calcular CAPM
+                            beta, alpha, r_squared, p_value = calcular_beta_alpha(
+                                asset_returns, 
+                                benchmark_returns
+                            )
+                            
+                            if beta is not None:
+                                # Mostrar resultados
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Beta", f"{beta:.4f}")
+                                with col2:
+                                    st.metric("Alpha", f"{alpha:.4f}")
+                                with col3:
+                                    st.metric("R²", f"{r_squared:.4f}")
+                                with col4:
+                                    st.metric("P-Value", f"{p_value:.4f}")
+                                
+                                # Clasificar estrategia
+                                estrategia = clasificar_estrategia(beta, alpha, r_squared, p_value)
+                                st.info(f"🎯 **Estrategia Recomendada:** {estrategia}")
+                                
+                                # Gráfico de dispersión
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    x=benchmark_returns * 100,
+                                    y=asset_returns * 100,
+                                    mode='markers',
+                                    name='Retornos',
+                                    marker=dict(color='#1f77b4', size=6)
+                                ))
+                                
+                                # Línea de regresión
+                                x_range = np.linspace(benchmark_returns.min(), benchmark_returns.max(), 100)
+                                y_pred = alpha + beta * x_range
+                                fig.add_trace(go.Scatter(
+                                    x=x_range * 100,
+                                    y=y_pred * 100,
+                                    mode='lines',
+                                    name='Línea de Regresión',
+                                    line=dict(color='red', width=2)
+                                ))
+                                
+                                fig.update_layout(
+                                    title=f"Análisis CAPM: {asset_ticker} vs {BENCHMARK_FACTORS[benchmark_ticker]}",
+                                    xaxis_title=f"Retornos {BENCHMARK_FACTORS[benchmark_ticker]} (%)",
+                                    yaxis_title=f"Retornos {asset_ticker} (%)",
+                                    height=500
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Interpretación
+                                st.subheader("📋 Interpretación CAPM")
+                                st.markdown(f"""
+                                **Beta ({beta:.4f}):** 
+                                - {'Mayor a 1: El activo es más volátil que el mercado' if beta > 1 else 'Menor a 1: El activo es menos volátil que el mercado' if beta < 1 else 'Igual a 1: El activo tiene la misma volatilidad que el mercado'}
+                                
+                                **Alpha ({alpha:.4f}):**
+                                - {'Positivo: El activo supera al mercado' if alpha > 0 else 'Negativo: El activo no supera al mercado'}
+                                
+                                **R² ({r_squared:.4f}):**
+                                - {'Alto (>0.7): Buena correlación con el benchmark' if r_squared > 0.7 else 'Medio (0.3-0.7): Correlación moderada' if r_squared > 0.3 else 'Bajo (<0.3): Baja correlación'}
+                                """)
+                                
+                            else:
+                                st.error("No se pudieron calcular los parámetros CAPM")
+                        else:
+                            st.error("No se pudieron obtener datos para el análisis")
+                            
+                    except Exception as e:
+                        st.error(f"Error en el análisis CAPM: {str(e)}")
+    
+    with tab5:
+        st.header("📋 Resumen General")
+        
+        # Resumen de todas las fuentes de datos
+        st.subheader("🔗 Estado de las Fuentes de Datos")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info("🇦🇷 **ArgentinaDatos**")
+            st.write("• Cotizaciones USD")
+            st.write("• Inflación")
+            st.write("• Tasas de interés")
+            st.write("• UVA")
+            st.write("• Riesgo país")
+        
+        with col2:
+            st.info("🏦 **BCRA**")
+            st.write("• Variables monetarias")
+            st.write("• Series históricas")
+            st.write("• Análisis con IA")
+            st.write("• Métricas estadísticas")
+        
+        with col3:
+            st.info("📈 **yfinance**")
+            st.write("• Datos globales")
+            st.write("• Análisis técnico")
+            st.write("• CAPM")
+            st.write("• Correlaciones")
+        
+        # Recomendaciones
+        st.subheader("💡 Recomendaciones de Uso")
+        st.markdown("""
+        1. **Para análisis local:** Use la pestaña de Datos Económicos para entender el contexto argentino
+        2. **Para análisis macro:** Combine BCRA con datos económicos para análisis monetario
+        3. **Para inversiones:** Use el análisis CAPM para evaluar activos específicos
+        4. **Para diversificación:** Compare correlaciones entre activos locales y globales
+        """)
+        
+        # Métricas de rendimiento
+        st.subheader("⚡ Métricas de Rendimiento")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Fuentes de Datos", "3", "ArgentinaDatos + BCRA + yfinance")
+            st.metric("Análisis Disponibles", "4", "Económico + Monetario + Intermarket + CAPM")
+        
+        with col2:
+            st.metric("Gráficos Interactivos", "10+", "Plotly + Streamlit")
+            st.metric("Análisis con IA", "Disponible", "Gemini API")
+
+def mostrar_datos_argentinadatos_bcra():
+    """
+    Función que muestra datos integrados de ArgentinaDatos, BCRA y yfinance
+    """
+    st.title("🔗 Datos Integrados")
+    st.markdown("### ArgentinaDatos + BCRA + yfinance")
+    
+    # Configuración de pestañas
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🇦🇷 ArgentinaDatos", 
+        "🏦 BCRA", 
+        "📈 yfinance", 
+        "📋 Resumen"
+    ])
+    
+    with tab1:
+        st.header("🇦🇷 Datos Económicos de Argentina")
+        
+        # Configuración de parámetros
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            periodo = st.selectbox("Período", ["1 mes", "3 meses", "6 meses", "1 año"], index=0)
+        with col2:
+            casas_dolares = st.multiselect(
+                "Casas de cambio (USD)",
+                ["blue", "oficial", "contadoconliqui", "promedio", "mayorista"],
+                default=["blue", "oficial"]
+            )
+        with col3:
+            candlestick_casa = st.selectbox("Casa para candlestick", ["blue", "oficial"], index=0)
+        
+        # Inicializar ArgentinaDatos
+        argentina_datos = ArgentinaDatos()
+        
+        # Obtener todos los datos económicos
+        with st.spinner("Obteniendo datos económicos..."):
+            try:
+                all_data = argentina_datos.get_all_economic_data()
+                all_charts = argentina_datos.create_all_charts(
+                    periodo=periodo,
+                    casas=casas_dolares,
+                    candlestick_casa=candlestick_casa
+                )
+                
+                # Mostrar métricas principales
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    if all_data.get('dolares'):
+                        ultimo_dolar = all_data['dolares'][-1] if all_data['dolares'] else None
+                        if ultimo_dolar:
+                            st.metric(
+                                "USD Blue",
+                                f"${ultimo_dolar.get('value', 0):,.2f}",
+                                f"{ultimo_dolar.get('change', 0):+.2f}%"
+                            )
+                
+                with col2:
+                    if all_data.get('inflacion'):
+                        ultima_inflacion = all_data['inflacion'][-1] if all_data['inflacion'] else None
+                        if ultima_inflacion:
+                            st.metric(
+                                "Inflación Mensual",
+                                f"{ultima_inflacion.get('value', 0):.2f}%",
+                                f"{ultima_inflacion.get('change', 0):+.2f}%"
+                            )
+                
+                with col3:
+                    if all_data.get('tasas'):
+                        ultima_tasa = all_data['tasas'][-1] if all_data['tasas'] else None
+                        if ultima_tasa:
+                            st.metric(
+                                "Tasa de Interés",
+                                f"{ultima_tasa.get('value', 0):.2f}%",
+                                f"{ultima_tasa.get('change', 0):+.2f}%"
+                            )
+                
+                with col4:
+                    if all_data.get('riesgo_pais'):
+                        ultimo_riesgo = all_data['riesgo_pais'][-1] if all_data['riesgo_pais'] else None
+                        if ultimo_riesgo:
+                            st.metric(
+                                "Riesgo País",
+                                f"{ultimo_riesgo.get('value', 0):,.0f}",
+                                f"{ultimo_riesgo.get('change', 0):+.0f}"
+                            )
+                
+                # Mostrar gráficos
+                if all_charts.get('dolares'):
+                    st.plotly_chart(all_charts['dolares'], use_container_width=True)
+                
+                if all_charts.get('dolares_candlestick'):
+                    st.plotly_chart(all_charts['dolares_candlestick'], use_container_width=True)
+                
+                if all_charts.get('inflacion'):
+                    st.plotly_chart(all_charts['inflacion'], use_container_width=True)
+                
+                if all_charts.get('tasas'):
+                    st.plotly_chart(all_charts['tasas'], use_container_width=True)
+                
+                if all_charts.get('uva'):
+                    st.plotly_chart(all_charts['uva'], use_container_width=True)
+                
+                if all_charts.get('riesgo_pais'):
+                    st.plotly_chart(all_charts['riesgo_pais'], use_container_width=True)
+                
+                # Tabla de datos
+                st.subheader("📊 Datos Detallados")
+                if all_data.get('dolares'):
+                    df_dolares = pd.DataFrame(all_data['dolares'])
+                    st.dataframe(df_dolares, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"Error al obtener datos económicos: {str(e)}")
+                st.info("Mostrando datos de ejemplo...")
+                
+                # Datos de ejemplo
+                st.warning("⚠️ Datos de ejemplo - API no disponible")
+    
+    with tab2:
+        st.header("🏦 BCRA Dashboard")
+        
+        # Obtener variables BCRA
+        variables_bcra = get_bcra_variables()
+        
+        if variables_bcra:
+            # Selección de variable
+            variable_seleccionada = st.selectbox(
+                "Seleccione una variable BCRA:",
+                options=list(variables_bcra.keys()),
+                format_func=lambda x: variables_bcra[x]['description']
+            )
+            
+            if variable_seleccionada:
+                variable_info = variables_bcra[variable_seleccionada]
+                
+                # Configuración de fechas
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha_desde_bcra = st.date_input(
+                        "Fecha desde:",
+                        value=date.today() - timedelta(days=365),
+                        max_value=date.today()
+                    )
+                with col2:
+                    fecha_hasta_bcra = st.date_input(
+                        "Fecha hasta:",
+                        value=date.today(),
+                        max_value=date.today()
+                    )
+                
+                # Obtener datos históricos
+                if st.button("📊 Cargar Datos BCRA", type="primary"):
+                    with st.spinner("Obteniendo datos del BCRA..."):
+                        try:
+                            data = get_historical_data(
+                                variable_info['id'],
+                                fecha_desde_bcra,
+                                fecha_hasta_bcra
+                            )
+                            
+                            if data is not None and not data.empty:
+                                # Calcular métricas
+                                metrics = calculate_metrics(data)
+                                
+                                # Mostrar métricas
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Valor Actual", f"{metrics['current']:.2f}")
+                                with col2:
+                                    st.metric("Máximo", f"{metrics['max']:.2f}")
+                                with col3:
+                                    st.metric("Mínimo", f"{metrics['min']:.2f}")
+                                with col4:
+                                    st.metric("Promedio", f"{metrics['mean']:.2f}")
+                                
+                                # Crear gráfico
+                                fig = create_professional_chart(
+                                    data, 
+                                    variable_info['description'],
+                                    variable_seleccionada
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Análisis con IA
+                                if st.checkbox("🤖 Generar Análisis con IA"):
+                                    gemini_api_key = st.text_input(
+                                        "Clave API de Gemini (opcional):",
+                                        type="password",
+                                        help="Ingrese su clave API de Gemini para análisis avanzado"
+                                    )
+                                    
+                                    if gemini_api_key:
+                                        with st.spinner("Generando análisis..."):
+                                            report = generate_bcra_analysis_report(
+                                                data, 
+                                                variable_seleccionada,
+                                                variable_info['description']
+                                            )
+                                            st.markdown(report)
+                                    else:
+                                        st.info("💡 Ingrese una clave API de Gemini para análisis avanzado")
+                                
+                                # Tabla de datos
+                                st.subheader("📋 Datos Históricos")
+                                st.dataframe(data, use_container_width=True)
+                                
+                            else:
+                                st.warning("No se encontraron datos para el período seleccionado")
+                                
+                        except Exception as e:
+                            st.error(f"Error al obtener datos del BCRA: {str(e)}")
+        else:
+            st.error("No se pudieron cargar las variables del BCRA")
+    
+    with tab3:
+        st.header("📈 Análisis con yfinance")
+        
+        # Configuración de análisis
+        col1, col2 = st.columns(2)
+        with col1:
+            ticker = st.text_input("Ticker (ej: AAPL, GOOGL, MERV):", value="AAPL")
+        with col2:
+            periodo_yf = st.selectbox("Período:", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=3)
+        
+        if st.button("📊 Analizar", type="primary"):
+            if ticker:
+                with st.spinner(f"Obteniendo datos de {ticker}..."):
+                    try:
+                        # Obtener datos de yfinance
+                        data_yf = obtener_datos_yfinance(ticker, periodo_yf)
+                        
+                        if data_yf is not None and not data_yf.empty:
+                            # Calcular retornos
+                            data_yf['Returns'] = data_yf['Close'].pct_change()
+                            
+                            # Métricas básicas
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Precio Actual", f"${data_yf['Close'].iloc[-1]:.2f}")
+                            with col2:
+                                returns_total = (data_yf['Close'].iloc[-1] / data_yf['Close'].iloc[0] - 1) * 100
+                                st.metric("Retorno Total", f"{returns_total:.2f}%")
+                            with col3:
+                                volatility = data_yf['Returns'].std() * np.sqrt(252) * 100
+                                st.metric("Volatilidad Anual", f"{volatility:.2f}%")
+                            with col4:
+                                max_price = data_yf['High'].max()
+                                st.metric("Máximo Histórico", f"${max_price:.2f}")
+                            
+                            # Gráfico de precios
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=data_yf.index,
+                                y=data_yf['Close'],
+                                mode='lines',
+                                name='Precio de Cierre',
+                                line=dict(color='#1f77b4', width=2)
+                            ))
+                            fig.update_layout(
+                                title=f"Evolución de Precios - {ticker}",
+                                xaxis_title="Fecha",
+                                yaxis_title="Precio ($)",
+                                height=500
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Gráfico de volumen
+                            fig_vol = go.Figure()
+                            fig_vol.add_trace(go.Bar(
+                                x=data_yf.index,
+                                y=data_yf['Volume'],
+                                name='Volumen',
+                                marker_color='#ff7f0e'
+                            ))
+                            fig_vol.update_layout(
+                                title=f"Volumen de Operaciones - {ticker}",
+                                xaxis_title="Fecha",
+                                yaxis_title="Volumen",
+                                height=400
+                            )
+                            st.plotly_chart(fig_vol, use_container_width=True)
+                            
+                            # Estadísticas descriptivas
+                            st.subheader("📊 Estadísticas Descriptivas")
+                            stats_df = data_yf[['Open', 'High', 'Low', 'Close', 'Volume']].describe()
+                            st.dataframe(stats_df, use_container_width=True)
+                            
+                        else:
+                            st.error(f"No se pudieron obtener datos para {ticker}")
+                            
+                    except Exception as e:
+                        st.error(f"Error al obtener datos: {str(e)}")
+    
+    with tab4:
+        st.header("📋 Resumen de Datos Integrados")
+        
+        # Resumen de todas las fuentes de datos
+        st.subheader("🔗 Estado de las Fuentes de Datos")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info("🇦🇷 **ArgentinaDatos**")
+            st.write("• Cotizaciones USD")
+            st.write("• Inflación")
+            st.write("• Tasas de interés")
+            st.write("• UVA")
+            st.write("• Riesgo país")
+        
+        with col2:
+            st.info("🏦 **BCRA**")
+            st.write("• Variables monetarias")
+            st.write("• Series históricas")
+            st.write("• Análisis con IA")
+            st.write("• Métricas estadísticas")
+        
+        with col3:
+            st.info("📈 **yfinance**")
+            st.write("• Datos globales")
+            st.write("• Análisis técnico")
+            st.write("• CAPM")
+            st.write("• Correlaciones")
+        
+        # Recomendaciones
+        st.subheader("💡 Recomendaciones de Uso")
+        st.markdown("""
+        1. **Para análisis local:** Use la pestaña de ArgentinaDatos para entender el contexto argentino
+        2. **Para análisis macro:** Combine BCRA con datos económicos para análisis monetario
+        3. **Para inversiones:** Use yfinance para evaluar activos específicos
+        4. **Para diversificación:** Compare correlaciones entre activos locales y globales
+        """)
+        
+        # Métricas de rendimiento
+        st.subheader("⚡ Métricas de Rendimiento")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Fuentes de Datos", "3", "ArgentinaDatos + BCRA + yfinance")
+            st.metric("Análisis Disponibles", "3", "Económico + Monetario + Intermarket")
+        
+        with col2:
+            st.metric("Gráficos Interactivos", "10+", "Plotly + Streamlit")
+            st.metric("Análisis con IA", "Disponible", "Gemini API")
 
 if __name__ == "__main__":
     main()
