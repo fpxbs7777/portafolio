@@ -4488,12 +4488,14 @@ def analisis_intermarket_economico(series_globales, series_locales=None):
     else:
         asignacion = {'Acciones Locales':20,'Commodities':15,'Emergentes':10,'Desarrollados':25,'Bonos/Liquidez':25,'Oro/Hedge':5}
     # --- Resumen profesional ---
+    momentum_str = ', '.join([f"{k}: 1w={v['m1w']*100:+.1f}%, 1m={v['m1m']*100:+.1f}%" for k,v in momentum.items() if not np.isnan(v['m1w']) and not np.isnan(v['m1m'])])
     resumen_txt = f"""
 🔗 **Análisis Intermarket Global-Local (Argentina)**
 
 - **Régimen de mercado:** {reg_desc}
 - **Correlaciones clave:** {', '.join([f'{k}: {v:+.2f}' for k,v in correlaciones.items()])}
-- **Momentum:** " + ', '.join([f"{k}: 1w={v['m1w']*100:+.1f}%, 1m={v['m1m']*100:+.1f}%" for k,v in momentum.items() if not np.isnan(v['m1w']) and not np.isnan(v['m1m'])]) + "\n"
+- **Momentum:** {momentum_str}
+"""
     if signals:
         resumen_txt += f"- **Señales activas:** {'; '.join(signals)}\n"
     resumen_txt += f"- **Asignación sugerida:** {', '.join([f'{k}: {v}%' for k,v in asignacion.items()])}\n"
