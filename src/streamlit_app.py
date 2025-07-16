@@ -3793,13 +3793,12 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Rebalanceo",
-        "🌍 Análisis Global IA"
+        "🔄 Rebalanceo"
     ])
 
     with tab1:
@@ -3824,140 +3823,6 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
-    
-    with tab6:
-        st.markdown("""
-        # 🌍 Análisis Global IA
-        """)
-        
-        st.info("Este módulo realiza un análisis intermarket y de factores, calculando correlaciones, alphas y betas respecto de un benchmark y factores globales/locales. El informe es generado automáticamente con IA.")
-
-        import pandas as pd
-        import numpy as np
-        import yfinance as yf
-        from datetime import datetime, timedelta
-        try:
-            import google.generativeai as genai
-        except ImportError:
-            genai = None
-
-        # --- Configuración de activos y factores ---
-        activos_locales = {
-            'Merval': '^MERV',
-            'YPF': 'YPF.BA',
-            'Galicia': 'GGAL.BA',
-            'Pampa': 'PAMP.BA',
-        }
-        factores_globales = {
-            'S&P 500': '^GSPC',
-            'Nasdaq': '^IXIC',
-            'DXY': 'DX-Y.NYB',
-            'VIX': '^VIX',
-            'Oro': 'GC=F',
-            'Petróleo': 'CL=F',
-            'Soja': 'ZS=F',
-        }
-        benchmark = 'S&P 500'
-        dias = 252
-        fecha_fin = datetime.now()
-        fecha_ini = fecha_fin - timedelta(days=dias*1.2)
-
-        st.subheader("Configuración de Análisis")
-        col1, col2 = st.columns(2)
-        with col1:
-            dias = st.slider("Días de análisis", 60, 500, 252, 10)
-        with col2:
-            benchmark = st.selectbox("Benchmark para alphas/betas", list(factores_globales.keys()), index=0)
-
-        tickers = list(activos_locales.values()) + list(factores_globales.values())
-        nombres = list(activos_locales.keys()) + list(factores_globales.keys())
-        ticker_map = dict(zip(nombres, tickers))
-
-        st.write("Descargando datos de mercado...")
-        data = yf.download(tickers, start=fecha_ini.strftime('%Y-%m-%d'), end=fecha_fin.strftime('%Y-%m-%d'), progress=False)['Adj Close']
-        data = data.dropna(axis=0, how='any')
-        if isinstance(data, pd.Series):
-            data = data.to_frame()
-        data.columns = [c if isinstance(c, str) else c[1] for c in data.columns]
-        data = data.rename(columns={v: k for k, v in ticker_map.items() if v in data.columns})
-        data = data[[n for n in nombres if n in data.columns]]
-        st.write(f"Datos descargados: {list(data.columns)}")
-
-        # Calcular retornos diarios
-        returns = data.pct_change().dropna()
-
-        # Calcular correlaciones
-        st.subheader("Matriz de Correlaciones")
-        corr = returns.corr()
-        st.dataframe(corr, use_container_width=True)
-
-        # Calcular alphas y betas respecto al benchmark
-        st.subheader(f"Alphas y Betas respecto a {benchmark}")
-        resultados = []
-        for col in data.columns:
-            if col == benchmark:
-                continue
-            x = returns[benchmark]
-            y = returns[col]
-            mask = x.notna() & y.notna()
-            if mask.sum() < 30:
-                continue
-            x = x[mask]
-            y = y[mask]
-            beta = np.cov(y, x)[0, 1] / np.var(x)
-            alpha = y.mean() - beta * x.mean()
-            r2 = np.corrcoef(x, y)[0, 1] ** 2
-            resultados.append({
-                'Activo': col,
-                'Alpha': alpha,
-                'Beta': beta,
-                'R²': r2
-            })
-        df_ab = pd.DataFrame(resultados)
-        st.dataframe(df_ab, use_container_width=True)
-
-        # Visualización rápida
-        st.subheader("Visualización de Retornos Acumulados")
-        ret_acum = (1 + returns).cumprod()
-        import plotly.graph_objects as go
-        fig = go.Figure()
-        for col in ret_acum.columns:
-            fig.add_trace(go.Scatter(x=ret_acum.index, y=ret_acum[col], name=col))
-        fig.update_layout(title="Retornos Acumulados", xaxis_title="Fecha", yaxis_title="Crecimiento", template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # --- Informe IA ---
-        st.subheader("Informe Ejecutivo IA")
-        if genai is not None and hasattr(st.session_state, 'GEMINI_API_KEY') and st.session_state.GEMINI_API_KEY:
-            genai.configure(api_key=st.session_state.GEMINI_API_KEY)
-            resumen = []
-            for row in resultados:
-                resumen.append(f"{row['Activo']}: Alpha={row['Alpha']:.3%}, Beta={row['Beta']:.2f}, R²={row['R²']:.2f}")
-            prompt = f"""
-Actúa como un analista financiero experto. Analiza el siguiente contexto intermarket y de factores para Argentina:
-
-- Benchmark: {benchmark}
-- Alphas y Betas:
-{chr(10).join(resumen)}
-- Matriz de correlaciones:
-{corr.round(2).to_string()}
-
-Genera un informe ejecutivo en español (máx 350 palabras) que incluya:
-1. Panorama global y local
-2. Factores que más impactan a los activos argentinos
-3. Riesgos y oportunidades
-4. Recomendaciones de asignación y cobertura
-
-Sé claro, profesional y orientado a inversores no técnicos."
-            with st.spinner("Generando informe IA..."):
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(prompt)
-                if response and response.text:
-                    st.markdown(response.text)
-                else:
-                    st.warning("No se pudo generar el informe IA.")
-        else:
-            st.info("Configura tu API Key de Gemini en la barra lateral para habilitar el informe IA.")
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -4086,20 +3951,25 @@ def main():
             
             # Panel de bienvenida
             st.markdown("""
-            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); border-radius: 15px; padding: 40px; color: white; text-align: center; margin: 30px 0;">
+            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
+                        border-radius: 15px; 
+                        padding: 40px; 
+                        color: white;
+                        text-align: center;
+                        margin: 30px 0;">
                 <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
                 <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
                 <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>Analisis Completo</h3>
+                        <h3>📊 Análisis Completo</h3>
                         <p>Visualice todos sus activos en un solo lugar con detalle</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>Graficos Interactivos</h3>
+                        <h3>📈 Gráficos Interactivos</h3>
                         <p>Comprenda su portafolio con visualizaciones avanzadas</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>Gestion de Riesgo</h3>
+                        <h3>⚖️ Gestión de Riesgo</h3>
                         <p>Identifique concentraciones y optimice su perfil de riesgo</p>
                     </div>
                 </div>
