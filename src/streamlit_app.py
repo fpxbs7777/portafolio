@@ -4389,27 +4389,34 @@ def analisis_intermarket_economico(series_globales, series_locales=None):
     Devuelve un string resumen profesional para IA y un dict con los datos clave.
     """
     import numpy as np
+    import streamlit as st
+    def safe_num(val, default=0):
+        return val if isinstance(val, (int, float, np.integer, np.floating)) and not np.isnan(val) else default
     resumen = []
     datos = {}
     # --- Momentum y retornos ---
     momentum = {}
     for k, df in series_globales.items():
-        if len(df) > 20:
-            df = df.sort_values('Fecha')
-            valores = df['Valor'].values
+        if df is None or df.empty or 'Valor' not in df.columns:
+            st.warning(f"No se pudo obtener la serie de {k} para el análisis intermarket.")
+            continue
+        df = df.sort_values('Fecha')
+        valores = df['Valor'].values
+        if len(valores) > 20:
             ret = np.diff(np.log(valores))
-            m1w = np.sum(ret[-5:]) if len(ret) >= 5 else np.nan
-            m1m = np.sum(ret[-20:]) if len(ret) >= 20 else np.nan
+            m1w = safe_num(np.sum(ret[-5:])) if len(ret) >= 5 else 0
+            m1m = safe_num(np.sum(ret[-20:])) if len(ret) >= 20 else 0
             momentum[k] = {'m1w': m1w, 'm1m': m1m}
     # --- Correlaciones clave ---
     def correlacion(t1, t2, dias=60):
         s1 = series_globales.get(t1)
         s2 = series_globales.get(t2)
-        if s1 is not None and s2 is not None:
+        if s1 is not None and s2 is not None and not s1.empty and not s2.empty:
             v1 = s1['Valor'].values[-dias:]
             v2 = s2['Valor'].values[-dias:]
             if len(v1) == len(v2) and len(v1) > 10:
-                return float(np.corrcoef(v1, v2)[0,1])
+                c = np.corrcoef(v1, v2)[0,1]
+                return safe_num(c)
         return None
     pares = [
         ("DX-Y.NYB", "ZS=F", "Dólar vs Soja"),
@@ -4428,8 +4435,8 @@ def analisis_intermarket_economico(series_globales, series_locales=None):
     score = 0
     detalles = []
     vix = series_globales.get('^VIX')
-    if vix is not None and len(vix) > 0:
-        vix_val = vix['Valor'].values[-1]
+    if vix is not None and not vix.empty:
+        vix_val = safe_num(vix['Valor'].values[-1])
         if vix_val < 15:
             score += 2
             detalles.append('VIX muy bajo: complacencia global.')
@@ -4439,27 +4446,31 @@ def analisis_intermarket_economico(series_globales, series_locales=None):
         else:
             detalles.append('VIX neutral.')
     dxy = series_globales.get('DX-Y.NYB')
-    if dxy is not None and len(dxy) > 20:
-        dxy_ret = np.diff(np.log(dxy['Valor'].values))
-        dxy20 = np.sum(dxy_ret[-20:])
-        if dxy20 < -0.02:
-            score += 1
-            detalles.append('Dólar débil: favorable para emergentes.')
-        elif dxy20 > 0.03:
-            score -= 1
-            detalles.append('Dólar fuerte: presión sobre emergentes.')
-        else:
-            detalles.append('Dólar estable.')
+    if dxy is not None and not dxy.empty:
+        dxy_vals = dxy['Valor'].values
+        if len(dxy_vals) > 20:
+            dxy_ret = np.diff(np.log(dxy_vals))
+            dxy20 = safe_num(np.sum(dxy_ret[-20:]))
+            if dxy20 < -0.02:
+                score += 1
+                detalles.append('Dólar débil: favorable para emergentes.')
+            elif dxy20 > 0.03:
+                score -= 1
+                detalles.append('Dólar fuerte: presión sobre emergentes.')
+            else:
+                detalles.append('Dólar estable.')
     soja = series_globales.get('ZS=F')
-    if soja is not None and len(soja) > 20:
-        soja_ret = np.diff(np.log(soja['Valor'].values))
-        soja20 = np.sum(soja_ret[-20:])
-        if soja20 > 0.05:
-            score += 1
-            detalles.append('Soja fuerte: buen contexto para Argentina.')
-        elif soja20 < -0.05:
-            score -= 1
-            detalles.append('Soja débil: contexto adverso.')
+    if soja is not None and not soja.empty:
+        soja_vals = soja['Valor'].values
+        if len(soja_vals) > 20:
+            soja_ret = np.diff(np.log(soja_vals))
+            soja20 = safe_num(np.sum(soja_ret[-20:]))
+            if soja20 > 0.05:
+                score += 1
+                detalles.append('Soja fuerte: buen contexto para Argentina.')
+            elif soja20 < -0.05:
+                score -= 1
+                detalles.append('Soja débil: contexto adverso.')
     if score >= 2:
         reg_tipo = 'ALCISTA'
         reg_desc = 'Régimen Alcista: contexto favorable para activos argentinos.'
@@ -4476,8 +4487,10 @@ def analisis_intermarket_economico(series_globales, series_locales=None):
     signals = []
     corr_dxy_soja = correlaciones.get('Dólar vs Soja')
     if dxy is not None and soja is not None and corr_dxy_soja is not None:
-        dxy20 = np.sum(np.diff(np.log(dxy['Valor'].values))[-20:])
-        soja20 = np.sum(np.diff(np.log(soja['Valor'].values))[-20:])
+        dxy_vals = dxy['Valor'].values
+        soja_vals = soja['Valor'].values
+        dxy20 = safe_num(np.sum(np.diff(np.log(dxy_vals))[-20:])) if len(dxy_vals) > 20 else 0
+        soja20 = safe_num(np.sum(np.diff(np.log(soja_vals))[-20:])) if len(soja_vals) > 20 else 0
         if dxy20 < -0.01 and soja20 > 0.01 and corr_dxy_soja < -0.3:
             signals.append('Dólar débil y commodities fuertes favorecen activos locales.')
     # --- Asignación sugerida ---
@@ -4488,19 +4501,17 @@ def analisis_intermarket_economico(series_globales, series_locales=None):
     else:
         asignacion = {'Acciones Locales':20,'Commodities':15,'Emergentes':10,'Desarrollados':25,'Bonos/Liquidez':25,'Oro/Hedge':5}
     # --- Resumen profesional ---
-    def safe_num(val, default=0):
-        import numpy as np
-        return val if isinstance(val, (int, float, np.integer, np.floating)) and not np.isnan(val) else default
     momentum_str = ', '.join([
         f"{k}: 1w={safe_num(v['m1w'])*100:+.1f}%, 1m={safe_num(v['m1m'])*100:+.1f}%"
         for k, v in momentum.items()
-        if v['m1w'] is not None and v['m1m'] is not None and not np.isnan(v['m1w']) and not np.isnan(v['m1m'])
+        if v['m1w'] is not None and v['m1m'] is not None
     ])
+    correlaciones_str = ', '.join([f'{k}: {safe_num(v):+.2f}' for k,v in correlaciones.items() if v is not None])
     resumen_txt = f"""
 🔗 **Análisis Intermarket Global-Local (Argentina)**
 
 - **Régimen de mercado:** {reg_desc}
-- **Correlaciones clave:** {', '.join([f'{k}: {v:+.2f}' for k,v in correlaciones.items()])}
+- **Correlaciones clave:** {correlaciones_str}
 - **Momentum:** {momentum_str}
 """
     if signals:
