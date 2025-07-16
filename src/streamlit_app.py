@@ -4304,5 +4304,9 @@ def generate_analysis_report_optimized(data: pd.DataFrame, variable_name: str, v
     except Exception as e:
         return f"## ❌ Error en el análisis\n\nNo se pudo generar el análisis: {str(e)}"
 
+# --- Helper para métricas seguras ---
+def safe_metric(value, default=0):
+    return value if value is not None else default
+
 if __name__ == "__main__":
     main()
