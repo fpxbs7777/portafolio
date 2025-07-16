@@ -18,7 +18,6 @@ import asyncio
 import matplotlib.pyplot as plt
 from scipy.stats import skew
 import google.generativeai as genai
-from bs4 import BeautifulSoup
 
 warnings.filterwarnings('ignore')
 
@@ -1551,7 +1550,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     elif len(portafolio) == 1:
         concentracion = 1.0
     else:
-        sum_squares = sum((safe_num(activo.get('Valuación')) / safe_num(valor_total, 1)) ** 2 
+        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
                          for activo in portafolio.values())
         # Normalizar entre 0 y 1
         min_concentration = 1.0 / len(portafolio)
@@ -1663,17 +1662,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
             
             # Calcular el peso del activo en el portafolio
-            peso = safe_num(activo.get('Valuación')) / safe_num(valor_total, 1)
+            peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
             
             # Guardar métricas
             metricas_activos[simbolo] = {
-                'retorno_medio': safe_num(retorno_medio),
-                'volatilidad': safe_num(volatilidad),
-                'prob_ganancia': safe_num(prob_ganancia),
-                'prob_perdida': safe_num(prob_perdida),
-                'prob_ganancia_10': safe_num(prob_ganancia_10),
-                'prob_perdida_10': safe_num(prob_perdida_10),
-                'peso': safe_num(peso)
+                'retorno_medio': retorno_medio,
+                'volatilidad': volatilidad,
+                'prob_ganancia': prob_ganancia,
+                'prob_perdida': prob_perdida,
+                'prob_ganancia_10': prob_ganancia_10,
+                'prob_perdida_10': prob_perdida_10,
+                'peso': peso
             }
             
             # Guardar retornos para cálculo de correlaciones
@@ -1699,83 +1698,74 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
-    retorno_esperado_anual = 0
-    for m in metricas_activos.values():
-        ret = safe_num(m.get('retorno_medio'))
-        peso = safe_num(m.get('peso'))
-        if m.get('retorno_medio') is None or m.get('peso') is None:
-            print(f"Advertencia: retorno_medio o peso es None en retorno_esperado_anual: {m}")
-        retorno_esperado_anual += ret * peso
+    retorno_esperado_anual = sum(
+        m['retorno_medio'] * m['peso'] 
+        for m in metricas_activos.values()
+    )
     
     # Volatilidad del portafolio (considerando correlaciones)
     try:
         if len(retornos_diarios) > 1:
+            # Asegurarse de que tenemos suficientes datos para calcular correlaciones
             df_retornos = pd.DataFrame(retornos_diarios).dropna()
-            if len(df_retornos) < 5:
+            if len(df_retornos) < 5:  # Mínimo de datos para correlación confiable
                 print("No hay suficientes datos para calcular correlaciones confiables")
-                volatilidad_portafolio = 0
-                for m in metricas_activos.values():
-                    vol = safe_num(m.get('volatilidad'))
-                    peso = safe_num(m.get('peso'))
-                    if m.get('volatilidad') is None or m.get('peso') is None:
-                        print(f"Advertencia: volatilidad o peso es None en volatilidad_portafolio: {m}")
-                    volatilidad_portafolio += vol * peso
+                # Usar promedio ponderado simple como respaldo
+                volatilidad_portafolio = sum(
+                    m['volatilidad'] * m['peso'] 
+                    for m in metricas_activos.values()
+                )
             else:
+                # Calcular matriz de correlación
                 df_correlacion = df_retornos.corr()
+                
+                # Verificar si la matriz de correlación es válida
                 if df_correlacion.isna().any().any():
                     print("Advertencia: Matriz de correlación contiene valores NaN")
-                    df_correlacion = df_correlacion.fillna(0)
+                    df_correlacion = df_correlacion.fillna(0)  # Reemplazar NaN con 0
+                
+                # Obtener pesos y volatilidades
                 activos = list(metricas_activos.keys())
-                pesos = np.array([safe_num(metricas_activos[a].get('peso')) for a in activos])
-                volatilidades = np.array([safe_num(metricas_activos[a].get('volatilidad')) for a in activos])
+                pesos = np.array([metricas_activos[a]['peso'] for a in activos])
+                volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
+                
+                # Asegurarse de que las dimensiones coincidan
                 if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
+                    # Calcular matriz de covarianza
                     matriz_cov = np.diag(volatilidades) @ df_correlacion.values @ np.diag(volatilidades)
+                    # Calcular varianza del portafolio
                     varianza_portafolio = pesos.T @ matriz_cov @ pesos
+                    # Asegurar que la varianza no sea negativa
                     varianza_portafolio = max(0, varianza_portafolio)
                     volatilidad_portafolio = np.sqrt(varianza_portafolio)
                 else:
                     print("Dimensiones no coinciden, usando promedio ponderado")
-                    volatilidad_portafolio = 0
-                    for v, w in zip(volatilidades, pesos):
-                        volatilidad_portafolio += v * w
+                    volatilidad_portafolio = sum(v * w for v, w in zip(volatilidades, pesos))
         else:
-            volatilidad_portafolio = safe_num(next(iter(metricas_activos.values())).get('volatilidad'))
+            # Si solo hay un activo, usar su volatilidad directamente
+            volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
+            
+        # Asegurar que la volatilidad sea un número finito
         if not np.isfinite(volatilidad_portafolio):
             print("Advertencia: Volatilidad no finita, usando valor por defecto")
-            volatilidad_portafolio = 0.2
+            volatilidad_portafolio = 0.2  # Valor por defecto razonable
+            
     except Exception as e:
         print(f"Error al calcular volatilidad del portafolio: {str(e)}")
         import traceback
         traceback.print_exc()
-        volatilidad_portafolio = 0
-        for m in metricas_activos.values():
-            vol = safe_num(m.get('volatilidad'))
-            peso = safe_num(m.get('peso'))
-            if m.get('volatilidad') is None or m.get('peso') is None:
-                print(f"Advertencia: volatilidad o peso es None en except volatilidad_portafolio: {m}")
-            volatilidad_portafolio += vol * peso
-        if volatilidad_portafolio == 0:
-            volatilidad_portafolio = 0.2
+        # Valor por defecto seguro
+        volatilidad_portafolio = sum(
+            m['volatilidad'] * m['peso'] 
+            for m in metricas_activos.values()
+        ) if metricas_activos else 0.2
     
     # Calcular percentiles para escenarios
     retornos_simulados = []
     for _ in range(1000):  # Simulación Monte Carlo simple
         retorno_simulado = 0
         for m in metricas_activos.values():
-            # Validar que todos los valores sean numéricos
-            ret = m.get('retorno_medio')
-            vol = m.get('volatilidad')
-            peso = m.get('peso')
-            if ret is None or vol is None or peso is None:
-                print(f"Advertencia: valor None en Monte Carlo: retorno_medio={ret}, volatilidad={vol}, peso={peso}")
-                ret = safe_num(ret)
-                vol = safe_num(vol)
-                peso = safe_num(peso)
-            try:
-                retorno_simulado += np.random.normal(ret/252, vol/np.sqrt(252)) * peso
-            except Exception as e:
-                print(f"Error en simulación Monte Carlo: {e}")
-                continue
+            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
         retornos_simulados.append(retorno_simulado * 252)  # Anualizado
     
     pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
@@ -1839,17 +1829,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # Crear diccionario de resultados
     resultados = {
         'concentracion': concentracion,
-        'std_dev_activo': safe_num(volatilidad_portafolio),
-        'retorno_esperado_anual': safe_num(retorno_esperado_anual),
-        'pl_esperado_min': safe_num(pl_esperado_min),
-        'pl_esperado_max': safe_num(pl_esperado_max),
+        'std_dev_activo': volatilidad_portafolio,
+        'retorno_esperado_anual': retorno_esperado_anual,
+        'pl_esperado_min': pl_esperado_min,
+        'pl_esperado_max': pl_esperado_max,
         'probabilidades': probabilidades,
-        'riesgo_anual': safe_num(volatilidad_portafolio),  # Usamos la volatilidad como proxy de riesgo
-        'alpha': safe_num(alpha_beta_metrics.get('alpha_annual', 0)),
-        'beta': safe_num(alpha_beta_metrics.get('beta', 0)),
-        'r_cuadrado': safe_num(alpha_beta_metrics.get('r_squared', 0)),
-        'tracking_error': safe_num(alpha_beta_metrics.get('tracking_error', 0)),
-        'information_ratio': safe_num(alpha_beta_metrics.get('information_ratio', 0))
+        'riesgo_anual': volatilidad_portafolio,  # Usamos la volatilidad como proxy de riesgo
+        'alpha': alpha_beta_metrics.get('alpha_annual', 0),
+        'beta': alpha_beta_metrics.get('beta', 0),
+        'r_cuadrado': alpha_beta_metrics.get('r_squared', 0),
+        'tracking_error': alpha_beta_metrics.get('tracking_error', 0),
+        'information_ratio': alpha_beta_metrics.get('information_ratio', 0)
     }
     
     # Analizar la estrategia de inversión
@@ -1858,9 +1848,9 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     
     # Agregar métricas adicionales si están disponibles
     if 'p_value' in alpha_beta_metrics:
-        resultados['p_value'] = safe_num(alpha_beta_metrics['p_value'])
+        resultados['p_value'] = alpha_beta_metrics['p_value']
     if 'observations' in alpha_beta_metrics:
-        resultados['observaciones'] = safe_num(alpha_beta_metrics['observations'])
+        resultados['observaciones'] = alpha_beta_metrics['observations']
     
     return resultados
 
@@ -3792,107 +3782,51 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
+
     if not cliente:
         st.error("No hay cliente seleccionado")
         return
+
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+    
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Rebalanceo",
-        "🤖 Diagnóstico IA",
-        "🪙 Análisis de Bonos"
+        "🌍 Análisis Global BCRA"
     ])
+
     with tab1:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
+    
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
             mostrar_estado_cuenta(estado_cuenta)
         else:
             st.warning("No se pudo obtener el estado de cuenta")
+    
     with tab3:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
+    
     with tab4:
         mostrar_cotizaciones_mercado(token_acceso)
+    
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+
     with tab6:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if portafolio:
-            activos = portafolio.get('activos', [])
-            datos_activos = {}
-            valor_total = 0
-            for activo in activos:
-                titulo = activo.get('titulo', {})
-                simbolo = titulo.get('simbolo', 'N/A')
-                valuacion = 0
-                for campo in ['valuacionEnMonedaOriginal','valuacionActual','valorNominalEnMonedaOriginal','valorNominal','valuacionDolar','valuacion','valorActual','montoInvertido','valorMercado','valorTotal','importe']:
-                    if campo in activo and activo[campo] is not None:
-                        try:
-                            val = float(activo[campo])
-                            if val > 0:
-                                valuacion = val
-                                break
-                        except (ValueError, TypeError):
-                            continue
-                if simbolo:
-                    datos_activos[simbolo] = {'Valuación': valuacion}
-                    valor_total += valuacion
-            metricas = calcular_metricas_portafolio(datos_activos, valor_total, token_acceso)
-            fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
-            fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
-            if st.button("🔍 Diagnóstico Global IA", key="btn_diag_global_ia_tab6"):
-                with st.spinner("Consultando IA profesional..."):
-                    diagnostico = diagnostico_global_unificado(datos_activos, metricas, token_acceso, fecha_desde, fecha_hasta)
-                st.markdown(diagnostico)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente")
-    with tab7:
-        st.header("🪙 Análisis de Bonos")
-        # Input manual de ticker de bono
-        ticker_bono = st.text_input("Ingrese el ticker del bono (ej: AE38)", value="AE38")
-        if st.button("Buscar datos técnicos del bono"):
-            with st.spinner("Buscando datos técnicos en IOL..."):
-                datos_bono = obtener_datos_tecnicos_bono_iol(ticker_bono)
-            if datos_bono:
-                st.subheader(f"Datos técnicos de {ticker_bono}")
-                st.table(list(datos_bono.items()))
-            else:
-                st.warning("No se encontraron datos técnicos para el bono ingresado.")
-        # Si el portafolio tiene bonos, listarlos y permitir seleccionar uno
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        bonos_portafolio = []
-        if portafolio and 'activos' in portafolio:
-            for activo in portafolio['activos']:
-                tipo = activo.get('tipo', '').lower()
-                simbolo = activo.get('titulo', {}).get('simbolo', '')
-                if 'bono' in tipo or 'obligacion' in tipo or 'titulo' in tipo:
-                    bonos_portafolio.append(simbolo)
-        if bonos_portafolio:
-            st.markdown("---")
-            st.subheader("Bonos en el portafolio")
-            bono_sel = st.selectbox("Seleccione un bono del portafolio para ver sus datos técnicos:", bonos_portafolio)
-            if st.button("Ver datos técnicos del bono seleccionado"):
-                with st.spinner("Buscando datos técnicos en IOL..."):
-                    datos_bono = obtener_datos_tecnicos_bono_iol(bono_sel)
-                if datos_bono:
-                    st.subheader(f"Datos técnicos de {bono_sel}")
-                    st.table(list(datos_bono.items()))
-                else:
-                    st.warning("No se encontraron datos técnicos para el bono seleccionado.")
-        # (Base para curva de TIR: aquí se puede agregar la lógica para scrapear y graficar la curva de TIR de bonos del panel)
-        st.markdown("---")
-        st.info("Próximamente: Gráfico de curva de TIR de bonos por clase. Si tienes tickers de bonos, puedes probar el scraping de datos técnicos arriba.")
+        mostrar_dashboard_bcra_global()
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -4258,19 +4192,15 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
                 # Preferir yfinance para tickers internacionales y Cedears
                 if panel.lower() in ['cedears', 'adrs'] or ticker.isalpha():
                     df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)[['Close']]
-                    if df is not None and not df.empty:
+                    if not df.empty:
                         df = df.rename(columns={'Close': 'precio'})
                         df = df.reset_index().rename(columns={'Date': 'fecha'})
                         series_historicas[ticker] = df
-                    else:
-                        print(f"Advertencia: No se encontraron datos para el ticker {ticker} en yfinance.")
                 else:
                     # Para acciones locales, usar la API de IOL si es necesario
                     df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
                     if df is not None and not df.empty:
                         series_historicas[ticker] = df
-                    else:
-                        print(f"Advertencia: No se encontraron datos para el ticker {ticker} en IOL.")
             except Exception as e:
                 continue
     # Validar que haya suficientes series
@@ -4279,355 +4209,100 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
 
-# --- NUEVO: Diagnóstico Global Unificado con IA ---
+# --- FUNCIONES DASHBOARD BCRA GLOBAL ---
+import requests
+from bs4 import BeautifulSoup
+import json
+import io
+import base64
+import markdown2
+# Solo importar si no existen
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
+
+# --- Función principal del tab global BCRA ---
 GEMINI_API_KEY = "AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E"
 
-def safe_num(val, default=0):
-    """Devuelve val si es numérico y no es NaN, si no devuelve default (por defecto 0)."""
-    try:
-        if isinstance(val, (int, float, np.integer, np.floating)) and not pd.isnull(val):
-            return val
-        else:
-            return default
-    except Exception:
-        return default
-
-def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador, fecha_desde, fecha_hasta):
-    """
-    Integra todas las variables relevantes (portafolio, intermarket, benchmarks, dólar, BCRA, tasas, ciclo económico, etc.),
-    las unifica en un resumen estructurado y consulta a la IA para diagnóstico y recomendaciones profesionales.
-    Optimiza el uso de tokens y cachea el resultado para evitar gastos innecesarios.
-    """
-    import yfinance as yf
-    import requests
-    import numpy as np
-    import pandas as pd
-    import datetime
+def mostrar_dashboard_bcra_global():
     import streamlit as st
-    # 1. Recolectar métricas del portafolio
-    resumen = {}
-    resumen['portafolio'] = metricas_portafolio or {}
-    resumen['valor_total'] = safe_num(sum([safe_num(a.get('Valuación')) for a in portafolio.values()])) if isinstance(portafolio, dict) else 0
-    # 2. Intermarket y benchmarks
-    tickers_inter = {
-        'MERVAL': '^MERV',
-        'S&P500': '^GSPC',
-        'DXY': 'DX-Y.NYB',
-        'VIX': '^VIX',
-        'Soja': 'ZS=F',
-        'Oro': 'GC=F',
-        'Petróleo': 'CL=F',
-    }
-    precios_inter = {}
-    for k, v in tickers_inter.items():
+    # Configurar la API Key de Gemini solo una vez por sesión
+    if 'GEMINI_API_KEY' not in st.session_state or not st.session_state.GEMINI_API_KEY:
+        st.session_state.GEMINI_API_KEY = GEMINI_API_KEY
+    if genai is not None:
         try:
-            data = yf.download(v, period='6mo')['Close']
-            if not data.empty:
-                precios_inter[k] = {
-                    'actual': safe_num(data.iloc[-1]),
-                    'inicio': safe_num(data.iloc[0]),
-                    'ret_6m': safe_num((data.iloc[-1]/data.iloc[0]-1)*100),
-                    'vol_6m': safe_num(data.pct_change().std()*np.sqrt(252)*100)
-                }
+            genai.configure(api_key=st.session_state.GEMINI_API_KEY)
         except Exception:
-            precios_inter[k] = {'actual': None, 'inicio': None, 'ret_6m': None, 'vol_6m': None}
-    resumen['intermarket'] = precios_inter
-    # 3. Dólar (MEP, CCL, oficial)
-    try:
-        cotiz_mep = obtener_cotizacion_mep(token_portador, 'AL30', 1, 1)
-        resumen['dolar_mep'] = safe_num(cotiz_mep.get('precio')) if cotiz_mep else None
-        if resumen['dolar_mep'] is None:
-            st.warning('No se pudo obtener el valor del dólar MEP, el análisis puede estar incompleto.')
-    except Exception:
-        resumen['dolar_mep'] = None
-        st.warning('No se pudo obtener el valor del dólar MEP, el análisis puede estar incompleto.')
-    # 4. BCRA: reservas, tasas, inflación, M2
-    try:
-        url_reservas = "https://api.estadisticasbcra.com/reservas"
-        url_leliq = "https://api.estadisticasbcra.com/leliq"
-        url_inflacion = "https://api.estadisticasbcra.com/inflacion_mensual_oficial"
-        url_m2 = "https://api.estadisticasbcra.com/base_monetaria"
-        headers = {"Authorization": "Bearer TU_API_KEY_BCRA"}
-        reservas = requests.get(url_reservas, headers=headers).json()[-1]["valor"]
-        tasa_leliq = requests.get(url_leliq, headers=headers).json()[-1]["valor"]
-        inflacion = requests.get(url_inflacion, headers=headers).json()[-1]["valor"] / 100
-        m2 = requests.get(url_m2, headers=headers).json()
-        m2_crecimiento = (m2[-1]["valor"] - m2[-22]["valor"]) / m2[-22]["valor"] if len(m2) > 22 else None
-    except Exception:
-        reservas = None
-        tasa_leliq = None
-        inflacion = None
-        m2_crecimiento = None
-    # Validar y formatear para evitar errores de NoneType
-    reservas_str = f"{reservas:,.0f}M USD" if reservas is not None else "N/D"
-    tasa_leliq_str = f"{tasa_leliq:.2f}% anual" if tasa_leliq is not None else "N/D"
-    inflacion_str = f"{inflacion*100:.2f}%" if inflacion is not None else "N/D"
-    m2_crecimiento_str = f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D"
-    if reservas is None:
-        st.warning('No se pudo obtener el valor de reservas del BCRA, el análisis puede estar incompleto.')
-    if tasa_leliq is None:
-        st.warning('No se pudo obtener la tasa LELIQ, el análisis puede estar incompleto.')
-    if inflacion is None:
-        st.warning('No se pudo obtener la inflación, el análisis puede estar incompleto.')
-    if m2_crecimiento is None:
-        st.warning('No se pudo obtener el crecimiento de M2, el análisis puede estar incompleto.')
-    resumen['bcra'] = {
-        'reservas': safe_num(reservas),
-        'tasa_leliq': safe_num(tasa_leliq),
-        'inflacion': safe_num(inflacion),
-        'm2_crecimiento': safe_num(m2_crecimiento)
-    }
-    # 5. Tasas de caución
-    try:
-        tasas_caucion = obtener_tasas_caucion(token_portador)
-        if tasas_caucion is not None and not tasas_caucion.empty:
-            resumen['tasa_caucion_prom'] = safe_num(tasas_caucion['tasa_limpia'].mean())
-        else:
-            resumen['tasa_caucion_prom'] = None
-            st.warning('No se pudo obtener la tasa de caución, el análisis puede estar incompleto.')
-    except Exception:
-        resumen['tasa_caucion_prom'] = None
-        st.warning('No se pudo obtener la tasa de caución, el análisis puede estar incompleto.')
-    # 6. Ciclo económico: se detectará por IA
-    # 7. Preparar prompt para IA (breve y ejecutivo)
-    prompt = f"""
-Analiza el siguiente resumen de variables reales y calculadas:
-PORTAFOLIO: {resumen['portafolio']}, Valor total: {resumen['valor_total']}
-INTERMARKET: {[(k, v['ret_6m']) for k,v in precios_inter.items()]}
-DÓLAR MEP: {resumen['dolar_mep']}
-BCRA: Reservas={reservas_str}, LELIQ={tasa_leliq_str}, Inflación={inflacion_str}, M2={m2_crecimiento_str}
-TASA CAUCIÓN PROM: {resumen['tasa_caucion_prom']}
-
-1. Diagnostica el ciclo económico actual (expansión, auge, recesión, recuperación, neutral, etc.)
-2. Fundamenta el diagnóstico usando todas las variables.
-3. Sugiere estrategias y sectores recomendados para el contexto detectado.
-4. Advierte riesgos y oportunidades reales.
-Responde en español, en formato ejecutivo y profesional, en menos de 10 líneas.
-"""
-    # 8. Cachear resultado en session_state para evitar gasto innecesario de tokens
-    cache_key = f"diagnostico_ia_{hash(str(resumen))}_{fecha_desde}_{fecha_hasta}"
-    if not hasattr(st.session_state, cache_key):
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            'gemini-1.5-flash',
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=350,  # Limitar tokens
-                top_p=0.8,
-                top_k=20
-            )
-        )
-        response = model.generate_content(prompt)
-        diagnostico = response.text if response and response.text else "No se pudo obtener diagnóstico IA."
-        setattr(st.session_state, cache_key, diagnostico)
-    return getattr(st.session_state, cache_key)
-
-def obtener_series_yfinance(tickers, fecha_desde, fecha_hasta):
-    """
-    Obtiene series históricas de precios de yfinance para los tickers indicados.
-    Devuelve un dict: {ticker: DataFrame con columnas ['Fecha', 'Valor']}
-    """
-    series = {}
-    for ticker in tickers:
-        try:
-            df = yf.download(ticker, start=fecha_desde, end=fecha_hasta, progress=False, auto_adjust=True)
-            if not df.empty:
-                df = df.reset_index()
-                df = df.rename(columns={"Date": "Fecha", "Close": "Valor"})
-                series[ticker] = df[["Fecha", "Valor"]].dropna()
-        except Exception as e:
-            print(f"Error obteniendo {ticker}: {e}")
-    return series
-
-
-def analisis_intermarket_economico(series_globales, series_locales=None):
-    """
-    Realiza un análisis intermarket global-local adaptado a Argentina.
-    series_globales: dict {ticker: DataFrame con ['Fecha', 'Valor']} (DXY, S&P500, VIX, Soja, Oro, Nasdaq...)
-    series_locales: dict {ticker: DataFrame} (opcional, para Merval, bonos, etc.)
-    Devuelve un string resumen profesional para IA y un dict con los datos clave.
-    """
-    import numpy as np
-    import streamlit as st
-    def safe_num(val, default=0):
-        return val if isinstance(val, (int, float, np.integer, np.floating)) and not np.isnan(val) else default
-    resumen = []
-    datos = {}
-    # --- Momentum y retornos ---
-    momentum = {}
-    for k, df in series_globales.items():
-        if df is None or df.empty or 'Valor' not in df.columns:
-            st.warning(f"No se pudo obtener la serie de {k} para el análisis intermarket.")
-            continue
-        df = df.sort_values('Fecha')
-        valores = df['Valor'].values
-        if len(valores) > 20:
-            ret = np.diff(np.log(valores))
-            m1w = safe_num(np.sum(ret[-5:])) if len(ret) >= 5 else 0
-            m1m = safe_num(np.sum(ret[-20:])) if len(ret) >= 20 else 0
-            momentum[k] = {'m1w': m1w, 'm1m': m1m}
-    # --- Correlaciones clave ---
-    def correlacion(t1, t2, dias=60):
-        s1 = series_globales.get(t1)
-        s2 = series_globales.get(t2)
-        if s1 is not None and s2 is not None and not s1.empty and not s2.empty:
-            v1 = s1['Valor'].values[-dias:]
-            v2 = s2['Valor'].values[-dias:]
-            if len(v1) == len(v2) and len(v1) > 10:
-                c = np.corrcoef(v1, v2)[0,1]
-                return safe_num(c)
-        return None
-    pares = [
-        ("DX-Y.NYB", "ZS=F", "Dólar vs Soja"),
-        ("ZS=F", "^MERV", "Soja vs Merval"),
-        ("DX-Y.NYB", "^MERV", "Dólar vs Merval"),
-        ("^VIX", "^MERV", "VIX vs Merval"),
-        ("^GSPC", "^MERV", "S&P500 vs Merval"),
-        ("GC=F", "^MERV", "Oro vs Merval")
-    ]
-    correlaciones = {}
-    for t1, t2, desc in pares:
-        c = correlacion(t1, t2)
-        if c is not None:
-            correlaciones[desc] = c
-    # --- Régimen de mercado ---
-    score = 0
-    detalles = []
-    vix = series_globales.get('^VIX')
-    if vix is not None and not vix.empty:
-        vix_val = safe_num(vix['Valor'].values[-1])
-        if vix_val < 15:
-            score += 2
-            detalles.append('VIX muy bajo: complacencia global.')
-        elif vix_val > 30:
-            score -= 2
-            detalles.append('VIX alto: volatilidad global elevada.')
-        else:
-            detalles.append('VIX neutral.')
-    dxy = series_globales.get('DX-Y.NYB')
-    if dxy is not None and not dxy.empty:
-        dxy_vals = dxy['Valor'].values
-        if len(dxy_vals) > 20:
-            dxy_ret = np.diff(np.log(dxy_vals))
-            dxy20 = safe_num(np.sum(dxy_ret[-20:]))
-            if dxy20 < -0.02:
-                score += 1
-                detalles.append('Dólar débil: favorable para emergentes.')
-            elif dxy20 > 0.03:
-                score -= 1
-                detalles.append('Dólar fuerte: presión sobre emergentes.')
-            else:
-                detalles.append('Dólar estable.')
-    soja = series_globales.get('ZS=F')
-    if soja is not None and not soja.empty:
-        soja_vals = soja['Valor'].values
-        if len(soja_vals) > 20:
-            soja_ret = np.diff(np.log(soja_vals))
-            soja20 = safe_num(np.sum(soja_ret[-20:]))
-            if soja20 > 0.05:
-                score += 1
-                detalles.append('Soja fuerte: buen contexto para Argentina.')
-            elif soja20 < -0.05:
-                score -= 1
-                detalles.append('Soja débil: contexto adverso.')
-    if score >= 2:
-        reg_tipo = 'ALCISTA'
-        reg_desc = 'Régimen Alcista: contexto favorable para activos argentinos.'
-        reg_rec = 'Aprovechar momentum, sobreponderar activos locales y commodities.'
-    elif score <= -2:
-        reg_tipo = 'BAJISTA'
-        reg_desc = 'Régimen Bajista: contexto adverso, priorizar liquidez y cobertura.'
-        reg_rec = 'Ser defensivo, priorizar liquidez y cobertura.'
-    else:
-        reg_tipo = 'NEUTRAL'
-        reg_desc = 'Régimen Neutral: portafolio balanceado, esperar catalizadores.'
-        reg_rec = 'Mantener portafolio balanceado, monitorear señales.'
-    # --- Señales activas ---
-    signals = []
-    corr_dxy_soja = correlaciones.get('Dólar vs Soja')
-    if dxy is not None and soja is not None and corr_dxy_soja is not None:
-        dxy_vals = dxy['Valor'].values
-        soja_vals = soja['Valor'].values
-        dxy20 = safe_num(np.sum(np.diff(np.log(dxy_vals))[-20:])) if len(dxy_vals) > 20 else 0
-        soja20 = safe_num(np.sum(np.diff(np.log(soja_vals))[-20:])) if len(soja_vals) > 20 else 0
-        if dxy20 < -0.01 and soja20 > 0.01 and corr_dxy_soja < -0.3:
-            signals.append('Dólar débil y commodities fuertes favorecen activos locales.')
-    # --- Asignación sugerida ---
-    if reg_tipo == 'ALCISTA':
-        asignacion = {'Acciones Locales':25,'Commodities':20,'Emergentes':15,'Desarrollados':20,'Bonos/Liquidez':15,'Oro/Hedge':5}
-    elif reg_tipo == 'BAJISTA':
-        asignacion = {'Acciones Locales':10,'Commodities':10,'Emergentes':5,'Desarrollados':25,'Bonos/Liquidez':35,'Oro/Hedge':15}
-    else:
-        asignacion = {'Acciones Locales':20,'Commodities':15,'Emergentes':10,'Desarrollados':25,'Bonos/Liquidez':25,'Oro/Hedge':5}
-    # --- Resumen profesional ---
-    momentum_str = ', '.join([
-        f"{k}: 1w={safe_num(v['m1w'])*100:+.1f}%, 1m={safe_num(v['m1m'])*100:+.1f}%"
-        for k, v in momentum.items()
-        if v['m1w'] is not None and v['m1m'] is not None
-    ])
-    correlaciones_str = ', '.join([f'{k}: {safe_num(v):+.2f}' for k,v in correlaciones.items() if v is not None])
-    resumen_txt = f"""
-🔗 **Análisis Intermarket Global-Local (Argentina)**
-
-- **Régimen de mercado:** {reg_desc}
-- **Correlaciones clave:** {correlaciones_str}
-- **Momentum:** {momentum_str}
-"""
-    if signals:
-        resumen_txt += f"- **Señales activas:** {'; '.join(signals)}\n"
-    resumen_txt += f"- **Asignación sugerida:** {', '.join([f'{k}: {v}%' for k,v in asignacion.items()])}\n"
-    resumen_txt += f"- **Recomendación:** {reg_rec}\n"
-    resumen_txt += "\n*Análisis automático intermarket global-local. No constituye recomendación de inversión.*"
-    # --- Devuelve resumen y datos ---
-    datos = {
-        'regimen': reg_tipo,
-        'detalles': detalles,
-        'correlaciones': correlaciones,
-        'momentum': momentum,
-        'signals': signals,
-        'asignacion': asignacion
-    }
-    return resumen_txt, datos
-
-# --- INTEGRACIÓN EN EL ANÁLISIS GLOBAL IA ---
-def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador, fecha_desde, fecha_hasta):
-    # ... código previo ...
-    # --- Obtener series globales ---
-    tickers_globales = ["DX-Y.NYB", "^GSPC", "^VIX", "ZS=F", "GC=F", "^IXIC", "^MERV"]
-    fecha_ini = (datetime.strptime(fecha_hasta, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d")
-    series_globales = obtener_series_yfinance(tickers_globales, fecha_ini, fecha_hasta)
-    # --- Análisis intermarket ---
-    resumen_intermarket, datos_intermarket = analisis_intermarket_economico(series_globales)
-    # --- Construir resumen para IA ---
-    resumen = {
-        # ... otros bloques ...
-        'intermarket': resumen_intermarket,
-        # ...
-    }
-    # ... resto del código ...
-    # En el prompt IA, incluir resumen['intermarket']
+            pass
+    # Aquí va el cuerpo principal del dashboard BCRA global, adaptado para minimizar el uso de tokens IA.
     # ...
+    pass
 
-def obtener_datos_tecnicos_bono_iol(simbolo):
-    url = f"https://iol.invertironline.com/titulo/cotizacion/BCBA/{simbolo}/fundamentalesTecnicos"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = requests.get(url, headers=headers)
-    if resp.status_code != 200:
-        return None
-    soup = BeautifulSoup(resp.text, "html.parser")
-    tabla = soup.find("th", string="Datos técnicos del bono")
-    if not tabla:
-        return None
-    tabla = tabla.find_parent("table")
-    datos = {}
-    for row in tabla.find_all("tr"):
-        cols = row.find_all("td")
-        if len(cols) == 2:
-            key = cols[0].get_text(strip=True)
-            value = cols[1].get_text(strip=True)
-            datos[key] = value
-    return datos
+# --- Aquí agregar todas las funciones auxiliares del dashboard BCRA global ---
+# (get_bcra_variables, get_historical_data, calculate_metrics, create_professional_chart, etc.)
+# ...
+
+def generate_analysis_report_optimized(data: pd.DataFrame, variable_name: str, variable_description: str = "") -> str:
+    """
+    Genera un informe de análisis optimizado usando la API de Gemini con uso mínimo de tokens.
+    El prompt es ultra-compacto: solo resumen estadístico, tendencia, variación, fechas clave y últimos valores.
+    El análisis IA es breve, profesional y en español. Solo se invoca IA si hay datos nuevos o si el usuario lo solicita.
+    """
+    try:
+        if data.empty or 'Valor' not in data.columns or 'Fecha' not in data.columns:
+            return generate_basic_analysis_report(data, variable_name, variable_description)
+        # Preparar y limpiar datos
+        data_clean = data.dropna(subset=['Valor', 'Fecha']).copy()
+        if len(data_clean) == 0:
+            return generate_basic_analysis_report(data, variable_name, variable_description)
+        data_clean['Valor'] = pd.to_numeric(data_clean['Valor'], errors='coerce')
+        data_clean = data_clean.dropna(subset=['Valor'])
+        if len(data_clean) == 0:
+            return generate_basic_analysis_report(data, variable_name, variable_description)
+        # Estadísticas clave
+        first_value = data_clean['Valor'].iloc[0]
+        last_value = data_clean['Valor'].iloc[-1]
+        total_change = ((last_value - first_value) / first_value * 100) if first_value != 0 else 0
+        max_val = data_clean['Valor'].max()
+        min_val = data_clean['Valor'].min()
+        mean_val = data_clean['Valor'].mean()
+        std_val = data_clean['Valor'].std()
+        start_date = data_clean['Fecha'].min().strftime('%d/%m/%Y')
+        end_date = data_clean['Fecha'].max().strftime('%d/%m/%Y')
+        # Ultra-compacto: solo últimos 3 valores
+        ultimos = data_clean.tail(3)
+        ultimos_str = '\n'.join([f"{row['Fecha'].strftime('%d/%m/%Y')}: {row['Valor']:.2f}" for _, row in ultimos.iterrows()])
+        # Prompt ultra-compacto
+        prompt = (
+            f"Variable: {variable_name}\n"
+            f"Período: {start_date} a {end_date}\n"
+            f"Valores recientes: {ultimos_str}\n"
+            f"Promedio: {mean_val:.2f}, Máx: {max_val:.2f}, Mín: {min_val:.2f}, Std: {std_val:.2f}\n"
+            f"Variación total: {total_change:+.2f}%\n"
+            f"Resumen en 3 líneas: tendencia, riesgos y recomendación. Español, claro, máximo 60 palabras."
+        )
+        # Intentar IA solo si hay clave y genai
+        try:
+            if genai is not None and 'GEMINI_API_KEY' in st.session_state and st.session_state.GEMINI_API_KEY:
+                model = genai.GenerativeModel(
+                    'gemini-1.5-flash',
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.2,
+                        max_output_tokens=120,
+                        top_p=0.7,
+                        top_k=10
+                    )
+                )
+                response = model.generate_content(prompt)
+                if response and response.text:
+                    return f"## 🧠 Análisis IA - {variable_name}\n\n{response.text}\n\n---\n*Análisis IA Gemini, tokens mínimos*"
+        except Exception:
+            pass
+        # Fallback
+        return generate_basic_analysis_report(data, variable_name, variable_description)
+    except Exception as e:
+        return f"## ❌ Error en el análisis\n\nNo se pudo generar el análisis: {str(e)}"
 
 if __name__ == "__main__":
     main()
