@@ -6321,7 +6321,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🔗 Dashboard Unificado", "📊 Paneles de Cotización"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🤖 Informe IA Completo"),
                 index=0,
             )
 
@@ -6341,10 +6341,11 @@ def main():
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "🔗 Dashboard Unificado":
-                mostrar_datos_unificados()
-            elif opcion == "📊 Paneles de Cotización":
-                mostrar_paneles_cotizacion()
+            elif opcion == "🤖 Informe IA Completo":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_informe_ia_completo(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
@@ -6364,8 +6365,8 @@ def main():
                         <p>Visualice todos sus activos en un solo lugar con detalle</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
-                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
+                        <h3>🤖 IA Integrada</h3>
+                        <p>Análisis inteligente con datos económicos e intermarket</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
                         <h3>⚖️ Gestión de Riesgo</h3>
@@ -6387,10 +6388,12 @@ def main():
                 """)
             with cols[1]:
                 st.markdown("""
-                **📈 Herramientas Profesionales**  
-                - Optimización de portafolio  
-                - Análisis técnico avanzado  
-                - Proyecciones de rendimiento  
+                **🤖 IA Completa**  
+                - Análisis de portafolio  
+                - Datos económicos argentinos  
+                - Análisis intermarket  
+                - BCRA Dashboard  
+                - Paneles y estrategias  
                 """)
             with cols[2]:
                 st.markdown("""
@@ -8114,6 +8117,305 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     if total_activos == 0 or not series_historicas:
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
+
+def mostrar_informe_ia_completo(token_acceso, id_cliente):
+    """
+    Genera un informe IA completo que incluye todos los análisis disponibles
+    """
+    st.header("🤖 Informe IA Completo - Análisis Integral")
+    st.markdown("### Análisis Unificado de Portafolio, Datos Económicos e Intermarket")
+    
+    # Crear tabs principales
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Análisis de Portafolio", 
+        "🇦🇷 Datos Económicos", 
+        "📈 Intermarket Analysis",
+        "🏛️ BCRA Dashboard",
+        "📊 Paneles y Estrategias",
+        "🤖 IA Avanzada"
+    ])
+    
+    with tab1:
+        st.subheader("📊 Análisis de Portafolio")
+        mostrar_analisis_portafolio()
+    
+    with tab2:
+        st.subheader("🇦🇷 Datos Económicos Argentina")
+        mostrar_datos_argentina()
+    
+    with tab3:
+        st.subheader("📈 Análisis Intermarket")
+        mostrar_analisis_beta_correlacion()
+    
+    with tab4:
+        st.subheader("🏛️ BCRA Dashboard")
+        mostrar_bcra_dashboard()
+    
+    with tab5:
+        st.subheader("📊 Paneles y Análisis de Estrategias")
+        mostrar_paneles_cotizacion()
+    
+    with tab6:
+        st.subheader("🤖 IA Avanzada")
+        mostrar_informe_ia_avanzado(token_acceso, id_cliente)
+
+def mostrar_informe_ia_avanzado(token_acceso, id_cliente):
+    """
+    Genera un informe IA avanzado con análisis integral
+    """
+    st.header("🤖 IA Avanzada - Análisis Integral")
+    
+    # Obtener datos del portafolio
+    portafolio = obtener_portafolio(token_acceso, id_cliente)
+    estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+    
+    if not portafolio or not estado_cuenta:
+        st.warning("No se pudieron obtener los datos necesarios para el informe IA")
+        return
+    
+    # Configuración avanzada
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("🔧 Configuración Avanzada")
+        
+        # API Key para Gemini
+        gemini_api_key = st.text_input(
+            "Clave API de Gemini (opcional):",
+            type="password",
+            help="Para análisis más avanzado con IA de Google"
+        )
+        
+        # Opciones de análisis expandidas
+        analisis_opciones = st.multiselect(
+            "Seleccione tipos de análisis:",
+            ["Análisis de Riesgo", "Recomendaciones de Rebalanceo", "Análisis de Correlaciones", 
+             "Predicción de Tendencias", "Análisis de Concentración", "Optimización de Portafolio",
+             "Análisis de Volatilidad", "Análisis de Drawdown", "Análisis de Liquidez",
+             "Análisis de Correlación con Mercados Globales", "Análisis de Sensibilidad a Factores"],
+            default=["Análisis de Riesgo", "Recomendaciones de Rebalanceo", "Análisis de Correlaciones"]
+        )
+        
+        # Período de análisis
+        periodo_analisis = st.selectbox(
+            "Período de análisis:",
+            ["Último mes", "Últimos 3 meses", "Últimos 6 meses", "Último año", "Últimos 2 años"],
+            index=2
+        )
+    
+    with col2:
+        st.subheader("📊 Métricas Rápidas")
+        
+        # Calcular métricas básicas
+        valor_total = sum(float(activo.get('valorMercado', 0)) for activo in portafolio)
+        activos_count = len(portafolio)
+        
+        st.metric("Valor Total", f"${valor_total:,.2f}")
+        st.metric("Cantidad de Activos", activos_count)
+        
+        # Distribución por tipo
+        tipos_activo = {}
+        for activo in portafolio:
+            tipo = activo.get('tipoActivo', 'Otro')
+            valor = float(activo.get('valorMercado', 0))
+            tipos_activo[tipo] = tipos_activo.get(tipo, 0) + valor
+        
+        if tipos_activo:
+            tipo_principal = max(tipos_activo, key=tipos_activo.get)
+            st.metric("Tipo Principal", tipo_principal)
+    
+    # Generar informe avanzado
+    if st.button("🚀 Generar Informe IA Avanzado", type="primary", use_container_width=True):
+        with st.spinner("Generando informe inteligente avanzado..."):
+            
+            # Crear tabs para diferentes secciones del informe
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📈 Análisis General", 
+                "⚖️ Gestión de Riesgo", 
+                "🎯 Recomendaciones",
+                "📊 Visualizaciones",
+                "🤖 IA Predictiva"
+            ])
+            
+            with tab1:
+                st.subheader("📈 Análisis General del Portafolio")
+                
+                # Análisis de composición
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Composición por Tipo de Activo:**")
+                    if tipos_activo:
+                        # Crear gráfico de torta
+                        fig = go.Figure(data=[go.Pie(
+                            labels=list(tipos_activo.keys()),
+                            values=list(tipos_activo.values()),
+                            hole=0.3
+                        )])
+                        fig.update_layout(title="Distribución del Portafolio")
+                        st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.write("**Top 5 Activos por Valor:**")
+                    activos_ordenados = sorted(portafolio, key=lambda x: float(x.get('valorMercado', 0)), reverse=True)
+                    
+                    for i, activo in enumerate(activos_ordenados[:5], 1):
+                        simbolo = activo.get('simbolo', 'N/A')
+                        valor = float(activo.get('valorMercado', 0))
+                        porcentaje = (valor / valor_total * 100) if valor_total > 0 else 0
+                        
+                        st.write(f"{i}. **{simbolo}** - ${valor:,.2f} ({porcentaje:.1f}%)")
+            
+            with tab2:
+                st.subheader("⚖️ Análisis de Riesgo Avanzado")
+                
+                # Calcular métricas de riesgo
+                if "Análisis de Riesgo" in analisis_opciones:
+                    
+                    # Concentración del portafolio
+                    concentracion = {}
+                    for activo in portafolio:
+                        simbolo = activo.get('simbolo', 'N/A')
+                        valor = float(activo.get('valorMercado', 0))
+                        concentracion[simbolo] = valor
+                    
+                    # Top concentraciones
+                    top_concentraciones = sorted(concentracion.items(), key=lambda x: x[1], reverse=True)[:5]
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Concentración por Activo:**")
+                        for simbolo, valor in top_concentraciones:
+                            porcentaje = (valor / valor_total * 100) if valor_total > 0 else 0
+                            color = "🔴" if porcentaje > 20 else "🟡" if porcentaje > 10 else "🟢"
+                            st.write(f"{color} {simbolo}: {porcentaje:.1f}%")
+                    
+                    with col2:
+                        st.write("**Alertas de Riesgo:**")
+                        
+                        # Verificar concentración excesiva
+                        max_concentracion = max(concentracion.values()) if concentracion else 0
+                        max_porcentaje = (max_concentracion / valor_total * 100) if valor_total > 0 else 0
+                        
+                        if max_porcentaje > 30:
+                            st.error(f"⚠️ Concentración excesiva: {max_porcentaje:.1f}% en un solo activo")
+                        elif max_porcentaje > 20:
+                            st.warning(f"⚠️ Concentración alta: {max_porcentaje:.1f}% en un solo activo")
+                        else:
+                            st.success("✅ Concentración diversificada")
+                        
+                        # Verificar diversificación
+                        if len(portafolio) < 5:
+                            st.warning("⚠️ Portafolio poco diversificado")
+                        else:
+                            st.success(f"✅ Buena diversificación: {len(portafolio)} activos")
+            
+            with tab3:
+                st.subheader("🎯 Recomendaciones IA Avanzadas")
+                
+                if "Recomendaciones de Rebalanceo" in analisis_opciones:
+                    
+                    # Análisis avanzado de recomendaciones
+                    recomendaciones = []
+                    
+                    # Verificar concentración
+                    if max_concentracion > valor_total * 0.3:
+                        recomendaciones.append({
+                            "tipo": "🔴 Crítica",
+                            "titulo": "Reducir concentración",
+                            "descripcion": f"El activo más concentrado representa el {max_porcentaje:.1f}% del portafolio. Considere diversificar."
+                        })
+                    
+                    # Verificar diversificación
+                    if len(portafolio) < 5:
+                        recomendaciones.append({
+                            "tipo": "🟡 Importante",
+                            "titulo": "Aumentar diversificación",
+                            "descripcion": "Considere agregar más activos para mejorar la diversificación del portafolio."
+                        })
+                    
+                    # Verificar tipos de activos
+                    if len(tipos_activo) < 3:
+                        recomendaciones.append({
+                            "tipo": "🟡 Importante",
+                            "titulo": "Diversificar tipos de activos",
+                            "descripcion": "El portafolio está concentrado en pocos tipos de activos. Considere agregar diferentes clases de activos."
+                        })
+                    
+                    # Mostrar recomendaciones
+                    if recomendaciones:
+                        for rec in recomendaciones:
+                            with st.expander(f"{rec['tipo']} {rec['titulo']}"):
+                                st.write(rec['descripcion'])
+                    else:
+                        st.success("✅ No se detectaron problemas críticos en el portafolio")
+                    
+                    # Recomendaciones avanzadas
+                    st.subheader("💡 Sugerencias de Mejora Avanzadas")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Estrategias Sugeridas:**")
+                        st.write("• Rebalanceo trimestral")
+                        st.write("• Monitoreo de correlaciones")
+                        st.write("• Evaluación de liquidez")
+                        st.write("• Análisis de volatilidad")
+                        st.write("• Optimización de Sharpe ratio")
+                    
+                    with col2:
+                        st.write("**Herramientas Disponibles:**")
+                        st.write("• Análisis de drawdown")
+                        st.write("• Backtesting de estrategias")
+                        st.write("• Análisis de factores")
+                        st.write("• Simulación de escenarios")
+                        st.write("• Análisis de stress testing")
+            
+            with tab4:
+                st.subheader("📊 Visualizaciones Avanzadas")
+                
+                # Gráficos adicionales
+                if tipos_activo:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Gráfico de barras por tipo
+                        fig = go.Figure(data=[go.Bar(
+                            x=list(tipos_activo.keys()),
+                            y=list(tipos_activo.values()),
+                            marker_color='lightblue'
+                        )])
+                        fig.update_layout(title="Valor por Tipo de Activo")
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    with col2:
+                        # Gráfico de concentración
+                        fig = go.Figure(data=[go.Bar(
+                            x=[activo.get('simbolo', 'N/A') for activo in activos_ordenados[:10]],
+                            y=[float(activo.get('valorMercado', 0)) for activo in activos_ordenados[:10]],
+                            marker_color='lightcoral'
+                        )])
+                        fig.update_layout(title="Top 10 Activos por Valor")
+                        st.plotly_chart(fig, use_container_width=True)
+            
+            with tab5:
+                st.subheader("🤖 IA Predictiva")
+                
+                if gemini_api_key:
+                    st.info("🔑 Clave API de Gemini configurada - Análisis predictivo disponible")
+                    
+                    # Análisis predictivo con IA
+                    if st.button("🔮 Generar Predicciones IA"):
+                        with st.spinner("Generando predicciones con IA..."):
+                            st.info("Funcionalidad de IA predictiva en desarrollo")
+                else:
+                    st.info("🔑 Configure la clave API de Gemini para acceder al análisis predictivo")
+                    st.write("**Funcionalidades disponibles con IA:**")
+                    st.write("• Análisis de sentimiento de mercado")
+                    st.write("• Predicción de tendencias")
+                    st.write("• Análisis de factores macroeconómicos")
+                    st.write("• Recomendaciones personalizadas")
 
 def mostrar_informe_ia(token_acceso, id_cliente):
     """
