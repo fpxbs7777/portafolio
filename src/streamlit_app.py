@@ -4288,24 +4288,23 @@ def mostrar_curva_tir_bonos(token_portador):
     tabla_bonos = []
     for bono in bonos:
         simbolo = bono['simbolo']
-        precio = bono['precio']
+        precio = bono['precio'] if bono['precio'] is not None else 0
         datos_tecnicos = obtener_datos_tecnicos_bono(simbolo)
-        # Aquí deberías parsear los cupones y fechas reales, para demo usamos None
         tir = None
-        if precio is not None and datos_tecnicos:
+        if precio and datos_tecnicos:
             # Aquí deberías armar flujos y fechas reales
             # flujos, fechas = ...
             # tir = calcular_tir_bono(precio, flujos, fechas)
             pass
         tabla_bonos.append({
             'Símbolo': simbolo,
-            'Descripción': bono['descripcion'],
-            'Vencimiento': bono['vencimiento'],
-            'Moneda': bono['moneda'],
-            'Precio': precio,
-            'TIR': tir,
+            'Descripción': bono.get('descripcion', ''),
+            'Vencimiento': bono.get('vencimiento', ''),
+            'Moneda': bono.get('moneda', ''),
+            'Precio': precio if precio else 'N/D',
+            'TIR': tir if tir is not None else 'N/D',
             'Link IOL': f'https://iol.invertironline.com/titulo/cotizacion/BCBA/{simbolo}/fundamentalesTecnicos',
-            'Tipo': bono['tipo'],
+            'Tipo': bono.get('tipo', ''),
         })
     df_bonos = pd.DataFrame(tabla_bonos)
     # Filtros
@@ -4313,8 +4312,8 @@ def mostrar_curva_tir_bonos(token_portador):
     tipo_sel = st.multiselect("Filtrar por tipo de bono", tipos, default=tipos)
     df_filtrado = df_bonos[df_bonos['Tipo'].isin(tipo_sel)]
     st.dataframe(df_filtrado[['Símbolo','Descripción','Vencimiento','Moneda','Precio','TIR','Tipo','Link IOL']], use_container_width=True)
-    # Graficar curva de TIR solo con los que tengan TIR
-    df_graf = df_filtrado[df_filtrado['TIR'].notnull()]
+    # Graficar curva de TIR solo con los que tengan TIR numérica
+    df_graf = df_filtrado[df_filtrado['TIR'].apply(lambda x: isinstance(x, (int, float)) and x is not None)]
     if not df_graf.empty:
         fig = go.Figure()
         fig.add_trace(go.Scatter(
