@@ -3782,16 +3782,12 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
-
     if not cliente:
         st.error("No hay cliente seleccionado")
         return
-
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
-
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
-    
     # Crear tabs con iconos
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📈 Resumen Portafolio", 
@@ -3800,27 +3796,56 @@ def mostrar_analisis_portafolio():
         "💱 Cotizaciones",
         "🔄 Rebalanceo"
     ])
-
     with tab1:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
+            # --- Diagnóstico Global Unificado IA ---
+            st.markdown("---")
+            st.subheader("🧠 Diagnóstico Global Unificado (IA)")
+            # Calcular métricas del portafolio
+            activos = portafolio.get('activos', [])
+            datos_activos = {}
+            valor_total = 0
+            for activo in activos:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', 'N/A')
+                valuacion = 0
+                for campo in ['valuacionEnMonedaOriginal','valuacionActual','valorNominalEnMonedaOriginal','valorNominal','valuacionDolar','valuacion','valorActual','montoInvertido','valorMercado','valorTotal','importe']:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            val = float(activo[campo])
+                            if val > 0:
+                                valuacion = val
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                if simbolo:
+                    datos_activos[simbolo] = {'Valuación': valuacion}
+                    valor_total += valuacion
+            metricas = calcular_metricas_portafolio(datos_activos, valor_total, token_acceso)
+            # Obtener fechas
+            fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
+            fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
+            # API KEY Gemini
+            if 'GEMINI_API_KEY' not in st.session_state:
+                st.session_state.GEMINI_API_KEY = ''
+            if st.button("🔍 Diagnóstico Global IA", key="btn_diag_global_ia"):
+                with st.spinner("Consultando IA profesional..."):
+                    diagnostico = diagnostico_global_unificado(datos_activos, metricas, token_acceso, fecha_desde, fecha_hasta, st.session_state.GEMINI_API_KEY)
+                st.markdown(diagnostico)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
-    
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
             mostrar_estado_cuenta(estado_cuenta)
         else:
             st.warning("No se pudo obtener el estado de cuenta")
-    
     with tab3:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
-    
     with tab4:
         mostrar_cotizaciones_mercado(token_acceso)
-    
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
@@ -4204,6 +4229,130 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     if total_activos == 0 or not series_historicas:
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
+
+# --- NUEVO: Diagnóstico Global Unificado con IA ---
+def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador, fecha_desde, fecha_hasta, gemini_api_key):
+    """
+    Integra todas las variables relevantes (portafolio, intermarket, benchmarks, dólar, BCRA, tasas, ciclo económico, etc.),
+    las unifica en un resumen estructurado y consulta a la IA para diagnóstico y recomendaciones profesionales.
+    """
+    import yfinance as yf
+    import requests
+    import numpy as np
+    import pandas as pd
+    import datetime
+    # 1. Recolectar métricas del portafolio
+    resumen = {}
+    resumen['portafolio'] = metricas_portafolio or {}
+    resumen['valor_total'] = sum([a.get('Valuación',0) for a in portafolio.values()]) if isinstance(portafolio, dict) else 0
+    # 2. Intermarket y benchmarks
+    tickers_inter = {
+        'MERVAL': '^MERV',
+        'S&P500': '^GSPC',
+        'DXY': 'DX-Y.NYB',
+        'VIX': '^VIX',
+        'Soja': 'ZS=F',
+        'Oro': 'GC=F',
+        'Petróleo': 'CL=F',
+    }
+    precios_inter = {}
+    for k, v in tickers_inter.items():
+        try:
+            data = yf.download(v, period='6mo')['Close']
+            if not data.empty:
+                precios_inter[k] = {
+                    'actual': float(data.iloc[-1]),
+                    'inicio': float(data.iloc[0]),
+                    'ret_6m': float((data.iloc[-1]/data.iloc[0]-1)*100),
+                    'vol_6m': float(data.pct_change().std()*np.sqrt(252)*100)
+                }
+        except Exception:
+            continue
+    resumen['intermarket'] = precios_inter
+    # 3. Dólar (MEP, CCL, oficial)
+    try:
+        cotiz_mep = obtener_cotizacion_mep(token_portador, 'AL30', 1, 1)
+        resumen['dolar_mep'] = cotiz_mep.get('precio') if cotiz_mep else None
+    except Exception:
+        resumen['dolar_mep'] = None
+    # 4. BCRA: reservas, tasas, inflación, M2
+    try:
+        url_reservas = "https://api.estadisticasbcra.com/reservas"
+        url_leliq = "https://api.estadisticasbcra.com/leliq"
+        url_inflacion = "https://api.estadisticasbcra.com/inflacion_mensual_oficial"
+        url_m2 = "https://api.estadisticasbcra.com/base_monetaria"
+        headers = {"Authorization": "Bearer TU_API_KEY_BCRA"}
+        reservas = requests.get(url_reservas, headers=headers).json()[-1]["valor"]
+        tasa_leliq = requests.get(url_leliq, headers=headers).json()[-1]["valor"]
+        inflacion = requests.get(url_inflacion, headers=headers).json()[-1]["valor"] / 100
+        m2 = requests.get(url_m2, headers=headers).json()
+        m2_crecimiento = (m2[-1]["valor"] - m2[-22]["valor"]) / m2[-22]["valor"] if len(m2) > 22 else None
+    except Exception:
+        reservas = None
+        tasa_leliq = None
+        inflacion = None
+        m2_crecimiento = None
+    resumen['bcra'] = {
+        'reservas': reservas,
+        'tasa_leliq': tasa_leliq,
+        'inflacion': inflacion,
+        'm2_crecimiento': m2_crecimiento
+    }
+    # 5. Tasas de caución
+    try:
+        tasas_caucion = obtener_tasas_caucion(token_portador)
+        if tasas_caucion is not None and not tasas_caucion.empty:
+            resumen['tasa_caucion_prom'] = float(tasas_caucion['tasa_limpia'].mean())
+        else:
+            resumen['tasa_caucion_prom'] = None
+    except Exception:
+        resumen['tasa_caucion_prom'] = None
+    # 6. Ciclo económico: se detectará por IA
+    # 7. Preparar prompt para IA
+    prompt = f"""
+Eres un analista financiero profesional y ético. Analiza el siguiente resumen de variables reales y calculadas:
+
+--- PORTAFOLIO ---
+Métricas: {resumen['portafolio']}
+Valor total: {resumen['valor_total']}
+
+--- INTERMARKET Y BENCHMARKS (6 meses) ---
+"""
+    for k, v in precios_inter.items():
+        prompt += f"{k}: actual={v['actual']:.2f}, inicio={v['inicio']:.2f}, retorno={v['ret_6m']:.2f}%, volatilidad={v['vol_6m']:.2f}%\n"
+    prompt += f"""
+--- DÓLAR ---
+MEP: {resumen['dolar_mep']}
+
+--- BCRA ---
+Reservas: {resumen['bcra']['reservas']}
+Tasa LELIQ: {resumen['bcra']['tasa_leliq']}
+Inflación mensual: {resumen['bcra']['inflacion']}
+Crecimiento M2: {resumen['bcra']['m2_crecimiento']}
+
+--- TASAS DE CAUCIÓN ---
+Promedio: {resumen['tasa_caucion_prom']}
+
+1. Diagnostica el ciclo económico actual (expansión, auge, recesión, recuperación, neutral, etc.)
+2. Fundamenta el diagnóstico usando todas las variables (no omitas ninguna relevante).
+3. Sugiere estrategias, sectores y activos recomendados para el contexto detectado.
+4. Advierte riesgos y oportunidades reales.
+5. Responde en español, en formato ejecutivo y profesional.
+"""
+    # 8. Consultar IA
+    import google.generativeai as genai
+    genai.configure(api_key=gemini_api_key)
+    model = genai.GenerativeModel(
+        'gemini-1.5-flash',
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.4,
+            max_output_tokens=900,
+            top_p=0.9,
+            top_k=30
+        )
+    )
+    response = model.generate_content(prompt)
+    return response.text if response and response.text else "No se pudo obtener diagnóstico IA."
 
 if __name__ == "__main__":
     main()
