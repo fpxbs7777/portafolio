@@ -1699,67 +1699,63 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
-    retorno_esperado_anual = sum(
-        safe_num(m['retorno_medio']) * safe_num(m['peso']) 
-        for m in metricas_activos.values()
-    )
+    retorno_esperado_anual = 0
+    for m in metricas_activos.values():
+        ret = safe_num(m.get('retorno_medio'))
+        peso = safe_num(m.get('peso'))
+        if m.get('retorno_medio') is None or m.get('peso') is None:
+            print(f"Advertencia: retorno_medio o peso es None en retorno_esperado_anual: {m}")
+        retorno_esperado_anual += ret * peso
     
     # Volatilidad del portafolio (considerando correlaciones)
     try:
         if len(retornos_diarios) > 1:
-            # Asegurarse de que tenemos suficientes datos para calcular correlaciones
             df_retornos = pd.DataFrame(retornos_diarios).dropna()
-            if len(df_retornos) < 5:  # Mínimo de datos para correlación confiable
+            if len(df_retornos) < 5:
                 print("No hay suficientes datos para calcular correlaciones confiables")
-                # Usar promedio ponderado simple como respaldo
-                volatilidad_portafolio = sum(
-                    safe_num(m['volatilidad']) * safe_num(m['peso']) 
-                    for m in metricas_activos.values()
-                )
+                volatilidad_portafolio = 0
+                for m in metricas_activos.values():
+                    vol = safe_num(m.get('volatilidad'))
+                    peso = safe_num(m.get('peso'))
+                    if m.get('volatilidad') is None or m.get('peso') is None:
+                        print(f"Advertencia: volatilidad o peso es None en volatilidad_portafolio: {m}")
+                    volatilidad_portafolio += vol * peso
             else:
-                # Calcular matriz de correlación
                 df_correlacion = df_retornos.corr()
-                
-                # Verificar si la matriz de correlación es válida
                 if df_correlacion.isna().any().any():
                     print("Advertencia: Matriz de correlación contiene valores NaN")
-                    df_correlacion = df_correlacion.fillna(0)  # Reemplazar NaN con 0
-                
-                # Obtener pesos y volatilidades
+                    df_correlacion = df_correlacion.fillna(0)
                 activos = list(metricas_activos.keys())
-                pesos = np.array([metricas_activos[a]['peso'] for a in activos])
-                volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
-                
-                # Asegurarse de que las dimensiones coincidan
+                pesos = np.array([safe_num(metricas_activos[a].get('peso')) for a in activos])
+                volatilidades = np.array([safe_num(metricas_activos[a].get('volatilidad')) for a in activos])
                 if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
-                    # Calcular matriz de covarianza
                     matriz_cov = np.diag(volatilidades) @ df_correlacion.values @ np.diag(volatilidades)
-                    # Calcular varianza del portafolio
                     varianza_portafolio = pesos.T @ matriz_cov @ pesos
-                    # Asegurar que la varianza no sea negativa
                     varianza_portafolio = max(0, varianza_portafolio)
                     volatilidad_portafolio = np.sqrt(varianza_portafolio)
                 else:
                     print("Dimensiones no coinciden, usando promedio ponderado")
-                    volatilidad_portafolio = sum(v * w for v, w in zip(volatilidades, pesos))
+                    volatilidad_portafolio = 0
+                    for v, w in zip(volatilidades, pesos):
+                        volatilidad_portafolio += v * w
         else:
-            # Si solo hay un activo, usar su volatilidad directamente
-            volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
-            
-        # Asegurar que la volatilidad sea un número finito
+            volatilidad_portafolio = safe_num(next(iter(metricas_activos.values())).get('volatilidad'))
         if not np.isfinite(volatilidad_portafolio):
             print("Advertencia: Volatilidad no finita, usando valor por defecto")
-            volatilidad_portafolio = 0.2  # Valor por defecto razonable
-            
+            volatilidad_portafolio = 0.2
     except Exception as e:
         print(f"Error al calcular volatilidad del portafolio: {str(e)}")
         import traceback
         traceback.print_exc()
-        # Valor por defecto seguro
-        volatilidad_portafolio = sum(
-            safe_num(m['volatilidad']) * safe_num(m['peso']) 
-            for m in metricas_activos.values()
-        ) if metricas_activos else 0.2
+        volatilidad_portafolio = 0
+        for m in metricas_activos.values():
+            vol = safe_num(m.get('volatilidad'))
+            peso = safe_num(m.get('peso'))
+            if m.get('volatilidad') is None or m.get('peso') is None:
+                print(f"Advertencia: volatilidad o peso es None en except volatilidad_portafolio: {m}")
+            volatilidad_portafolio += vol * peso
+        if volatilidad_portafolio == 0:
+            volatilidad_portafolio = 0.2
     
     # Calcular percentiles para escenarios
     retornos_simulados = []
