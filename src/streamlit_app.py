@@ -33,6 +33,86 @@ import markdown2
 load_dotenv()
 
 # ============================
+# ARGENTINADATOS API FUNCTIONS
+# ============================
+
+BASE_URL = 'https://api.argentinadatos.com/v1'
+
+async def fetch_argentinadatos(endpoint: str) -> Any:
+    """
+    Obtiene datos de la API de ArgentinaDatos de forma asíncrona.
+    Args:
+        endpoint (str): Endpoint de la API (ej: '/cotizaciones/dolares').
+    Returns:
+        Any: Respuesta JSON de la API.
+    """
+    url = f"{BASE_URL}{endpoint}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.json()
+
+async def obtener_dolares() -> List[Dict]:
+    """Obtiene cotizaciones de dólares desde ArgentinaDatos."""
+    return await fetch_argentinadatos('/cotizaciones/dolares')
+
+async def obtener_inflacion() -> List[Dict]:
+    """Obtiene datos de inflación desde ArgentinaDatos."""
+    return await fetch_argentinadatos('/inflacion')
+
+async def obtener_tasas() -> List[Dict]:
+    """Obtiene tasas de interés desde ArgentinaDatos."""
+    return await fetch_argentinadatos('/tasas')
+
+async def obtener_uva() -> List[Dict]:
+    """Obtiene datos de UVA desde ArgentinaDatos."""
+    return await fetch_argentinadatos('/uva')
+
+async def obtener_riesgo_pais() -> List[Dict]:
+    """Obtiene datos de riesgo país desde ArgentinaDatos."""
+    return await fetch_argentinadatos('/riesgo-pais')
+
+# ============================
+# BCRA SCRAPING FUNCTIONS
+# ============================
+
+def obtener_tasa_leliq_bcra() -> Optional[float]:
+    """
+    Obtiene la tasa Leliq del BCRA desde la web oficial (scraping simple).
+    Returns:
+        float | None: Tasa Leliq si se encuentra, None si falla.
+    """
+    url = "https://www.bcra.gob.ar"
+    try:
+        resp = requests.get(f"{url}/")
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        # Este selector puede necesitar ajuste si cambia la web
+        tasa = soup.find(string=lambda t: t and "LELIQ" in t)
+        if tasa:
+            num = ''.join(filter(lambda c: c.isdigit() or c=='.', tasa))
+            return float(num)
+    except Exception:
+        pass
+    return None
+
+# ============================
+# YFINANCE FUNCTIONS
+# ============================
+
+def obtener_datos_yfinance(ticker: str, periodo: str = '1y', intervalo: str = '1d') -> Any:
+    """
+    Descarga datos históricos de un ticker usando yfinance.
+    Args:
+        ticker (str): Símbolo (ej: 'YPF.BA', 'GGAL.BA', 'AAPL').
+        periodo (str): Periodo (ej: '1y', '6mo', '1mo').
+        intervalo (str): Intervalo (ej: '1d', '1wk').
+    Returns:
+        DataFrame: Datos históricos del activo.
+    """
+    data = yf.download(ticker, period=periodo, interval=intervalo, progress=False)
+    return data
+
+# ============================
 # ANÁLISIS DE BETA Y CORRELACIÓN
 # ============================
 
@@ -561,11 +641,9 @@ def metric_card(title: str, value: str, change: float = None, icon: str = "chart
         change_icon = "arrow-up" if is_positive else "arrow-down"
         change_color = "text-green-500" if is_positive else "text-red-500"
         change_html = f"""
-        <div class="mt-2">
             <span class="text-sm font-medium {change_color}">
                 <i class="fas fa-{change_icon}"></i> {abs(change):.2f}%
             </span>
-        </div>
         """
     
     return f"""
@@ -6243,7 +6321,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🇦🇷 Datos Económicos", "🏦 BCRA Dashboard", "📊 Paneles de Cotización", "📈 Análisis Beta/Correlación"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🇦🇷 Datos Económicos", "🏦 BCRA Dashboard", "📊 Paneles de Cotización", "📈 Análisis Beta/Correlación", "🔗 Datos Integrados (ArgentinaDatos+BCRA+yfinance)"),
                 index=0,
             )
 
@@ -6271,6 +6349,8 @@ def main():
                 mostrar_paneles_cotizacion()
             elif opcion == "📈 Análisis Beta/Correlación":
                 mostrar_analisis_beta_correlacion()
+            elif opcion == "🔗 Datos Integrados (ArgentinaDatos+BCRA+yfinance)":
+                mostrar_datos_argentinadatos_bcra()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
