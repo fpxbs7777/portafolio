@@ -2920,6 +2920,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     Ahora usa obtención asincrónica y optimizada de series históricas para el universo aleatorio.
     """
     st.markdown("### 🔄 Menú Avanzado de Optimización de Portafolio")
+    # --- NUEVO: Mostrar horizonte de análisis seleccionado ---
+    fecha_desde = st.session_state.fecha_desde
+    fecha_hasta = st.session_state.fecha_hasta
+    st.info(f"\n**Horizonte de análisis:**\n\n- Desde: **{fecha_desde.strftime('%Y-%m-%d')}**\n- Hasta: **{fecha_hasta.strftime('%Y-%m-%d')}**\n- Días: **{(fecha_hasta - fecha_desde).days}**\n")
     with st.spinner("Obteniendo portafolio actual..."):
         portafolio = obtener_portafolio(token_acceso, id_cliente)
     if not portafolio or not portafolio.get('activos'):
@@ -3028,8 +3032,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             st.success(f"Capital valorizado + disponible: ${capital_auto:,.2f}")
             capital_ars = capital_auto
         cantidad_activos = st.slider("Cantidad de activos por panel", 2, 10, 5)
-        fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
-        fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
+        # --- USAR FECHAS DEL HORIZONTE SELECCIONADO ---
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
         ajustada = "SinAjustar"
         # Obtener tickers por panel
         tickers_por_panel, _ = obtener_tickers_por_panel(token_acceso, paneles_seleccionados, 'Argentina')
@@ -3038,11 +3043,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             st.error("No se pudieron obtener tickers para el universo aleatorio seleccionado. Revise los paneles o intente nuevamente.")
             return
         # Obtener series históricas aleatorias (ahora asincrónico y optimizado)
-        st.info("Descargando series históricas en paralelo para mayor velocidad...")
+        st.info(f"Descargando series históricas en paralelo para mayor velocidad...\n\n**Horizonte:** {fecha_desde_str} a {fecha_hasta_str} ({(fecha_hasta - fecha_desde).days} días)")
         try:
             series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
                 tickers_por_panel, paneles_seleccionados, cantidad_activos,
-                fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars
+                fecha_desde_str, fecha_hasta_str, ajustada, token_acceso, capital_ars
             )
         except Exception as e:
             st.error(f"Error al obtener series históricas para el universo aleatorio: {e}")
@@ -3061,9 +3066,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         st.error("No se pudo construir el universo de activos para la optimización. Proceso detenido.")
         return
 
-    fecha_desde = st.session_state.fecha_desde
-    fecha_hasta = st.session_state.fecha_hasta
-    st.info(f"Optimizando {len(universe_activos)} activos desde {fecha_desde} hasta {fecha_hasta}")
+    # --- Mostrar horizonte ANTES de optimizar ---
+    st.info(f"Optimizando {len(universe_activos)} activos desde **{fecha_desde.strftime('%Y-%m-%d')}** hasta **{fecha_hasta.strftime('%Y-%m-%d')}** (**{(fecha_hasta-fecha_desde).days} días**)")
 
     # Automatizar todas las estrategias
     st.subheader("🚀 Ejecución Automática de Estrategias de Optimización")
@@ -3075,7 +3079,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         ('long-only', 'Solo Largos')
     ]
     target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, max_value=3.0, value=0.8, step=0.01)
-    st.caption("Si no es posible alcanzar el Sharpe exacto, se mostrará el portafolio más cercano.")
+    st.caption(f"Si no es posible alcanzar el Sharpe exacto, se mostrará el portafolio más cercano.\n\n**Horizonte de análisis:** {fecha_desde.strftime('%Y-%m-%d')} a {fecha_hasta.strftime('%Y-%m-%d')} ({(fecha_hasta-fecha_desde).days} días)")
 
     # Cargar datos y preparar manager
     manager_inst = PortfolioManager(universe_activos, token_acceso, fecha_desde, fecha_hasta)
@@ -3087,19 +3091,22 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     for clave, nombre in estrategias:
         if clave == 'markowitz':
             # Mejorar lógica de Sharpe objetivo: buscar el retorno objetivo que más se aproxime al Sharpe deseado
-            mejor_sharpe = -1e9
-            mejor_result = None
-            mejor_ret = None
+            candidatos = []
             for ret in [x/100 for x in range(2, 25, 1)]:
                 res = manager_inst.compute_portfolio(strategy='markowitz', target_return=ret)
                 if not res or not hasattr(res, 'returns') or not hasattr(res, 'risk'):
                     continue
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
-                if abs(sharpe - target_sharpe) < abs(mejor_sharpe - target_sharpe):
-                    mejor_sharpe = sharpe
-                    mejor_result = res
-                    mejor_ret = ret
-            resultados[clave] = (mejor_result, mejor_sharpe, mejor_ret)
+                if sharpe >= target_sharpe - 0.01:  # Tolerancia mínima
+                    candidatos.append((sharpe, res, ret))
+            if candidatos:
+                # Elegir el Sharpe más cercano por arriba
+                candidatos.sort(key=lambda x: x[0])
+                mejor_sharpe, mejor_result, mejor_ret = candidatos[0]
+                resultados[clave] = (mejor_result, mejor_sharpe, mejor_ret)
+            else:
+                st.warning(f"No se pudo alcanzar un Sharpe igual o superior a {target_sharpe:.2f} con los activos y horizonte seleccionados.")
+                resultados[clave] = (None, None, None)
         else:
             res = manager_inst.compute_portfolio(strategy=clave)
             if res:
@@ -3108,7 +3115,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 
     # Mostrar resultados
     st.markdown("---")
-    st.subheader("📊 Resultados de Optimización y Comparación")
+    st.subheader(f"📊 Resultados de Optimización y Comparación ({fecha_desde.strftime('%Y-%m-%d')} a {fecha_hasta.strftime('%Y-%m-%d')}, {(fecha_hasta-fecha_desde).days} días)")
     cols = st.columns(len(estrategias)+1)
     # Métricas del portafolio actual
     cols[0].metric("Actual: Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
@@ -3151,7 +3158,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         st.markdown("---")
 
     # Frontera eficiente
-    st.subheader("📈 Frontera Eficiente y Portafolios Especiales")
+    st.subheader(f"📈 Frontera Eficiente y Portafolios Especiales ({fecha_desde.strftime('%Y-%m-%d')} a {fecha_hasta.strftime('%Y-%m-%d')})")
     if st.checkbox("Mostrar Frontera Eficiente", value=True):
         portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(target_return=0.08, include_min_variance=True)
         if portfolios and returns and volatilities and len(returns) > 0 and len(volatilities) > 0:
@@ -3163,7 +3170,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             for i, (label, port) in enumerate(portfolios.items()):
                 if port and hasattr(port, 'risk') and hasattr(port, 'returns'):
                     fig.add_trace(go.Scatter(x=[port.risk], y=[port.returns], mode='markers+text', name=label, marker=dict(color=colores[i%len(colores)], size=14, symbol='star'), text=[label], textposition='top center'))
-            fig.update_layout(title='Frontera Eficiente del Portafolio', xaxis_title='Volatilidad Anual', yaxis_title='Retorno Anual', showlegend=True, template='plotly_white', height=500)
+            fig.update_layout(title=f'Frontera Eficiente del Portafolio ({fecha_desde.strftime('%Y-%m-%d')} a {fecha_hasta.strftime('%Y-%m-%d')})', xaxis_title='Volatilidad Anual', yaxis_title='Retorno Anual', showlegend=True, template='plotly_white', height=500)
             st.plotly_chart(fig, use_container_width=True)
             # Línea de tasa libre de riesgo
             risk_free_rate = 0.40  # Tasa libre de riesgo anual para Argentina
@@ -4204,6 +4211,34 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     if total_activos == 0 or not series_historicas:
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
+
+def obtener_panel_bonos_api(token_portador):
+    """
+    Obtiene el panel completo de bonos (títulos públicos) desde la API de IOL.
+    Devuelve una lista de diccionarios con los campos principales: simbolo, descripcion, vencimiento, moneda, precio, etc.
+    """
+    url = 'https://api.invertironline.com/api/v2/TitulosPublicos'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        bonos = []
+        for item in data:
+            bono = {
+                'simbolo': item.get('simbolo'),
+                'descripcion': item.get('descripcion', ''),
+                'vencimiento': item.get('fechaVencimiento', ''),
+                'moneda': item.get('moneda', ''),
+                'precio': item.get('ultimoPrecio', item.get('precio', None)),
+                'isin': item.get('isin', ''),
+                'tipo': item.get('tipo', ''),
+            }
+            bonos.append(bono)
+        return bonos
+    except Exception as e:
+        st.warning(f"No se pudo obtener el panel de bonos: {e}")
+        return []
 
 if __name__ == "__main__":
     main()
