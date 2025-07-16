@@ -4086,12 +4086,7 @@ def main():
             
             # Panel de bienvenida
             st.markdown("""
-            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
-                        border-radius: 15px; 
-                        padding: 40px; 
-                        color: white;
-                        text-align: center;
-                        margin: 30px 0;">
+            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); border-radius: 15px; padding: 40px; color: white; text-align: center; margin: 30px 0;">
                 <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
                 <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
                 <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
