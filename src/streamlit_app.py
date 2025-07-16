@@ -4363,5 +4363,171 @@ Responde en español, en formato ejecutivo y profesional, en menos de 10 líneas
         setattr(st.session_state, cache_key, diagnostico)
     return getattr(st.session_state, cache_key)
 
+def obtener_series_yfinance(tickers, fecha_desde, fecha_hasta):
+    """
+    Obtiene series históricas de precios de yfinance para los tickers indicados.
+    Devuelve un dict: {ticker: DataFrame con columnas ['Fecha', 'Valor']}
+    """
+    series = {}
+    for ticker in tickers:
+        try:
+            df = yf.download(ticker, start=fecha_desde, end=fecha_hasta, progress=False, auto_adjust=True)
+            if not df.empty:
+                df = df.reset_index()
+                df = df.rename(columns={"Date": "Fecha", "Close": "Valor"})
+                series[ticker] = df[["Fecha", "Valor"]].dropna()
+        except Exception as e:
+            print(f"Error obteniendo {ticker}: {e}")
+    return series
+
+
+def analisis_intermarket_economico(series_globales, series_locales=None):
+    """
+    Realiza un análisis intermarket global-local adaptado a Argentina.
+    series_globales: dict {ticker: DataFrame con ['Fecha', 'Valor']} (DXY, S&P500, VIX, Soja, Oro, Nasdaq...)
+    series_locales: dict {ticker: DataFrame} (opcional, para Merval, bonos, etc.)
+    Devuelve un string resumen profesional para IA y un dict con los datos clave.
+    """
+    import numpy as np
+    resumen = []
+    datos = {}
+    # --- Momentum y retornos ---
+    momentum = {}
+    for k, df in series_globales.items():
+        if len(df) > 20:
+            df = df.sort_values('Fecha')
+            valores = df['Valor'].values
+            ret = np.diff(np.log(valores))
+            m1w = np.sum(ret[-5:]) if len(ret) >= 5 else np.nan
+            m1m = np.sum(ret[-20:]) if len(ret) >= 20 else np.nan
+            momentum[k] = {'m1w': m1w, 'm1m': m1m}
+    # --- Correlaciones clave ---
+    def correlacion(t1, t2, dias=60):
+        s1 = series_globales.get(t1)
+        s2 = series_globales.get(t2)
+        if s1 is not None and s2 is not None:
+            v1 = s1['Valor'].values[-dias:]
+            v2 = s2['Valor'].values[-dias:]
+            if len(v1) == len(v2) and len(v1) > 10:
+                return float(np.corrcoef(v1, v2)[0,1])
+        return None
+    pares = [
+        ("DX-Y.NYB", "ZS=F", "Dólar vs Soja"),
+        ("ZS=F", "^MERV", "Soja vs Merval"),
+        ("DX-Y.NYB", "^MERV", "Dólar vs Merval"),
+        ("^VIX", "^MERV", "VIX vs Merval"),
+        ("^GSPC", "^MERV", "S&P500 vs Merval"),
+        ("GC=F", "^MERV", "Oro vs Merval")
+    ]
+    correlaciones = {}
+    for t1, t2, desc in pares:
+        c = correlacion(t1, t2)
+        if c is not None:
+            correlaciones[desc] = c
+    # --- Régimen de mercado ---
+    score = 0
+    detalles = []
+    vix = series_globales.get('^VIX')
+    if vix is not None and len(vix) > 0:
+        vix_val = vix['Valor'].values[-1]
+        if vix_val < 15:
+            score += 2
+            detalles.append('VIX muy bajo: complacencia global.')
+        elif vix_val > 30:
+            score -= 2
+            detalles.append('VIX alto: volatilidad global elevada.')
+        else:
+            detalles.append('VIX neutral.')
+    dxy = series_globales.get('DX-Y.NYB')
+    if dxy is not None and len(dxy) > 20:
+        dxy_ret = np.diff(np.log(dxy['Valor'].values))
+        dxy20 = np.sum(dxy_ret[-20:])
+        if dxy20 < -0.02:
+            score += 1
+            detalles.append('Dólar débil: favorable para emergentes.')
+        elif dxy20 > 0.03:
+            score -= 1
+            detalles.append('Dólar fuerte: presión sobre emergentes.')
+        else:
+            detalles.append('Dólar estable.')
+    soja = series_globales.get('ZS=F')
+    if soja is not None and len(soja) > 20:
+        soja_ret = np.diff(np.log(soja['Valor'].values))
+        soja20 = np.sum(soja_ret[-20:])
+        if soja20 > 0.05:
+            score += 1
+            detalles.append('Soja fuerte: buen contexto para Argentina.')
+        elif soja20 < -0.05:
+            score -= 1
+            detalles.append('Soja débil: contexto adverso.')
+    if score >= 2:
+        reg_tipo = 'ALCISTA'
+        reg_desc = 'Régimen Alcista: contexto favorable para activos argentinos.'
+        reg_rec = 'Aprovechar momentum, sobreponderar activos locales y commodities.'
+    elif score <= -2:
+        reg_tipo = 'BAJISTA'
+        reg_desc = 'Régimen Bajista: contexto adverso, priorizar liquidez y cobertura.'
+        reg_rec = 'Ser defensivo, priorizar liquidez y cobertura.'
+    else:
+        reg_tipo = 'NEUTRAL'
+        reg_desc = 'Régimen Neutral: portafolio balanceado, esperar catalizadores.'
+        reg_rec = 'Mantener portafolio balanceado, monitorear señales.'
+    # --- Señales activas ---
+    signals = []
+    corr_dxy_soja = correlaciones.get('Dólar vs Soja')
+    if dxy is not None and soja is not None and corr_dxy_soja is not None:
+        dxy20 = np.sum(np.diff(np.log(dxy['Valor'].values))[-20:])
+        soja20 = np.sum(np.diff(np.log(soja['Valor'].values))[-20:])
+        if dxy20 < -0.01 and soja20 > 0.01 and corr_dxy_soja < -0.3:
+            signals.append('Dólar débil y commodities fuertes favorecen activos locales.')
+    # --- Asignación sugerida ---
+    if reg_tipo == 'ALCISTA':
+        asignacion = {'Acciones Locales':25,'Commodities':20,'Emergentes':15,'Desarrollados':20,'Bonos/Liquidez':15,'Oro/Hedge':5}
+    elif reg_tipo == 'BAJISTA':
+        asignacion = {'Acciones Locales':10,'Commodities':10,'Emergentes':5,'Desarrollados':25,'Bonos/Liquidez':35,'Oro/Hedge':15}
+    else:
+        asignacion = {'Acciones Locales':20,'Commodities':15,'Emergentes':10,'Desarrollados':25,'Bonos/Liquidez':25,'Oro/Hedge':5}
+    # --- Resumen profesional ---
+    resumen_txt = f"""
+🔗 **Análisis Intermarket Global-Local (Argentina)**
+
+- **Régimen de mercado:** {reg_desc}
+- **Correlaciones clave:** {', '.join([f'{k}: {v:+.2f}' for k,v in correlaciones.items()])}
+- **Momentum:** " + ', '.join([f"{k}: 1w={v['m1w']*100:+.1f}%, 1m={v['m1m']*100:+.1f}%" for k,v in momentum.items() if not np.isnan(v['m1w']) and not np.isnan(v['m1m'])]) + "\n"
+    if signals:
+        resumen_txt += f"- **Señales activas:** {'; '.join(signals)}\n"
+    resumen_txt += f"- **Asignación sugerida:** {', '.join([f'{k}: {v}%' for k,v in asignacion.items()])}\n"
+    resumen_txt += f"- **Recomendación:** {reg_rec}\n"
+    resumen_txt += "\n*Análisis automático intermarket global-local. No constituye recomendación de inversión.*"
+    # --- Devuelve resumen y datos ---
+    datos = {
+        'regimen': reg_tipo,
+        'detalles': detalles,
+        'correlaciones': correlaciones,
+        'momentum': momentum,
+        'signals': signals,
+        'asignacion': asignacion
+    }
+    return resumen_txt, datos
+
+# --- INTEGRACIÓN EN EL ANÁLISIS GLOBAL IA ---
+def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador, fecha_desde, fecha_hasta):
+    # ... código previo ...
+    # --- Obtener series globales ---
+    tickers_globales = ["DX-Y.NYB", "^GSPC", "^VIX", "ZS=F", "GC=F", "^IXIC", "^MERV"]
+    fecha_ini = (datetime.strptime(fecha_hasta, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d")
+    series_globales = obtener_series_yfinance(tickers_globales, fecha_ini, fecha_hasta)
+    # --- Análisis intermarket ---
+    resumen_intermarket, datos_intermarket = analisis_intermarket_economico(series_globales)
+    # --- Construir resumen para IA ---
+    resumen = {
+        # ... otros bloques ...
+        'intermarket': resumen_intermarket,
+        # ...
+    }
+    # ... resto del código ...
+    # En el prompt IA, incluir resumen['intermarket']
+    # ...
+
 if __name__ == "__main__":
     main()
