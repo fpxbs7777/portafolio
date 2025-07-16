@@ -1550,7 +1550,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     elif len(portafolio) == 1:
         concentracion = 1.0
     else:
-        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
+        sum_squares = sum((safe_num(activo.get('Valuación')) / safe_num(valor_total, 1)) ** 2 
                          for activo in portafolio.values())
         # Normalizar entre 0 y 1
         min_concentration = 1.0 / len(portafolio)
@@ -1662,17 +1662,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
             
             # Calcular el peso del activo en el portafolio
-            peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
+            peso = safe_num(activo.get('Valuación')) / safe_num(valor_total, 1)
             
             # Guardar métricas
             metricas_activos[simbolo] = {
-                'retorno_medio': retorno_medio,
-                'volatilidad': volatilidad,
-                'prob_ganancia': prob_ganancia,
-                'prob_perdida': prob_perdida,
-                'prob_ganancia_10': prob_ganancia_10,
-                'prob_perdida_10': prob_perdida_10,
-                'peso': peso
+                'retorno_medio': safe_num(retorno_medio),
+                'volatilidad': safe_num(volatilidad),
+                'prob_ganancia': safe_num(prob_ganancia),
+                'prob_perdida': safe_num(prob_perdida),
+                'prob_ganancia_10': safe_num(prob_ganancia_10),
+                'prob_perdida_10': safe_num(prob_perdida_10),
+                'peso': safe_num(peso)
             }
             
             # Guardar retornos para cálculo de correlaciones
@@ -1699,7 +1699,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
     retorno_esperado_anual = sum(
-        m['retorno_medio'] * m['peso'] 
+        safe_num(m['retorno_medio']) * safe_num(m['peso']) 
         for m in metricas_activos.values()
     )
     
@@ -1712,7 +1712,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 print("No hay suficientes datos para calcular correlaciones confiables")
                 # Usar promedio ponderado simple como respaldo
                 volatilidad_portafolio = sum(
-                    m['volatilidad'] * m['peso'] 
+                    safe_num(m['volatilidad']) * safe_num(m['peso']) 
                     for m in metricas_activos.values()
                 )
             else:
@@ -1756,7 +1756,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         traceback.print_exc()
         # Valor por defecto seguro
         volatilidad_portafolio = sum(
-            m['volatilidad'] * m['peso'] 
+            safe_num(m['volatilidad']) * safe_num(m['peso']) 
             for m in metricas_activos.values()
         ) if metricas_activos else 0.2
     
@@ -1829,17 +1829,17 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # Crear diccionario de resultados
     resultados = {
         'concentracion': concentracion,
-        'std_dev_activo': volatilidad_portafolio,
-        'retorno_esperado_anual': retorno_esperado_anual,
-        'pl_esperado_min': pl_esperado_min,
-        'pl_esperado_max': pl_esperado_max,
+        'std_dev_activo': safe_num(volatilidad_portafolio),
+        'retorno_esperado_anual': safe_num(retorno_esperado_anual),
+        'pl_esperado_min': safe_num(pl_esperado_min),
+        'pl_esperado_max': safe_num(pl_esperado_max),
         'probabilidades': probabilidades,
-        'riesgo_anual': volatilidad_portafolio,  # Usamos la volatilidad como proxy de riesgo
-        'alpha': alpha_beta_metrics.get('alpha_annual', 0),
-        'beta': alpha_beta_metrics.get('beta', 0),
-        'r_cuadrado': alpha_beta_metrics.get('r_squared', 0),
-        'tracking_error': alpha_beta_metrics.get('tracking_error', 0),
-        'information_ratio': alpha_beta_metrics.get('information_ratio', 0)
+        'riesgo_anual': safe_num(volatilidad_portafolio),  # Usamos la volatilidad como proxy de riesgo
+        'alpha': safe_num(alpha_beta_metrics.get('alpha_annual', 0)),
+        'beta': safe_num(alpha_beta_metrics.get('beta', 0)),
+        'r_cuadrado': safe_num(alpha_beta_metrics.get('r_squared', 0)),
+        'tracking_error': safe_num(alpha_beta_metrics.get('tracking_error', 0)),
+        'information_ratio': safe_num(alpha_beta_metrics.get('information_ratio', 0))
     }
     
     # Analizar la estrategia de inversión
@@ -1848,9 +1848,9 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     
     # Agregar métricas adicionales si están disponibles
     if 'p_value' in alpha_beta_metrics:
-        resultados['p_value'] = alpha_beta_metrics['p_value']
+        resultados['p_value'] = safe_num(alpha_beta_metrics['p_value'])
     if 'observations' in alpha_beta_metrics:
-        resultados['observaciones'] = alpha_beta_metrics['observations']
+        resultados['observaciones'] = safe_num(alpha_beta_metrics['observations'])
     
     return resultados
 
@@ -4227,6 +4227,16 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
 # --- NUEVO: Diagnóstico Global Unificado con IA ---
 GEMINI_API_KEY = "AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E"
 
+def safe_num(val, default=0):
+    """Devuelve val si es numérico y no es NaN, si no devuelve default (por defecto 0)."""
+    try:
+        if isinstance(val, (int, float, np.integer, np.floating)) and not pd.isnull(val):
+            return val
+        else:
+            return default
+    except Exception:
+        return default
+
 def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador, fecha_desde, fecha_hasta):
     """
     Integra todas las variables relevantes (portafolio, intermarket, benchmarks, dólar, BCRA, tasas, ciclo económico, etc.),
@@ -4242,7 +4252,7 @@ def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador
     # 1. Recolectar métricas del portafolio
     resumen = {}
     resumen['portafolio'] = metricas_portafolio or {}
-    resumen['valor_total'] = sum([a.get('Valuación',0) for a in portafolio.values()]) if isinstance(portafolio, dict) else 0
+    resumen['valor_total'] = safe_num(sum([safe_num(a.get('Valuación')) for a in portafolio.values()])) if isinstance(portafolio, dict) else 0
     # 2. Intermarket y benchmarks
     tickers_inter = {
         'MERVAL': '^MERV',
@@ -4259,20 +4269,23 @@ def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador
             data = yf.download(v, period='6mo')['Close']
             if not data.empty:
                 precios_inter[k] = {
-                    'actual': float(data.iloc[-1]),
-                    'inicio': float(data.iloc[0]),
-                    'ret_6m': float((data.iloc[-1]/data.iloc[0]-1)*100),
-                    'vol_6m': float(data.pct_change().std()*np.sqrt(252)*100)
+                    'actual': safe_num(data.iloc[-1]),
+                    'inicio': safe_num(data.iloc[0]),
+                    'ret_6m': safe_num((data.iloc[-1]/data.iloc[0]-1)*100),
+                    'vol_6m': safe_num(data.pct_change().std()*np.sqrt(252)*100)
                 }
         except Exception:
-            continue
+            precios_inter[k] = {'actual': None, 'inicio': None, 'ret_6m': None, 'vol_6m': None}
     resumen['intermarket'] = precios_inter
     # 3. Dólar (MEP, CCL, oficial)
     try:
         cotiz_mep = obtener_cotizacion_mep(token_portador, 'AL30', 1, 1)
-        resumen['dolar_mep'] = cotiz_mep.get('precio') if cotiz_mep else None
+        resumen['dolar_mep'] = safe_num(cotiz_mep.get('precio')) if cotiz_mep else None
+        if resumen['dolar_mep'] is None:
+            st.warning('No se pudo obtener el valor del dólar MEP, el análisis puede estar incompleto.')
     except Exception:
         resumen['dolar_mep'] = None
+        st.warning('No se pudo obtener el valor del dólar MEP, el análisis puede estar incompleto.')
     # 4. BCRA: reservas, tasas, inflación, M2
     try:
         url_reservas = "https://api.estadisticasbcra.com/reservas"
@@ -4290,21 +4303,31 @@ def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador
         tasa_leliq = None
         inflacion = None
         m2_crecimiento = None
+    if reservas is None:
+        st.warning('No se pudo obtener el valor de reservas del BCRA, el análisis puede estar incompleto.')
+    if tasa_leliq is None:
+        st.warning('No se pudo obtener la tasa LELIQ, el análisis puede estar incompleto.')
+    if inflacion is None:
+        st.warning('No se pudo obtener la inflación, el análisis puede estar incompleto.')
+    if m2_crecimiento is None:
+        st.warning('No se pudo obtener el crecimiento de M2, el análisis puede estar incompleto.')
     resumen['bcra'] = {
-        'reservas': reservas,
-        'tasa_leliq': tasa_leliq,
-        'inflacion': inflacion,
-        'm2_crecimiento': m2_crecimiento
+        'reservas': safe_num(reservas),
+        'tasa_leliq': safe_num(tasa_leliq),
+        'inflacion': safe_num(inflacion),
+        'm2_crecimiento': safe_num(m2_crecimiento)
     }
     # 5. Tasas de caución
     try:
         tasas_caucion = obtener_tasas_caucion(token_portador)
         if tasas_caucion is not None and not tasas_caucion.empty:
-            resumen['tasa_caucion_prom'] = float(tasas_caucion['tasa_limpia'].mean())
+            resumen['tasa_caucion_prom'] = safe_num(tasas_caucion['tasa_limpia'].mean())
         else:
             resumen['tasa_caucion_prom'] = None
+            st.warning('No se pudo obtener la tasa de caución, el análisis puede estar incompleto.')
     except Exception:
         resumen['tasa_caucion_prom'] = None
+        st.warning('No se pudo obtener la tasa de caución, el análisis puede estar incompleto.')
     # 6. Ciclo económico: se detectará por IA
     # 7. Preparar prompt para IA (breve y ejecutivo)
     prompt = f"""
