@@ -15,3 +15,4 @@ google.generativeai
 markdown2
 seaborn
 dotenv
+nest_asyncio
