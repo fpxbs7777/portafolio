@@ -4227,21 +4227,206 @@ GEMINI_API_KEY = "AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E"
 
 def mostrar_dashboard_bcra_global():
     import streamlit as st
-    # Configurar la API Key de Gemini solo una vez por sesión
-    if 'GEMINI_API_KEY' not in st.session_state or not st.session_state.GEMINI_API_KEY:
-        st.session_state.GEMINI_API_KEY = GEMINI_API_KEY
-    if genai is not None:
-        try:
-            genai.configure(api_key=st.session_state.GEMINI_API_KEY)
-        except Exception:
-            pass
-    # Aquí va el cuerpo principal del dashboard BCRA global, adaptado para minimizar el uso de tokens IA.
-    # ...
-    pass
+    import pandas as pd
+    import plotly.express as px
+    from datetime import datetime, timedelta
+    import requests
+    from bs4 import BeautifulSoup
 
-# --- Aquí agregar todas las funciones auxiliares del dashboard BCRA global ---
-# (get_bcra_variables, get_historical_data, calculate_metrics, create_professional_chart, etc.)
-# ...
+    # Estilos CSS personalizados
+    st.markdown("""
+        <style>
+        .main-header {font-size: 2.5rem; color: #1E3F66; text-align: center; margin-bottom: 2rem;}
+        .metric-card {background-color: #f8f9fa; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem;}
+        .metric-value {font-size: 1.8rem; font-weight: bold; color: #1E3F66;}
+        .metric-label {font-size: 1rem; color: #6c757d;}
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Título de la aplicación
+    st.markdown('<h1 class="main-header">📊 Dashboard BCRA</h1>', unsafe_allow_html=True)
+
+    @st.cache_data(ttl=3600)
+    def get_bcra_variables():
+        url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables.asp"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        try:
+            requests.packages.urllib3.disable_warnings()
+            response = requests.get(url, headers=headers, verify=False, timeout=30)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, 'html.parser')
+            variables = []
+            tables = soup.find_all('table', {'class': 'table'})
+            if not tables:
+                return pd.DataFrame()
+            table = tables[0]
+            rows = table.find_all('tr')
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 3:
+                    link = cols[0].find('a')
+                    href = link.get('href') if link else ''
+                    serie = ''
+                    if href and 'serie=' in href:
+                        serie = href.split('serie=')[1].split('&')[0]
+                    variable = {
+                        'Nombre': cols[0].get_text(strip=True),
+                        'Fecha': cols[1].get_text(strip=True) if len(cols) > 1 else '',
+                        'Valor': cols[2].get_text(strip=True) if len(cols) > 2 else '',
+                        'Serie ID': serie,
+                        'URL': f"https://www.bcra.gob.ar{href}" if href else ''
+                    }
+                    variables.append(variable)
+            return pd.DataFrame(variables)
+        except Exception as e:
+            st.error(f"Error al obtener las variables del BCRA: {str(e)}")
+            return pd.DataFrame()
+
+    def get_historical_data(serie_id, fecha_desde=None, fecha_hasta=None):
+        if not fecha_desde:
+            fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not fecha_hasta:
+            fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+        url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables_datos.asp"
+        params = {
+            'serie': serie_id,
+            'fecha_desde': fecha_desde,
+            'fecha_hasta': fecha_hasta,
+            'primeravez': '1'
+        }
+        try:
+            response = requests.get(url, params=params, verify=False)
+            soup = BeautifulSoup(response.content, 'html.parser')
+            table = soup.find('table', {'class': 'table'})
+            if table:
+                data = []
+                rows = table.find_all('tr')
+                if not rows:
+                    return pd.DataFrame()
+                headers = [th.get_text(strip=True) for th in rows[0].find_all('th')]
+                for row in rows[1:]:
+                    cols = row.find_all('td')
+                    if cols:
+                        row_data = [col.get_text(strip=True) for col in cols]
+                        data.append(row_data)
+                if data:
+                    df = pd.DataFrame(data, columns=headers)
+                    if 'Fecha' in df.columns:
+                        df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
+                        df = df.sort_values('Fecha')
+                    return df
+                return pd.DataFrame()
+            return pd.DataFrame()
+        except Exception as e:
+            st.error(f"Error al obtener datos históricos: {str(e)}")
+            return pd.DataFrame()
+
+    # Mostrar indicadores de carga
+    with st.spinner('Obteniendo datos del BCRA...'):
+        variables_df = get_bcra_variables()
+    if not variables_df.empty:
+        # Filtro de búsqueda
+        search_term = st.sidebar.text_input("🔍 Buscar variable")
+        # Filtrar variables según búsqueda
+        if search_term:
+            filtered_df = variables_df[variables_df['Nombre'].str.contains(search_term, case=False, na=False)]
+        else:
+            filtered_df = variables_df
+        # Mostrar métricas principales
+        st.subheader("📈 Variables Principales")
+        # Mostrar las primeras 6 variables como tarjetas de métricas
+        cols = st.columns(3)
+        for idx, (_, row) in enumerate(filtered_df.head(6).iterrows()):
+            with cols[idx % 3]:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">{row['Nombre']}</div>
+                    <div class="metric-value">{row['Valor']}</div>
+                    <div class="metric-label">{row['Fecha']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        # Sección de datos históricos
+        st.markdown("---")
+        st.subheader("📊 Datos Históricos")
+        # Selector de variable para datos históricos
+        selected_var = st.selectbox(
+            "Seleccione una variable para ver su histórico:",
+            options=filtered_df['Nombre'].tolist(),
+            index=0
+        )
+        # Obtener el ID de la serie seleccionada
+        selected_serie = filtered_df[filtered_df['Nombre'] == selected_var].iloc[0]
+        # Selector de rango de fechas
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Fecha de inicio",
+                value=datetime.now() - timedelta(days=30),
+                max_value=datetime.now()
+            )
+        with col2:
+            end_date = st.date_input(
+                "Fecha de fin",
+                value=datetime.now(),
+                max_value=datetime.now()
+            )
+        # Botón para cargar datos históricos
+        if st.button("Cargar Datos Históricos"):
+            with st.spinner('Obteniendo datos históricos...'):
+                hist_data = get_historical_data(
+                    selected_serie['Serie ID'],
+                    start_date.strftime('%Y-%m-%d'),
+                    end_date.strftime('%Y-%m-%d')
+                )
+                if not hist_data.empty:
+                    # Mostrar datos en tabla
+                    st.dataframe(hist_data, use_container_width=True)
+                    # Mostrar gráfico si hay datos de fecha y valor
+                    if 'Fecha' in hist_data.columns and 'Valor' in hist_data.columns:
+                        try:
+                            hist_data['Valor'] = pd.to_numeric(hist_data['Valor'].str.replace(',', '.'), errors='coerce')
+                            fig = px.line(
+                                hist_data, 
+                                x='Fecha', 
+                                y='Valor',
+                                title=f"Evolución de {selected_var}",
+                                labels={'Valor': selected_var, 'Fecha': 'Fecha'}
+                            )
+                            fig.update_layout(
+                                xaxis_title="Fecha",
+                                yaxis_title="Valor",
+                                hovermode="x unified"
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            # Botón de descarga
+                            csv = hist_data.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                label="📥 Descargar datos en CSV",
+                                data=csv,
+                                file_name=f"historico_{selected_serie['Serie ID']}_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime='text/csv'
+                            )
+                        except Exception as e:
+                            st.warning("No se pudo generar el gráfico. Verifique los datos.")
+                else:
+                    st.warning("No se encontraron datos históricos para el período seleccionado.")
+        # Mostrar todas las variables en una tabla expandible
+        with st.expander("📋 Ver todas las variables"):
+            st.dataframe(
+                filtered_df[['Nombre', 'Valor', 'Fecha', 'Serie ID']],
+                use_container_width=True,
+                hide_index=True
+            )
+    # Pie de página
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; color: #6c757d; font-size: 0.9rem;">
+        <p>Datos obtenidos del <a href=\"https://www.bcra.gob.ar/\" target=\"_blank\">Banco Central de la República Argentina</a></p>
+        <p>Actualizado: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 def generate_analysis_report_optimized(data: pd.DataFrame, variable_name: str, variable_description: str = "") -> str:
     """
