@@ -1550,8 +1550,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     elif len(portafolio) == 1:
         concentracion = 1.0
     else:
-        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
-                         for activo in portafolio.values())
+        sum_squares = sum((safe_div(activo.get('Valuación', 0), valor_total) ** 2 
+                         for activo in portafolio.values()))
         # Normalizar entre 0 y 1
         min_concentration = 1.0 / len(portafolio)
         concentracion = (sum_squares - min_concentration) / (1 - min_concentration)
@@ -1662,7 +1662,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
             
             # Calcular el peso del activo en el portafolio
-            peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
+            peso = safe_div(activo.get('Valuación', 0), valor_total) if valor_total > 0 else 0.0
             
             # Guardar métricas
             metricas_activos[simbolo] = {
@@ -1672,7 +1672,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 'prob_perdida': prob_perdida,
                 'prob_ganancia_10': prob_ganancia_10,
                 'prob_perdida_10': prob_perdida_10,
-                'peso': peso
+                'peso': peso if peso is not None else 0.0
             }
             
             # Guardar retornos para cálculo de correlaciones
@@ -1699,7 +1699,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
     retorno_esperado_anual = sum(
-        m['retorno_medio'] * m['peso'] 
+        (m.get('retorno_medio', 0) or 0.0) * (m.get('peso', 0) or 0.0)
         for m in metricas_activos.values()
     )
     
@@ -1709,26 +1709,21 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             # Asegurarse de que tenemos suficientes datos para calcular correlaciones
             df_retornos = pd.DataFrame(retornos_diarios).dropna()
             if len(df_retornos) < 5:  # Mínimo de datos para correlación confiable
-                print("No hay suficientes datos para calcular correlaciones confiables")
                 # Usar promedio ponderado simple como respaldo
                 volatilidad_portafolio = sum(
-                    m['volatilidad'] * m['peso'] 
+                    (m.get('volatilidad', 0) or 0.0) * (m.get('peso', 0) or 0.0)
                     for m in metricas_activos.values()
                 )
             else:
                 # Calcular matriz de correlación
                 df_correlacion = df_retornos.corr()
-                
                 # Verificar si la matriz de correlación es válida
                 if df_correlacion.isna().any().any():
-                    print("Advertencia: Matriz de correlación contiene valores NaN")
                     df_correlacion = df_correlacion.fillna(0)  # Reemplazar NaN con 0
-                
                 # Obtener pesos y volatilidades
                 activos = list(metricas_activos.keys())
-                pesos = np.array([metricas_activos[a]['peso'] for a in activos])
-                volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
-                
+                pesos = np.array([(metricas_activos[a].get('peso', 0) or 0.0) for a in activos])
+                volatilidades = np.array([(metricas_activos[a].get('volatilidad', 0) or 0.0) for a in activos])
                 # Asegurarse de que las dimensiones coincidan
                 if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
                     # Calcular matriz de covarianza
@@ -1739,24 +1734,16 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                     varianza_portafolio = max(0, varianza_portafolio)
                     volatilidad_portafolio = np.sqrt(varianza_portafolio)
                 else:
-                    print("Dimensiones no coinciden, usando promedio ponderado")
-                    volatilidad_portafolio = sum(v * w for v, w in zip(volatilidades, pesos))
+                    volatilidad_portafolio = sum((v or 0.0) * (w or 0.0) for v, w in zip(volatilidades, pesos))
         else:
             # Si solo hay un activo, usar su volatilidad directamente
-            volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
-            
+            volatilidad_portafolio = next(iter(metricas_activos.values())).get('volatilidad', 0) or 0.0
         # Asegurar que la volatilidad sea un número finito
         if not np.isfinite(volatilidad_portafolio):
-            print("Advertencia: Volatilidad no finita, usando valor por defecto")
             volatilidad_portafolio = 0.2  # Valor por defecto razonable
-            
     except Exception as e:
-        print(f"Error al calcular volatilidad del portafolio: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        # Valor por defecto seguro
         volatilidad_portafolio = sum(
-            m['volatilidad'] * m['peso'] 
+            (m.get('volatilidad', 0) or 0.0) * (m.get('peso', 0) or 0.0)
             for m in metricas_activos.values()
         ) if metricas_activos else 0.2
     
@@ -1765,20 +1752,22 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     for _ in range(1000):  # Simulación Monte Carlo simple
         retorno_simulado = 0
         for m in metricas_activos.values():
-            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
+            retorno_simulado += np.random.normal(
+                (m.get('retorno_medio', 0) or 0.0)/252, 
+                (m.get('volatilidad', 0) or 0.0)/np.sqrt(252)
+            ) * (m.get('peso', 0) or 0.0)
         retornos_simulados.append(retorno_simulado * 252)  # Anualizado
     
-    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
-    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * safe_div(valor_total, 100) if valor_total else 0.0
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * safe_div(valor_total, 100) if valor_total else 0.0
     
     # Calcular probabilidades basadas en los retornos simulados
     retornos_simulados = np.array(retornos_simulados)
     total_simulaciones = len(retornos_simulados)
-            
     prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
     prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
-    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
-    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
+    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones if total_simulaciones > 0 else 0
+    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones if total_simulaciones > 0 else 0
             
     # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
     alpha_beta_metrics = {}
