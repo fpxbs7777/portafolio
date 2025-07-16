@@ -3318,14 +3318,32 @@ def mostrar_analisis_individual_ia(portafolio, token_acceso, dias_analisis):
     
     # Obtener datos históricos del activo
     simbolo = activo_data.get('simbolo', activo_data.get('titulo', ''))
+    
+    # Asegurarse de que el símbolo sea un string y limpiarlo
+    if isinstance(simbolo, dict):
+        # Si es un diccionario, intentar extraer el valor de 'simbolo' o 'ticker'
+        simbolo = simbolo.get('simbolo', simbolo.get('ticker', str(simbolo)))
+    
+    # Limpiar el símbolo de caracteres especiales y espacios
+    simbolo = str(simbolo).strip().replace('.', '').replace('^', '').replace('=', '')
+    
+    if not simbolo:
+        st.error("No se pudo obtener un símbolo válido para el activo")
+        return
+        
     fecha_desde = datetime.now() - timedelta(days=dias_analisis)
     
     try:
         # Intentar obtener datos con yfinance primero
-        data = yf.download(simbolo, start=fecha_desde, end=datetime.now(), progress=False)
+        try:
+            data = yf.download(simbolo, start=fecha_desde, end=datetime.now(), progress=False)
+        except Exception as yf_error:
+            st.warning(f"No se pudieron obtener datos de yfinance para {simbolo}: {str(yf_error)}")
+            data = pd.DataFrame()
         
         if data.empty:
             # Si no hay datos con yfinance, intentar con IOL
+            st.info(f"Obteniendo datos históricos para {simbolo} desde IOL...")
             data = obtener_serie_historica_iol(token_acceso, 'BCBA', simbolo, 
                                               fecha_desde.strftime('%Y-%m-%d'), 
                                               datetime.now().strftime('%Y-%m-%d'), True)
