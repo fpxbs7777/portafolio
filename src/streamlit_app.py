@@ -1550,8 +1550,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     elif len(portafolio) == 1:
         concentracion = 1.0
     else:
-        sum_squares = sum((safe_div(activo.get('Valuación', 0), valor_total) ** 2 
-                         for activo in portafolio.values()))
+        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
+                         for activo in portafolio.values())
         # Normalizar entre 0 y 1
         min_concentration = 1.0 / len(portafolio)
         concentracion = (sum_squares - min_concentration) / (1 - min_concentration)
@@ -1662,7 +1662,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
             
             # Calcular el peso del activo en el portafolio
-            peso = safe_div(activo.get('Valuación', 0), valor_total) if valor_total > 0 else 0.0
+            peso = activo.get('Valuación', 0) / valor_total if valor_total > 0 else 0
             
             # Guardar métricas
             metricas_activos[simbolo] = {
@@ -1672,7 +1672,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 'prob_perdida': prob_perdida,
                 'prob_ganancia_10': prob_ganancia_10,
                 'prob_perdida_10': prob_perdida_10,
-                'peso': peso if peso is not None else 0.0
+                'peso': peso
             }
             
             # Guardar retornos para cálculo de correlaciones
@@ -1699,7 +1699,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     # 3. Calcular métricas del portafolio
     # Retorno esperado ponderado
     retorno_esperado_anual = sum(
-        (m.get('retorno_medio', 0) or 0.0) * (m.get('peso', 0) or 0.0)
+        m['retorno_medio'] * m['peso'] 
         for m in metricas_activos.values()
     )
     
@@ -1709,21 +1709,26 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             # Asegurarse de que tenemos suficientes datos para calcular correlaciones
             df_retornos = pd.DataFrame(retornos_diarios).dropna()
             if len(df_retornos) < 5:  # Mínimo de datos para correlación confiable
+                print("No hay suficientes datos para calcular correlaciones confiables")
                 # Usar promedio ponderado simple como respaldo
                 volatilidad_portafolio = sum(
-                    (m.get('volatilidad', 0) or 0.0) * (m.get('peso', 0) or 0.0)
+                    m['volatilidad'] * m['peso'] 
                     for m in metricas_activos.values()
                 )
             else:
                 # Calcular matriz de correlación
                 df_correlacion = df_retornos.corr()
+                
                 # Verificar si la matriz de correlación es válida
                 if df_correlacion.isna().any().any():
+                    print("Advertencia: Matriz de correlación contiene valores NaN")
                     df_correlacion = df_correlacion.fillna(0)  # Reemplazar NaN con 0
+                
                 # Obtener pesos y volatilidades
                 activos = list(metricas_activos.keys())
-                pesos = np.array([(metricas_activos[a].get('peso', 0) or 0.0) for a in activos])
-                volatilidades = np.array([(metricas_activos[a].get('volatilidad', 0) or 0.0) for a in activos])
+                pesos = np.array([metricas_activos[a]['peso'] for a in activos])
+                volatilidades = np.array([metricas_activos[a]['volatilidad'] for a in activos])
+                
                 # Asegurarse de que las dimensiones coincidan
                 if len(activos) == df_correlacion.shape[0] == df_correlacion.shape[1]:
                     # Calcular matriz de covarianza
@@ -1734,16 +1739,24 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                     varianza_portafolio = max(0, varianza_portafolio)
                     volatilidad_portafolio = np.sqrt(varianza_portafolio)
                 else:
-                    volatilidad_portafolio = sum((v or 0.0) * (w or 0.0) for v, w in zip(volatilidades, pesos))
+                    print("Dimensiones no coinciden, usando promedio ponderado")
+                    volatilidad_portafolio = sum(v * w for v, w in zip(volatilidades, pesos))
         else:
             # Si solo hay un activo, usar su volatilidad directamente
-            volatilidad_portafolio = next(iter(metricas_activos.values())).get('volatilidad', 0) or 0.0
+            volatilidad_portafolio = next(iter(metricas_activos.values()))['volatilidad']
+            
         # Asegurar que la volatilidad sea un número finito
         if not np.isfinite(volatilidad_portafolio):
+            print("Advertencia: Volatilidad no finita, usando valor por defecto")
             volatilidad_portafolio = 0.2  # Valor por defecto razonable
+            
     except Exception as e:
+        print(f"Error al calcular volatilidad del portafolio: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Valor por defecto seguro
         volatilidad_portafolio = sum(
-            (m.get('volatilidad', 0) or 0.0) * (m.get('peso', 0) or 0.0)
+            m['volatilidad'] * m['peso'] 
             for m in metricas_activos.values()
         ) if metricas_activos else 0.2
     
@@ -1752,22 +1765,20 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     for _ in range(1000):  # Simulación Monte Carlo simple
         retorno_simulado = 0
         for m in metricas_activos.values():
-            retorno_simulado += np.random.normal(
-                (m.get('retorno_medio', 0) or 0.0)/252, 
-                (m.get('volatilidad', 0) or 0.0)/np.sqrt(252)
-            ) * (m.get('peso', 0) or 0.0)
+            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
         retornos_simulados.append(retorno_simulado * 252)  # Anualizado
     
-    pl_esperado_min = np.percentile(retornos_simulados, 5) * safe_div(valor_total, 100) if valor_total else 0.0
-    pl_esperado_max = np.percentile(retornos_simulados, 95) * safe_div(valor_total, 100) if valor_total else 0.0
+    pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
+    pl_esperado_max = np.percentile(retornos_simulados, 95) * valor_total / 100
     
     # Calcular probabilidades basadas en los retornos simulados
     retornos_simulados = np.array(retornos_simulados)
     total_simulaciones = len(retornos_simulados)
+            
     prob_ganancia = np.sum(retornos_simulados > 0) / total_simulaciones if total_simulaciones > 0 else 0.5
     prob_perdida = np.sum(retornos_simulados < 0) / total_simulaciones if total_simulaciones > 0 else 0.5
-    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones if total_simulaciones > 0 else 0
-    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones if total_simulaciones > 0 else 0
+    prob_ganancia_10 = np.sum(retornos_simulados > 0.1) / total_simulaciones
+    prob_perdida_10 = np.sum(retornos_simulados < -0.1) / total_simulaciones
             
     # 4. Calcular Alpha y Beta respecto al MERVAL si hay datos disponibles
     alpha_beta_metrics = {}
@@ -1972,21 +1983,21 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols = st.columns(3)
             
             # Mostrar concentración como porcentaje
-            concentracion_pct = safe_pct(metricas.get('concentracion'))
+            concentracion_pct = metricas['concentracion'] * 100
             cols[0].metric("Concentración", 
                          f"{concentracion_pct:.1f}%",
                          help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
             
             # Mostrar volatilidad como porcentaje anual
-            volatilidad_pct = safe_pct(metricas.get('std_dev_activo'))
+            volatilidad_pct = metricas['std_dev_activo'] * 100
             cols[1].metric("Volatilidad Anual", 
                          f"{volatilidad_pct:.1f}%",
                          help="Riesgo medido como desviación estándar de retornos anuales")
             
             # Nivel de concentración con colores
-            if metricas['concentracion'] is not None and metricas['concentracion'] < 0.3:
+            if metricas['concentracion'] < 0.3:
                 concentracion_status = "🟢 Baja"
-            elif metricas['concentracion'] is not None and metricas['concentracion'] < 0.6:
+            elif metricas['concentracion'] < 0.6:
                 concentracion_status = "🟡 Media"
             else:
                 concentracion_status = "🔴 Alta"
@@ -1998,14 +2009,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols = st.columns(3)
             
             # Mostrar retornos como porcentaje del portafolio
-            retorno_anual_pct = safe_pct(metricas.get('retorno_esperado_anual'))
+            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
             cols[0].metric("Retorno Esperado Anual", 
                          f"{retorno_anual_pct:+.1f}%",
                          help="Retorno anual esperado basado en datos históricos")
             
             # Mostrar escenarios como porcentaje del portafolio
-            optimista_pct = safe_pct(safe_div(metricas.get('pl_esperado_max'), valor_total)) if valor_total > 0 else 0
-            pesimista_pct = safe_pct(safe_div(metricas.get('pl_esperado_min'), valor_total)) if valor_total > 0 else 0
+            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
             
             cols[1].metric("Escenario Optimista (95%)", 
                          f"{optimista_pct:+.1f}%",
@@ -2482,7 +2493,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     valor_final_ars = df_portfolio['Portfolio_Total'].iloc[-1]
                                     valor_inicial_usd = valor_inicial_ars / tasa_mep
                                     valor_final_usd = valor_final_ars / tasa_mep
-                                    retorno_total_real = safe_pct(safe_div(valor_final_ars, valor_inicial_ars) - 1) if valor_inicial_ars else 0
+                                    retorno_total_real = (valor_final_ars / valor_inicial_ars - 1) * 100
                                     
                                     col1.metric("Valor Inicial (ARS)", f"${valor_inicial_ars:,.2f}")
                                     col2.metric("Valor Final (ARS)", f"${valor_final_ars:,.2f}")
@@ -2490,7 +2501,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     col4.metric("Valor Final (USD)", f"${valor_final_usd:,.2f}")
                                     
                                     col1, col2 = st.columns(2)
-                                    col1.metric("Retorno Total (ARS)", f"{retorno_total_real:.2f}%")
+                                    col1.metric("Retorno Total (ARS)", f"{retorno_total_real:+.2f}%")
                                     col2.metric("Tasa MEP Utilizada", f"${tasa_mep:,.2f}")
                                     
                                     # Análisis de rendimiento extra asegurado de renta fija
@@ -2530,7 +2541,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             
                                         # Mostrar tabla de instrumentos de renta fija
                                         df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
-                                        df_renta_fija['Peso (%)'] = df_renta_fija['peso'].apply(safe_pct)
+                                        df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
                                         df_renta_fija['Valuación ($)'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
                                         
                                         st.dataframe(
@@ -2540,7 +2551,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         )
                                         
                                         # Calcular rendimiento extra asegurado
-                                        peso_renta_fija = safe_pct(safe_div(total_renta_fija, valor_total)) if valor_total > 0 else 0
+                                        peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
                                         
                                         # Estimación de rendimiento extra (basado en tasas típicas)
                                         rendimiento_extra_estimado = {
@@ -2791,7 +2802,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 Su portafolio está bien diversificado.
                 """)
             
-            ratio_riesgo_retorno = safe_pct(safe_div(metricas['retorno_esperado_anual'], metricas['riesgo_anual'])) if metricas['riesgo_anual'] > 0 else 0
+            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
             if ratio_riesgo_retorno > 0.5:
                 st.success("""
                 **✅ Buen Balance Riesgo-Retorno**  
@@ -3782,13 +3793,12 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Visualización", 
-        "📈 Análisis", 
-        "🔗 Análisis Específicos",
-        "📚 Glosario",
-        "🌍 Análisis Global",
-        "🤖 Análisis IA de Variables"
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📈 Resumen Portafolio", 
+        "💰 Estado de Cuenta", 
+        "📊 Análisis Técnico",
+        "💱 Cotizaciones",
+        "🔄 Rebalanceo"
     ])
 
     with tab1:
@@ -3813,86 +3823,6 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
-
-    with tab6:
-        st.markdown("## 🤖 Análisis IA de Variables BCRA")
-        st.info("Seleccione varias variables para analizarlas en conjunto con IA. El análisis es ultra-compacto para minimizar el consumo de tokens.")
-
-        # Selección múltiple de variables
-        selected_vars = st.multiselect(
-            "Variables a analizar:",
-            options=filtered_df['Nombre'].tolist(),
-            default=filtered_df['Nombre'].tolist()[:3],  # Por defecto las primeras 3
-            help="Seleccione las variables económicas a analizar con IA"
-        )
-
-        # Selección de período
-        period_days = st.selectbox(
-            "Período de análisis:",
-            options=[30, 60, 90],
-            index=1,
-            format_func=lambda x: f"{x} días"
-        )
-
-        if st.button("🚀 Analizar con IA", type="primary"):
-            if not selected_vars:
-                st.warning("Seleccione al menos una variable.")
-            else:
-                with st.spinner("Obteniendo datos y generando análisis IA..."):
-                    all_variables_data = {}
-                    for var_name in selected_vars:
-                        var_row = filtered_df[filtered_df['Nombre'] == var_name].iloc[0]
-                        serie_id = var_row.get('Serie ID', '')
-                        if serie_id:
-                            hist_data = get_historical_data(
-                                serie_id,
-                                (datetime.now() - timedelta(days=period_days)).strftime('%Y-%m-%d'),
-                                datetime.now().strftime('%Y-%m-%d')
-                            )
-                            if not hist_data.empty:
-                                metrics = calculate_specific_metrics(hist_data, var_name)
-                                all_variables_data[var_name] = {
-                                    'data': hist_data,
-                                    'metrics': metrics,
-                                    'serie_id': serie_id,
-                                    'valor_actual': var_row.get('Valor', 'N/A')
-                                }
-                    if all_variables_data:
-                        prompt = generate_global_analysis_prompt(all_variables_data)
-                        if prompt:
-                            try:
-                                import google.generativeai as genai
-                                if 'GEMINI_API_KEY' in st.session_state and st.session_state.GEMINI_API_KEY:
-                                    genai.configure(api_key=st.session_state.GEMINI_API_KEY)
-                                    model = genai.GenerativeModel(
-                                        'gemini-1.5-flash',
-                                        generation_config=genai.types.GenerationConfig(
-                                            temperature=0.4,
-                                            max_output_tokens=800,
-                                            top_p=0.9,
-                                            top_k=30
-                                        )
-                                    )
-                                    response = model.generate_content(prompt)
-                                    if response and response.text:
-                                        st.markdown("### 🧠 Informe IA de Análisis de Variables")
-                                        st.markdown(response.text)
-                                        st.download_button(
-                                            label="📥 Descargar Informe",
-                                            data=response.text,
-                                            file_name=f"analisis_ia_variables_{datetime.now().strftime('%Y%m%d')}.md",
-                                            mime="text/markdown"
-                                        )
-                                    else:
-                                        st.error("No se pudo generar el análisis IA.")
-                                else:
-                                    st.warning("API Key de Gemini no configurada.")
-                            except Exception as e:
-                                st.error(f"Error en análisis IA: {str(e)}")
-                        else:
-                            st.error("No se pudo generar el prompt para análisis IA.")
-                    else:
-                        st.warning("No se pudieron obtener datos para las variables seleccionadas.")
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -4274,25 +4204,6 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     if total_activos == 0 or not series_historicas:
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
-
-# Funciones robustas para porcentajes y divisiones seguras
-import pandas as pd
-import numpy as np
-
-def safe_pct(value):
-    if value is None or (isinstance(value, float) and (np.isnan(value) or pd.isna(value))):
-        return 0.0
-    return value * 100
-
-def safe_div(num, denom):
-    try:
-        if denom in [None, 0, np.nan] or pd.isna(denom):
-            return 0.0
-        if num is None or pd.isna(num) or (isinstance(num, float) and np.isnan(num)):
-            return 0.0
-        return num / denom
-    except Exception:
-        return 0.0
 
 if __name__ == "__main__":
     main()
