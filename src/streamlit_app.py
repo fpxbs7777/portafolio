@@ -18,6 +18,8 @@ import asyncio
 import matplotlib.pyplot as plt
 from scipy.stats import skew
 import google.generativeai as genai
+import numpy_financial as npf
+from bs4 import BeautifulSoup
 
 warnings.filterwarnings('ignore')
 
@@ -3798,14 +3800,15 @@ def mostrar_analisis_portafolio():
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
-    
-    # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+
+    # Crear tabs con iconos, agregando el nuevo tab de curva de TIR de bonos
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "⚙️ Optimización Avanzada",
+        "🔗 Intermarket",
+        "🏦 Curva de TIR de Bonos"
     ])
 
     with tab1:
@@ -3814,22 +3817,26 @@ def mostrar_analisis_portafolio():
             mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
-    
+
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         if estado_cuenta:
             mostrar_estado_cuenta(estado_cuenta)
         else:
             st.warning("No se pudo obtener el estado de cuenta")
-    
+
     with tab3:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
-    
+
     with tab4:
-        mostrar_cotizaciones_mercado(token_acceso)
-    
-    with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+
+    with tab5:
+        # Aquí iría el análisis intermarket si está implementado
+        st.info("Próximamente: Análisis Intermarket profesional.")
+
+    with tab6:
+        mostrar_curva_tir_bonos(token_acceso)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -4239,6 +4246,100 @@ def obtener_panel_bonos_api(token_portador):
     except Exception as e:
         st.warning(f"No se pudo obtener el panel de bonos: {e}")
         return []
+
+def obtener_datos_tecnicos_bono(simbolo):
+    """
+    Scrapea la web de IOL para obtener tasas, cupones y cronograma de pagos de un bono.
+    Devuelve un dict con los datos relevantes o None si falla.
+    """
+    url = f"https://iol.invertironline.com/titulo/cotizacion/BCBA/{simbolo}/fundamentalesTecnicos"
+    try:
+        r = httpx.get(url, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+        tabla = soup.find('table', class_='table-striped')
+        if not tabla:
+            return None
+        rows = tabla.find_all('tr')
+        datos = {}
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) == 2:
+                key = cols[0].get_text(strip=True)
+                val = cols[1].get_text(strip=True)
+                datos[key] = val
+        return datos
+    except Exception:
+        return None
+
+def calcular_tir_bono(precio, flujos, fechas):
+    """
+    Calcula la TIR de un bono dados el precio, los flujos futuros y las fechas de pago.
+    """
+    try:
+        from datetime import datetime
+        hoy = datetime.now()
+        flujos_desc = [-precio]
+        for f, fecha in zip(flujos, fechas):
+            t = (fecha - hoy).days / 365.0
+            flujos_desc.append(f / (1 + 0.1) ** t)  # Aproximación inicial
+        tir = npf.irr([-precio] + flujos)
+        return tir
+    except Exception:
+        return None
+
+def mostrar_curva_tir_bonos(token_portador):
+    import streamlit as st
+    import pandas as pd
+    import plotly.graph_objects as go
+    st.markdown("### 🏦 Curva de TIR de Bonos Argentinos")
+    bonos = obtener_panel_bonos_api(token_portador)
+    if not bonos:
+        st.warning("No se pudo obtener el panel de bonos desde la API.")
+        return
+    # Scrapeo y cálculo de TIR para cada bono
+    tabla_bonos = []
+    for bono in bonos:
+        simbolo = bono['simbolo']
+        precio = bono['precio']
+        datos_tecnicos = obtener_datos_tecnicos_bono(simbolo)
+        # Aquí deberías parsear los cupones y fechas reales, para demo usamos None
+        tir = None
+        if precio is not None and datos_tecnicos:
+            # Aquí deberías armar flujos y fechas reales
+            # flujos, fechas = ...
+            # tir = calcular_tir_bono(precio, flujos, fechas)
+            pass
+        tabla_bonos.append({
+            'Símbolo': simbolo,
+            'Descripción': bono['descripcion'],
+            'Vencimiento': bono['vencimiento'],
+            'Moneda': bono['moneda'],
+            'Precio': precio,
+            'TIR': tir,
+            'Link IOL': f'https://iol.invertironline.com/titulo/cotizacion/BCBA/{simbolo}/fundamentalesTecnicos',
+            'Tipo': bono['tipo'],
+        })
+    df_bonos = pd.DataFrame(tabla_bonos)
+    # Filtros
+    tipos = df_bonos['Tipo'].dropna().unique().tolist()
+    tipo_sel = st.multiselect("Filtrar por tipo de bono", tipos, default=tipos)
+    df_filtrado = df_bonos[df_bonos['Tipo'].isin(tipo_sel)]
+    st.dataframe(df_filtrado[['Símbolo','Descripción','Vencimiento','Moneda','Precio','TIR','Tipo','Link IOL']], use_container_width=True)
+    # Graficar curva de TIR solo con los que tengan TIR
+    df_graf = df_filtrado[df_filtrado['TIR'].notnull()]
+    if not df_graf.empty:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df_graf['Vencimiento'],
+            y=df_graf['TIR'],
+            mode='markers+lines',
+            text=df_graf['Símbolo'],
+            marker=dict(size=10),
+        ))
+        fig.update_layout(title="Curva de TIR de Bonos", xaxis_title="Vencimiento", yaxis_title="TIR", template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No hay suficientes datos de TIR para graficar la curva.")
 
 if __name__ == "__main__":
     main()
