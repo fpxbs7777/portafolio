@@ -3278,9 +3278,9 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     soja_series = retornos_inter.get('Soja', pd.Series([0]))
     soja_trend = soja_series.tail(20).sum() if not soja_series.empty and soja_series.notna().any() else 0
     vix_actual = df_inter.get('VIX', pd.Series([20])).iloc[-1] if 'VIX' in df_inter else 20
-                        # Validar valores antes de sumar
-                    merval_series = retornos_inter.get('Merval', pd.Series([0]))
-                    merval_momentum = merval_series.tail(10).sum() if not merval_series.empty and merval_series.notna().any() else 0
+    # Validar valores antes de sumar
+    merval_series = retornos_inter.get('Merval', pd.Series([0]))
+    merval_momentum = merval_series.tail(10).sum() if not merval_series.empty and merval_series.notna().any() else 0
     if dxy_trend < -0.01 and soja_trend > 0.03 and vix_actual < 20 and merval_momentum > 0.02:
         regimen = "ALCISTA"
         recomendacion = "Contexto favorable para activos de riesgo y commodities."
