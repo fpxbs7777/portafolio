@@ -3789,19 +3789,35 @@ def mostrar_analisis_portafolio():
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "🔄 Rebalanceo",
+        "🤖 Diagnóstico IA"
     ])
     with tab1:
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
-            st.markdown("---")
-            st.subheader("🧠 Diagnóstico Global Unificado (IA)")
+        else:
+            st.warning("No se pudo obtener el portafolio del cliente")
+    with tab2:
+        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        if estado_cuenta:
+            mostrar_estado_cuenta(estado_cuenta)
+        else:
+            st.warning("No se pudo obtener el estado de cuenta")
+    with tab3:
+        mostrar_analisis_tecnico(token_acceso, id_cliente)
+    with tab4:
+        mostrar_cotizaciones_mercado(token_acceso)
+    with tab5:
+        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+    with tab6:
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if portafolio:
             activos = portafolio.get('activos', [])
             datos_activos = {}
             valor_total = 0
@@ -3824,24 +3840,12 @@ def mostrar_analisis_portafolio():
             metricas = calcular_metricas_portafolio(datos_activos, valor_total, token_acceso)
             fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
             fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
-            if st.button("🔍 Diagnóstico Global IA", key="btn_diag_global_ia"):
+            if st.button("🔍 Diagnóstico Global IA", key="btn_diag_global_ia_tab6"):
                 with st.spinner("Consultando IA profesional..."):
                     diagnostico = diagnostico_global_unificado(datos_activos, metricas, token_acceso, fecha_desde, fecha_hasta)
                 st.markdown(diagnostico)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
-    with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
-    with tab3:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
-    with tab4:
-        mostrar_cotizaciones_mercado(token_acceso)
-    with tab5:
-        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
