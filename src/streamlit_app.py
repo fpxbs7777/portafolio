@@ -4311,6 +4311,11 @@ def diagnostico_global_unificado(portafolio, metricas_portafolio, token_portador
         tasa_leliq = None
         inflacion = None
         m2_crecimiento = None
+    # Validar y formatear para evitar errores de NoneType
+    reservas_str = f"{reservas:,.0f}M USD" if reservas is not None else "N/D"
+    tasa_leliq_str = f"{tasa_leliq:.2f}% anual" if tasa_leliq is not None else "N/D"
+    inflacion_str = f"{inflacion*100:.2f}%" if inflacion is not None else "N/D"
+    m2_crecimiento_str = f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D"
     if reservas is None:
         st.warning('No se pudo obtener el valor de reservas del BCRA, el análisis puede estar incompleto.')
     if tasa_leliq is None:
@@ -4343,7 +4348,7 @@ Analiza el siguiente resumen de variables reales y calculadas:
 PORTAFOLIO: {resumen['portafolio']}, Valor total: {resumen['valor_total']}
 INTERMARKET: {[(k, v['ret_6m']) for k,v in precios_inter.items()]}
 DÓLAR MEP: {resumen['dolar_mep']}
-BCRA: Reservas={resumen['bcra']['reservas']}, LELIQ={resumen['bcra']['tasa_leliq']}, Inflación={resumen['bcra']['inflacion']}, M2={resumen['bcra']['m2_crecimiento']}
+BCRA: Reservas={reservas_str}, LELIQ={tasa_leliq_str}, Inflación={inflacion_str}, M2={m2_crecimiento_str}
 TASA CAUCIÓN PROM: {resumen['tasa_caucion_prom']}
 
 1. Diagnostica el ciclo económico actual (expansión, auge, recesión, recuperación, neutral, etc.)
