@@ -16,3 +16,4 @@ markdown2
 seaborn
 dotenv
 nest_asyncio
+numpy_financial
