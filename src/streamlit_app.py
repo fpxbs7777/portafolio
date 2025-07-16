@@ -4207,15 +4207,19 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
                 # Preferir yfinance para tickers internacionales y Cedears
                 if panel.lower() in ['cedears', 'adrs'] or ticker.isalpha():
                     df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)[['Close']]
-                    if not df.empty:
+                    if df is not None and not df.empty:
                         df = df.rename(columns={'Close': 'precio'})
                         df = df.reset_index().rename(columns={'Date': 'fecha'})
                         series_historicas[ticker] = df
+                    else:
+                        print(f"Advertencia: No se encontraron datos para el ticker {ticker} en yfinance.")
                 else:
                     # Para acciones locales, usar la API de IOL si es necesario
                     df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
                     if df is not None and not df.empty:
                         series_historicas[ticker] = df
+                    else:
+                        print(f"Advertencia: No se encontraron datos para el ticker {ticker} en IOL.")
             except Exception as e:
                 continue
     # Validar que haya suficientes series
