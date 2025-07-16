@@ -2020,10 +2020,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.subheader("🎯 Probabilidades")
             cols = st.columns(4)
             probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+                    # Validar valores antes de multiplicar
+        ganancia = probs.get('ganancia', 0) if probs.get('ganancia', None) is not None else 0
+        perdida = probs.get('perdida', 0) if probs.get('perdida', None) is not None else 0
+        ganancia_mayor_10 = probs.get('ganancia_mayor_10', 0) if probs.get('ganancia_mayor_10', None) is not None else 0
+        perdida_mayor_10 = probs.get('perdida_mayor_10', 0) if probs.get('perdida_mayor_10', None) is not None else 0
+        cols[0].metric("Ganancia", f"{ganancia*100:.1f}%")
+        cols[1].metric("Pérdida", f"{perdida*100:.1f}%")
+        cols[2].metric("Ganancia >10%", f"{ganancia_mayor_10*100:.1f}%")
+        cols[3].metric("Pérdida >10%", f"{perdida_mayor_10*100:.1f}")
             
 
         
@@ -2988,10 +2993,14 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 continue
     metricas_actual = calcular_metricas_portafolio(activos_dict, valor_total, token_acceso)
     cols = st.columns(4)
-    cols[0].metric("Retorno Esperado", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
-    cols[1].metric("Riesgo (Volatilidad)", f"{metricas_actual.get('riesgo_anual',0)*100:.2f}%")
-    cols[2].metric("Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-    cols[3].metric("Concentración", f"{metricas_actual.get('concentracion',0)*100:.1f}%")
+    # Validar valores antes de multiplicar
+    retorno_actual = metricas_actual.get('retorno_esperado_anual',0) if metricas_actual.get('retorno_esperado_anual',None) is not None else 0
+    riesgo_actual = metricas_actual.get('riesgo_anual',0) if metricas_actual.get('riesgo_anual',None) is not None else 0
+    concentracion_actual = metricas_actual.get('concentracion',0) if metricas_actual.get('concentracion',None) is not None else 0
+    cols[0].metric("Retorno Esperado", f"{retorno_actual*100:.2f}%")
+    cols[1].metric("Riesgo (Volatilidad)", f"{riesgo_actual*100:.2f}%")
+    cols[2].metric("Sharpe", f"{(retorno_actual/(riesgo_actual if riesgo_actual > 0 else 1e-6)):.2f}")
+    cols[3].metric("Concentración", f"{concentracion_actual*100:.1f}%")
 
     st.markdown("---")
     st.subheader("⚙️ Configuración de Universo de Optimización")
@@ -3110,14 +3119,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     cols = st.columns(len(estrategias)+1)
     # Métricas del portafolio actual
     cols[0].metric("Actual: Sharpe", f"{(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6))):.2f}")
-    cols[0].metric("Actual: Retorno", f"{metricas_actual.get('retorno_esperado_anual',0)*100:.2f}%")
-    cols[0].metric("Actual: Riesgo", f"{metricas_actual.get('riesgo_anual',0)*100:.2f}%")
+    # Validar valores antes de multiplicar
+    retorno_actual = metricas_actual.get('retorno_esperado_anual',0) if metricas_actual.get('retorno_esperado_anual',None) is not None else 0
+    riesgo_actual = metricas_actual.get('riesgo_anual',0) if metricas_actual.get('riesgo_anual',None) is not None else 0
+    cols[0].metric("Actual: Retorno", f"{retorno_actual*100:.2f}%")
+    cols[0].metric("Actual: Riesgo", f"{riesgo_actual*100:.2f}%")
     for i, (clave, nombre) in enumerate(estrategias):
         res, sharpe, ret = resultados.get(clave, (None, None, None))
         if res:
             cols[i+1].metric(f"{nombre}\nSharpe", f"{sharpe:.2f}")
-            cols[i+1].metric(f"{nombre}\nRetorno", f"{getattr(res,'returns',0)*100:.2f}%")
-            cols[i+1].metric(f"{nombre}\nRiesgo", f"{getattr(res,'risk',0)*100:.2f}%")
+            # Validar valores antes de multiplicar
+            returns_val = getattr(res,'returns',0) if getattr(res,'returns',None) is not None else 0
+            risk_val = getattr(res,'risk',0) if getattr(res,'risk',None) is not None else 0
+            cols[i+1].metric(f"{nombre}\nRetorno", f"{returns_val*100:.2f}%")
+            cols[i+1].metric(f"{nombre}\nRiesgo", f"{risk_val*100:.2f}%")
             if clave == 'markowitz' and ret is not None:
                 cols[i+1].caption(f"Retorno objetivo: {ret*100:.2f}%")
     st.markdown("---")
@@ -3145,7 +3160,10 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             else:
                 st.info("No hay datos suficientes para mostrar la distribución de pesos.")
         # Métricas
-        st.write(f"Retorno esperado: {getattr(res,'returns',0)*100:.2f}% | Riesgo: {getattr(res,'risk',0)*100:.2f}% | Sharpe: {sharpe:.2f}")
+        # Validar valores antes de multiplicar
+        returns_val = getattr(res,'returns',0) if getattr(res,'returns',None) is not None else 0
+        risk_val = getattr(res,'risk',0) if getattr(res,'risk',None) is not None else 0
+        st.write(f"Retorno esperado: {returns_val*100:.2f}% | Riesgo: {risk_val*100:.2f}% | Sharpe: {sharpe:.2f}")
         st.markdown("---")
 
     # Frontera eficiente
@@ -3177,13 +3195,18 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     for clave, nombre in estrategias:
         res, sharpe, _ = resultados.get(clave, (None, None, None))
         if res:
+            # Validar valores antes de multiplicar
+            returns_val = getattr(res,'returns',0) if getattr(res,'returns',None) is not None else 0
+            risk_val = getattr(res,'risk',0) if getattr(res,'risk',None) is not None else 0
+            retorno_actual = metricas_actual.get('retorno_esperado_anual',0) if metricas_actual.get('retorno_esperado_anual',None) is not None else 0
+            riesgo_actual = metricas_actual.get('riesgo_anual',1e-6) if metricas_actual.get('riesgo_anual',None) is not None else 1e-6
             df_comp.append({
                 'Estrategia': nombre,
-                'Retorno': getattr(res,'returns',0)*100,
-                'Riesgo': getattr(res,'risk',0)*100,
+                'Retorno': returns_val*100,
+                'Riesgo': risk_val*100,
                 'Sharpe': sharpe,
-                'Mejora Retorno (%)': (getattr(res,'returns',0)-metricas_actual.get('retorno_esperado_anual',0))*100,
-                'Mejora Sharpe': sharpe-(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6)))
+                'Mejora Retorno (%)': (returns_val-retorno_actual)*100,
+                'Mejora Sharpe': sharpe-(retorno_actual/riesgo_actual)
             })
     if df_comp:
         import pandas as pd
@@ -3249,10 +3272,15 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         df_inter = pd.DataFrame(precios_inter).dropna()
         retornos_inter = df_inter.pct_change().dropna()
     # Señal simple intermarket
-    dxy_trend = retornos_inter['DXY'].tail(20).sum() if 'DXY' in retornos_inter else 0
-    soja_trend = retornos_inter['Soja'].tail(20).sum() if 'Soja' in retornos_inter else 0
-    vix_actual = df_inter['VIX'].iloc[-1] if 'VIX' in df_inter else 20
-    merval_momentum = retornos_inter['Merval'].tail(10).sum() if 'Merval' in retornos_inter else 0
+    # Validar valores antes de operar
+    dxy_series = retornos_inter.get('DXY', pd.Series([0]))
+    dxy_trend = dxy_series.tail(20).sum() if not dxy_series.empty and dxy_series.notna().any() else 0
+    soja_series = retornos_inter.get('Soja', pd.Series([0]))
+    soja_trend = soja_series.tail(20).sum() if not soja_series.empty and soja_series.notna().any() else 0
+    vix_actual = df_inter.get('VIX', pd.Series([20])).iloc[-1] if 'VIX' in df_inter else 20
+                        # Validar valores antes de sumar
+                    merval_series = retornos_inter.get('Merval', pd.Series([0]))
+                    merval_momentum = merval_series.tail(10).sum() if not merval_series.empty and merval_series.notna().any() else 0
     if dxy_trend < -0.01 and soja_trend > 0.03 and vix_actual < 20 and merval_momentum > 0.02:
         regimen = "ALCISTA"
         recomendacion = "Contexto favorable para activos de riesgo y commodities."
@@ -3320,7 +3348,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             sugerencia = "Portafolio diversificado: mantener exposición equilibrada y flexibilidad."
         st.success(f"Etapa detectada: **{etapa}**")
         st.caption(f"Explicación: {explicacion_ciclo}")
-        st.markdown(f"- Reservas: {reservas:,.0f}M USD\n- Tasa LELIQ: {tasa_leliq:.2f}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
+        # Validar y mostrar variables de forma segura
+        reservas_str = f"{reservas:,.0f}M USD" if reservas is not None else "N/D"
+        tasa_leliq_str = f"{tasa_leliq:.2f}% anual" if tasa_leliq is not None else "N/D"
+        inflacion_str = f"{inflacion*100:.2f}%" if inflacion is not None else "N/D"
+        m2_crecimiento_str = f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D"
+        st.markdown(f"- Reservas: {reservas_str}\n- Tasa LELIQ: {tasa_leliq_str}\n- Inflación mensual: {inflacion_str}\n- Crecimiento M2: {m2_crecimiento_str}")
         # --- SUGERENCIA DE ESTRATEGIA SEGÚN CICLO ---
         st.markdown(f"""
         <div style='background:#eaf6fb;border-left:6px solid #007cf0;padding:1.2em 1.5em;margin:1.2em 0 1.5em 0;border-radius:10px;'>
@@ -3353,7 +3386,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             # M2 (usamos base monetaria como proxy)
             m2_df = pd.DataFrame(requests.get(url_m2, headers=headers).json())
             if len(m2_df) > 1:
-                m2_crecimiento = (m2_df.iloc[-1]['valor'] - m2_df.iloc[-2]['valor']) / m2_df.iloc[-2]['valor']
+                valor_actual = m2_df.iloc[-1]['valor'] if m2_df.iloc[-1]['valor'] is not None else 0
+                valor_anterior = m2_df.iloc[-2]['valor'] if m2_df.iloc[-2]['valor'] is not None else 0
+                if valor_anterior != 0:
+                    m2_crecimiento = (valor_actual - valor_anterior) / valor_anterior
+                else:
+                    m2_crecimiento = None
             else:
                 m2_crecimiento = None
         except Exception as e:
@@ -3441,19 +3479,28 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         import plotly.graph_objects as go
         try:
             precios = yf.download(list(sector_etfs.values()), period="6mo", interval="1d", progress=False)["Adj Close"]
-            rendimientos = precios.iloc[-1] / precios.iloc[0] - 1
+            # Validar valores antes de dividir
+            precio_final = precios.iloc[-1] if precios.iloc[-1] is not None else 0
+            precio_inicial = precios.iloc[0] if precios.iloc[0] is not None else 1
+            if precio_inicial != 0:
+                rendimientos = precio_final / precio_inicial - 1
+            else:
+                rendimientos = pd.Series([0] * len(precios.columns), index=precios.columns)
             ranking = rendimientos.sort_values(ascending=False)
             fig = go.Figure()
             fig.add_trace(go.Bar(
                 x=[k for k,v in sector_etfs.items() if v in ranking.index],
-                y=ranking.values*100,
-                marker_color=["#2ecc71" if v==ranking.index[0] else "#3498db" for v in ranking.index],
-                text=[f"{v}: {ranking[v]*100:.2f}%" for v in ranking.index],
+                            y=ranking.values*100,
+            marker_color=["#2ecc71" if v==ranking.index[0] else "#3498db" for v in ranking.index],
+            text=[f"{v}: {ranking[v]*100:.2f}%" for v in ranking.index if ranking[v] is not None],
                 textposition="auto"
             ))
             fig.update_layout(title="Ranking de Sectores por Momentum (6 meses)", yaxis_title="Rendimiento (%)", xaxis_title="Sector", template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
-            st.success(f"Sector destacado: {ranking.index[0]} ({ranking.values[0]*100:.2f}%)")
+            # Validar valores antes de multiplicar
+            sector_destacado = ranking.index[0] if len(ranking) > 0 else "N/A"
+            valor_destacado = ranking.values[0] if len(ranking) > 0 and ranking.values[0] is not None else 0
+            st.success(f"Sector destacado: {sector_destacado} ({valor_destacado*100:.2f}%)")
             st.markdown(f"**Recomendación:** Priorizar activos del sector **{[k for k,v in sector_etfs.items() if v==ranking.index[0]][0]}** para optimizaciones si es coherente con tu perfil de riesgo.")
         except Exception as e:
             st.warning(f"No se pudo obtener el ranking sectorial: {e}")
@@ -3525,13 +3572,16 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
                 merval = yf.download('^MERV', period='6mo')['Close']
                 if not merval.empty:
                     merval_ret = merval.pct_change().dropna()
+                    # Validar valores antes de multiplicar
                     merval_atr = merval_ret.abs().rolling(ATR_WINDOW).mean().iloc[-1]*100 if len(merval_ret) >= ATR_WINDOW else merval_ret.abs().mean()*100
+                    valor_actual = merval.iloc[-1] if merval.iloc[-1] is not None else 0
+                    cambio_porcentual = (merval.iloc[-1]/merval.iloc[0]-1)*100 if merval.iloc[-1] is not None and merval.iloc[0] is not None and merval.iloc[0] != 0 else 0
                     all_variables_data['MERVAL (Argentina)'] = {
                         'metrics': {
-                            'valor_actual': merval.iloc[-1],
-                            'cambio_porcentual': (merval.iloc[-1]/merval.iloc[0]-1)*100,
+                            'valor_actual': valor_actual,
+                            'cambio_porcentual': cambio_porcentual,
                             'volatilidad_atr': merval_atr,
-                            'tendencia_direccion': 'alcista' if merval.iloc[-1]>merval.iloc[0] else 'bajista'
+                            'tendencia_direccion': 'alcista' if valor_actual > merval.iloc[0] else 'bajista'
                         }
                     }
             except Exception as e:
@@ -3558,13 +3608,16 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
                     serie = precios[ticker] if ticker in precios else None
                     if serie is not None and not serie.empty:
                         ret = serie.pct_change().dropna()
+                        # Validar valores antes de multiplicar
                         atr = ret.abs().rolling(ATR_WINDOW).mean().iloc[-1]*100 if len(ret) >= ATR_WINDOW else ret.abs().mean()*100
+                        valor_actual = serie.iloc[-1] if serie.iloc[-1] is not None else 0
+                        cambio_porcentual = (serie.iloc[-1]/serie.iloc[0]-1)*100 if serie.iloc[-1] is not None and serie.iloc[0] is not None and serie.iloc[0] != 0 else 0
                         all_variables_data[nombre] = {
                             'metrics': {
-                                'valor_actual': serie.iloc[-1],
-                                'cambio_porcentual': (serie.iloc[-1]/serie.iloc[0]-1)*100,
+                                'valor_actual': valor_actual,
+                                'cambio_porcentual': cambio_porcentual,
                                 'volatilidad_atr': atr,
-                                'tendencia_direccion': 'alcista' if serie.iloc[-1]>serie.iloc[0] else 'bajista'
+                                'tendencia_direccion': 'alcista' if valor_actual > serie.iloc[0] else 'bajista'
                             }
                         }
             except Exception as e:
@@ -3642,11 +3695,15 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
                 df_precios = pd.DataFrame(precios).dropna()
                 serie_valor = (df_precios * pesos).sum(axis=1)
                 dd_max, dd_actual, serie_dd = calcular_drawdown(serie_valor)
-                st.metric("Drawdown Máximo", f"{dd_max*100:.2f}%")
-                st.metric("Drawdown Actual", f"{dd_actual*100:.2f}%")
+                # Validar valores antes de multiplicar
+                dd_max_val = dd_max if dd_max is not None else 0
+                dd_actual_val = dd_actual if dd_actual is not None else 0
+                serie_dd_val = serie_dd if serie_dd is not None else pd.Series([0])
+                st.metric("Drawdown Máximo", f"{dd_max_val*100:.2f}%")
+                st.metric("Drawdown Actual", f"{dd_actual_val*100:.2f}%")
                 import plotly.graph_objects as go
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(x=serie_dd.index, y=serie_dd*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
+                fig.add_trace(go.Scatter(x=serie_dd_val.index, y=serie_dd_val*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
                 fig.update_layout(title="Drawdown Portafolio Actual", yaxis_title="Drawdown (%)", xaxis_title="Fecha", template='plotly_white', height=300)
                 st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
@@ -3664,11 +3721,15 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
                         # Suponemos retornos diarios
                         serie_valor = (1 + pd.Series(res.returns)).cumprod()
                         dd_max, dd_actual, serie_dd = calcular_drawdown(serie_valor)
-                        st.metric("Drawdown Máximo", f"{dd_max*100:.2f}%")
-                        st.metric("Drawdown Actual", f"{dd_actual*100:.2f}%")
+                        # Validar valores antes de multiplicar
+                        dd_max_val = dd_max if dd_max is not None else 0
+                        dd_actual_val = dd_actual if dd_actual is not None else 0
+                        serie_dd_val = serie_dd if serie_dd is not None else pd.Series([0])
+                        st.metric("Drawdown Máximo", f"{dd_max_val*100:.2f}%")
+                        st.metric("Drawdown Actual", f"{dd_actual_val*100:.2f}%")
                         import plotly.graph_objects as go
                         fig = go.Figure()
-                        fig.add_trace(go.Scatter(y=serie_dd*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
+                        fig.add_trace(go.Scatter(y=serie_dd_val*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
                         fig.update_layout(title=f"Drawdown {nombre}", yaxis_title="Drawdown (%)", xaxis_title="Día", template='plotly_white', height=250)
                         st.plotly_chart(fig, use_container_width=True)
                 except Exception as e:
@@ -3683,11 +3744,15 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
                 serie = yf.download(ticker, period='1y')['Close']
                 if not serie.empty:
                     dd_max, dd_actual, serie_dd = calcular_drawdown(serie)
-                    st.metric(f"{nombre} Drawdown Máx", f"{dd_max*100:.2f}%")
-                    st.metric(f"{nombre} Drawdown Actual", f"{dd_actual*100:.2f}%")
+                    # Validar valores antes de multiplicar
+                    dd_max_val = dd_max if dd_max is not None else 0
+                    dd_actual_val = dd_actual if dd_actual is not None else 0
+                    serie_dd_val = serie_dd if serie_dd is not None else pd.Series([0])
+                    st.metric(f"{nombre} Drawdown Máx", f"{dd_max_val*100:.2f}%")
+                    st.metric(f"{nombre} Drawdown Actual", f"{dd_actual_val*100:.2f}%")
                     import plotly.graph_objects as go
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=serie_dd.index, y=serie_dd*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
+                    fig.add_trace(go.Scatter(x=serie_dd_val.index, y=serie_dd_val*100, mode='lines', name='Drawdown (%)', line=dict(color='#ef4444')))
                     fig.update_layout(title=f"Drawdown {nombre}", yaxis_title="Drawdown (%)", xaxis_title="Fecha", template='plotly_white', height=250)
                     st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
