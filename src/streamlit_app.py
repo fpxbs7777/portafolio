@@ -4286,5 +4286,24 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
         raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
     return series_historicas, seleccion_final
 
+# Funciones robustas para porcentajes y divisiones seguras
+import pandas as pd
+import numpy as np
+
+def safe_pct(value):
+    if value is None or (isinstance(value, float) and (np.isnan(value) or pd.isna(value))):
+        return 0.0
+    return value * 100
+
+def safe_div(num, denom):
+    try:
+        if denom in [None, 0, np.nan] or pd.isna(denom):
+            return 0.0
+        if num is None or pd.isna(num) or (isinstance(num, float) and np.isnan(num)):
+            return 0.0
+        return num / denom
+    except Exception:
+        return 0.0
+
 if __name__ == "__main__":
     main()
