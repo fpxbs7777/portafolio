@@ -4488,7 +4488,14 @@ def analisis_intermarket_economico(series_globales, series_locales=None):
     else:
         asignacion = {'Acciones Locales':20,'Commodities':15,'Emergentes':10,'Desarrollados':25,'Bonos/Liquidez':25,'Oro/Hedge':5}
     # --- Resumen profesional ---
-    momentum_str = ', '.join([f"{k}: 1w={v['m1w']*100:+.1f}%, 1m={v['m1m']*100:+.1f}%" for k,v in momentum.items() if not np.isnan(v['m1w']) and not np.isnan(v['m1m'])])
+    def safe_num(val, default=0):
+        import numpy as np
+        return val if isinstance(val, (int, float, np.integer, np.floating)) and not np.isnan(val) else default
+    momentum_str = ', '.join([
+        f"{k}: 1w={safe_num(v['m1w'])*100:+.1f}%, 1m={safe_num(v['m1m'])*100:+.1f}%"
+        for k, v in momentum.items()
+        if v['m1w'] is not None and v['m1m'] is not None and not np.isnan(v['m1w']) and not np.isnan(v['m1m'])
+    ])
     resumen_txt = f"""
 🔗 **Análisis Intermarket Global-Local (Argentina)**
 
