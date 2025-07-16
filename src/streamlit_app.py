@@ -1766,7 +1766,20 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     for _ in range(1000):  # Simulación Monte Carlo simple
         retorno_simulado = 0
         for m in metricas_activos.values():
-            retorno_simulado += np.random.normal(m['retorno_medio']/252, m['volatilidad']/np.sqrt(252)) * m['peso']
+            # Validar que todos los valores sean numéricos
+            ret = m.get('retorno_medio')
+            vol = m.get('volatilidad')
+            peso = m.get('peso')
+            if ret is None or vol is None or peso is None:
+                print(f"Advertencia: valor None en Monte Carlo: retorno_medio={ret}, volatilidad={vol}, peso={peso}")
+                ret = safe_num(ret)
+                vol = safe_num(vol)
+                peso = safe_num(peso)
+            try:
+                retorno_simulado += np.random.normal(ret/252, vol/np.sqrt(252)) * peso
+            except Exception as e:
+                print(f"Error en simulación Monte Carlo: {e}")
+                continue
         retornos_simulados.append(retorno_simulado * 252)  # Anualizado
     
     pl_esperado_min = np.percentile(retornos_simulados, 5) * valor_total / 100
