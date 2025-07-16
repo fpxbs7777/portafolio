@@ -3793,12 +3793,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Visualización", 
+        "📈 Análisis", 
+        "🔗 Análisis Específicos",
+        "📚 Glosario",
+        "🌍 Análisis Global",
+        "🤖 Análisis IA de Variables"
     ])
 
     with tab1:
@@ -3824,44 +3825,466 @@ def mostrar_analisis_portafolio():
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
-def dashboard_bcra_tab():
-    import pandas as pd
+    with tab6:
+        st.markdown("## 🤖 Análisis IA de Variables BCRA")
+        st.info("Seleccione varias variables para analizarlas en conjunto con IA. El análisis es ultra-compacto para minimizar el consumo de tokens.")
+
+        # Selección múltiple de variables
+        selected_vars = st.multiselect(
+            "Variables a analizar:",
+            options=filtered_df['Nombre'].tolist(),
+            default=filtered_df['Nombre'].tolist()[:3],  # Por defecto las primeras 3
+            help="Seleccione las variables económicas a analizar con IA"
+        )
+
+        # Selección de período
+        period_days = st.selectbox(
+            "Período de análisis:",
+            options=[30, 60, 90],
+            index=1,
+            format_func=lambda x: f"{x} días"
+        )
+
+        if st.button("🚀 Analizar con IA", type="primary"):
+            if not selected_vars:
+                st.warning("Seleccione al menos una variable.")
+            else:
+                with st.spinner("Obteniendo datos y generando análisis IA..."):
+                    all_variables_data = {}
+                    for var_name in selected_vars:
+                        var_row = filtered_df[filtered_df['Nombre'] == var_name].iloc[0]
+                        serie_id = var_row.get('Serie ID', '')
+                        if serie_id:
+                            hist_data = get_historical_data(
+                                serie_id,
+                                (datetime.now() - timedelta(days=period_days)).strftime('%Y-%m-%d'),
+                                datetime.now().strftime('%Y-%m-%d')
+                            )
+                            if not hist_data.empty:
+                                metrics = calculate_specific_metrics(hist_data, var_name)
+                                all_variables_data[var_name] = {
+                                    'data': hist_data,
+                                    'metrics': metrics,
+                                    'serie_id': serie_id,
+                                    'valor_actual': var_row.get('Valor', 'N/A')
+                                }
+                    if all_variables_data:
+                        prompt = generate_global_analysis_prompt(all_variables_data)
+                        if prompt:
+                            try:
+                                import google.generativeai as genai
+                                if 'GEMINI_API_KEY' in st.session_state and st.session_state.GEMINI_API_KEY:
+                                    genai.configure(api_key=st.session_state.GEMINI_API_KEY)
+                                    model = genai.GenerativeModel(
+                                        'gemini-1.5-flash',
+                                        generation_config=genai.types.GenerationConfig(
+                                            temperature=0.4,
+                                            max_output_tokens=800,
+                                            top_p=0.9,
+                                            top_k=30
+                                        )
+                                    )
+                                    response = model.generate_content(prompt)
+                                    if response and response.text:
+                                        st.markdown("### 🧠 Informe IA de Análisis de Variables")
+                                        st.markdown(response.text)
+                                        st.download_button(
+                                            label="📥 Descargar Informe",
+                                            data=response.text,
+                                            file_name=f"analisis_ia_variables_{datetime.now().strftime('%Y%m%d')}.md",
+                                            mime="text/markdown"
+                                        )
+                                    else:
+                                        st.error("No se pudo generar el análisis IA.")
+                                else:
+                                    st.warning("API Key de Gemini no configurada.")
+                            except Exception as e:
+                                st.error(f"Error en análisis IA: {str(e)}")
+                        else:
+                            st.error("No se pudo generar el prompt para análisis IA.")
+                    else:
+                        st.warning("No se pudieron obtener datos para las variables seleccionadas.")
+
+def main():
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    
+    # Inicializar session state
+    if 'token_acceso' not in st.session_state:
+        st.session_state.token_acceso = None
+    if 'refresh_token' not in st.session_state:
+        st.session_state.refresh_token = None
+    if 'clientes' not in st.session_state:
+        st.session_state.clientes = []
+    if 'cliente_seleccionado' not in st.session_state:
+        st.session_state.cliente_seleccionado = None
+    if 'fecha_desde' not in st.session_state:
+        st.session_state.fecha_desde = date.today() - timedelta(days=365)
+    if 'fecha_hasta' not in st.session_state:
+        st.session_state.fecha_hasta = date.today()
+    
+    # Barra lateral - Autenticación
+    with st.sidebar:
+        st.header("🔐 Autenticación IOL")
+        
+        if st.session_state.token_acceso is None:
+            with st.form("login_form"):
+                st.subheader("Ingreso a IOL")
+                usuario = st.text_input("Usuario", placeholder="su_usuario")
+                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+                
+                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
+                    if usuario and contraseña:
+                        with st.spinner("Conectando..."):
+                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
+                            
+                            if token_acceso:
+                                st.session_state.token_acceso = token_acceso
+                                st.session_state.refresh_token = refresh_token
+                                st.success("✅ Conexión exitosa!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error en la autenticación")
+                    else:
+                        st.warning("⚠️ Complete todos los campos")
+        else:
+            st.success("✅ Conectado a IOL")
+            st.divider()
+            
+            st.subheader("Configuración de Fechas")
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_desde = st.date_input(
+                    "Desde:",
+                    value=st.session_state.fecha_desde,
+                    max_value=date.today()
+                )
+            with col2:
+                fecha_hasta = st.date_input(
+                    "Hasta:",
+                    value=st.session_state.fecha_hasta,
+                    max_value=date.today()
+                )
+            
+            st.session_state.fecha_desde = fecha_desde
+            st.session_state.fecha_hasta = fecha_hasta
+            
+            # Obtener lista de clientes
+            if not st.session_state.clientes and st.session_state.token_acceso:
+                with st.spinner("Cargando clientes..."):
+                    try:
+                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        if clientes:
+                            st.session_state.clientes = clientes
+                        else:
+                            st.warning("No se encontraron clientes")
+                    except Exception as e:
+                        st.error(f"Error al cargar clientes: {str(e)}")
+            
+            clientes = st.session_state.clientes
+            
+            if clientes:
+                st.subheader("Selección de Cliente")
+                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
+                
+                cliente_seleccionado = st.selectbox(
+                    "Seleccione un cliente:",
+                    options=cliente_ids,
+                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
+                    label_visibility="collapsed"
+                )
+                
+                st.session_state.cliente_seleccionado = next(
+                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                    None
+                )
+                
+                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+                    with st.spinner("Actualizando..."):
+                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                        st.session_state.clientes = nuevos_clientes
+                        st.success("✅ Lista actualizada")
+                        st.rerun()
+            else:
+                st.warning("No se encontraron clientes")
+
+    # Contenido principal
+    try:
+        if st.session_state.token_acceso:
+            st.sidebar.title("Menú Principal")
+            opcion = st.sidebar.radio(
+                "Seleccione una opción:",
+                ("🏠 Inicio", "📊 Análisis de Portafolio"),
+                index=0,
+            )
+
+            # Mostrar la página seleccionada
+            if opcion == "🏠 Inicio":
+                st.info("👆 Seleccione una opción del menú para comenzar")
+            elif opcion == "📊 Análisis de Portafolio":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_portafolio()
+                else:
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+        else:
+            st.info("👆 Ingrese sus credenciales para comenzar")
+            
+            # Panel de bienvenida
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
+                        border-radius: 15px; 
+                        padding: 40px; 
+                        color: white;
+                        text-align: center;
+                        margin: 30px 0;">
+                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
+                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
+                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>📊 Análisis Completo</h3>
+                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>📈 Gráficos Interactivos</h3>
+                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>⚖️ Gestión de Riesgo</h3>
+                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Características
+            st.subheader("✨ Características Principales")
+            cols = st.columns(3)
+            with cols[0]:
+                st.markdown("""
+                **📊 Análisis Detallado**  
+                - Valuación completa de activos  
+                - Distribución por tipo de instrumento  
+                - Concentración del portafolio  
+                """)
+            with cols[1]:
+                st.markdown("""
+                **📈 Herramientas Profesionales**  
+                - Optimización de portafolio  
+                - Análisis técnico avanzado  
+                - Proyecciones de rendimiento  
+                """)
+            with cols[2]:
+                st.markdown("""
+                **💱 Datos de Mercado**  
+                - Cotizaciones MEP en tiempo real  
+                - Tasas de caución actualizadas  
+                - Estado de cuenta consolidado  
+                """)
+    except Exception as e:
+        st.error(f"❌ Error en la aplicación: {str(e)}")
+
+def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
+    """
+    Devuelve un diccionario con listas de tickers reales por panel para el universo aleatorio.
+    Si no hay API, usa listas fijas de tickers representativos.
+    Retorna: (dict panel->tickers, dict panel->descripciones)
+    """
+    tickers = {}
+    descripciones = {}
+    # Paneles y ejemplos (puedes reemplazar por consulta a la API de IOL si tienes endpoint)
+    paneles_dict = {
+        'acciones': [
+            ('GGAL', 'Grupo Financiero Galicia'),
+            ('YPFD', 'YPF S.A.'),
+            ('PAMP', 'Pampa Energía'),
+            ('BMA', 'Banco Macro'),
+            ('SUPV', 'Grupo Supervielle'),
+            ('CEPU', 'Central Puerto'),
+            ('TXAR', 'Ternium Argentina'),
+            ('ALUA', 'Aluar'),
+            ('TGSU2', 'Transportadora Gas del Sur'),
+            ('EDN', 'Edenor'),
+        ],
+        'cedears': [
+            ('AAPL', 'Apple'),
+            ('TSLA', 'Tesla'),
+            ('AMZN', 'Amazon'),
+            ('GOOGL', 'Alphabet'),
+            ('MSFT', 'Microsoft'),
+            ('KO', 'Coca-Cola'),
+            ('MELI', 'Mercado Libre'),
+            ('BABA', 'Alibaba'),
+            ('JNJ', 'Johnson & Johnson'),
+            ('PG', 'Procter & Gamble'),
+        ],
+        'aDRs': [
+            ('BBAR', 'BBVA Argentina'),
+            ('BMA', 'Banco Macro'),
+            ('GGAL', 'Grupo Galicia'),
+            ('PAM', 'Pampa Energia'),
+            ('SUPV', 'Supervielle'),
+        ],
+        'titulosPublicos': [
+            ('AL30', 'Bonar 2030'),
+            ('GD30', 'Global 2030'),
+            ('AL35', 'Bonar 2035'),
+            ('GD35', 'Global 2035'),
+            ('AL29', 'Bonar 2029'),
+            ('GD29', 'Global 2029'),
+        ],
+        'obligacionesNegociables': [
+            ('PBY22', 'Pampa Energía ON'),
+            ('CGC24', 'Compañía General de Combustibles ON'),
+            ('YPF23', 'YPF ON'),
+            ('TGSU2', 'Transportadora Gas del Sur ON'),
+        ]
+    }
+    for panel in paneles:
+        panel_l = panel.lower()
+        if panel_l in paneles_dict:
+            tickers[panel] = [t[0] for t in paneles_dict[panel_l]]
+            descripciones[panel] = [t[1] for t in paneles_dict[panel_l]]
+        else:
+            tickers[panel] = []
+            descripciones[panel] = []
+    return tickers, descripciones
+
+# --- Función: calcular retornos y covarianza con ventana móvil ---
+def calcular_estadisticas_ventana_movil(precios, ventana=252):
+    """
+    Calcula retornos esperados y matriz de covarianza usando una ventana móvil.
+    precios: DataFrame de precios (columnas=activos, filas=fechas)
+    ventana: días para la ventana móvil (por defecto 1 año)
+    Devuelve: retornos esperados anualizados, covarianza anualizada
+    """
+    retornos = precios.pct_change().dropna()
+    retornos_ventana = retornos.iloc[-ventana:]
+    mean_ret = retornos_ventana.mean() * 252
+    cov = retornos_ventana.cov() * 252
+    return mean_ret, cov
+
+# --- Función: optimización Markowitz (max Sharpe) ---
+def optimizar_markowitz(mean_ret, cov, risk_free_rate=0.0):
+    """
+    Devuelve los pesos óptimos de Markowitz (max Sharpe, long-only)
+    """
     import numpy as np
+    import scipy.optimize as op
+    n = len(mean_ret)
+    bounds = tuple((0, 1) for _ in range(n))
+    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},)
+    def neg_sharpe(x):
+        port_ret = np.dot(mean_ret, x)
+        port_vol = np.sqrt(np.dot(x, np.dot(cov, x)))
+        if port_vol == 0:
+            return 1e6
+        return -(port_ret - risk_free_rate) / port_vol
+    x0 = np.ones(n) / n
+    res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints)
+    if res.success:
+        return res.x
+    else:
+        return x0
+
+# --- Función: backtest con rebalanceo periódico ---
+def backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+    """
+    Simula la evolución de un portafolio Markowitz con rebalanceo periódico.
+    precios: DataFrame de precios (columnas=activos, filas=fechas)
+    ventana: días para estimar retornos/covarianza
+    rebalanceo: cada cuántos días rebalancear (63 = 3 meses aprox)
+    Devuelve: fechas, valores del portafolio, lista de pesos, fechas de rebalanceo
+    """
+    import numpy as np
+    fechas = precios.index
+    n_activos = precios.shape[1]
+    portafolio_valor = [1.0]
+    pesos_hist = []
+    fechas_reb = []
+    pesos_actual = np.ones(n_activos) / n_activos
+    for i in range(ventana, len(fechas)-1, rebalanceo):
+        precios_window = precios.iloc[i-ventana:i]
+        mean_ret, cov = calcular_estadisticas_ventana_movil(precios_window, ventana)
+        pesos_actual = optimizar_markowitz(mean_ret, cov, risk_free_rate)
+        pesos_hist.append(pesos_actual)
+        fechas_reb.append(fechas[i])
+        # Simular evolución hasta el próximo rebalanceo
+        for j in range(i, min(i+rebalanceo, len(fechas)-1)):
+            ret = (precios.iloc[j+1] / precios.iloc[j] - 1).values
+            portafolio_valor.append(portafolio_valor[-1] * (1 + np.dot(pesos_actual, ret)))
+    # Completar hasta el final con los últimos pesos
+    while len(portafolio_valor) < len(fechas):
+        portafolio_valor.append(portafolio_valor[-1])
+    return fechas, portafolio_valor, pesos_hist, fechas_reb
+
+# --- Función: visualización de backtest y pesos ---
+def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+    """
+    Visualiza la evolución del portafolio Markowitz con rebalanceo periódico.
+    """
     import plotly.graph_objects as go
-    import plotly.express as px
-    import requests
-    from bs4 import BeautifulSoup
-    import json
-    from datetime import datetime, timedelta
-    import io
-    import base64
-    from scipy import stats
-    import matplotlib.pyplot as plt
-    import os
-    import google.generativeai as genai
-    import time
-    import markdown2
+    fechas, portafolio_valor, pesos_hist, fechas_reb = backtest_markowitz(precios, ventana, rebalanceo, risk_free_rate)
     import streamlit as st
+    st.subheader("📈 Evolución del Portafolio Markowitz (Backtest)")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=fechas, y=portafolio_valor, mode='lines', name='Valor Portafolio'))
+    fig.update_layout(title="Backtest Markowitz con rebalanceo", xaxis_title="Fecha", yaxis_title="Valor acumulado", template="plotly_white")
+    st.plotly_chart(fig, use_container_width=True)
+    # Mostrar evolución de pesos
+    st.subheader("🔄 Evolución de Pesos por Activo")
+    if pesos_hist:
+        import numpy as np
+        activos = precios.columns
+        pesos_array = np.array(pesos_hist)
+        fig2 = go.Figure()
+        for idx, activo in enumerate(activos):
+            fig2.add_trace(go.Scatter(x=fechas_reb, y=pesos_array[:, idx], mode='lines+markers', name=activo))
+        fig2.update_layout(title="Pesos óptimos en cada rebalanceo", xaxis_title="Fecha de rebalanceo", yaxis_title="Peso", template="plotly_white")
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("No hay datos suficientes para mostrar la evolución de pesos.")
+# --- FIN FUNCIONES ROBUSTAS ---
 
-    # Configuración de estilos personalizados (NO usar st.set_page_config aquí)
-    st.markdown("""
-        <style>
-        /* ... (todo el CSS que enviaste) ... */
-        </style>
-    """, unsafe_allow_html=True)
-    st.markdown("""
-        <div class="main-header fade-in">
-            <h1>📊 BCRA Analytics</h1>
-            <div class="subtitle">Centro de Análisis Económico • Banco Central de la República Argentina</div>
-        </div>
-    """, unsafe_allow_html=True)
+def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
+    """
+    Selecciona aleatoriamente tickers de los paneles seleccionados, descarga sus series históricas y devuelve:
+    - series_historicas: dict[ticker] -> DataFrame de precios
+    - seleccion_final: dict[panel] -> lista de tickers seleccionados
+    Respeta la cantidad de activos por panel y el capital disponible.
+    """
+    import random
+    import yfinance as yf
+    import pandas as pd
+    series_historicas = {}
+    seleccion_final = {}
+    for panel in paneles_seleccionados:
+        tickers = tickers_por_panel.get(panel, [])
+        if not tickers:
+            continue
+        seleccionados = random.sample(tickers, min(cantidad_activos, len(tickers)))
+        seleccion_final[panel] = seleccionados
+        for ticker in seleccionados:
+            try:
+                # Preferir yfinance para tickers internacionales y Cedears
+                if panel.lower() in ['cedears', 'adrs'] or ticker.isalpha():
+                    df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)[['Close']]
+                    if not df.empty:
+                        df = df.rename(columns={'Close': 'precio'})
+                        df = df.reset_index().rename(columns={'Date': 'fecha'})
+                        series_historicas[ticker] = df
+                else:
+                    # Para acciones locales, usar la API de IOL si es necesario
+                    df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
+                    if df is not None and not df.empty:
+                        series_historicas[ticker] = df
+            except Exception as e:
+                continue
+    # Validar que haya suficientes series
+    total_activos = sum(len(v) for v in seleccion_final.values())
+    if total_activos == 0 or not series_historicas:
+        raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
+    return series_historicas, seleccion_final
 
-    # --- (TODO EL RESTO DEL CÓDIGO DEL DASHBOARD BCRA AQUÍ, SIN st.set_page_config y sin if __name__ == "__main__": main()) ---
-    # (Por brevedad, aquí va el bloque completo que enviaste, adaptado a función)
-
-    # ...
-    # (Pega aquí todo el código del dashboard BCRA, desde la definición de funciones hasta el final, quitando st.set_page_config y el if __name__ == "__main__": main())
-    # ...
-
-    # Ejecutar la aplicación (NO usar if __name__ == "__main__": main())
+if __name__ == "__main__":
     main()
