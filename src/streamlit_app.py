@@ -20,6 +20,7 @@ from scipy.stats import skew
 import google.generativeai as genai
 import numpy_financial as npf
 from bs4 import BeautifulSoup
+import re
 
 warnings.filterwarnings('ignore')
 
@@ -4244,18 +4245,45 @@ def obtener_datos_tecnicos_bono(simbolo):
     try:
         r = httpx.get(url, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
-        tabla = soup.find('table', class_='table-striped')
-        if not tabla:
-            return None
-        rows = tabla.find_all('tr')
+        tablas = soup.find_all('table', class_='table-striped')
         datos = {}
-        for row in rows:
-            cols = row.find_all('td')
-            if len(cols) == 2:
-                key = cols[0].get_text(strip=True)
-                val = cols[1].get_text(strip=True)
-                datos[key] = val
-        return datos
+        flujos = []
+        fechas = []
+        for tabla in tablas:
+            # Buscar tabla de "Datos técnicos" y "Cronograma de pagos"
+            ths = tabla.find_all('th')
+            if any('cronograma' in th.get_text(strip=True).lower() for th in ths):
+                # Parsear cronograma de pagos
+                for row in tabla.find_all('tr'):
+                    cols = row.find_all('td')
+                    if len(cols) >= 2:
+                        texto_fecha = cols[0].get_text(strip=True)
+                        texto_pago = cols[1].get_text(strip=True)
+                        # Buscar fecha válida
+                        try:
+                            fecha_pago = datetime.strptime(texto_fecha, "%d/%m/%Y")
+                        except Exception:
+                            continue
+                        # Buscar monto de pago (puede tener % o $)
+                        monto = None
+                        match = re.search(r"([\d\.,]+)", texto_pago.replace('.', '').replace(',', '.'))
+                        if match:
+                            try:
+                                monto = float(match.group(1))
+                            except Exception:
+                                monto = None
+                        if monto and fecha_pago > datetime.now():
+                            flujos.append(monto)
+                            fechas.append(fecha_pago)
+            else:
+                # Parsear datos técnicos generales
+                for row in tabla.find_all('tr'):
+                    cols = row.find_all('td')
+                    if len(cols) == 2:
+                        key = cols[0].get_text(strip=True)
+                        val = cols[1].get_text(strip=True)
+                        datos[key] = val
+        return {'datos': datos, 'flujos': flujos, 'fechas': fechas}
     except Exception:
         return None
 
@@ -4264,13 +4292,32 @@ def calcular_tir_bono(precio, flujos, fechas):
     Calcula la TIR de un bono dados el precio, los flujos futuros y las fechas de pago.
     """
     try:
-        from datetime import datetime
         hoy = datetime.now()
-        flujos_desc = [-precio]
+        # Calcular los flujos descontados según la fecha
+        flujos_desc = []
         for f, fecha in zip(flujos, fechas):
             t = (fecha - hoy).days / 365.0
-            flujos_desc.append(f / (1 + 0.1) ** t)  # Aproximación inicial
-        tir = npf.irr([-precio] + flujos)
+            flujos_desc.append((f, t))
+        # Ordenar por fecha
+        flujos_desc = sorted(flujos_desc, key=lambda x: x[1])
+        # Construir lista de flujos para irr
+        flujos_irr = [-precio]
+        fechas_irr = [0]
+        for f, t in flujos_desc:
+            flujos_irr.append(f)
+            fechas_irr.append(t)
+        # Convertir a periodos anuales
+        # Usar npf.xirr si hay fechas, sino npf.irr
+        if len(flujos_irr) > 1 and all(t > 0 for t in fechas_irr[1:]):
+            # Usar xirr si está disponible
+            try:
+                import numpy_financial as npf
+                tir = npf.xirr([{'amount': v, 'date': hoy + timedelta(days=int(t*365))} for v, t in zip(flujos_irr, fechas_irr)])
+            except Exception:
+                tir = npf.irr(flujos_irr)
+        else:
+            import numpy_financial as npf
+            tir = npf.irr(flujos_irr)
         return tir
     except Exception:
         return None
@@ -4291,11 +4338,8 @@ def mostrar_curva_tir_bonos(token_portador):
         precio = bono['precio'] if bono['precio'] is not None else 0
         datos_tecnicos = obtener_datos_tecnicos_bono(simbolo)
         tir = None
-        if precio and datos_tecnicos:
-            # Aquí deberías armar flujos y fechas reales
-            # flujos, fechas = ...
-            # tir = calcular_tir_bono(precio, flujos, fechas)
-            pass
+        if precio and datos_tecnicos and datos_tecnicos['flujos'] and datos_tecnicos['fechas']:
+            tir = calcular_tir_bono(precio, datos_tecnicos['flujos'], datos_tecnicos['fechas'])
         tabla_bonos.append({
             'Símbolo': simbolo,
             'Descripción': bono.get('descripcion', ''),
