@@ -5026,6 +5026,12 @@ def optimizacion_portafolio_ciclo_economico(token_acceso, gemini_api_key=None):
             except Exception as e:
                 st.error(f"Error en optimización: {e}")
                 return
+                
+        except Exception as e:
+            st.error(f"❌ Error en optimización de portafolio por ciclo económico: {str(e)}")
+            st.error(f"Tipo de error: {type(e).__name__}")
+            import traceback
+            st.code(traceback.format_exc())
 
 def analisis_correlaciones_economicas(token_acceso, gemini_api_key=None):
     """
@@ -5527,6 +5533,12 @@ def analisis_correlaciones_economicas(token_acceso, gemini_api_key=None):
                 
             else:
                 st.error("Se necesitan al menos 2 variables para el análisis de correlaciones")
+                
+        except Exception as e:
+            st.error(f"❌ Error en el análisis de correlaciones: {str(e)}")
+            st.error(f"Tipo de error: {type(e).__name__}")
+            import traceback
+            st.code(traceback.format_exc())
 
 # --- FIN FUNCIONES ROBUSTAS ---
 
