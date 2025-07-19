@@ -5540,48 +5540,6 @@ def analisis_correlaciones_economicas(token_acceso, gemini_api_key=None):
             import traceback
             st.code(traceback.format_exc())
 
-# --- FIN FUNCIONES ROBUSTAS ---
-
-def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
-    """
-    Selecciona aleatoriamente tickers de los paneles seleccionados, descarga sus series históricas y devuelve:
-    - series_historicas: dict[ticker] -> DataFrame de precios
-    - seleccion_final: dict[panel] -> lista de tickers seleccionados
-    Respeta la cantidad de activos por panel y el capital disponible.
-    """
-    import random
-    import yfinance as yf
-    import pandas as pd
-    series_historicas = {}
-    seleccion_final = {}
-    for panel in paneles_seleccionados:
-        tickers = tickers_por_panel.get(panel, [])
-        if not tickers:
-            continue
-        seleccionados = random.sample(tickers, min(cantidad_activos, len(tickers)))
-        seleccion_final[panel] = seleccionados
-        for ticker in seleccionados:
-            try:
-                # Preferir yfinance para tickers internacionales y Cedears
-                if panel.lower() in ['cedears', 'adrs'] or ticker.isalpha():
-                    df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)[['Close']]
-                    if not df.empty:
-                        df = df.rename(columns={'Close': 'precio'})
-                        df = df.reset_index().rename(columns={'Date': 'fecha'})
-                        series_historicas[ticker] = df
-                else:
-                    # Para acciones locales, usar la API de IOL si es necesario
-                    df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
-                    if df is not None and not df.empty:
-                        series_historicas[ticker] = df
-            except Exception as e:
-                continue
-    # Validar que haya suficientes series
-    total_activos = sum(len(v) for v in seleccion_final.values())
-    if total_activos == 0 or not series_historicas:
-        raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
-    return series_historicas, seleccion_final
-
 def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
     """
     Análisis completo intermarket con detección de ciclos económicos.
@@ -6070,7 +6028,7 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
                     sugerencias = sugerencias_arg
                     st.markdown("**🇦🇷 Sugerencias basadas en ciclo argentino**")
                 else:
-            sugerencias = matriz_sugerencias.get(fase_ciclo, {})
+                    sugerencias = matriz_sugerencias.get(fase_ciclo, {})
                     st.markdown("**🌍 Sugerencias basadas en ciclo global**")
             else:
                 sugerencias = matriz_sugerencias.get(fase_ciclo, {})
@@ -7044,8 +7002,8 @@ def mostrar_dashboard_unificado():
                 if not alertas:
                     alertas.append("✅ **Portafolio saludable** - No se detectaron alertas críticas")
                 
-                                 for alerta in alertas:
-                     st.info(alerta)
+                for alerta in alertas:
+                    st.info(alerta)
                 
                 # Métricas de rendimiento y benchmarks
                 st.subheader("📊 Métricas de Rendimiento")
@@ -7304,53 +7262,53 @@ def mostrar_dashboard_unificado():
                     else:
                         datos_cliente['composicion'][tipo] = 1
                 
-                                 # Generar prompt para IA
-                 prompt_ia = f"""
-                 Eres un asesor financiero experto en Argentina con más de 15 años de experiencia. Analiza el siguiente portafolio y proporciona recomendaciones específicas para el asesor:
-                 
-                 **Datos del Cliente:**
-                 - Patrimonio total: ${datos_cliente['patrimonio']:,.2f}
-                 - Activos: ${datos_cliente['activos']:,.2f}
-                 - Pasivos: ${datos_cliente['pasivos']:,.2f}
-                 - Cantidad de activos: {datos_cliente['cantidad_activos']}
-                 - Composición: {datos_cliente['composicion']}
-                 
-                 **Contexto Económico Actual:**
-                 - Mercado argentino con alta volatilidad
-                 - Inflación elevada (superior al 100% anual)
-                 - Tasas de interés altas (LELIQ > 100%)
-                 - Riesgo cambiario presente
-                 - Presión sobre reservas del BCRA
-                 
-                 **Como asesor experto, proporciona:**
-                 
-                 **1. ANÁLISIS DE RIESGO (2-3 párrafos)**
-                 - Evaluación del perfil de riesgo actual
-                 - Identificación de vulnerabilidades específicas
-                 - Comparación con benchmarks del mercado argentino
-                 
-                 **2. RECOMENDACIONES INMEDIATAS (3-5 puntos)**
-                 - Acciones específicas que el asesor debe sugerir al cliente
-                 - Priorización de cambios urgentes
-                 - Sugerencias de timing para las operaciones
-                 
-                 **3. ESTRATEGIA DE REBALANCEO (detallada)**
-                 - Qué activos reducir/aumentar
-                 - Nuevos activos a considerar
-                 - Proporciones sugeridas por tipo de activo
-                 
-                 **4. ALERTAS Y MONITOREO**
-                 - Indicadores clave a vigilar
-                 - Triggers para cambios de estrategia
-                 - Frecuencia de revisión recomendada
-                 
-                 **5. COMUNICACIÓN CON EL CLIENTE**
-                 - Puntos clave a explicar al cliente
-                 - Expectativas realistas a establecer
-                 - Mensajes de tranquilidad o advertencia según corresponda
-                 
-                 Responde en español, de forma clara y profesional, orientado específicamente a un asesor financiero que necesita guía experta para aconsejar a su cliente. Incluye datos específicos y justificaciones técnicas cuando sea relevante.
-                 """
+                # Generar prompt para IA
+                prompt_ia = f"""
+                Eres un asesor financiero experto en Argentina con más de 15 años de experiencia. Analiza el siguiente portafolio y proporciona recomendaciones específicas para el asesor:
+                
+                **Datos del Cliente:**
+                - Patrimonio total: ${datos_cliente['patrimonio']:,.2f}
+                - Activos: ${datos_cliente['activos']:,.2f}
+                - Pasivos: ${datos_cliente['pasivos']:,.2f}
+                - Cantidad de activos: {datos_cliente['cantidad_activos']}
+                - Composición: {datos_cliente['composicion']}
+                
+                **Contexto Económico Actual:**
+                - Mercado argentino con alta volatilidad
+                - Inflación elevada (superior al 100% anual)
+                - Tasas de interés altas (LELIQ > 100%)
+                - Riesgo cambiario presente
+                - Presión sobre reservas del BCRA
+                
+                **Como asesor experto, proporciona:**
+                
+                **1. ANÁLISIS DE RIESGO (2-3 párrafos)**
+                - Evaluación del perfil de riesgo actual
+                - Identificación de vulnerabilidades específicas
+                - Comparación con benchmarks del mercado argentino
+                
+                **2. RECOMENDACIONES INMEDIATAS (3-5 puntos)**
+                - Acciones específicas que el asesor debe sugerir al cliente
+                - Priorización de cambios urgentes
+                - Sugerencias de timing para las operaciones
+                
+                **3. ESTRATEGIA DE REBALANCEO (detallada)**
+                - Qué activos reducir/aumentar
+                - Nuevos activos a considerar
+                - Proporciones sugeridas por tipo de activo
+                
+                **4. ALERTAS Y MONITOREO**
+                - Indicadores clave a vigilar
+                - Triggers para cambios de estrategia
+                - Frecuencia de revisión recomendada
+                
+                **5. COMUNICACIÓN CON EL CLIENTE**
+                - Puntos clave a explicar al cliente
+                - Expectativas realistas a establecer
+                - Mensajes de tranquilidad o advertencia según corresponda
+                
+                Responde en español, de forma clara y profesional, orientado específicamente a un asesor financiero que necesita guía experta para aconsejar a su cliente. Incluye datos específicos y justificaciones técnicas cuando sea relevante.
+                """
                 
                 # Llamar a Gemini
                 import google.generativeai as genai
@@ -7375,7 +7333,7 @@ def mostrar_dashboard_unificado():
         except Exception as e:
             st.error(f"Error al generar recomendaciones IA: {e}")
     
-    with tabs[4]:
+    with tabs[5]:
         st.header("📈 Optimización Adaptativa")
         
         if st.session_state.cliente_seleccionado and gemini_key:
@@ -7386,7 +7344,7 @@ def mostrar_dashboard_unificado():
         else:
             st.info("Seleccione un cliente y configure la API Key para acceder a la optimización")
     
-    with tabs[5]:
+    with tabs[6]:
         st.header("🔍 Datos Económicos")
         
         # Dashboard económico optimizado
@@ -7906,144 +7864,6 @@ def mostrar_dashboard_economico_optimizado():
         unsafe_allow_html=True
     )
 
-def obtener_variables_macro_argentina(datos_economicos, periodo_analisis="1y"):
-    """Obtiene variables macroeconómicas específicas de Argentina desde el Ministerio de Economía"""
-    variables_macro_arg = {}
-    
-    if datos_economicos is None:
-        return variables_macro_arg
-    
-    # Buscar series específicas por palabras clave
-    series_info = obtener_series_disponibles_economicas(datos_economicos)
-    
-    # Categorías de interés para análisis macro
-    categorias_interes = [
-        'inflacion', 'pbi', 'desempleo', 'tipo_cambio', 'reservas', 
-        'deuda', 'exportaciones', 'importaciones', 'consumo', 'inversion'
-    ]
-    
-    for categoria in categorias_interes:
-        # Buscar series que contengan la categoría en el título
-        series_categoria = series_info[
-            series_info['serie_titulo'].str.contains(categoria, case=False, na=False)
-        ]
-        
-        if not series_categoria.empty:
-            # Tomar la primera serie encontrada
-            serie_id = series_categoria.iloc[0]['serie_id']
-            valores = obtener_valores_serie_economica(serie_id, datos_economicos)
-            
-            if not valores.empty:
-                # Calcular métricas
-                serie = valores.set_index('indice_tiempo')['valor']
-                retornos = serie.pct_change().dropna()
-                
-                # Calcular momentum (últimos 63 días)
-                ventana_momentum = min(63, len(serie))
-                if len(serie) >= ventana_momentum:
-                    momentum = (serie.iloc[-1] / serie.iloc[-ventana_momentum] - 1) * 100
-                else:
-                    momentum = 0
-                
-                volatilidad = retornos.std() * np.sqrt(252) * 100 if len(retornos) > 0 else 0
-                tendencia = 'Alcista' if momentum > 0 else 'Bajista'
-                
-                variables_macro_arg[categoria.upper()] = {
-                    'valor_actual': serie.iloc[-1],
-                    'momentum': momentum,
-                    'volatilidad': volatilidad,
-                    'tendencia': tendencia,
-                    'serie': serie,
-                    'serie_id': serie_id,
-                    'titulo': series_categoria.iloc[0]['serie_titulo']
-                }
-    
-    return variables_macro_arg
-
-def crear_indice_ciclo_economico_argentino():
-    """
-    Crea un índice del ciclo económico argentino basado en variables macroeconómicas clave
-    """
-    st.subheader("📊 Índice del Ciclo Económico Argentino")
-    
-    try:
-        with st.spinner("🔄 Calculando índice del ciclo económico..."):
-            
-            # Variables económicas clave para Argentina
-            variables_clave = {
-                'PBI': '^GSPC',  # Proxy del PBI argentino (usamos S&P 500 como referencia)
-                'Inflación': '^VIX',  # Volatilidad como proxy de inflación
-                'Tasa de Interés': '^TNX',  # Tasa de 10 años EEUU como referencia
-                'Commodities': 'GC=F',  # Oro como proxy de commodities
-                'Dólar': 'DX-Y.NYB',  # Índice del dólar
-                'MERVAL': '^MXX'  # Índice mexicano como proxy del MERVAL
-            }
-            
-            # Descargar datos históricos
-            datos = yf.download(list(variables_clave.values()), period="2y", progress=False)['Adj Close']
-            
-            if datos.empty:
-                st.error("No se pudieron obtener datos para calcular el índice")
-                return None
-            
-            # Normalizar datos (convertir a índices base 100)
-            datos_normalizados = datos / datos.iloc[0] * 100
-            
-            # Calcular componentes del índice
-            componentes = {}
-            
-            # 1. Componente de Actividad (PBI + MERVAL)
-            if '^GSPC' in datos_normalizados.columns and '^MXX' in datos_normalizados.columns:
-                componentes['Actividad'] = (datos_normalizados['^GSPC'] + datos_normalizados['^MXX']) / 2
-            
-            # 2. Componente de Inflación (invertido VIX)
-            if '^VIX' in datos_normalizados.columns:
-                # Invertir VIX (mayor volatilidad = peor ciclo)
-                vix_invertido = 200 - datos_normalizados['^VIX']
-                componentes['Inflación'] = vix_invertido
-            
-            # 3. Componente Monetario (Tasa de interés invertida)
-            if '^TNX' in datos_normalizados.columns:
-                # Invertir tasa (mayor tasa = peor ciclo)
-                tasa_invertida = 200 - datos_normalizados['^TNX']
-                componentes['Monetario'] = tasa_invertida
-            
-            # 4. Componente de Commodities
-            if 'GC=F' in datos_normalizados.columns:
-                componentes['Commodities'] = datos_normalizados['GC=F']
-            
-            # 5. Componente Cambiario (dólar invertido)
-            if 'DX-Y.NYB' in datos_normalizados.columns:
-                # Invertir dólar (dólar fuerte = peor para Argentina)
-                dolar_invertido = 200 - datos_normalizados['DX-Y.NYB']
-                componentes['Cambiario'] = dolar_invertido
-            
-            # Calcular índice compuesto
-            if len(componentes) >= 3:
-                df_componentes = pd.DataFrame(componentes)
-                indice_ciclo = df_componentes.mean(axis=1)
-                
-                # Normalizar índice a escala 0-100
-                indice_normalizado = ((indice_ciclo - indice_ciclo.min()) / 
-                                    (indice_ciclo.max() - indice_ciclo.min())) * 100
-                
-                # Crear DataFrame final
-                df_indice = pd.DataFrame({
-                    'Fecha': indice_normalizado.index,
-                    'Índice_Ciclo': indice_normalizado.values,
-                    'Tendencia': indice_normalizado.rolling(window=20).mean(),
-                    'Volatilidad': indice_normalizado.rolling(window=20).std()
-                })
-                
-                return df_indice, componentes
-            else:
-                st.error("No hay suficientes datos para calcular el índice")
-                return None, None
-                
-    except Exception as e:
-        st.error(f"Error al calcular el índice: {e}")
-        return None, None
-
 def graficar_indice_ciclo_economico(df_indice, componentes=None):
     """
     Grafica el índice del ciclo económico argentino con análisis detallado
@@ -8206,300 +8026,6 @@ def graficar_indice_ciclo_economico(df_indice, componentes=None):
                         line=dict(color=colores[i % len(colores)], width=2),
                         hovertemplate=f'<b>{nombre}</b><br>Fecha: %{{x}}<br>Componente: %{{y:.1f}}<extra></extra>'
                     ))
-        
-        fig_componentes.update_layout(
-            title="Componentes del Índice del Ciclo Económico",
-            xaxis_title="Fecha",
-            yaxis_title="Valor Normalizado",
-            hovermode='x unified',
-            template='plotly_white',
-            height=400
-        )
-        
-        st.plotly_chart(fig_componentes, use_container_width=True)
-    
-    # Análisis de correlación con portafolio
-    st.subheader("📊 Correlación con Portafolio")
-    
-    # Simular correlación (en implementación real usarías datos reales del portafolio)
-    correlacion_estimada = 0.65
-    st.metric("Correlación Estimada", f"{correlacion_estimada:.2f}")
-    
-    st.info(f"""
-    **Interpretación de la Correlación:**
-    - **Alta (>0.7)**: El portafolio sigue muy de cerca el ciclo económico
-    - **Media (0.4-0.7)**: Correlación moderada, hay diversificación
-    - **Baja (<0.4)**: El portafolio está bien diversificado del ciclo
-    
-    **Correlación actual: {correlacion_estimada:.2f}** - Correlación media, 
-    indica que el portafolio tiene cierta diversificación del ciclo económico.
-    """)
-
-def mostrar_analisis_tecnico_componentes(componentes_procesados):
-    """
-    Muestra análisis técnico detallado de cada componente del índice
-    """
-    if not componentes_procesados:
-        return
-    
-    st.subheader("🔬 Análisis Técnico de Componentes")
-    
-    # Crear pestañas para cada componente
-    tabs_componentes = st.tabs(list(componentes_procesados.keys()))
-    
-    for i, (variable, info) in enumerate(componentes_procesados.items()):
-        with tabs_componentes[i]:
-            st.write(f"**{info['titulo']}**")
-            st.write(f"**Tipo:** {info['tipo']} | **Peso:** {info['peso']:.1%}")
-            
-            datos = info['datos']
-            
-            # Métricas básicas
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                ultimo_valor = datos['valor'].iloc[-1]
-                st.metric("Valor Actual", f"{ultimo_valor:,.2f}")
-            
-            with col2:
-                if 'crecimiento_interanual' in datos.columns:
-                    crecimiento = datos['crecimiento_interanual'].iloc[-1]
-                    st.metric("Crecimiento Interanual", f"{crecimiento:+.1f}%")
-            
-            with col3:
-                if 'brecha_producto' in datos.columns:
-                    brecha = datos['brecha_producto'].iloc[-1]
-                    st.metric("Brecha de Producto", f"{brecha:+.1f}%")
-            
-            # Gráficos de análisis técnico
-            fig_tecnico = make_subplots(
-                rows=2, cols=2,
-                subplot_titles=('Valor Original', 'Tendencia HP', 'Componente Cíclico', 'Brecha de Producto'),
-                specs=[[{"secondary_y": False}, {"secondary_y": False}],
-                       [{"secondary_y": False}, {"secondary_y": False}]]
-            )
-            
-            # 1. Valor original
-            fig_tecnico.add_trace(
-                go.Scatter(x=datos['indice_tiempo'], y=datos['valor'], 
-                          mode='lines', name='Valor Original', line=dict(color='blue')),
-                row=1, col=1
-            )
-            
-            # 2. Tendencia HP
-            if 'tendencia_hp' in datos.columns:
-                fig_tecnico.add_trace(
-                    go.Scatter(x=datos['indice_tiempo'], y=datos['tendencia_hp'], 
-                              mode='lines', name='Tendencia HP', line=dict(color='red')),
-                    row=1, col=2
-                )
-            
-            # 3. Componente cíclico
-            if 'ciclo_hp' in datos.columns:
-                fig_tecnico.add_trace(
-                    go.Scatter(x=datos['indice_tiempo'], y=datos['ciclo_hp'], 
-                              mode='lines', name='Componente Cíclico', line=dict(color='green')),
-                    row=2, col=1
-                )
-            
-            # 4. Brecha de producto
-            if 'brecha_producto' in datos.columns:
-                fig_tecnico.add_trace(
-                    go.Scatter(x=datos['indice_tiempo'], y=datos['brecha_producto'], 
-                              mode='lines', name='Brecha de Producto', line=dict(color='orange')),
-                    row=2, col=2
-                )
-            
-            fig_tecnico.update_layout(height=600, showlegend=False, title_text=f"Análisis Técnico: {variable}")
-            st.plotly_chart(fig_tecnico, use_container_width=True)
-            
-            # Interpretación técnica
-            st.subheader("📋 Interpretación Técnica")
-            
-            if 'brecha_producto' in datos.columns:
-                brecha_actual = datos['brecha_producto'].iloc[-1]
-                
-                if brecha_actual > 2:
-                    interpretacion = "**Sobrecalentamiento**: La economía está operando por encima de su potencial"
-                elif brecha_actual > 0:
-                    interpretacion = "**Expansión**: La economía está creciendo por encima de su tendencia"
-                elif brecha_actual > -2:
-                    interpretacion = "**Normal**: La economía está cerca de su potencial"
-                else:
-                    interpretacion = "**Subutilización**: La economía está operando por debajo de su potencial"
-                
-                st.info(f"""
-                **Brecha de Producto Actual: {brecha_actual:.1f}%**
-                
-                {interpretacion}
-                
-                **Implicaciones:**
-                - Brecha positiva: Presión inflacionaria, posible ajuste monetario
-                - Brecha negativa: Capacidad ociosa, espacio para estímulo
-                """)
-            
-            # Estadísticas descriptivas
-            st.subheader("📊 Estadísticas Descriptivas")
-            
-            if 'ciclo_hp' in datos.columns:
-                ciclo_stats = datos['ciclo_hp'].describe()
-                st.dataframe(ciclo_stats.to_frame('Estadísticas'))
-                
-                # Análisis de volatilidad del ciclo
-                volatilidad_ciclo = datos['ciclo_hp'].std()
-                st.metric("Volatilidad del Ciclo", f"{volatilidad_ciclo:.2f}")
-                
-                if volatilidad_ciclo > datos['valor'].std() * 0.5:
-                    st.warning("⚠️ **Alta volatilidad cíclica** - Esta variable muestra fuertes fluctuaciones del ciclo")
-                else:
-                    st.success("✅ **Volatilidad cíclica moderada** - Esta variable es relativamente estable")
-    """
-    Grafica el índice del ciclo económico argentino con análisis detallado
-    """
-    if df_indice is None or df_indice.empty:
-        st.error("No hay datos para graficar")
-        return
-    
-    st.subheader("📈 Visualización del Índice del Ciclo Económico")
-    
-    # Gráfico principal del índice
-    fig_principal = go.Figure()
-    
-    # Línea del índice
-    fig_principal.add_trace(go.Scatter(
-        x=df_indice['Fecha'],
-        y=df_indice['Índice_Ciclo'],
-        mode='lines',
-        name='Índice del Ciclo',
-        line=dict(color='#1f77b4', width=3),
-        hovertemplate='<b>Fecha:</b> %{x}<br><b>Índice:</b> %{y:.1f}<extra></extra>'
-    ))
-    
-    # Línea de tendencia
-    fig_principal.add_trace(go.Scatter(
-        x=df_indice['Fecha'],
-        y=df_indice['Tendencia'],
-        mode='lines',
-        name='Tendencia (20 días)',
-        line=dict(color='#ff7f0e', width=2, dash='dash'),
-        hovertemplate='<b>Fecha:</b> %{x}<br><b>Tendencia:</b> %{y:.1f}<extra></extra>'
-    ))
-    
-    # Banda de volatilidad
-    fig_principal.add_trace(go.Scatter(
-        x=df_indice['Fecha'],
-        y=df_indice['Tendencia'] + df_indice['Volatilidad'],
-        mode='lines',
-        name='Banda Superior',
-        line=dict(color='rgba(255,127,14,0.3)', width=1),
-        showlegend=False,
-        hoverinfo='skip'
-    ))
-    
-    fig_principal.add_trace(go.Scatter(
-        x=df_indice['Fecha'],
-        y=df_indice['Tendencia'] - df_indice['Volatilidad'],
-        mode='lines',
-        fill='tonexty',
-        name='Banda de Volatilidad',
-        line=dict(color='rgba(255,127,14,0.3)', width=1),
-        fillcolor='rgba(255,127,14,0.1)',
-        hovertemplate='<b>Fecha:</b> %{x}<br><b>Banda Inferior:</b> %{y:.1f}<extra></extra>'
-    ))
-    
-    # Líneas de referencia para fases del ciclo
-    fig_principal.add_hline(y=80, line_dash="dash", line_color="green", 
-                           annotation_text="Expansión", annotation_position="top right")
-    fig_principal.add_hline(y=60, line_dash="dash", line_color="orange", 
-                           annotation_text="Crecimiento Moderado", annotation_position="top right")
-    fig_principal.add_hline(y=40, line_dash="dash", line_color="red", 
-                           annotation_text="Contracción", annotation_position="top right")
-    fig_principal.add_hline(y=20, line_dash="dash", line_color="darkred", 
-                           annotation_text="Recesión", annotation_position="top right")
-    
-    fig_principal.update_layout(
-        title="Índice del Ciclo Económico Argentino",
-        xaxis_title="Fecha",
-        yaxis_title="Índice del Ciclo (0-100)",
-        yaxis=dict(range=[0, 100]),
-        hovermode='x unified',
-        template='plotly_white',
-        height=500
-    )
-    
-    st.plotly_chart(fig_principal, use_container_width=True)
-    
-    # Análisis de fases del ciclo
-    st.subheader("🔄 Análisis de Fases del Ciclo")
-    
-    ultimo_indice = df_indice['Índice_Ciclo'].iloc[-1]
-    tendencia_actual = df_indice['Tendencia'].iloc[-1]
-    
-    # Determinar fase actual
-    if ultimo_indice >= 80:
-        fase_actual = "Expansión"
-        color_fase = "success"
-        descripcion = "Economía en fase de expansión fuerte"
-    elif ultimo_indice >= 60:
-        fase_actual = "Crecimiento Moderado"
-        color_fase = "info"
-        descripcion = "Economía en crecimiento moderado"
-    elif ultimo_indice >= 40:
-        fase_actual = "Contracción"
-        color_fase = "warning"
-        descripcion = "Economía en fase de contracción"
-    else:
-        fase_actual = "Recesión"
-        color_fase = "error"
-        descripcion = "Economía en recesión"
-    
-    # Métricas actuales
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Índice Actual", f"{ultimo_indice:.1f}")
-    
-    with col2:
-        st.metric("Fase del Ciclo", fase_actual)
-    
-    with col3:
-        cambio_1m = ((ultimo_indice / df_indice['Índice_Ciclo'].iloc[-20]) - 1) * 100
-        st.metric("Cambio 1 Mes", f"{cambio_1m:+.1f}%")
-    
-    with col4:
-        volatilidad_actual = df_indice['Volatilidad'].iloc[-1]
-        st.metric("Volatilidad", f"{volatilidad_actual:.1f}")
-    
-    # Información de la fase
-    st.info(f"""
-    **📊 Fase Actual: {fase_actual}**
-    
-    {descripcion}
-    
-    **Recomendaciones para el portafolio:**
-    - **Expansión**: Aumentar exposición a acciones y activos de riesgo
-    - **Crecimiento Moderado**: Mantener balance entre riesgo y conservador
-    - **Contracción**: Reducir riesgo, aumentar bonos y activos defensivos
-    - **Recesión**: Máxima defensa, liquidez y activos de refugio
-    """)
-    
-    # Gráfico de componentes
-    if componentes:
-        st.subheader("🔧 Componentes del Índice")
-        
-        fig_componentes = go.Figure()
-        
-        colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-        
-        for i, (nombre, datos) in enumerate(componentes.items()):
-            fig_componentes.add_trace(go.Scatter(
-                x=datos.index,
-                y=datos.values,
-                mode='lines',
-                name=nombre,
-                line=dict(color=colores[i % len(colores)], width=2),
-                hovertemplate=f'<b>{nombre}</b><br>Fecha: %{{x}}<br>Valor: %{{y:.1f}}<extra></extra>'
-            ))
         
         fig_componentes.update_layout(
             title="Componentes del Índice del Ciclo Económico",
