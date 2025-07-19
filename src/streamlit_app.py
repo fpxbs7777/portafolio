@@ -3405,7 +3405,14 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             sugerencia = "Portafolio diversificado: mantener exposición equilibrada y flexibilidad."
         st.success(f"Etapa detectada: **{etapa}**")
         st.caption(f"Explicación: {explicacion_ciclo}")
-        st.markdown(f"- Reservas: {reservas:,.0f}M USD\n- Tasa LELIQ: {tasa_leliq:.2f}% anual\n- Inflación mensual: {inflacion*100:.2f}%\n- Crecimiento M2: {m2_crecimiento*100:.2f}%")
+        
+        # Validar y mostrar variables con manejo de None
+        reservas_str = f"{reservas:,.0f}M USD" if reservas is not None else "N/D"
+        tasa_leliq_str = f"{tasa_leliq:.2f}% anual" if tasa_leliq is not None else "N/D"
+        inflacion_str = f"{inflacion*100:.2f}%" if inflacion is not None else "N/D"
+        m2_crecimiento_str = f"{m2_crecimiento*100:.2f}%" if m2_crecimiento is not None else "N/D"
+        
+        st.markdown(f"- Reservas: {reservas_str}\n- Tasa LELIQ: {tasa_leliq_str}\n- Inflación mensual: {inflacion_str}\n- Crecimiento M2: {m2_crecimiento_str}")
         # --- SUGERENCIA DE ESTRATEGIA SEGÚN CICLO ---
         st.markdown(f"""
         <div style='background:#eaf6fb;border-left:6px solid #007cf0;padding:1.2em 1.5em;margin:1.2em 0 1.5em 0;border-radius:10px;'>
@@ -4109,7 +4116,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Dashboard Unificado", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Dashboard Unificado", "📊 Análisis de Portafolio", "🌍 Contexto Económico", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4121,12 +4128,14 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "🌍 Contexto Económico":
+                mostrar_dashboard_datos_economicos()
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
+            elif opcion == "👨‍💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
@@ -4189,6 +4198,227 @@ def main():
         st.code(traceback.format_exc())
         st.error("La aplicación no pudo iniciarse correctamente.")
         st.info("Por favor, verifique que todas las dependencias estén instaladas.")
+
+def crear_indice_ciclo_economico_argentino():
+    """
+    Crea un índice básico del ciclo económico argentino usando datos globales como proxy
+    """
+    try:
+        import yfinance as yf
+        import pandas as pd
+        import numpy as np
+        
+        # Variables globales como proxy para el ciclo argentino
+        tickers = {
+            'S&P 500': '^GSPC',
+            'VIX': '^VIX',
+            'Tasa 10Y EEUU': '^TNX',
+            'Oro': 'GC=F',
+            'Dólar Index': 'DX-Y.NYB',
+            'Índice Mexicano': '^MXX'  # Proxy del MERVAL
+        }
+        
+        # Descargar datos
+        data = {}
+        for nombre, ticker in tickers.items():
+            try:
+                df = yf.download(ticker, start='2020-01-01', end=pd.Timestamp.now(), progress=False)
+                if not df.empty:
+                    data[nombre] = df['Adj Close']
+            except Exception as e:
+                st.warning(f"No se pudo obtener {nombre}: {e}")
+                continue
+        
+        if len(data) < 3:
+            st.error("No hay suficientes datos para crear el índice")
+            return None, None
+        
+        # Crear DataFrame con todos los datos
+        df_combined = pd.DataFrame(data)
+        df_combined = df_combined.dropna()
+        
+        if len(df_combined) < 30:
+            st.error("No hay suficientes datos históricos")
+            return None, None
+        
+        # Normalizar a base 100
+        df_normalized = df_combined / df_combined.iloc[0] * 100
+        
+        # Invertir variables contra-cíclicas
+        variables_contraciclicas = ['VIX', 'Tasa 10Y EEUU', 'Dólar Index']
+        for var in variables_contraciclicas:
+            if var in df_normalized.columns:
+                df_normalized[var] = 200 - df_normalized[var]  # Invertir
+        
+        # Calcular índice como promedio simple
+        df_normalized['Índice_Ciclo'] = df_normalized.mean(axis=1)
+        
+        # Normalizar a escala 0-100
+        min_val = df_normalized['Índice_Ciclo'].min()
+        max_val = df_normalized['Índice_Ciclo'].max()
+        df_normalized['Índice_Ciclo'] = ((df_normalized['Índice_Ciclo'] - min_val) / (max_val - min_val)) * 100
+        
+        # Agregar tendencia y volatilidad
+        df_normalized['Tendencia'] = df_normalized['Índice_Ciclo'].rolling(window=20).mean()
+        df_normalized['Volatilidad'] = df_normalized['Índice_Ciclo'].rolling(window=20).std()
+        
+        # Crear DataFrame final
+        df_final = pd.DataFrame({
+            'Fecha': df_normalized.index,
+            'Índice_Ciclo': df_normalized['Índice_Ciclo'],
+            'Tendencia': df_normalized['Tendencia'],
+            'Volatilidad': df_normalized['Volatilidad']
+        })
+        
+        # Componentes para mostrar
+        componentes = {}
+        for nombre, ticker in tickers.items():
+            if nombre in df_normalized.columns:
+                componentes[nombre] = df_normalized[nombre]
+        
+        return df_final, componentes
+        
+    except Exception as e:
+        st.error(f"Error al crear índice del ciclo económico: {e}")
+        return None, None
+
+def mostrar_analisis_tecnico_componentes(componentes):
+    """
+    Muestra análisis técnico detallado de los componentes del índice
+    """
+    if not componentes:
+        st.warning("No hay componentes para analizar")
+        return
+    
+    st.subheader("🔧 Análisis Técnico de Componentes")
+    
+    for nombre, info in componentes.items():
+        if isinstance(info, dict) and 'datos' in info:
+            datos_comp = info['datos']
+            
+            if 'componente_final' in datos_comp.columns:
+                serie = datos_comp['componente_final']
+                
+                # Calcular métricas técnicas
+                if len(serie) > 0:
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(f"{nombre} - Media", f"{serie.mean():.2f}")
+                    
+                    with col2:
+                        st.metric(f"{nombre} - Volatilidad", f"{serie.std():.2f}")
+                    
+                    with col3:
+                        st.metric(f"{nombre} - Peso", f"{info.get('peso', 0):.1%}")
+                    
+                    # Gráfico del componente
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=datos_comp['indice_tiempo'],
+                        y=serie,
+                        mode='lines',
+                        name=nombre,
+                        line=dict(width=2)
+                    ))
+                    
+                    fig.update_layout(
+                        title=f"Evolución de {nombre}",
+                        xaxis_title="Fecha",
+                        yaxis_title="Valor",
+                        template='plotly_white',
+                        height=300
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.markdown("---")
+
+def obtener_variables_macro_argentina(datos_economicos, periodo_analisis):
+    """
+    Obtiene variables macroeconómicas argentinas desde los datos económicos
+    """
+    variables_macro = {}
+    
+    try:
+        if datos_economicos and 'valores' in datos_economicos:
+            # Buscar series específicas argentinas
+            series_buscadas = {
+                'inflacion': ['inflacion', 'ipc', 'indice_precios'],
+                'pbi': ['pbi', 'producto_bruto', 'actividad_economica'],
+                'desempleo': ['desempleo', 'tasa_desempleo', 'empleo'],
+                'reservas': ['reservas', 'reservas_internacionales'],
+                'tasa_interes': ['tasa_interes', 'leliq', 'badlar']
+            }
+            
+            for variable, keywords in series_buscadas.items():
+                for keyword in keywords:
+                    # Buscar series que contengan el keyword
+                    series_encontradas = datos_economicos['index'][
+                        datos_economicos['index']['serie_titulo'].str.contains(keyword, case=False, na=False)
+                    ]
+                    
+                    if not series_encontradas.empty:
+                        # Tomar la primera serie encontrada
+                        serie_id = series_encontradas.iloc[0]['serie_id']
+                        valores = obtener_valores_serie_economica(serie_id, datos_economicos)
+                        
+                        if valores is not None and not valores.empty:
+                            # Calcular métricas básicas
+                            valor_actual = valores['valor'].iloc[-1] if len(valores) > 0 else None
+                            valor_inicial = valores['valor'].iloc[0] if len(valores) > 0 else None
+                            
+                            if valor_actual is not None and valor_inicial is not None:
+                                cambio_porcentual = ((valor_actual / valor_inicial) - 1) * 100
+                                
+                                variables_macro[variable] = {
+                                    'valor_actual': valor_actual,
+                                    'cambio_porcentual': cambio_porcentual,
+                                    'serie_id': serie_id,
+                                    'titulo': series_encontradas.iloc[0]['serie_titulo']
+                                }
+                            break
+        
+        return variables_macro
+        
+    except Exception as e:
+        st.warning(f"Error al obtener variables macro argentinas: {e}")
+        return {}
+
+def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
+    """
+    Obtiene series históricas aleatorias para un universo de activos con capital específico
+    """
+    import random
+    import pandas as pd
+    
+    series_historicas = {}
+    seleccion_final = {}
+    
+    try:
+        for panel in paneles_seleccionados:
+            if panel in tickers_por_panel and tickers_por_panel[panel]:
+                # Seleccionar activos aleatorios del panel
+                tickers_disponibles = tickers_por_panel[panel]
+                cantidad_seleccionar = min(cantidad_activos, len(tickers_disponibles))
+                tickers_seleccionados = random.sample(tickers_disponibles, cantidad_seleccionar)
+                
+                seleccion_final[panel] = tickers_seleccionados
+                
+                # Obtener series históricas para cada ticker seleccionado
+                for ticker in tickers_seleccionados:
+                    try:
+                        # Intentar obtener datos históricos
+                        serie = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
+                        if serie is not None and not serie.empty:
+                            series_historicas[ticker] = serie
+                    except Exception as e:
+                        continue
+        
+        return series_historicas, seleccion_final
+        
+    except Exception as e:
+        st.error(f"Error al obtener series históricas: {e}")
+        return {}, {}
 
 def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
     """
@@ -6913,10 +7143,7 @@ def mostrar_dashboard_unificado():
         "📊 Resumen Ejecutivo", 
         "🎯 Análisis de Portafolio",
         "🌍 Contexto Económico",
-        "📈 Ciclo Económico",
-        "🤖 Recomendaciones IA",
-        "📈 Optimización Adaptativa",
-        "🔍 Datos Económicos"
+        "📈 Optimización Adaptativa"
     ])
     
     with tabs[0]:
@@ -7333,7 +7560,7 @@ def mostrar_dashboard_unificado():
         except Exception as e:
             st.error(f"Error al generar recomendaciones IA: {e}")
     
-    with tabs[5]:
+    with tabs[3]:
         st.header("📈 Optimización Adaptativa")
         
         if st.session_state.cliente_seleccionado and gemini_key:
@@ -7343,158 +7570,8 @@ def mostrar_dashboard_unificado():
                 st.error(f"Error en optimización: {e}")
         else:
             st.info("Seleccione un cliente y configure la API Key para acceder a la optimización")
-    
-    with tabs[6]:
-        st.header("🔍 Datos Económicos")
-        
-        # Dashboard económico optimizado
-        try:
-            mostrar_dashboard_economico_optimizado()
-        except Exception as e:
-            st.error(f"Error al cargar datos económicos: {e}")
 
-def mostrar_dashboard_economico_optimizado():
-    """
-    Dashboard completo y optimizado para explorar y analizar datos económicos del Ministerio de Economía de Argentina
-    """
-    st.markdown("---")
-    st.subheader("🚀 Dashboard Económico Optimizado - Ministerio de Economía")
-    
-    # Configuración de pandas para mejor rendimiento
-    pd.options.mode.chained_assignment = None
-    
-    # Inicializar session_state para persistencia
-    if 'datos_cargados' not in st.session_state:
-        st.session_state.datos_cargados = None
-    if 'series_info' not in st.session_state:
-        st.session_state.series_info = None
-    if 'categoria_seleccionada' not in st.session_state:
-        st.session_state.categoria_seleccionada = 'Todas'
-    if 'frecuencia_seleccionada' not in st.session_state:
-        st.session_state.frecuencia_seleccionada = 'Todas'
-    if 'busqueda_texto' not in st.session_state:
-        st.session_state.busqueda_texto = ''
-    if 'serie_seleccionada' not in st.session_state:
-        st.session_state.serie_seleccionada = None
-    if 'categoria_analisis' not in st.session_state:
-        st.session_state.categoria_analisis = None
-    if 'series_comparar' not in st.session_state:
-        st.session_state.series_comparar = []
-    if 'tab_actual' not in st.session_state:
-        st.session_state.tab_actual = "🏠 Dashboard General"
-    
-    # Título principal
-    st.title("🚀 Dashboard Económico Optimizado")
-    st.markdown("### Ministerio de Economía de la Nación - Series de Tiempo")
-    st.markdown("---")
-    
-    # Información sobre datos reales y optimizaciones
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        st.info("✅ **Todos los datos mostrados son REALES y provienen directamente de las APIs oficiales del Ministerio de Economía de la Nación Argentina.**")
-    
-    with col2:
-        st.success("⚡ **Optimizada para velocidad máxima**")
-    
-    # Botón para recargar datos
-    col1, col2, col3 = st.columns([1, 3, 1])
-    with col2:
-        if st.button("🔄 Recargar Datos", key="reload_button_optimized"):
-            st.session_state.datos_cargados = None
-            st.session_state.series_info = None
-            st.rerun()
-    
-    # Información sobre mapeos descriptivos
-    with st.expander("ℹ️ Información sobre los datos mostrados"):
-        st.info("""
-        **Nombres Descriptivos Implementados:**
-        
-        **Frecuencias de Actualización:**
-        - R/P1Y → Anual
-        - R/P6M → Semestral  
-        - R/P3M → Trimestral
-        - R/P1M → Mensual
-        - R/P1D → Diaria
-        
-        **Fuentes de Datos:**
-        - sspm → Sistema de Cuentas Nacionales
-        - snic → Sistema Nacional de Información de Comercio
-        - bcra → Banco Central de la República Argentina
-        - agroindustria → Ministerio de Agroindustria
-        - turismo → Turismo
-        - obras → Obras Públicas
-        - Y muchos más...
-        """)
-    
-    # Descargar y procesar datos con persistencia
-    if st.session_state.datos_cargados is None:
-        datos = descargar_y_procesar_datos_economicos()
-        if datos is not None:
-            st.session_state.datos_cargados = datos
-        else:
-            st.error("No se pudieron cargar los datos. Verifica tu conexión a internet.")
-            return
-    else:
-        datos = st.session_state.datos_cargados
-        st.success("✅ Datos cargados desde cache - Sin recarga necesaria")
-    
-    # Sidebar para navegación
-    st.sidebar.title("🎯 Navegación")
-    
-    # Indicador de estado de persistencia
-    if st.session_state.datos_cargados is not None:
-        st.sidebar.success("✅ Datos persistentes")
-        st.sidebar.info(f"📊 {len(st.session_state.datos_cargados['valores']):,} valores cargados")
-    else:
-        st.sidebar.warning("⏳ Cargando datos...")
-    
-    st.sidebar.markdown("---")
-    
-    # Botones de control
-    if st.sidebar.button("🗑️ Limpiar Selecciones", key="clear_selections_optimized"):
-        st.session_state.categoria_seleccionada = 'Todas'
-        st.session_state.frecuencia_seleccionada = 'Todas'
-        st.session_state.busqueda_texto = ''
-        st.session_state.serie_seleccionada = None
-        st.session_state.categoria_analisis = None
-        st.session_state.series_comparar = []
-        st.rerun()
-    
-    if st.sidebar.button("🔄 Limpiar Cache", key="clear_cache_optimized"):
-        st.session_state.datos_cargados = None
-        st.session_state.series_info = None
-        st.rerun()
-    
-    st.sidebar.markdown("---")
-    
-    # Estadísticas generales
-    st.header("📈 Estadísticas Generales")
-    mostrar_estadisticas_generales_economicas(datos)
-    st.markdown("---")
-    
-    # Obtener series disponibles con persistencia
-    if st.session_state.series_info is None:
-        series_info = obtener_series_disponibles_economicas(datos)
-        st.session_state.series_info = series_info
-    else:
-        series_info = st.session_state.series_info
-    
-    # Pestañas principales con persistencia
-    tabs = st.tabs([
-        "🏠 Dashboard General", 
-        "📊 Explorador de Series", 
-        "🔍 Análisis por Categoría",
-        "📈 Comparación de Series",
-        "📋 Metadatos y Fuentes"
-    ])
-    
-    # Actualizar tab actual basado en la selección
-    tab_names = ["📊 Resumen Ejecutivo", "🎯 Análisis de Portafolio", "🌍 Contexto Económico", "📈 Ciclo Económico", "🤖 Recomendaciones IA", "📈 Optimización Adaptativa", "🔍 Datos Económicos"]
-    for i, tab in enumerate(tabs):
-        if tab:
-            st.session_state.tab_actual = tab_names[i]
-            break
+# Función eliminada - redundante con mostrar_dashboard_datos_economicos()
     
     with tabs[0]:
         st.header("🏠 Dashboard General")
