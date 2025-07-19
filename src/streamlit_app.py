@@ -5,18 +5,16 @@ import pandas as pd
 from plotly.subplots import make_subplots
 from datetime import date, timedelta, datetime
 import numpy as np
-import pandas as pd
 import yfinance as yf
 import scipy.optimize as op
 from scipy import stats
+from scipy.stats import linregress, skew
 import random
 import warnings
 import streamlit.components.v1 as components
-from scipy.stats import linregress
 import httpx
 import asyncio
 import matplotlib.pyplot as plt
-from scipy.stats import skew
 import google.generativeai as genai
 import tempfile
 import io
@@ -4002,9 +4000,8 @@ def mostrar_analisis_portafolio():
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
-    try:
-        st.title("📊 IOL Portfolio Analyzer")
-        st.markdown("### Analizador Avanzado de Portafolios IOL")
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
     
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
@@ -4190,8 +4187,6 @@ def main():
         st.error(f"Tipo de error: {type(e).__name__}")
         import traceback
         st.code(traceback.format_exc())
-    except Exception as e:
-        st.error(f"❌ Error crítico en la aplicación: {str(e)}")
         st.error("La aplicación no pudo iniciarse correctamente.")
         st.info("Por favor, verifique que todas las dependencias estén instaladas.")
 
