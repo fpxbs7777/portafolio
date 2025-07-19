@@ -4111,7 +4111,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "📈 Datos Económicos", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "🧱 Análisis Intermarket", "📈 Datos Económicos", "🎯 Optimización Adaptativa", "📊 Correlaciones Económicas", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4142,6 +4142,24 @@ def main():
                     st.warning("Por favor inicie sesión para acceder al análisis intermarket")
             elif opcion == "📈 Datos Económicos":
                 mostrar_dashboard_datos_economicos()
+            elif opcion == "🎯 Optimización Adaptativa":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    # Configuración de API key para IA
+                    if 'GEMINI_API_KEY' not in st.session_state:
+                        st.session_state.GEMINI_API_KEY = 'AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E'
+                    
+                    optimizacion_portafolio_ciclo_economico(st.session_state.token_acceso, st.session_state.GEMINI_API_KEY)
+                else:
+                    st.warning("Por favor inicie sesión para acceder a la optimización adaptativa")
+            elif opcion == "📊 Correlaciones Económicas":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    # Configuración de API key para IA
+                    if 'GEMINI_API_KEY' not in st.session_state:
+                        st.session_state.GEMINI_API_KEY = 'AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E'
+                    
+                    analisis_correlaciones_economicas(st.session_state.token_acceso, st.session_state.GEMINI_API_KEY)
+                else:
+                    st.warning("Por favor inicie sesión para acceder al análisis de correlaciones")
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
@@ -4287,37 +4305,160 @@ def calcular_estadisticas_ventana_movil(precios, ventana=252):
     cov = retornos_ventana.cov() * 252
     return mean_ret, cov
 
-# --- Función: optimización Markowitz (max Sharpe) ---
-def optimizar_markowitz(mean_ret, cov, risk_free_rate=0.0):
+# --- Función: optimización Markowitz adaptativa (max Sharpe con ajuste por ciclo económico) ---
+def optimizar_markowitz(mean_ret, cov, risk_free_rate=0.0, ciclo_economico=None, variables_macro=None, gemini_api_key=None):
     """
-    Devuelve los pesos óptimos de Markowitz (max Sharpe, long-only)
+    Optimización de Markowitz adaptativa que ajusta retornos y covarianza según el ciclo económico.
+    Usa IA para predecir ajustes y amortiguar caídas bruscas.
     """
     import numpy as np
     import scipy.optimize as op
+    
     n = len(mean_ret)
     bounds = tuple((0, 1) for _ in range(n))
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},)
-    def neg_sharpe(x):
-        port_ret = np.dot(mean_ret, x)
-        port_vol = np.sqrt(np.dot(x, np.dot(cov, x)))
-        if port_vol == 0:
+    
+    # Si no hay información de ciclo, usar optimización clásica
+    if not ciclo_economico or not variables_macro:
+        def neg_sharpe(x):
+            port_ret = np.dot(mean_ret, x)
+            port_vol = np.sqrt(np.dot(x, np.dot(cov, x)))
+            if port_vol == 0:
+                return 1e6
+            return -(port_ret - risk_free_rate) / port_vol
+        x0 = np.ones(n) / n
+        res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints)
+        if res.success:
+            return res.x
+        else:
+            return x0
+    
+    # ========== 1. AJUSTE DE RETORNOS SEGÚN CICLO ECONÓMICO ==========
+    mean_ret_ajustado = mean_ret.copy()
+    
+    # Factores de ajuste según ciclo
+    factores_ciclo = {
+        "Expansión": {"factor": 1.2, "volatilidad": 0.8},
+        "Auge": {"factor": 0.9, "volatilidad": 1.1},
+        "Contracción": {"factor": 0.7, "volatilidad": 1.3},
+        "Recesión": {"factor": 0.5, "volatilidad": 1.5},
+        "Expansión Fuerte": {"factor": 1.3, "volatilidad": 0.7},
+        "Expansión Moderada": {"factor": 1.1, "volatilidad": 0.9},
+        "Estancamiento": {"factor": 0.8, "volatilidad": 1.2},
+        "Recesión Moderada": {"factor": 0.6, "volatilidad": 1.4},
+        "Recesión Severa": {"factor": 0.4, "volatilidad": 1.6}
+    }
+    
+    factor_ciclo = factores_ciclo.get(ciclo_economico, {"factor": 1.0, "volatilidad": 1.0})
+    
+    # Ajustar retornos esperados
+    mean_ret_ajustado = mean_ret * factor_ciclo["factor"]
+    
+    # ========== 2. AJUSTE DE COVARIANZA SEGÚN VOLATILIDAD ==========
+    cov_ajustado = cov * factor_ciclo["volatilidad"]
+    
+    # ========== 3. ANÁLISIS IA PARA AJUSTES ESPECÍFICOS ==========
+    if gemini_api_key and variables_macro:
+        try:
+            # Preparar datos para IA de manera eficiente
+            resumen_macro = []
+            for nombre, datos in list(variables_macro.items())[:5]:  # Solo 5 variables principales
+                if isinstance(datos, dict) and 'momentum' in datos:
+                    resumen_macro.append(f"{nombre}: {datos['momentum']:+.1f}%")
+            
+            # Prompt eficiente para IA
+            prompt_ia = f"""
+            Ciclo económico: {ciclo_economico}
+            Variables macro: {', '.join(resumen_macro[:3])}
+            
+            Sugiere ajustes específicos para optimización de portafolio:
+            1. Factores de riesgo por sector (0.5-1.5)
+            2. Ajustes de volatilidad (0.8-1.5)
+            3. Activos a favorecer/evitar
+            
+            Responde solo con números separados por comas: factor_riesgo,ajuste_volatilidad,activos_favorecer
+            """
+            
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt_ia)
+            
+            if response and response.text:
+                try:
+                    # Parsear respuesta de IA
+                    ajustes_ia = response.text.strip().split(',')
+                    if len(ajustes_ia) >= 2:
+                        factor_riesgo_ia = float(ajustes_ia[0])
+                        ajuste_vol_ia = float(ajustes_ia[1])
+                        
+                        # Aplicar ajustes de IA
+                        mean_ret_ajustado *= factor_riesgo_ia
+                        cov_ajustado *= ajuste_vol_ia
+                except:
+                    pass  # Si falla el parsing, continuar con ajustes básicos
+        except:
+            pass  # Si falla la IA, continuar con ajustes básicos
+    
+    # ========== 4. DETECCIÓN DE RIESGOS ESPECÍFICOS ==========
+    # Ajustar por volatilidad del VIX si está disponible
+    if 'VIX' in variables_macro:
+        vix_actual = variables_macro['VIX']['valor_actual']
+        if vix_actual > 30:  # VIX alto = mayor riesgo
+            factor_vix = 1.3
+            mean_ret_ajustado *= 0.8  # Reducir retornos esperados
+            cov_ajustado *= factor_vix
+        elif vix_actual < 15:  # VIX bajo = menor riesgo
+            factor_vix = 0.8
+            mean_ret_ajustado *= 1.1  # Aumentar retornos esperados
+            cov_ajustado *= factor_vix
+    
+    # Ajustar por inflación argentina si está disponible
+    if 'INFLACION' in variables_macro:
+        inflacion = variables_macro['INFLACION']['valor_actual']
+        if inflacion > 50:  # Inflación muy alta
+            mean_ret_ajustado *= 0.7  # Reducir retornos reales esperados
+            cov_ajustado *= 1.4  # Aumentar volatilidad
+    
+    # ========== 5. OPTIMIZACIÓN CON PESOS MÍNIMOS ==========
+    # Agregar restricción de diversificación mínima
+    min_weight = 0.05  # Mínimo 5% por activo
+    bounds = tuple((min_weight, 1) for _ in range(n))
+    
+    # Función objetivo: maximizar Sharpe ratio con penalización por concentración
+    def neg_sharpe_adaptativo(x):
+        portfolio_return = np.sum(x * mean_ret_ajustado)
+        portfolio_vol = np.sqrt(np.dot(x.T, np.dot(cov_ajustado, x)))
+        
+        if portfolio_vol == 0:
             return 1e6
-        return -(port_ret - risk_free_rate) / port_vol
-    x0 = np.ones(n) / n
-    res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints)
-    if res.success:
-        return res.x
+        
+        # Penalización por concentración excesiva
+        concentration_penalty = 0.1 * np.sum(x**2)  # Penalizar pesos muy altos
+        
+        sharpe = (portfolio_return - risk_free_rate) / portfolio_vol
+        return -(sharpe - concentration_penalty)
+    
+    # Optimización
+    result = op.minimize(
+        neg_sharpe_adaptativo, 
+        np.ones(n) / n, 
+        method='SLSQP', 
+        bounds=bounds, 
+        constraints=constraints
+    )
+    
+    if result.success:
+        return result.x
     else:
-        return x0
+        return np.ones(n) / n
 
-# --- Función: backtest con rebalanceo periódico ---
-def backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+# --- Función: backtest con rebalanceo periódico adaptativo ---
+def backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0, 
+                      ciclo_economico=None, variables_macro=None, gemini_api_key=None):
     """
-    Simula la evolución de un portafolio Markowitz con rebalanceo periódico.
-    precios: DataFrame de precios (columnas=activos, filas=fechas)
-    ventana: días para estimar retornos/covarianza
-    rebalanceo: cada cuántos días rebalancear (63 = 3 meses aprox)
-    Devuelve: fechas, valores del portafolio, lista de pesos, fechas de rebalanceo
+    Simula la evolución de un portafolio Markowitz adaptativo con rebalanceo periódico.
+    Ajusta la optimización según el ciclo económico para amortiguar caídas bruscas.
     """
     import numpy as np
     fechas = precios.index
@@ -4325,35 +4466,142 @@ def backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
     portafolio_valor = [1.0]
     pesos_hist = []
     fechas_reb = []
+    ciclos_detectados = []
     pesos_actual = np.ones(n_activos) / n_activos
+    
     for i in range(ventana, len(fechas)-1, rebalanceo):
         precios_window = precios.iloc[i-ventana:i]
         mean_ret, cov = calcular_estadisticas_ventana_movil(precios_window, ventana)
-        pesos_actual = optimizar_markowitz(mean_ret, cov, risk_free_rate)
+        
+        # Detectar ciclo económico en la ventana actual si no se proporciona
+        ciclo_actual = ciclo_economico
+        if not ciclo_actual and variables_macro:
+            # Detectar ciclo basado en volatilidad y momentum de la ventana
+            volatilidad_ventana = np.sqrt(np.mean(np.diag(cov)))
+            momentum_ventana = np.mean(mean_ret)
+            
+            if volatilidad_ventana > 0.3 and momentum_ventana < 0:
+                ciclo_actual = "Recesión"
+            elif volatilidad_ventana > 0.2 and momentum_ventana < 0.05:
+                ciclo_actual = "Contracción"
+            elif volatilidad_ventana < 0.15 and momentum_ventana > 0.1:
+                ciclo_actual = "Expansión"
+            else:
+                ciclo_actual = "Estancamiento"
+        
+        # Optimización adaptativa
+        pesos_actual = optimizar_markowitz(
+            mean_ret, cov, risk_free_rate, 
+            ciclo_actual, variables_macro, gemini_api_key
+        )
+        
         pesos_hist.append(pesos_actual)
         fechas_reb.append(fechas[i])
+        ciclos_detectados.append(ciclo_actual)
+        
         # Simular evolución hasta el próximo rebalanceo
         for j in range(i, min(i+rebalanceo, len(fechas)-1)):
             ret = (precios.iloc[j+1] / precios.iloc[j] - 1).values
             portafolio_valor.append(portafolio_valor[-1] * (1 + np.dot(pesos_actual, ret)))
+    
     # Completar hasta el final con los últimos pesos
     while len(portafolio_valor) < len(fechas):
         portafolio_valor.append(portafolio_valor[-1])
-    return fechas, portafolio_valor, pesos_hist, fechas_reb
+    
+    return fechas, portafolio_valor, pesos_hist, fechas_reb, ciclos_detectados
 
-# --- Función: visualización de backtest y pesos ---
-def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0):
+# --- Función: visualización de backtest adaptativo y pesos ---
+def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_rate=0.0, 
+                              ciclo_economico=None, variables_macro=None, gemini_api_key=None):
     """
-    Visualiza la evolución del portafolio Markowitz con rebalanceo periódico.
+    Visualiza la evolución del portafolio Markowitz adaptativo con rebalanceo periódico.
+    Muestra los ciclos económicos detectados y su impacto en la optimización.
     """
     import plotly.graph_objects as go
-    fechas, portafolio_valor, pesos_hist, fechas_reb = backtest_markowitz(precios, ventana, rebalanceo, risk_free_rate)
+    fechas, portafolio_valor, pesos_hist, fechas_reb, ciclos_detectados = backtest_markowitz(
+        precios, ventana, rebalanceo, risk_free_rate, 
+        ciclo_economico, variables_macro, gemini_api_key
+    )
     import streamlit as st
-    st.subheader("📈 Evolución del Portafolio Markowitz (Backtest)")
+    
+    # Métricas del backtest
+    retorno_total = (portafolio_valor[-1] / portafolio_valor[0] - 1) * 100
+    volatilidad = np.std(np.diff(portafolio_valor) / portafolio_valor[:-1]) * np.sqrt(252) * 100
+    sharpe = retorno_total / volatilidad if volatilidad > 0 else 0
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Retorno Total", f"{retorno_total:.1f}%")
+    with col2:
+        st.metric("Volatilidad", f"{volatilidad:.1f}%")
+    with col3:
+        st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+    with col4:
+        st.metric("Rebalanceos", len(fechas_reb))
+    
+    st.subheader("📈 Evolución del Portafolio Markowitz Adaptativo")
+    
+    # Gráfico principal con ciclos económicos
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=fechas, y=portafolio_valor, mode='lines', name='Valor Portafolio'))
-    fig.update_layout(title="Backtest Markowitz con rebalanceo", xaxis_title="Fecha", yaxis_title="Valor acumulado", template="plotly_white")
+    fig.add_trace(go.Scatter(
+        x=fechas, y=portafolio_valor, 
+        mode='lines', name='Valor Portafolio',
+        line=dict(color='#1f77b4', width=2)
+    ))
+    
+    # Agregar marcadores de rebalanceo con colores según ciclo
+    if ciclos_detectados:
+        colores_ciclo = {
+            "Expansión": "#00ff00",
+            "Auge": "#ffff00", 
+            "Contracción": "#ff8000",
+            "Recesión": "#ff0000",
+            "Estancamiento": "#808080"
+        }
+        
+        for i, (fecha, ciclo) in enumerate(zip(fechas_reb, ciclos_detectados)):
+            color = colores_ciclo.get(ciclo, "#808080")
+            fig.add_trace(go.Scatter(
+                x=[fecha], y=[portafolio_valor[fechas.get_loc(fecha)]],
+                mode='markers',
+                marker=dict(color=color, size=8, symbol='diamond'),
+                name=f'Rebalanceo {ciclo}',
+                showlegend=False
+            ))
+    
+    fig.update_layout(
+        title="Backtest Markowitz Adaptativo con Ciclos Económicos",
+        xaxis_title="Fecha", 
+        yaxis_title="Valor acumulado", 
+        template="plotly_white",
+        height=500
+    )
     st.plotly_chart(fig, use_container_width=True)
+    
+    # Mostrar evolución de ciclos
+    if ciclos_detectados:
+        st.subheader("🔄 Evolución de Ciclos Económicos Detectados")
+        fig_ciclos = go.Figure()
+        
+        # Contar ciclos
+        ciclos_count = {}
+        for ciclo in ciclos_detectados:
+            ciclos_count[ciclo] = ciclos_count.get(ciclo, 0) + 1
+        
+        fig_ciclos.add_trace(go.Bar(
+            x=list(ciclos_count.keys()),
+            y=list(ciclos_count.values()),
+            marker_color=[colores_ciclo.get(ciclo, "#808080") for ciclo in ciclos_count.keys()]
+        ))
+        
+        fig_ciclos.update_layout(
+            title="Distribución de Ciclos Económicos Detectados",
+            xaxis_title="Ciclo Económico",
+            yaxis_title="Cantidad de Rebalanceos",
+            template="plotly_white"
+        )
+        st.plotly_chart(fig_ciclos, use_container_width=True)
+    
     # Mostrar evolución de pesos
     st.subheader("🔄 Evolución de Pesos por Activo")
     if pesos_hist:
@@ -4361,12 +4609,853 @@ def mostrar_backtest_markowitz(precios, ventana=252, rebalanceo=63, risk_free_ra
         activos = precios.columns
         pesos_array = np.array(pesos_hist)
         fig2 = go.Figure()
+        
         for idx, activo in enumerate(activos):
-            fig2.add_trace(go.Scatter(x=fechas_reb, y=pesos_array[:, idx], mode='lines+markers', name=activo))
-        fig2.update_layout(title="Pesos óptimos en cada rebalanceo", xaxis_title="Fecha de rebalanceo", yaxis_title="Peso", template="plotly_white")
+            fig2.add_trace(go.Scatter(
+                x=fechas_reb, y=pesos_array[:, idx], 
+                mode='lines+markers', name=activo,
+                line=dict(width=2)
+            ))
+        
+        fig2.update_layout(
+            title="Pesos óptimos en cada rebalanceo (Adaptativo)",
+            xaxis_title="Fecha de rebalanceo", 
+            yaxis_title="Peso", 
+            template="plotly_white",
+            height=400
+        )
         st.plotly_chart(fig2, use_container_width=True)
+        
+        # Mostrar estadísticas de pesos
+        st.subheader("📊 Estadísticas de Pesos")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Peso Promedio por Activo:**")
+            pesos_promedio = np.mean(pesos_array, axis=0)
+            for activo, peso in zip(activos, pesos_promedio):
+                st.write(f"• {activo}: {peso:.1%}")
+        
+        with col2:
+            st.write("**Peso Máximo por Activo:**")
+            pesos_max = np.max(pesos_array, axis=0)
+            for activo, peso in zip(activos, pesos_max):
+                st.write(f"• {activo}: {peso:.1%}")
     else:
         st.info("No hay datos suficientes para mostrar la evolución de pesos.")
+
+def optimizacion_portafolio_ciclo_economico(token_acceso, gemini_api_key=None):
+    """
+    Optimización de portafolio que integra análisis de ciclo económico para amortiguar caídas bruscas.
+    Usa datos estadísticos y IA para predecir y adaptar la optimización según el contexto económico.
+    """
+    st.markdown("---")
+    st.subheader("🎯 Optimización de Portafolio con Ciclo Económico")
+    
+    # Configuración
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        periodo_analisis = st.selectbox(
+            "Período de análisis",
+            ["6mo", "1y", "2y", "5y"],
+            index=1,
+            help="Período para el análisis histórico"
+        )
+    with col2:
+        ventana_optimizacion = st.slider(
+            "Ventana de optimización (días)",
+            min_value=63,
+            max_value=252,
+            value=126,
+            help="Ventana para calcular retornos y covarianza"
+        )
+    with col3:
+        rebalanceo = st.slider(
+            "Frecuencia de rebalanceo (días)",
+            min_value=21,
+            max_value=126,
+            value=63,
+            help="Cada cuántos días rebalancear el portafolio"
+        )
+    
+    # Configuración de IA
+    if gemini_api_key:
+        st.info(f"🔑 API Key Gemini configurada - Análisis IA habilitado")
+    else:
+        gemini_key = st.text_input(
+            "🔑 API Key Gemini (opcional)",
+            type="password",
+            help="Para análisis IA avanzado del ciclo económico"
+        )
+        if gemini_key:
+            gemini_api_key = gemini_key
+    
+    if st.button("🚀 Ejecutar Optimización Adaptativa", type="primary"):
+        with st.spinner("Analizando ciclo económico y optimizando portafolio..."):
+            
+            # ========== 1. ANÁLISIS DE CICLO ECONÓMICO ==========
+            st.markdown("### 📊 Análisis de Ciclo Económico")
+            
+            # Obtener variables macro
+            variables_macro = {}
+            try:
+                # Variables globales
+                tickers_global = {
+                    'S&P 500': '^GSPC',
+                    'VIX': '^VIX',
+                    'Dólar Index': 'DX-Y.NYB',
+                    'Oro': 'GC=F',
+                    'Treasury 10Y': '^TNX',
+                }
+                
+                datos_global = yf.download(list(tickers_global.values()), period=periodo_analisis)['Close']
+                
+                for nombre, ticker in tickers_global.items():
+                    if ticker in datos_global.columns and not datos_global[ticker].empty:
+                        serie = datos_global[ticker].dropna()
+                        if len(serie) > 0:
+                            retornos = serie.pct_change().dropna()
+                            momentum = (serie.iloc[-1] / serie.iloc[-63] - 1) * 100 if len(serie) >= 63 else 0
+                            volatilidad = retornos.std() * np.sqrt(252) * 100
+                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
+                            
+                            variables_macro[nombre] = {
+                                'valor_actual': serie.iloc[-1],
+                                'momentum': momentum,
+                                'volatilidad': volatilidad,
+                                'tendencia': tendencia,
+                                'serie': serie
+                            }
+                
+                # Obtener datos económicos argentinos si están disponibles
+                datos_economicos = descargar_y_procesar_datos_economicos()
+                if datos_economicos:
+                    variables_macro_arg = obtener_variables_macro_argentina(datos_economicos, periodo_analisis)
+                    variables_macro.update(variables_macro_arg)
+                
+            except Exception as e:
+                st.error(f"Error obteniendo datos macro: {e}")
+                return
+            
+            # Detectar ciclo económico
+            if variables_macro:
+                # Puntuación de ciclo
+                puntuacion_ciclo = 0
+                indicadores_ciclo = []
+                
+                # Curva de tasas
+                if 'Treasury 10Y' in variables_macro and 'Treasury 2Y' in variables_macro:
+                    spread = variables_macro['Treasury 10Y']['valor_actual'] - variables_macro['Treasury 2Y']['valor_actual']
+                    if spread < 0:
+                        puntuacion_ciclo -= 2
+                        indicadores_ciclo.append("Curva invertida (-2)")
+                    elif spread < 0.5:
+                        puntuacion_ciclo -= 1
+                        indicadores_ciclo.append("Curva plana (-1)")
+                    else:
+                        puntuacion_ciclo += 1
+                        indicadores_ciclo.append("Curva normal (+1)")
+                
+                # VIX
+                if 'VIX' in variables_macro:
+                    vix_actual = variables_macro['VIX']['valor_actual']
+                    if vix_actual > 30:
+                        puntuacion_ciclo -= 1
+                        indicadores_ciclo.append("VIX alto (-1)")
+                    elif vix_actual < 15:
+                        puntuacion_ciclo += 1
+                        indicadores_ciclo.append("VIX bajo (+1)")
+                
+                # S&P 500
+                if 'S&P 500' in variables_macro:
+                    sp500_momentum = variables_macro['S&P 500']['momentum']
+                    if sp500_momentum > 10:
+                        puntuacion_ciclo += 1
+                        indicadores_ciclo.append("S&P 500 fuerte (+1)")
+                    elif sp500_momentum < -10:
+                        puntuacion_ciclo -= 1
+                        indicadores_ciclo.append("S&P 500 débil (-1)")
+                
+                # Determinar fase del ciclo
+                if puntuacion_ciclo >= 2:
+                    fase_ciclo = "Expansión"
+                elif puntuacion_ciclo >= 0:
+                    fase_ciclo = "Auge"
+                elif puntuacion_ciclo >= -1:
+                    fase_ciclo = "Contracción"
+                else:
+                    fase_ciclo = "Recesión"
+                
+                # Mostrar diagnóstico
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Ciclo Económico", fase_ciclo)
+                with col2:
+                    st.metric("Puntuación", puntuacion_ciclo)
+                with col3:
+                    st.metric("Indicadores", len(indicadores_ciclo))
+                
+                st.markdown("**Indicadores detectados:**")
+                for indicador in indicadores_ciclo:
+                    st.write(f"• {indicador}")
+            
+            # ========== 2. SELECCIÓN DE ACTIVOS ==========
+            st.markdown("### 📈 Selección de Activos")
+            
+            # Obtener tickers disponibles
+            try:
+                tickers_por_panel = obtener_tickers_por_panel(token_acceso, ['Acciones', 'CEDEARs', 'Bonos'])
+                
+                # Seleccionar activos según el ciclo
+                activos_seleccionados = []
+                
+                if fase_ciclo == "Expansión":
+                    # Favorecer acciones y CEDEARs
+                    if 'Acciones' in tickers_por_panel:
+                        activos_seleccionados.extend(tickers_por_panel['Acciones'][:5])
+                    if 'CEDEARs' in tickers_por_panel:
+                        activos_seleccionados.extend(tickers_por_panel['CEDEARs'][:3])
+                elif fase_ciclo == "Auge":
+                    # Balance entre acciones y bonos
+                    if 'Acciones' in tickers_por_panel:
+                        activos_seleccionados.extend(tickers_por_panel['Acciones'][:3])
+                    if 'Bonos' in tickers_por_panel:
+                        activos_seleccionados.extend(tickers_por_panel['Bonos'][:3])
+                elif fase_ciclo == "Contracción":
+                    # Favorecer bonos y activos defensivos
+                    if 'Bonos' in tickers_por_panel:
+                        activos_seleccionados.extend(tickers_por_panel['Bonos'][:5])
+                    if 'CEDEARs' in tickers_por_panel:
+                        activos_seleccionados.extend(tickers_por_panel['CEDEARs'][:2])
+                else:  # Recesión
+                    # Solo bonos y activos muy defensivos
+                    if 'Bonos' in tickers_por_panel:
+                        activos_seleccionados.extend(tickers_por_panel['Bonos'][:6])
+                
+                # Agregar activos globales según ciclo
+                if fase_ciclo in ["Expansión", "Auge"]:
+                    activos_seleccionados.extend(['^GSPC', 'GC=F'])  # S&P 500 y Oro
+                elif fase_ciclo == "Contracción":
+                    activos_seleccionados.extend(['GC=F', '^TNX'])  # Oro y Treasury
+                else:
+                    activos_seleccionados.extend(['GC=F'])  # Solo Oro
+                
+                st.success(f"✅ Seleccionados {len(activos_seleccionados)} activos para ciclo {fase_ciclo}")
+                
+            except Exception as e:
+                st.error(f"Error seleccionando activos: {e}")
+                return
+            
+            # ========== 3. OBTENER DATOS HISTÓRICOS ==========
+            st.markdown("### 📊 Datos Históricos")
+            
+            try:
+                # Descargar datos históricos
+                datos_historicos = {}
+                for ticker in activos_seleccionados:
+                    try:
+                        if ticker.startswith('^') or ticker in ['GC=F', 'DX-Y.NYB']:
+                            # Activos globales con yfinance
+                            df = yf.download(ticker, period=periodo_analisis)['Close']
+                        else:
+                            # Activos locales con IOL
+                            df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, 
+                                                          (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d'),
+                                                          datetime.now().strftime('%Y-%m-%d'), 'SinAjustar')
+                            if df is not None and not df.empty:
+                                df = df.set_index('fecha')['precio']
+                        
+                        if df is not None and not df.empty:
+                            datos_historicos[ticker] = df
+                    except:
+                        continue
+                
+                if len(datos_historicos) < 3:
+                    st.error("No se obtuvieron suficientes datos históricos")
+                    return
+                
+                # Crear DataFrame de precios
+                precios_df = pd.DataFrame(datos_historicos)
+                precios_df = precios_df.dropna()
+                
+                st.success(f"✅ Datos históricos obtenidos para {len(precios_df.columns)} activos")
+                
+            except Exception as e:
+                st.error(f"Error obteniendo datos históricos: {e}")
+                return
+            
+            # ========== 4. OPTIMIZACIÓN ADAPTATIVA ==========
+            st.markdown("### 🎯 Optimización Adaptativa")
+            
+            try:
+                # Calcular estadísticas
+                mean_ret, cov = calcular_estadisticas_ventana_movil(precios_df, ventana_optimizacion)
+                
+                # Optimización clásica vs adaptativa
+                pesos_clasicos = optimizar_markowitz(mean_ret, cov, 0.0)
+                pesos_adaptativos = optimizar_markowitz(mean_ret, cov, 0.0, fase_ciclo, variables_macro, gemini_api_key)
+                
+                # Comparar resultados
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**📊 Optimización Clásica**")
+                    for ticker, peso in zip(precios_df.columns, pesos_clasicos):
+                        st.write(f"• {ticker}: {peso:.1%}")
+                
+                with col2:
+                    st.markdown("**🎯 Optimización Adaptativa**")
+                    for ticker, peso in zip(precios_df.columns, pesos_adaptativos):
+                        st.write(f"• {ticker}: {peso:.1%}")
+                
+                # Calcular métricas esperadas
+                retorno_clasico = np.sum(pesos_clasicos * mean_ret) * 252 * 100
+                volatilidad_clasica = np.sqrt(np.dot(pesos_clasicos.T, np.dot(cov * 252, pesos_clasicos))) * 100
+                sharpe_clasico = retorno_clasico / volatilidad_clasica if volatilidad_clasica > 0 else 0
+                
+                retorno_adaptativo = np.sum(pesos_adaptativos * mean_ret) * 252 * 100
+                volatilidad_adaptativa = np.sqrt(np.dot(pesos_adaptativos.T, np.dot(cov * 252, pesos_adaptativos))) * 100
+                sharpe_adaptativo = retorno_adaptativo / volatilidad_adaptativa if volatilidad_adaptativa > 0 else 0
+                
+                # Mostrar comparación
+                st.markdown("### 📈 Comparación de Estrategias")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Retorno Clásico", f"{retorno_clasico:.1f}%")
+                with col2:
+                    st.metric("Retorno Adaptativo", f"{retorno_adaptativo:.1f}%")
+                with col3:
+                    st.metric("Sharpe Clásico", f"{sharpe_clasico:.2f}")
+                with col4:
+                    st.metric("Sharpe Adaptativo", f"{sharpe_adaptativo:.2f}")
+                
+                # ========== 5. BACKTEST ADAPTATIVO ==========
+                st.markdown("### 🔄 Backtest Adaptativo")
+                
+                mostrar_backtest_markowitz(
+                    precios_df, 
+                    ventana_optimizacion, 
+                    rebalanceo, 
+                    0.0,
+                    fase_ciclo, 
+                    variables_macro, 
+                    gemini_api_key
+                )
+                
+                # ========== 6. ANÁLISIS DE RIESGOS ==========
+                st.markdown("### ⚠️ Análisis de Riesgos")
+                
+                # Calcular Value at Risk (VaR)
+                retornos_portafolio = precios_df.pct_change().dropna()
+                retornos_portafolio_adaptativo = retornos_portafolio.dot(pesos_adaptativos)
+                
+                var_95 = np.percentile(retornos_portafolio_adaptativo, 5) * 100
+                var_99 = np.percentile(retornos_portafolio_adaptativo, 1) * 100
+                
+                # Calcular drawdown máximo
+                portafolio_acumulado = (1 + retornos_portafolio_adaptativo).cumprod()
+                drawdown = (portafolio_acumulado / portafolio_acumulado.cummax() - 1) * 100
+                max_drawdown = drawdown.min()
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("VaR 95%", f"{var_95:.2f}%")
+                with col2:
+                    st.metric("VaR 99%", f"{var_99:.2f}%")
+                with col3:
+                    st.metric("Max Drawdown", f"{max_drawdown:.2f}%")
+                
+                # Recomendaciones según ciclo
+                st.markdown("### 💡 Recomendaciones")
+                
+                recomendaciones = {
+                    "Expansión": [
+                        "Aumentar exposición a acciones cíclicas",
+                        "Considerar apalancamiento moderado",
+                        "Mantener liquidez para oportunidades"
+                    ],
+                    "Auge": [
+                        "Reducir exposición a activos de riesgo",
+                        "Aumentar posición en activos defensivos",
+                        "Considerar estrategias de cobertura"
+                    ],
+                    "Contracción": [
+                        "Aumentar exposición a bonos",
+                        "Reducir exposición a acciones",
+                        "Mantener alta liquidez"
+                    ],
+                    "Recesión": [
+                        "Máxima exposición a bonos soberanos",
+                        "Evitar activos de riesgo",
+                        "Mantener liquidez máxima"
+                    ]
+                }
+                
+                st.markdown(f"**Recomendaciones para ciclo {fase_ciclo}:**")
+                for rec in recomendaciones.get(fase_ciclo, []):
+                    st.write(f"• {rec}")
+                
+            except Exception as e:
+                st.error(f"Error en optimización: {e}")
+                return
+
+def analisis_correlaciones_economicas(token_acceso, gemini_api_key=None):
+    """
+    Análisis estadístico completo de correlaciones entre variables económicas.
+    Calcula correlaciones, causalidad de Granger, y relaciones temporales entre series.
+    """
+    st.markdown("---")
+    st.subheader("📊 Análisis de Correlaciones Económicas")
+    
+    # Configuración
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        periodo_analisis = st.selectbox(
+            "Período de análisis",
+            ["6mo", "1y", "2y", "5y"],
+            index=1,
+            help="Período para el análisis de correlaciones"
+        )
+    with col2:
+        metodo_correlacion = st.selectbox(
+            "Método de correlación",
+            ["Pearson", "Spearman", "Kendall"],
+            index=0,
+            help="Tipo de correlación a calcular"
+        )
+    with col3:
+        ventana_rolling = st.slider(
+            "Ventana rolling (días)",
+            min_value=30,
+            max_value=252,
+            value=63,
+            help="Ventana para correlaciones móviles"
+        )
+    
+    if st.button("🔍 Analizar Correlaciones Económicas", type="primary"):
+        with st.spinner("Calculando correlaciones y relaciones estadísticas..."):
+            
+            # ========== 1. OBTENER VARIABLES ECONÓMICAS ==========
+            st.markdown("### 📈 Variables Económicas Analizadas")
+            
+            variables_macro = {}
+            series_historicas = {}
+            
+            try:
+                # Variables globales
+                tickers_global = {
+                    'S&P 500': '^GSPC',
+                    'VIX': '^VIX',
+                    'Dólar Index': 'DX-Y.NYB',
+                    'Oro': 'GC=F',
+                    'Petróleo': 'CL=F',
+                    'Cobre': 'HG=F',
+                    'Treasury 10Y': '^TNX',
+                    'Treasury 2Y': '^UST2YR',
+                    'EUR/USD': 'EURUSD=X',
+                    'JPY/USD': 'JPYUSD=X',
+                }
+                
+                datos_global = yf.download(list(tickers_global.values()), period=periodo_analisis)['Close']
+                
+                for nombre, ticker in tickers_global.items():
+                    if ticker in datos_global.columns and not datos_global[ticker].empty:
+                        serie = datos_global[ticker].dropna()
+                        if len(serie) > 0:
+                            retornos = serie.pct_change().dropna()
+                            momentum = (serie.iloc[-1] / serie.iloc[-63] - 1) * 100 if len(serie) >= 63 else 0
+                            volatilidad = retornos.std() * np.sqrt(252) * 100
+                            tendencia = 'Alcista' if momentum > 0 else 'Bajista'
+                            
+                            variables_macro[nombre] = {
+                                'valor_actual': serie.iloc[-1],
+                                'momentum': momentum,
+                                'volatilidad': volatilidad,
+                                'tendencia': tendencia,
+                                'serie': serie
+                            }
+                            series_historicas[nombre] = serie
+                
+                # Obtener datos económicos argentinos
+                datos_economicos = descargar_y_procesar_datos_economicos()
+                if datos_economicos:
+                    variables_macro_arg = obtener_variables_macro_argentina(datos_economicos, periodo_analisis)
+                    variables_macro.update(variables_macro_arg)
+                    
+                    # Agregar series argentinas
+                    for nombre, datos in variables_macro_arg.items():
+                        if 'serie' in datos:
+                            series_historicas[nombre] = datos['serie']
+                
+                st.success(f"✅ {len(variables_macro)} variables económicas cargadas")
+                
+            except Exception as e:
+                st.error(f"Error obteniendo datos: {e}")
+                return
+            
+            # ========== 2. MATRIZ DE CORRELACIONES ==========
+            st.markdown("### 🔗 Matriz de Correlaciones")
+            
+            if len(series_historicas) >= 2:
+                # Crear DataFrame de series
+                df_series = pd.DataFrame(series_historicas)
+                df_series = df_series.dropna()
+                
+                # Calcular correlaciones según método seleccionado
+                if metodo_correlacion == "Pearson":
+                    correlaciones = df_series.corr(method='pearson')
+                elif metodo_correlacion == "Spearman":
+                    correlaciones = df_series.corr(method='spearman')
+                else:  # Kendall
+                    correlaciones = df_series.corr(method='kendall')
+                
+                # Gráfico de correlaciones
+                fig_corr = go.Figure(data=go.Heatmap(
+                    z=correlaciones.values,
+                    x=correlaciones.columns,
+                    y=correlaciones.columns,
+                    colorscale='RdBu',
+                    zmid=0,
+                    text=correlaciones.values.round(3),
+                    texttemplate="%{text}",
+                    textfont={"size": 10},
+                    hoverongaps=False
+                ))
+                
+                fig_corr.update_layout(
+                    title=f"Matriz de Correlaciones ({metodo_correlacion})",
+                    width=800,
+                    height=600
+                )
+                st.plotly_chart(fig_corr, use_container_width=True)
+                
+                # ========== 3. ANÁLISIS DE CORRELACIONES SIGNIFICATIVAS ==========
+                st.markdown("### 📊 Correlaciones Significativas")
+                
+                # Encontrar correlaciones más fuertes
+                correlaciones_significativas = []
+                for i in range(len(correlaciones.columns)):
+                    for j in range(i+1, len(correlaciones.columns)):
+                        corr_valor = correlaciones.iloc[i, j]
+                        if abs(corr_valor) > 0.3:  # Correlación moderada o fuerte
+                            correlaciones_significativas.append({
+                                'Variable 1': correlaciones.columns[i],
+                                'Variable 2': correlaciones.columns[j],
+                                'Correlación': corr_valor,
+                                'Tipo': 'Positiva' if corr_valor > 0 else 'Negativa',
+                                'Fuerza': 'Fuerte' if abs(corr_valor) > 0.7 else 'Moderada' if abs(corr_valor) > 0.5 else 'Débil'
+                            })
+                
+                if correlaciones_significativas:
+                    df_corr_sig = pd.DataFrame(correlaciones_significativas)
+                    df_corr_sig = df_corr_sig.sort_values('Correlación', key=abs, ascending=False)
+                    
+                    st.markdown("**🔍 Correlaciones más importantes:**")
+                    st.dataframe(df_corr_sig, use_container_width=True)
+                    
+                    # Gráfico de correlaciones significativas
+                    fig_sig = go.Figure(data=go.Bar(
+                        x=[f"{row['Variable 1']} vs {row['Variable 2']}" for _, row in df_corr_sig.head(10).iterrows()],
+                        y=df_corr_sig.head(10)['Correlación'],
+                        marker_color=['red' if x < 0 else 'blue' for x in df_corr_sig.head(10)['Correlación']]
+                    ))
+                    
+                    fig_sig.update_layout(
+                        title="Top 10 Correlaciones Significativas",
+                        xaxis_title="Pares de Variables",
+                        yaxis_title="Correlación",
+                        xaxis_tickangle=45
+                    )
+                    st.plotly_chart(fig_sig, use_container_width=True)
+                else:
+                    st.info("No se encontraron correlaciones significativas (>0.3)")
+                
+                # ========== 4. CORRELACIONES MÓVILES ==========
+                st.markdown("### 📈 Correlaciones Móviles")
+                
+                # Calcular correlaciones móviles para pares importantes
+                if len(correlaciones_significativas) > 0:
+                    # Tomar el par más correlacionado
+                    par_principal = correlaciones_significativas[0]
+                    var1, var2 = par_principal['Variable 1'], par_principal['Variable 2']
+                    
+                    if var1 in df_series.columns and var2 in df_series.columns:
+                        # Calcular correlación móvil
+                        correlacion_rolling = df_series[var1].rolling(window=ventana_rolling).corr(df_series[var2])
+                        
+                        fig_rolling = go.Figure()
+                        fig_rolling.add_trace(go.Scatter(
+                            x=correlacion_rolling.index,
+                            y=correlacion_rolling.values,
+                            mode='lines',
+                            name=f'Correlación {ventana_rolling}d',
+                            line=dict(color='blue', width=2)
+                        ))
+                        
+                        # Agregar líneas de referencia
+                        fig_rolling.add_hline(y=0.7, line_dash="dash", line_color="green", 
+                                            annotation_text="Correlación Fuerte Positiva")
+                        fig_rolling.add_hline(y=-0.7, line_dash="dash", line_color="red", 
+                                            annotation_text="Correlación Fuerte Negativa")
+                        fig_rolling.add_hline(y=0, line_dash="dot", line_color="gray")
+                        
+                        fig_rolling.update_layout(
+                            title=f"Correlación Móvil: {var1} vs {var2}",
+                            xaxis_title="Fecha",
+                            yaxis_title="Correlación",
+                            yaxis_range=[-1, 1]
+                        )
+                        st.plotly_chart(fig_rolling, use_container_width=True)
+                
+                # ========== 5. ANÁLISIS DE CAUSALIDAD ==========
+                st.markdown("### 🔄 Análisis de Causalidad (Test de Granger)")
+                
+                try:
+                    from statsmodels.tsa.stattools import grangercausalitytests
+                    
+                    # Seleccionar variables para test de causalidad
+                    variables_causalidad = st.multiselect(
+                        "Seleccionar variables para análisis de causalidad:",
+                        options=list(df_series.columns),
+                        default=list(df_series.columns)[:4] if len(df_series.columns) >= 4 else list(df_series.columns)
+                    )
+                    
+                    if len(variables_causalidad) >= 2:
+                        # Preparar datos para test de Granger
+                        df_causalidad = df_series[variables_causalidad].dropna()
+                        
+                        if len(df_causalidad) > 50:  # Necesitamos suficientes datos
+                            resultados_causalidad = []
+                            
+                            for i, var1 in enumerate(variables_causalidad):
+                                for j, var2 in enumerate(variables_causalidad):
+                                    if i != j:
+                                        try:
+                                            # Test de Granger con lag=1
+                                            test_result = grangercausalitytests(
+                                                df_causalidad[[var2, var1]], 
+                                                maxlag=1, 
+                                                verbose=False
+                                            )
+                                            
+                                            p_value = test_result[1][0]['ssr_chi2test'][1]
+                                            f_stat = test_result[1][0]['ssr_chi2test'][0]
+                                            
+                                            resultados_causalidad.append({
+                                                'Causa': var1,
+                                                'Efecto': var2,
+                                                'P-Value': p_value,
+                                                'F-Statistic': f_stat,
+                                                'Significativo': p_value < 0.05
+                                            })
+                                        except:
+                                            continue
+                            
+                            if resultados_causalidad:
+                                df_causalidad_result = pd.DataFrame(resultados_causalidad)
+                                df_causalidad_result = df_causalidad_result.sort_values('P-Value')
+                                
+                                st.markdown("**📊 Resultados del Test de Causalidad de Granger:**")
+                                st.dataframe(df_causalidad_result, use_container_width=True)
+                                
+                                # Mostrar relaciones causales significativas
+                                relaciones_significativas = df_causalidad_result[df_causalidad_result['Significativo'] == True]
+                                
+                                if not relaciones_significativas.empty:
+                                    st.markdown("**🔗 Relaciones Causales Significativas (p < 0.05):**")
+                                    for _, rel in relaciones_significativas.iterrows():
+                                        st.write(f"• {rel['Causa']} → {rel['Efecto']} (p={rel['P-Value']:.3f})")
+                                else:
+                                    st.info("No se encontraron relaciones causales significativas")
+                            else:
+                                st.warning("No se pudieron calcular las relaciones de causalidad")
+                        else:
+                            st.warning("Se necesitan al menos 50 observaciones para el test de causalidad")
+                    else:
+                        st.info("Selecciona al menos 2 variables para el análisis de causalidad")
+                        
+                except ImportError:
+                    st.warning("statsmodels no está disponible para el análisis de causalidad")
+                except Exception as e:
+                    st.error(f"Error en análisis de causalidad: {e}")
+                
+                # ========== 6. ANÁLISIS DE COINTEGRACIÓN ==========
+                st.markdown("### 🔗 Análisis de Cointegración")
+                
+                try:
+                    from statsmodels.tsa.stattools import coint
+                    
+                    # Buscar pares cointegrados
+                    pares_cointegrados = []
+                    
+                    for i, var1 in enumerate(df_series.columns):
+                        for j, var2 in enumerate(df_series.columns):
+                            if i < j:  # Evitar duplicados
+                                try:
+                                    # Test de cointegración
+                                    score, pvalue, _ = coint(df_series[var1], df_series[var2])
+                                    
+                                    if pvalue < 0.05:  # Cointegración significativa
+                                        pares_cointegrados.append({
+                                            'Variable 1': var1,
+                                            'Variable 2': var2,
+                                            'P-Value': pvalue,
+                                            'Score': score
+                                        })
+                                except:
+                                    continue
+                    
+                    if pares_cointegrados:
+                        df_coint = pd.DataFrame(pares_cointegrados)
+                        df_coint = df_coint.sort_values('P-Value')
+                        
+                        st.markdown("**📊 Pares Cointegrados (p < 0.05):**")
+                        st.dataframe(df_coint, use_container_width=True)
+                        
+                        # Gráfico de pares cointegrados
+                        if len(df_coint) > 0:
+                            par_coint = df_coint.iloc[0]  # Tomar el par más significativo
+                            var1, var2 = par_coint['Variable 1'], par_coint['Variable 2']
+                            
+                            # Normalizar series para comparación
+                            serie1_norm = (df_series[var1] / df_series[var1].iloc[0]) * 100
+                            serie2_norm = (df_series[var2] / df_series[var2].iloc[0]) * 100
+                            
+                            fig_coint = go.Figure()
+                            fig_coint.add_trace(go.Scatter(
+                                x=serie1_norm.index,
+                                y=serie1_norm.values,
+                                mode='lines',
+                                name=var1,
+                                line=dict(color='blue', width=2)
+                            ))
+                            fig_coint.add_trace(go.Scatter(
+                                x=serie2_norm.index,
+                                y=serie2_norm.values,
+                                mode='lines',
+                                name=var2,
+                                line=dict(color='red', width=2)
+                            ))
+                            
+                            fig_coint.update_layout(
+                                title=f"Pares Cointegrados: {var1} vs {var2} (p={par_coint['P-Value']:.3f})",
+                                title="Pares Cointegrados: {var1} vs {var2} (p={par_coint['P-Value']:.3f})",
+                                xaxis_title="Fecha",
+                                yaxis_title="Valor Normalizado (%)"
+                            )
+                            st.plotly_chart(fig_coint, use_container_width=True)
+                    else:
+                        st.info("No se encontraron pares cointegrados significativos")
+                        
+                except ImportError:
+                    st.warning("statsmodels no está disponible para el análisis de cointegración")
+                except Exception as e:
+                    st.error(f"Error en análisis de cointegración: {e}")
+                
+                # ========== 7. ANÁLISIS DE VOLATILIDAD ==========
+                st.markdown("### 📊 Análisis de Volatilidad")
+                
+                # Calcular volatilidad móvil
+                volatilidades = {}
+                for var in df_series.columns:
+                    retornos_var = df_series[var].pct_change().dropna()
+                    volatilidad_rolling = retornos_var.rolling(window=ventana_rolling).std() * np.sqrt(252) * 100
+                    volatilidades[var] = volatilidad_rolling
+                
+                df_volatilidad = pd.DataFrame(volatilidades)
+                
+                # Gráfico de volatilidades
+                fig_vol = go.Figure()
+                for var in df_volatilidad.columns:
+                    fig_vol.add_trace(go.Scatter(
+                        x=df_volatilidad.index,
+                        y=df_volatilidad[var].values,
+                        mode='lines',
+                        name=var,
+                        line=dict(width=1.5)
+                    ))
+                
+                fig_vol.update_layout(
+                    title=f"Volatilidad Móvil ({ventana_rolling} días)",
+                    xaxis_title="Fecha",
+                    yaxis_title="Volatilidad Anualizada (%)"
+                )
+                st.plotly_chart(fig_vol, use_container_width=True)
+                
+                # Correlación de volatilidades
+                corr_volatilidad = df_volatilidad.corr()
+                
+                fig_corr_vol = go.Figure(data=go.Heatmap(
+                    z=corr_volatilidad.values,
+                    x=corr_volatilidad.columns,
+                    y=corr_volatilidad.columns,
+                    colorscale='RdBu',
+                    zmid=0,
+                    text=corr_volatilidad.values.round(3),
+                    texttemplate="%{text}",
+                    textfont={"size": 10}
+                ))
+                
+                fig_corr_vol.update_layout(
+                    title="Correlación de Volatilidades",
+                    width=600,
+                    height=500
+                )
+                st.plotly_chart(fig_corr_vol, use_container_width=True)
+                
+                # ========== 8. RESUMEN ESTADÍSTICO ==========
+                st.markdown("### 📋 Resumen Estadístico")
+                
+                # Estadísticas descriptivas
+                stats_descriptivas = df_series.describe()
+                st.markdown("**📊 Estadísticas Descriptivas:**")
+                st.dataframe(stats_descriptivas, use_container_width=True)
+                
+                # Resumen de correlaciones
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Variables Analizadas", len(df_series.columns))
+                
+                with col2:
+                    correlaciones_fuertes = len([c for c in correlaciones.values.flatten() if abs(c) > 0.7])
+                    st.metric("Correlaciones Fuertes (>0.7)", correlaciones_fuertes)
+                
+                with col3:
+                    correlaciones_negativas = len([c for c in correlaciones.values.flatten() if c < -0.3])
+                    st.metric("Correlaciones Negativas (<-0.3)", correlaciones_negativas)
+                
+                # Recomendaciones basadas en correlaciones
+                st.markdown("### 💡 Recomendaciones")
+                
+                if len(correlaciones_significativas) > 0:
+                    st.markdown("**🔍 Hallazgos principales:**")
+                    
+                    # Correlaciones positivas fuertes
+                    corr_positivas = [c for c in correlaciones_significativas if c['Correlación'] > 0.7]
+                    if corr_positivas:
+                        st.markdown("**📈 Variables fuertemente correlacionadas positivamente:**")
+                        for corr in corr_positivas[:3]:
+                            st.write(f"• {corr['Variable 1']} ↔ {corr['Variable 2']} ({corr['Correlación']:.3f})")
+                    
+                    # Correlaciones negativas fuertes
+                    corr_negativas = [c for c in correlaciones_significativas if c['Correlación'] < -0.7]
+                    if corr_negativas:
+                        st.markdown("**📉 Variables fuertemente correlacionadas negativamente:**")
+                        for corr in corr_negativas[:3]:
+                            st.write(f"• {corr['Variable 1']} ↔ {corr['Variable 2']} ({corr['Correlación']:.3f})")
+                    
+                    st.markdown("**💡 Implicaciones para inversión:**")
+                    st.write("• Las variables fuertemente correlacionadas pueden usarse como proxies")
+                    st.write("• Las correlaciones negativas ofrecen oportunidades de diversificación")
+                    st.write("• Monitorear cambios en correlaciones para detectar cambios de régimen")
+                else:
+                    st.info("No se encontraron correlaciones significativas para generar recomendaciones")
+                
+            else:
+                st.error("Se necesitan al menos 2 variables para el análisis de correlaciones")
+
 # --- FIN FUNCIONES ROBUSTAS ---
 
 def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
