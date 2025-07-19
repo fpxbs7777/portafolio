@@ -4002,8 +4002,9 @@ def mostrar_analisis_portafolio():
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
 
 def main():
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    try:
+        st.title("📊 IOL Portfolio Analyzer")
+        st.markdown("### Analizador Avanzado de Portafolios IOL")
     
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
@@ -4186,6 +4187,13 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.error(f"Tipo de error: {type(e).__name__}")
+        import traceback
+        st.code(traceback.format_exc())
+    except Exception as e:
+        st.error(f"❌ Error crítico en la aplicación: {str(e)}")
+        st.error("La aplicación no pudo iniciarse correctamente.")
+        st.info("Por favor, verifique que todas las dependencias estén instaladas.")
 
 def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
     """
@@ -4282,18 +4290,19 @@ def optimizar_markowitz(mean_ret, cov, risk_free_rate=0.0, ciclo_economico=None,
     
     # Si no hay información de ciclo, usar optimización clásica
     if not ciclo_economico or not variables_macro:
-    def neg_sharpe(x):
-        port_ret = np.dot(mean_ret, x)
-        port_vol = np.sqrt(np.dot(x, np.dot(cov, x)))
-        if port_vol == 0:
-            return 1e6
-        return -(port_ret - risk_free_rate) / port_vol
-    x0 = np.ones(n) / n
-    res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints)
-    if res.success:
-        return res.x
-    else:
-        return x0
+        def neg_sharpe(x):
+            port_ret = np.dot(mean_ret, x)
+            port_vol = np.sqrt(np.dot(x, np.dot(cov, x)))
+            if port_vol == 0:
+                return 1e6
+            return -(port_ret - risk_free_rate) / port_vol
+        
+        x0 = np.ones(n) / n
+        res = op.minimize(neg_sharpe, x0, bounds=bounds, constraints=constraints)
+        if res.success:
+            return res.x
+        else:
+            return x0
 
     # ========== 1. AJUSTE DE RETORNOS SEGÚN CICLO ECONÓMICO ==========
     mean_ret_ajustado = mean_ret.copy()
@@ -6687,7 +6696,7 @@ def descargar_y_procesar_datos_economicos():
             try:
                 from numba import jit
                 
-                @jit(nopython=True)
+                # @jit(nopython=True)  # Comentado temporalmente para evitar problemas de carga
                 def calculate_stats_numba(serie_ids, valores):
                     """Función optimizada con numba para calcular estadísticas"""
                     unique_series = np.unique(serie_ids)
@@ -8627,22 +8636,28 @@ def crear_indice_ciclo_avanzado_argentino():
                 
                 # 2. Aplicar filtro Hodrick-Prescott para separar tendencia de ciclo
                 try:
-                    from statsmodels.tsa.filters.hp_filter import hpfilter
-                    
-                    # Lambda para datos mensuales = 129600, trimestrales = 1600
-                    lambda_hp = 129600 if 'Mensual' in info.get('frecuencia', '') else 1600
-                    
-                    ciclo_hp, tendencia_hp = hpfilter(datos['valor'].dropna(), lamb=lambda_hp)
-                    
-                    datos['tendencia_hp'] = tendencia_hp
-                    datos['ciclo_hp'] = ciclo_hp
-                    
-                    # 3. Calcular brecha de producto (diferencia entre actual y tendencia)
-                    datos['brecha_producto'] = ((datos['valor'] - datos['tendencia_hp']) / datos['tendencia_hp']) * 100
-                    
-                except ImportError:
+                    # Intentar importar statsmodels de forma segura
+                    import importlib.util
+                    spec = importlib.util.find_spec("statsmodels")
+                    if spec is not None:
+                        from statsmodels.tsa.filters.hp_filter import hpfilter
+                        
+                        # Lambda para datos mensuales = 129600, trimestrales = 1600
+                        lambda_hp = 129600 if 'Mensual' in info.get('frecuencia', '') else 1600
+                        
+                        ciclo_hp, tendencia_hp = hpfilter(datos['valor'].dropna(), lamb=lambda_hp)
+                        
+                        datos['tendencia_hp'] = tendencia_hp
+                        datos['ciclo_hp'] = ciclo_hp
+                        
+                        # 3. Calcular brecha de producto (diferencia entre actual y tendencia)
+                        datos['brecha_producto'] = ((datos['valor'] - datos['tendencia_hp']) / datos['tendencia_hp']) * 100
+                    else:
+                        raise ImportError("statsmodels no está instalado")
+                        
+                except (ImportError, Exception) as e:
                     # Fallback si no está disponible statsmodels
-                    st.warning("statsmodels no disponible. Usando métodos alternativos.")
+                    st.info("Usando métodos alternativos para el análisis de tendencia.")
                     # Usar media móvil como proxy de tendencia
                     datos['tendencia_hp'] = datos['valor'].rolling(window=12).mean()
                     datos['ciclo_hp'] = datos['valor'] - datos['tendencia_hp']
@@ -9211,4 +9226,36 @@ def analisis_ciclo_economico_argentina(variables_macro_arg, variables_macro_glob
             }
 
 if __name__ == "__main__":
-    main()
+    try:
+        st.write("🚀 Iniciando aplicación...")
+        main()
+    except Exception as e:
+        st.error(f"❌ Error fatal al iniciar la aplicación: {str(e)}")
+        st.error(f"Tipo de error: {type(e).__name__}")
+        import traceback
+        st.code(traceback.format_exc())
+        
+        # Información de diagnóstico
+        st.subheader("🔍 Diagnóstico del Sistema")
+        st.write(f"**Streamlit version:** {st.__version__}")
+        st.write(f"**Pandas version:** {pd.__version__}")
+        st.write(f"**Numpy version:** {np.__version__}")
+        
+        # Verificar importaciones críticas
+        try:
+            import yfinance
+            st.success("✅ yfinance importado correctamente")
+        except Exception as e:
+            st.error(f"❌ Error con yfinance: {e}")
+        
+        try:
+            import plotly
+            st.success("✅ plotly importado correctamente")
+        except Exception as e:
+            st.error(f"❌ Error con plotly: {e}")
+        
+        try:
+            import requests
+            st.success("✅ requests importado correctamente")
+        except Exception as e:
+            st.error(f"❌ Error con requests: {e}")
