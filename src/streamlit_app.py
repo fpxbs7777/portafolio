@@ -3574,20 +3574,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
                 # Convert to scalar if it's a pandas Series or numpy array
                 try:
-                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
-                    sharpe_scalar = sharpe.item()
-                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
-                    sharpe_scalar = float(sharpe[0])
+                    if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
+                        sharpe_scalar = sharpe.item()
+                    elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                        sharpe_scalar = float(sharpe[0])
                     elif hasattr(sharpe, 'iloc') and len(sharpe) == 1:
                         sharpe_scalar = float(sharpe.iloc[0])
                     elif hasattr(sharpe, 'values'):
                         if len(sharpe.values) == 1:
                             sharpe_scalar = float(sharpe.values[0])
-                else:
+                        else:
                             sharpe_scalar = float(sharpe.values)
                     else:
                         try:
-                    sharpe_scalar = float(sharpe)
+                            sharpe_scalar = float(sharpe)
                         except (ValueError, TypeError):
                             sharpe_scalar = 0.0
                 except (ValueError, TypeError, IndexError) as e:
@@ -3605,20 +3605,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
                 # Convert to scalar if it's a pandas Series or numpy array
                 try:
-                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
-                    sharpe = sharpe.item()
-                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
-                    sharpe = float(sharpe[0])
+                    if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
+                        sharpe = sharpe.item()
+                    elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                        sharpe = float(sharpe[0])
                     elif hasattr(sharpe, 'iloc') and len(sharpe) == 1:
                         sharpe = float(sharpe.iloc[0])
                     elif hasattr(sharpe, 'values'):
                         if len(sharpe.values) == 1:
                             sharpe = float(sharpe.values[0])
-                else:
+                        else:
                             sharpe = float(sharpe.values)
                     else:
                         try:
-                    sharpe = float(sharpe)
+                            sharpe = float(sharpe)
                         except (ValueError, TypeError):
                             sharpe = 0.0
                 except (ValueError, TypeError, IndexError) as e:
