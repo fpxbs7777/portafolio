@@ -4258,7 +4258,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        key="analisis_tecnico_simbolo"
     )
     
     if simbolo_seleccionado:
@@ -4357,12 +4358,14 @@ def mostrar_movimientos_asesor():
             tipo_fecha = st.selectbox(
                 "Tipo de fecha",
                 ["fechaOperacion", "fechaLiquidacion"],
-                index=0
+                index=0,
+                key="tipo_fecha_asesor"
             )
             estado = st.selectbox(
                 "Estado",
                 ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
+                index=0,
+                key="estado_asesor"
             )
         with col2:
             tipo_operacion = st.text_input("Tipo de operación")
@@ -4654,7 +4657,8 @@ def mostrar_configuracion(token_acceso, id_cliente):
         frecuencia = st.selectbox(
             "Frecuencia de rebalanceo",
             ["Mensual", "Trimestral", "Semestral", "Anual"],
-            index=1
+            index=1,
+            key="frecuencia_rebalanceo"
         )
         
         col1, col2 = st.columns(2)
@@ -4673,7 +4677,8 @@ def mostrar_configuracion(token_acceso, id_cliente):
         perfil_riesgo = st.selectbox(
             "Perfil de riesgo actual",
             ["Conservador", "Moderado", "Agresivo"],
-            index=1
+            index=1,
+            key="perfil_riesgo_config"
         )
         
         col1, col2 = st.columns(2)
@@ -4695,7 +4700,7 @@ def mostrar_configuracion(token_acceso, id_cliente):
             default=["ARS", "USD"]
         )
         
-        moneda_principal = st.selectbox("Moneda principal", monedas, index=0)
+        moneda_principal = st.selectbox("Moneda principal", monedas, index=0, key="moneda_principal_config")
         
         if st.button("💾 Guardar Configuración de Monedas"):
             st.success("✅ Configuración de monedas guardada")
@@ -5410,7 +5415,8 @@ def main():
                     "Seleccione un cliente:",
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    key="cliente_seleccionado_main"
                 )
                 
                 st.session_state.cliente_seleccionado = next(
@@ -6226,7 +6232,8 @@ def optimizacion_portafolio_ciclo_economico(token_acceso, gemini_api_key=None):
             "Período de análisis",
             ["6mo", "1y", "2y", "5y"],
             index=1,
-            help="Período para el análisis histórico"
+            help="Período para el análisis histórico",
+            key="periodo_analisis_ciclo_economico"
         )
     with col2:
         ventana_optimizacion = st.slider(
@@ -6649,14 +6656,16 @@ def analisis_correlaciones_economicas(token_acceso, gemini_api_key=None):
             "Período de análisis",
             ["6mo", "1y", "2y", "5y"],
             index=1,
-            help="Período para el análisis de correlaciones"
+            help="Período para el análisis de correlaciones",
+            key="periodo_analisis_correlaciones"
         )
     with col2:
         metodo_correlacion = st.selectbox(
             "Método de correlación",
             ["Pearson", "Spearman", "Kendall"],
             index=0,
-            help="Tipo de correlación a calcular"
+            help="Tipo de correlación a calcular",
+            key="metodo_correlacion_economica"
         )
     with col3:
         ventana_rolling = st.slider(
@@ -7157,7 +7166,8 @@ def analisis_intermarket_completo(token_acceso, gemini_api_key=None):
             "Período de análisis",
             ["6mo", "1y", "2y", "5y"],
             index=1,
-            help="Período para el análisis de variables macro e intermarket"
+            help="Período para el análisis de variables macro e intermarket",
+            key="periodo_analisis_intermarket"
         )
     with col2:
         ventana_momentum = st.slider(
@@ -7809,8 +7819,13 @@ def mostrar_dashboard_datos_economicos():
     mostrar_estadisticas_generales_economicas(datos)
     st.markdown("---")
     
-    # Obtener series disponibles
-    series_info = obtener_series_disponibles_economicas(datos)
+    # Obtener solo las series con datos válidos disponibles
+    with st.spinner("🔍 Verificando series con datos disponibles..."):
+        series_info = obtener_series_con_datos_validos(datos)
+    
+    if series_info.empty:
+        st.warning("⚠️ No se encontraron series con datos válidos disponibles. Algunas series pueden estar temporalmente sin datos.")
+        return
     
     # Pestañas principales
     tab1, tab2, tab3 = st.tabs([
@@ -7827,11 +7842,11 @@ def mostrar_dashboard_datos_economicos():
         
         with col1:
             categorias = ['Todas'] + list(series_info['catalogo_id'].unique())
-            categoria_seleccionada = st.selectbox("Categoría:", categorias)
+            categoria_seleccionada = st.selectbox("Categoría:", categorias, key="categoria_series_economicas")
         
         with col2:
             frecuencias = ['Todas'] + list(series_info['indice_tiempo_frecuencia'].unique())
-            frecuencia_seleccionada = st.selectbox("Frecuencia:", frecuencias)
+            frecuencia_seleccionada = st.selectbox("Frecuencia:", frecuencias, key="frecuencia_series_economicas")
         
         with col3:
             busqueda = st.text_input("Buscar por título:", "")
@@ -7858,7 +7873,8 @@ def mostrar_dashboard_datos_economicos():
             serie_seleccionada = st.selectbox(
                 "Selecciona una serie para visualizar:",
                 options=series_filtradas['serie_id'].tolist(),
-                format_func=lambda x: f"{x} - {series_filtradas[series_filtradas['serie_id']==x]['serie_titulo'].iloc[0]}"
+                format_func=lambda x: f"{x} - {series_filtradas[series_filtradas['serie_id']==x]['serie_titulo'].iloc[0]}",
+                key="serie_seleccionada_economica"
             )
             
             if serie_seleccionada:
@@ -8270,6 +8286,37 @@ def obtener_series_disponibles_economicas(datos):
     )
     
     return series_info
+
+@st.cache_data(ttl=900)  # Cache por 15 minutos
+def obtener_series_con_datos_validos(datos):
+    """Obtiene solo las series que tienen datos válidos disponibles"""
+    if datos is None:
+        return pd.DataFrame()
+    
+    # Obtener todas las series
+    series_info = obtener_series_disponibles_economicas(datos)
+    
+    if series_info.empty:
+        return pd.DataFrame()
+    
+    # Verificar qué series tienen datos válidos
+    series_con_datos = []
+    
+    for _, serie in series_info.iterrows():
+        serie_id = serie['serie_id']
+        valores = obtener_valores_serie_economica(serie_id, datos)
+        
+        # Verificar que la serie tenga datos válidos
+        if not valores.empty and len(valores) > 0:
+            # Verificar que no sean todos NaN
+            valores_validos = valores['valor'].dropna()
+            if len(valores_validos) > 0:
+                series_con_datos.append(serie)
+    
+    if series_con_datos:
+        return pd.DataFrame(series_con_datos)
+    else:
+        return pd.DataFrame()
 
 @st.cache_data(ttl=900)  # Cache por 15 minutos
 def obtener_valores_serie_economica(serie_id, datos):
