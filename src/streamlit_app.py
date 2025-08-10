@@ -3573,12 +3573,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                     continue
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
                 # Convert to scalar if it's a pandas Series or numpy array
-                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
-                    sharpe_scalar = sharpe.item()
-                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
-                    sharpe_scalar = float(sharpe[0])
-                else:
-                    sharpe_scalar = float(sharpe)
+                try:
+                    if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
+                        sharpe_scalar = sharpe.item()
+                    elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                        sharpe_scalar = float(sharpe[0])
+                    elif hasattr(sharpe, 'iloc') and len(sharpe) == 1:
+                        sharpe_scalar = float(sharpe.iloc[0])
+                    elif hasattr(sharpe, 'values'):
+                        sharpe_scalar = float(sharpe.values[0]) if len(sharpe.values) == 1 else float(sharpe.values)
+                    else:
+                        sharpe_scalar = float(sharpe)
+                except (ValueError, TypeError, IndexError) as e:
+                    st.warning(f"⚠️ Error al convertir Sharpe ratio: {e}. Usando valor por defecto.")
+                    sharpe_scalar = 0.0
                 
                 if abs(sharpe_scalar - target_sharpe) < abs(mejor_sharpe - target_sharpe):
                     mejor_sharpe = sharpe_scalar
@@ -3590,12 +3598,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             if res:
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
                 # Convert to scalar if it's a pandas Series or numpy array
-                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
-                    sharpe = sharpe.item()
-                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
-                    sharpe = float(sharpe[0])
-                else:
-                    sharpe = float(sharpe)
+                try:
+                    if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
+                        sharpe = sharpe.item()
+                    elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                        sharpe = float(sharpe[0])
+                    elif hasattr(sharpe, 'iloc') and len(sharpe) == 1:
+                        sharpe = float(sharpe.iloc[0])
+                    elif hasattr(sharpe, 'values'):
+                        sharpe = float(sharpe.values[0]) if len(sharpe.values) == 1 else float(sharpe.values)
+                    else:
+                        sharpe = float(sharpe)
+                except (ValueError, TypeError, IndexError) as e:
+                    st.warning(f"⚠️ Error al convertir Sharpe ratio: {e}. Usando valor por defecto.")
+                    sharpe = 0.0
                 resultados[clave] = (res, sharpe, None)
 
     # Mostrar resultados
@@ -4392,7 +4408,7 @@ def mostrar_dashboard_principal(token_acceso, id_cliente):
     try:
         with st.spinner("📊 Cargando datos del portafolio..."):
             # Obtener portafolio del cliente
-            portafolio = obtener_portafolio_cliente(token_acceso, id_cliente)
+            portafolio = obtener_portafolio(token_acceso, id_cliente)
             
             if portafolio:
                 # Mostrar resumen del portafolio
@@ -5422,7 +5438,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Dashboard Unificado", "📊 Análisis de Portafolio", "🌍 Contexto Económico", "📋 Informe Financiero", "🤖 Noticias con IA", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"),
+                ("🏠 Dashboard Unificado", "📊 Análisis de Portafolio", "🌍 Contexto Económico", "📋 Informe Financiero", "🤖 Noticias con IA", "👨‍💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -5440,11 +5456,6 @@ def main():
                 generar_informe_financiero_actual()
             elif opcion == "🤖 Noticias con IA":
                 mostrar_busqueda_noticias_gemini()
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
-                else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
             elif opcion == "👨‍💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
         else:
@@ -11603,13 +11614,59 @@ def mostrar_busqueda_noticias_gemini():
     if modo_busqueda == "📰 Análisis General":
         st.info("💡 **Modo Eficiente**: Analiza múltiples tickers en una sola llamada (1 crédito)")
         
+        # Opción para incluir activos del portafolio actual
+        incluir_portafolio = False
+        if 'token_acceso' in st.session_state and st.session_state.token_acceso and st.session_state.cliente_seleccionado:
+            incluir_portafolio = st.checkbox(
+                "📊 Incluir activos del portafolio actual",
+                value=False,
+                help="Agregar automáticamente los activos del portafolio actual a la lista de tickers"
+            )
+        
         # Tickers personalizables
         tickers_default = ['META', 'GOOGL', 'AMZN', 'MSFT', 'AAPL', 'TSLA', '^MERV', 'YPF']
+        
+        # Si se selecciona incluir portafolio, obtener activos actuales
+        tickers_portafolio = []
+        if incluir_portafolio:
+            try:
+                portafolio = obtener_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+                if portafolio and portafolio.get('activos'):
+                    for activo in portafolio['activos']:
+                        titulo = activo.get('titulo', {})
+                        simbolo = titulo.get('simbolo')
+                        if simbolo:
+                            tickers_portafolio.append(simbolo)
+                
+                if tickers_portafolio:
+                    st.success(f"✅ Se agregaron {len(tickers_portafolio)} activos del portafolio actual")
+                    # Mostrar activos del portafolio
+                    with st.expander("📋 Activos del Portafolio Actual", expanded=False):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("**Símbolos:**")
+                            for i, ticker in enumerate(tickers_portafolio):
+                                if i % 2 == 0:
+                                    st.write(f"• {ticker}")
+                        with col2:
+                            st.write("**Símbolos:**")
+                            for i, ticker in enumerate(tickers_portafolio):
+                                if i % 2 == 1:
+                                    st.write(f"• {ticker}")
+                else:
+                    st.warning("⚠️ No se encontraron activos en el portafolio actual")
+            except Exception as e:
+                st.error(f"❌ Error al obtener portafolio: {e}")
+        
+        # Combinar tickers por defecto con tickers del portafolio
+        tickers_combinados = tickers_default + tickers_portafolio
+        tickers_combinados = list(dict.fromkeys(tickers_combinados))  # Eliminar duplicados
+        
         tickers_personalizados = st.multiselect(
             "📊 Selecciona tickers para analizar:",
-            options=tickers_default,
-            default=tickers_default[:6],
-            help="Selecciona hasta 6 tickers para optimizar el uso de créditos"
+            options=tickers_combinados,
+            default=tickers_combinados[:6] if len(tickers_combinados) >= 6 else tickers_combinados,
+            help=f"Selecciona hasta 6 tickers para optimizar el uso de créditos. Total disponible: {len(tickers_combinados)}"
         )
         
         if st.button("🚀 Iniciar Búsqueda Automática", use_container_width=True):
