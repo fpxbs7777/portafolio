@@ -4066,9 +4066,9 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     if simbolo_seleccionado:
         st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
         
-        # Widget de TradingView
+                # Widget de TradingView con ancho completo de página
         tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+        <div id="tradingview_{simbolo_seleccionado}" style="height:650px; width:100%;"></div>
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         <script type="text/javascript">
         new TradingView.widget({{
@@ -4114,7 +4114,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         }});
         </script>
         """
-        components.html(tv_widget, height=680)
+        # Usar ancho completo de contenedor para el gráfico
+        components.html(tv_widget, height=680, use_container_width=True)
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
