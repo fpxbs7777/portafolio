@@ -3474,7 +3474,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     for clave, nombre in estrategias:
         if clave == 'markowitz':
             # Mejorar lógica de Sharpe objetivo: buscar el retorno objetivo que más se aproxime al Sharpe deseado
-            mejor_sharpe = -1e9
+            mejor_sharpe = -1e9  # Scalar value
             mejor_result = None
             mejor_ret = None
             for ret in [x/100 for x in range(2, 25, 1)]:
@@ -3482,8 +3482,14 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 if not res or not hasattr(res, 'returns') or not hasattr(res, 'risk'):
                     continue
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
-                if abs(sharpe - target_sharpe) < abs(mejor_sharpe - target_sharpe):
-                    mejor_sharpe = sharpe
+                # Convert to scalar if it's a pandas Series
+                if hasattr(sharpe, 'item'):
+                    sharpe_scalar = sharpe.item()
+                else:
+                    sharpe_scalar = float(sharpe)
+                
+                if abs(sharpe_scalar - target_sharpe) < abs(mejor_sharpe - target_sharpe):
+                    mejor_sharpe = sharpe_scalar
                     mejor_result = res
                     mejor_ret = ret
             resultados[clave] = (mejor_result, mejor_sharpe, mejor_ret)
@@ -3491,6 +3497,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             res = manager_inst.compute_portfolio(strategy=clave)
             if res:
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
+                # Convert to scalar if it's a pandas Series
+                if hasattr(sharpe, 'item'):
+                    sharpe = sharpe.item()
+                else:
+                    sharpe = float(sharpe)
                 resultados[clave] = (res, sharpe, None)
 
     # Mostrar resultados
