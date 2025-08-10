@@ -1282,7 +1282,11 @@ class output:
         self.dataframe_allocation = None
         # Compatibilidad: alias para risk y returns (usados en la interfaz)
         self.risk = self.volatility_annual
-        self.returns = self.return_annual
+        # NO sobrescribir self.returns aquí - mantener los retornos diarios para el histograma
+        # self.returns ya contiene los retornos diarios del portafolio
+        
+        # Propiedad para acceder al retorno anual cuando sea necesario
+        self._return_annual = self.return_annual
 
     def get_metrics_dict(self):
         """Retorna métricas del portafolio en formato diccionario"""
@@ -6727,55 +6731,13 @@ def mostrar_dashboard_datos_economicos():
     series_info = obtener_series_disponibles_economicas(datos)
     
     # Pestañas principales
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🏠 Dashboard General", 
+    tab1, tab2, tab3 = st.tabs([
         "📊 Explorador de Series", 
-        "🔍 Análisis por Categoría",
         "📈 Comparación de Series",
         "📋 Metadatos y Fuentes"
     ])
     
     with tab1:
-        st.header("🏠 Dashboard General")
-        
-        # Resumen por categoría
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📊 Series por Categoría")
-            categoria_counts = datos['index']['catalogo_id'].value_counts()
-            fig_cat = px.pie(
-                values=categoria_counts.values, 
-                names=categoria_counts.index,
-                title="Distribución de Series por Categoría"
-            )
-            st.plotly_chart(fig_cat, use_container_width=True)
-        
-        with col2:
-            st.subheader("📅 Frecuencia de Actualización")
-            freq_counts = datos['index']['indice_tiempo_frecuencia'].value_counts()
-            fig_freq = px.bar(
-                x=freq_counts.index, 
-                y=freq_counts.values,
-                title="Frecuencia de Actualización de Series",
-                labels={'x': 'Frecuencia', 'y': 'Cantidad de Series'}
-            )
-            st.plotly_chart(fig_freq, use_container_width=True)
-        
-        # Series más consultadas
-        st.subheader("🔥 Series Más Consultadas")
-        if not datos['consultas'].empty:
-            top_consultas = datos['consultas'].nlargest(10, 'consultas_total')
-            fig_consultas = px.bar(
-                x=top_consultas['serie_id'], 
-                y=top_consultas['consultas_total'],
-                title="Top 10 Series Más Consultadas",
-                labels={'x': 'Serie ID', 'y': 'Total de Consultas'}
-            )
-            fig_consultas.update_xaxes(tickangle=45)
-            st.plotly_chart(fig_consultas, use_container_width=True)
-    
-    with tab2:
         st.header("📊 Explorador de Series")
         
         # Filtros
@@ -6864,100 +6826,44 @@ def mostrar_dashboard_datos_economicos():
         else:
             st.info("No se encontraron series con los filtros aplicados.")
     
-    with tab3:
-        st.header("🔍 Análisis por Categoría")
-        
-        # Selector de categoría
-        categoria_analisis = st.selectbox(
-            "Selecciona una categoría para analizar:",
-            options=datos['index']['catalogo_id'].unique()
-        )
-        
-        if categoria_analisis:
-            # Obtener series de la categoría
-            series_categoria = series_info[series_info['catalogo_id'] == categoria_analisis]
-            
-            st.subheader(f"📊 Análisis de {categoria_analisis.upper()}")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric("Total de Series", len(series_categoria))
-                st.metric("Fuentes de Datos", series_categoria['dataset_fuente'].nunique())
-            
-            with col2:
-                st.metric("Frecuencias", series_categoria['indice_tiempo_frecuencia'].nunique())
-                st.metric("Datasets", series_categoria['dataset_id'].nunique())
-            
-            # Gráfico de frecuencias
-            st.subheader("📅 Distribución por Frecuencia")
-            freq_cat = series_categoria['indice_tiempo_frecuencia'].value_counts()
-            fig_freq_cat = px.pie(
-                values=freq_cat.values, 
-                names=freq_cat.index,
-                title=f"Frecuencias en {categoria_analisis}"
-            )
-            st.plotly_chart(fig_freq_cat, use_container_width=True)
-            
-            # Lista de series de la categoría
-            st.subheader("📋 Series Disponibles")
-            st.dataframe(
-                series_categoria[['serie_id', 'serie_titulo', 'indice_tiempo_frecuencia', 'dataset_fuente']],
-                use_container_width=True
-            )
-    
-    with tab4:
+    with tab2:
         st.header("📈 Comparación de Series")
         
-        # Selector múltiple de series
-        series_disponibles = series_info['serie_id'].tolist()
-        series_comparar = st.multiselect(
-            "Selecciona series para comparar (máximo 5):",
-            options=series_disponibles,
-            max_selections=5
-        )
+        # Mostrar todas las series disponibles
+        st.subheader("📋 Series Disponibles para Comparación")
         
-        if len(series_comparar) >= 2:
-            # Obtener datos de las series seleccionadas
-            series_data = {}
-            for serie_id in series_comparar:
-                valores = obtener_valores_serie_economica(serie_id, datos)
-                if not valores.empty:
-                    series_data[serie_id] = valores
-            
-            if len(series_data) >= 2:
-                # Gráfico comparativo
-                st.subheader("📊 Comparación de Series")
-                fig_comp = crear_grafico_comparativo_economico(series_data, "Comparación de Series Seleccionadas")
-                st.plotly_chart(fig_comp, use_container_width=True)
-                
-                # Tabla comparativa
-                st.subheader("📋 Resumen Comparativo")
-                
-                resumen_data = []
-                for serie_id, valores in series_data.items():
-                    info = series_info[series_info['serie_id'] == serie_id].iloc[0]
-                    resumen_data.append({
-                        'Serie ID': serie_id,
-                        'Título': info['serie_titulo'],
-                        'Categoría': info['catalogo_id'],
-                        'Unidades': info['serie_unidades'],
-                        'Valores': len(valores),
-                        'Inicio': valores['indice_tiempo'].min().strftime('%Y-%m'),
-                        'Fin': valores['indice_tiempo'].max().strftime('%Y-%m'),
-                        'Promedio': valores['valor'].mean(),
-                        'Máximo': valores['valor'].max(),
-                        'Mínimo': valores['valor'].min()
-                    })
-                
-                resumen_df = pd.DataFrame(resumen_data)
-                st.dataframe(resumen_df, use_container_width=True)
-            else:
-                st.warning("Se necesitan al menos 2 series con datos válidos para la comparación.")
-        else:
-            st.info("Selecciona al menos 2 series para comparar.")
+        # Crear tabla con todas las series disponibles
+        series_display = series_info[['serie_id', 'serie_titulo', 'catalogo_id', 'indice_tiempo_frecuencia']].copy()
+        series_display.columns = ['ID de Serie', 'Título', 'Categoría', 'Frecuencia']
+        
+        # Agregar información adicional
+        st.info(f"📊 Total de series disponibles: {len(series_display)}")
+        
+        # Mostrar tabla con todas las series
+        st.dataframe(series_display, use_container_width=True)
+        
+        # Información sobre comparaciones
+        st.subheader("💡 Información sobre Comparaciones")
+        st.write("""
+        **Para realizar comparaciones entre series:**
+        - Las series deben tener la misma frecuencia temporal
+        - Se recomienda comparar series de la misma categoría
+        - Algunas series pueden tener diferentes períodos de datos disponibles
+        """)
+        
+        # Estadísticas por categoría
+        st.subheader("📊 Estadísticas por Categoría")
+        categoria_stats = series_info['catalogo_id'].value_counts()
+        fig_cat_stats = px.bar(
+            x=categoria_stats.index,
+            y=categoria_stats.values,
+            title="Distribución de Series por Categoría",
+            labels={'x': 'Categoría', 'y': 'Cantidad de Series'}
+        )
+        fig_cat_stats.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_cat_stats, use_container_width=True)
     
-    with tab5:
+    with tab3:
         st.header("📋 Metadatos y Fuentes")
         
         # Información de datasets
@@ -8071,14 +7977,8 @@ def mostrar_dashboard_unificado():
     with tabs[3]:
         st.header("📈 Comparación de Series")
         
-        # Filtro de búsqueda para facilitar selección
-        st.info("💡 **Consejo**: Usa el campo de búsqueda para filtrar las series y facilitar la selección")
-        
-        busqueda_comparacion = st.text_input(
-            "🔍 Buscar series para comparar:",
-            placeholder="Escribe parte del título de la serie...",
-            key="busqueda_comparacion_optimized"
-        )
+        # Mostrar todas las series disponibles
+        st.subheader("📋 Series Disponibles para Comparación")
         
         # Selector múltiple de series con persistencia
         # Crear opciones con títulos descriptivos
