@@ -4289,6 +4289,42 @@ def mostrar_movimientos_asesor():
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
+def mostrar_dashboard_principal(token_acceso, id_cliente):
+    """
+    Muestra el dashboard principal con resumen del portafolio del cliente
+    """
+    st.header("📊 Dashboard Principal")
+    
+    try:
+        with st.spinner("📊 Cargando datos del portafolio..."):
+            # Obtener portafolio del cliente
+            portafolio = obtener_portafolio_cliente(token_acceso, id_cliente)
+            
+            if portafolio:
+                # Mostrar resumen del portafolio
+                mostrar_resumen_portafolio(portafolio, token_acceso)
+                
+                # Mostrar estado de cuenta si está disponible
+                try:
+                    estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+                    if estado_cuenta:
+                        mostrar_estado_cuenta(estado_cuenta)
+                except Exception as e:
+                    st.warning(f"No se pudo obtener el estado de cuenta: {e}")
+                
+                # Mostrar análisis técnico básico
+                try:
+                    mostrar_analisis_tecnico(token_acceso, id_cliente)
+                except Exception as e:
+                    st.warning(f"No se pudo realizar el análisis técnico: {e}")
+                    
+            else:
+                st.warning("No se pudo obtener el portafolio del cliente")
+                
+    except Exception as e:
+        st.error(f"❌ Error al cargar el dashboard principal: {e}")
+        st.info("Verifique que el cliente tenga un portafolio activo")
+
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
