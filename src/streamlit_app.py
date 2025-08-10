@@ -180,7 +180,6 @@ def obtener_lista_clientes(token_portador):
         st.error(f'Error de conexión al obtener clientes: {str(e)}')
         return []
 
-def obtener_estado_cuenta(token_portador, id_cliente=None):
 import streamlit as st
 import requests
 import plotly.graph_objects as go
