@@ -4339,12 +4339,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos más organizados
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Dashboard Principal", 
         "📈 Análisis Detallado", 
         "💱 Mercado y Cotizaciones",
         "🔄 Optimización",
-        "⚙️ Configuración"
+        "⚙️ Configuración",
+        "🇦🇷 Decreto 676/2020"
     ])
 
     with tab1:
@@ -4361,6 +4362,414 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_configuracion(token_acceso, id_cliente)
+    
+    with tab6:
+        mostrar_instrumentos_decreto_676(token_acceso)
+
+def mostrar_datos_simulados(ticker):
+    """
+    Muestra datos simulados cuando no se pueden obtener datos reales.
+    """
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Precio Actual", "$95.50", delta="+2.5%")
+    with col2:
+        st.metric("Variación 1D", "+2.5%", delta="+2.5%")
+    with col3:
+        st.metric("Variación 1M", "+5.2%", delta="+5.2%")
+    with col4:
+        st.metric("Variación 1A", "+12.8%", delta="+12.8%")
+    
+    # Gráfico de evolución de precios (simulado)
+    st.subheader("📈 Evolución de Precios (Últimos 30 días)")
+    
+    # Datos simulados para el gráfico
+    fechas = pd.date_range(start=date.today() - timedelta(days=30), end=date.today(), freq='D')
+    precios = [95 + np.random.normal(0, 1) for _ in range(len(fechas))]
+    
+    df_precios = pd.DataFrame({
+        'Fecha': fechas,
+        'Precio': precios
+    })
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_precios['Fecha'],
+        y=df_precios['Precio'],
+        mode='lines+markers',
+        name='Precio',
+        line=dict(color='#0d6efd', width=2),
+        marker=dict(size=6)
+    ))
+    
+    fig.update_layout(
+        title=f"Evolución de Precios - {ticker}",
+        xaxis_title="Fecha",
+        yaxis_title="Precio (USD)",
+        hovermode='x unified',
+        template='plotly_white'
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def mostrar_instrumentos_decreto_676(token_acceso):
+    """
+    Muestra información sobre los instrumentos financieros emitidos en el canje 
+    dispuesto por Decreto 676/2020, incluyendo cotizaciones, variaciones y cálculos de TIR.
+    """
+    st.header("🇦🇷 Instrumentos Financieros - Decreto 676/2020")
+    st.markdown("### Canje de Deuda Argentina - Instrumentos Emitidos")
+    
+    # Datos de los instrumentos financieros con tickers oficiales y información completa
+    instrumentos = {
+        'BONCER': [
+            {'nombre': 'BONCER 2% $ 2026', 'tasa': '2.00%', 'vencimiento': '09-nov-26', 'ticker': 'TX26', 'ticker_ny': '—', 'ticker_ar': 'TX26', 'moneda': 'USD', 'ley': 'Nueva York'},
+            {'nombre': 'BONCER 2.25% $ 2028', 'tasa': '2.25%', 'vencimiento': '09-nov-28', 'ticker': 'TX28', 'ticker_ny': '—', 'ticker_ar': 'TX28', 'moneda': 'USD', 'ley': 'Nueva York'}
+        ],
+        'BONOS STEP UP USD': [
+            {'nombre': 'Bono Global USD Step Up 2030', 'tasa': '0.125% - 0.50% - 0.75% - 1.75%', 'vencimiento': '09-jul-30', 'ticker': 'GD30', 'ticker_ny': 'GD30', 'ticker_ar': 'AL30', 'moneda': 'USD', 'ley': 'Nueva York'},
+            {'nombre': 'Bono Global USD Step Up 2035', 'tasa': '0.125% - 1.125% - 1.50% - 3.625% - 4.125% - 4.75% - 5%', 'vencimiento': '09-jul-35', 'ticker': 'GD35', 'ticker_ny': 'GD35', 'ticker_ar': 'AL35', 'moneda': 'USD', 'ley': 'Nueva York'},
+            {'nombre': 'Bono Global USD Step Up 2038', 'tasa': '0.125% - 2% - 3.875% - 4.25% - 5%', 'vencimiento': '09-ene-38', 'ticker': 'GD38', 'ticker_ny': 'GD38', 'ticker_ar': 'AE38', 'moneda': 'USD', 'ley': 'Nueva York'},
+            {'nombre': 'Bono Global USD Step Up 2041', 'tasa': '0.125% - 2.5% - 3.8% - 4.875%', 'vencimiento': '09-jul-41', 'ticker': 'GD41', 'ticker_ny': 'GD41', 'ticker_ar': 'AL41', 'moneda': 'USD', 'ley': 'Nueva York'},
+            {'nombre': 'Bono Global USD Step Up 2046', 'tasa': '0.125% - 1.125% - 1.5% - 3.625% - 4.125% - 4.375% - 5%', 'vencimiento': '09-jul-46', 'ticker': 'GD46', 'ticker_ny': 'GD46', 'ticker_ar': '—', 'moneda': 'USD', 'ley': 'Nueva York'},
+            {'nombre': 'Bono Global USD 1% 2029', 'tasa': '1.000%', 'vencimiento': '09-jul-29', 'ticker': 'GD29', 'ticker_ny': 'GD29', 'ticker_ar': '—', 'moneda': 'USD', 'ley': 'Nueva York'}
+        ],
+        'BONOS STEP UP EUR': [
+            {'nombre': 'Bono Global EUR Step Up 2030', 'tasa': '0.125%', 'vencimiento': '09-jul-30', 'ticker': 'GD30E', 'ticker_ny': 'GD30E', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres'},
+            {'nombre': 'Bono Global EUR Step Up 2035', 'tasa': '0.125% - 0.75% - 0.875% - 2.5% - 3.875% - 4%', 'vencimiento': '09-jul-35', 'ticker': 'GD35E', 'ticker_ny': 'GD35E', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres'},
+            {'nombre': 'Bono Global EUR Step Up 2038', 'tasa': '0.125% - 1.5% - 3% - 3.75% - 4.25%', 'vencimiento': '09-ene-38', 'ticker': 'GD38E', 'ticker_ny': 'GD38E', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres'},
+            {'nombre': 'Bono Global EUR Step Up 2041', 'tasa': '0.125% - 1.5% - 3% - 4.5%', 'vencimiento': '09-jul-41', 'ticker': 'GD41E', 'ticker_ny': 'GD41E', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres'},
+            {'nombre': 'Bono Global EUR Step Up 2046', 'tasa': '0.125% - 0.75% - 0.875% - 2.5% - 3.875% - 4% - 4.125%', 'vencimiento': '09-jul-46', 'ticker': 'GD46E', 'ticker_ny': 'GD46E', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres'},
+            {'nombre': 'Bono Global EUR 0.50% 2029', 'tasa': '0.500%', 'vencimiento': '09-jul-29', 'ticker': 'GD29E', 'ticker_ny': 'GD29E', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres'}
+        ],
+        'BONOS ARGENTINA USD': [
+            {'nombre': 'Bono Argentina USD Step Up 2030', 'tasa': '0.125% - 0.50% - 0.75% - 1.75%', 'vencimiento': '09-jul-30', 'ticker': 'AL30', 'ticker_ny': '—', 'ticker_ar': 'AL30', 'moneda': 'USD', 'ley': 'Argentina'},
+            {'nombre': 'Bono Argentina USD Step Up 2035', 'tasa': '0.125% - 1.125% - 1.50% - 3.625% - 4.125% - 4.75% - 5%', 'vencimiento': '09-jul-35', 'ticker': 'AL35', 'ticker_ny': '—', 'ticker_ar': 'AL35', 'moneda': 'USD', 'ley': 'Argentina'},
+            {'nombre': 'Bono Argentina USD Step Up 2038', 'tasa': '0.125% - 2% - 3.875% - 4.25% - 5%', 'vencimiento': '09-ene-38', 'ticker': 'AE38', 'ticker_ny': '—', 'ticker_ar': 'AE38', 'moneda': 'USD', 'ley': 'Argentina'},
+            {'nombre': 'Bono Argentina USD Step Up 2041', 'tasa': '0.125% - 2.5% - 3.8% - 4.875%', 'vencimiento': '09-jul-41', 'ticker': 'AL41', 'ticker_ny': '—', 'ticker_ar': 'AL41', 'moneda': 'USD', 'ley': 'Argentina'},
+            {'nombre': 'Bono Argentina USD 1% 2029', 'tasa': '1.000%', 'vencimiento': '09-jul-29', 'ticker': 'AL29', 'ticker_ny': '—', 'ticker_ar': 'AL29', 'moneda': 'USD', 'ley': 'Argentina'}
+        ],
+        'BONOS PAR (A LA PAR)': [
+            {'nombre': 'Bonos Rep. Arg. a la Par en Pesos Step Up 2038', 'tasa': '0.63% → 1.18% → 1.77% → 2.48%', 'vencimiento': '31-dic-38', 'ticker': 'PARP', 'ticker_ny': '—', 'ticker_ar': 'PARP', 'moneda': 'ARS (CER)', 'ley': 'Argentina', 'amortizacion': 'Capital ajustado por CER, 20 cuotas iguales (19 semestrales + 1 final)', 'pago_intereses': 'Semestral (31-mar / 30-sep)'},
+            {'nombre': 'Bonos Rep. Arg. a la Par en USD Step Up 2038', 'tasa': '1.33% → 2.50% → 3.75% → 5.25%', 'vencimiento': '31-dic-38', 'ticker': 'PARA', 'ticker_ny': '—', 'ticker_ar': 'PARA', 'moneda': 'USD', 'ley': 'Argentina', 'amortizacion': '20 cuotas iguales', 'pago_intereses': 'Semestral'},
+            {'nombre': 'Bonos Internacionales Rep. Arg. a la Par en USD Step Up 2038', 'tasa': '1.33% → 2.50% → 3.75% → 5.25%', 'vencimiento': '31-dic-38', 'ticker': 'PARY', 'ticker_ny': 'PARY', 'ticker_ar': '—', 'moneda': 'USD', 'ley': 'Nueva York', 'amortizacion': '20 cuotas iguales', 'pago_intereses': 'Semestral'},
+            {'nombre': 'Bonos Internacionales Rep. Arg. a la Par en EUR Step Up 2038', 'tasa': '1.20% → 2.26% → 3.38% → 4.74%', 'vencimiento': '31-dic-38', 'ticker': 'PARE', 'ticker_ny': '—', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres', 'amortizacion': '20 cuotas iguales', 'pago_intereses': 'Semestral'},
+            {'nombre': 'Bonos Internacionales Rep. Arg. a la Par en Yenes Step Up 2038', 'tasa': '0.24% → 0.45% → 0.67% → 0.94%', 'vencimiento': '31-dic-38', 'ticker': '—', 'ticker_ny': '—', 'ticker_ar': '—', 'moneda': 'JPY', 'ley': 'Tokio', 'amortizacion': '20 cuotas iguales', 'pago_intereses': 'Semestral'}
+        ],
+        'BONOS DIC (CON DESCUENTO)': [
+            {'nombre': 'Discount Pesos 5,83% 2033', 'tasa': '2,79% pago + 3,04% cap. (03–08) → 4,06% pago + 1,77% cap. (08–13) → 5,83% pago (13–33)', 'vencimiento': '31-dic-33', 'ticker': 'DIP0', 'ticker_ny': '—', 'ticker_ar': 'DIP0', 'moneda': 'ARS (CER)', 'ley': 'Argentina', 'amortizacion': 'Ajuste capital por CER; 20 cuotas semestrales (30-jun/31-dic); última 31-dic-33; primer pago 30-jun-24', 'pago_intereses': 'Semestral, tasa anual 5,83% con capitalización parcial'},
+            {'nombre': 'Discount Euros 7,82% 2033', 'tasa': '3,75% pago + 4,07% cap. (03–08) → 5,45% pago + 2,37% cap. (08–13) → 7,82% pago (13–33)', 'vencimiento': '31-dic-33', 'ticker': 'DIE0/DIE5', 'ticker_ny': '—', 'ticker_ar': '—', 'moneda': 'EUR', 'ley': 'Londres', 'amortizacion': '20 cuotas semestrales (30-jun/31-dic); última 31-dic-33; primer pago 30-jun-24', 'pago_intereses': 'Semestral, tasa anual 7,82% con capitalización parcial'},
+            {'nombre': 'Discount Yenes 4,33% 2033', 'tasa': '2,07% pago + 2,26% cap. (03–08) → 3,02% pago + 1,32% cap. (08–13) → 4,33% pago (13–33)', 'vencimiento': '31-dic-33', 'ticker': '—', 'ticker_ny': '—', 'ticker_ar': '—', 'moneda': 'JPY', 'ley': 'Tokio', 'amortizacion': '20 cuotas semestrales (30-jun/31-dic); última 31-dic-33; primer pago 30-jun-24', 'pago_intereses': 'Semestral, tasa anual 4,33% con capitalización parcial'}
+        ],
+        'BONOS CUAP (CUASI-PAR)': [
+            {'nombre': 'Bonos Rep. Arg. Cuasi-Par en Pesos 3,31% 2045 (CER)', 'tasa': '3,31%', 'vencimiento': '31-dic-45', 'ticker': 'CUAP', 'ticker_ny': '—', 'ticker_ar': 'CUAP', 'moneda': 'ARS (CER)', 'ley': 'Argentina', 'amortizacion': 'Capital ajustado por CER, 20 cuotas semestrales', 'pago_intereses': 'Capitalización de intereses hasta 31-dic-2013; desde 30-jun-2014 pago en efectivo'}
+        ],
+        'ACCIONES ARGENTINAS': [
+            {'nombre': 'Edenor S.A.', 'tasa': 'N/A', 'vencimiento': 'N/A', 'ticker': 'EDENOR', 'info': 'Mayor distribuidora de electricidad de Argentina', 'moneda': 'ARS', 'ley': 'Argentina'},
+            {'nombre': 'YPF S.A.', 'tasa': 'N/A', 'vencimiento': 'N/A', 'ticker': 'YPF', 'info': 'Empresa líder en energía de Argentina', 'moneda': 'ARS', 'ley': 'Argentina'},
+            {'nombre': 'Banco Macro S.A.', 'tasa': 'N/A', 'vencimiento': 'N/A', 'ticker': 'BMA', 'info': 'Banco privado líder en Argentina', 'moneda': 'ARS', 'ley': 'Argentina'},
+            {'nombre': 'Grupo Supervielle S.A.', 'tasa': 'N/A', 'vencimiento': 'N/A', 'ticker': 'SUPV', 'info': 'Grupo financiero argentino', 'moneda': 'ARS', 'ley': 'Argentina'}
+        ]
+    }
+    
+    # Crear tabs para diferentes secciones
+    tab_info, tab_cotizaciones, tab_calculos = st.tabs([
+        "📋 Información General",
+        "📊 Cotizaciones y Variaciones",
+        "🧮 Flujo de Fondos y TIR"
+    ])
+    
+    with tab_info:
+        st.subheader("📋 Catálogo de Instrumentos")
+        
+        # Información destacada sobre Edenor
+        st.info("""
+        **⚡ Edenor S.A. - Destacado del Mercado Argentino**
+        
+        **Características principales:**
+        - **Mayor distribuidora de electricidad de Argentina**
+        - **EBITDA:** USD 242 millones (margen 10%)
+        - **Deuda financiera:** USD 415 millones
+        - **Liquidez:** USD 347 millones
+        - **Calificación:** A(arg) con Perspectiva Estable
+        
+        **Ticker:** EDENOR.BA (Buenos Aires) / EDN (NYSE ADR)
+        """)
+        
+        for categoria, bonos in instrumentos.items():
+            with st.expander(f"🔸 {categoria} ({len(bonos)} instrumentos)"):
+                for bono in bonos:
+                    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+                    with col1:
+                        st.write(f"**{bono['nombre']}**")
+                        if 'info' in bono:
+                            st.caption(f"*{bono['info']}*")
+                    with col2:
+                        if bono['tasa'] != 'N/A':
+                            st.write(f"Tasa: {bono['tasa']}")
+                        else:
+                            st.write("Tipo: Acción")
+                    with col3:
+                        if bono['vencimiento'] != 'N/A':
+                            st.write(f"Vencimiento: {bono['vencimiento']}")
+                        else:
+                            st.write("Mercado: Acciones")
+                    with col4:
+                        st.write(f"`{bono['ticker']}`")
+    
+    with tab_cotizaciones:
+        st.subheader("📊 Cotizaciones y Variaciones")
+        
+        # Selector de instrumento
+        todos_bonos = []
+        for categoria, bonos in instrumentos.items():
+            for bono in bonos:
+                todos_bonos.append(f"{bono['ticker']} - {bono['nombre']}")
+        
+        bono_seleccionado = st.selectbox(
+            "Seleccione un instrumento para ver cotizaciones:",
+            options=todos_bonos,
+            index=0
+        )
+        
+        if bono_seleccionado:
+            ticker = bono_seleccionado.split(" - ")[0]
+            st.write(f"**Instrumento seleccionado:** {bono_seleccionado}")
+            
+            # Intentar obtener datos reales de TradingView/yfinance
+            try:
+                # Mapeo de tickers a símbolos de yfinance (equivalente a TradingView)
+                ticker_mapping = {
+                    'BONCER26': 'BONCER26.BA',
+                    'BONCER28': 'BONCER28.BA',
+                    'GGAR30': 'GGAR30.BA',
+                    'GGAR35': 'GGAR35.BA',
+                    'GGAR38': 'GGAR38.BA',
+                    'GGAR41': 'GGAR41.BA',
+                    'GGAR46': 'GGAR46.BA',
+                    'GGAR29': 'GGAR29.BA',
+                    'EDENOR': 'EDN.BA',  # Edenor en Buenos Aires
+                    'YPF': 'YPF.BA',     # YPF en Buenos Aires
+                    'BMA': 'BMA.BA',     # Banco Macro en Buenos Aires
+                    'SUPV': 'SUPV.BA'    # Supervielle en Buenos Aires
+                }
+                
+                yf_ticker = ticker_mapping.get(ticker, ticker)
+                
+                # Obtener datos históricos
+                bono_yf = yf.Ticker(yf_ticker)
+                hist = bono_yf.history(period="1mo")
+                
+                if not hist.empty:
+                    # Calcular métricas reales
+                    precio_actual = hist['Close'].iloc[-1]
+                    precio_anterior = hist['Close'].iloc[-2] if len(hist) > 1 else precio_actual
+                    precio_mes_atras = hist['Close'].iloc[0] if len(hist) > 20 else precio_actual
+                    precio_anio_atras = hist['Close'].iloc[0] if len(hist) > 250 else precio_actual
+                    
+                    var_1d = ((precio_actual - precio_anterior) / precio_anterior * 100) if precio_anterior != 0 else 0
+                    var_1m = ((precio_actual - precio_mes_atras) / precio_mes_atras * 100) if precio_mes_atras != 0 else 0
+                    var_1a = ((precio_actual - precio_anio_atras) / precio_anio_atras * 100) if precio_anio_atras != 0 else 0
+                    
+                    # Mostrar métricas reales
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Precio Actual", f"${precio_actual:.2f}", delta=f"{var_1d:+.2f}%")
+                    with col2:
+                        st.metric("Variación 1D", f"{var_1d:+.2f}%", delta=f"{var_1d:+.2f}%")
+                    with col3:
+                        st.metric("Variación 1M", f"{var_1m:+.2f}%", delta=f"{var_1m:+.2f}%")
+                    with col4:
+                        st.metric("Variación 1A", f"{var_1a:+.2f}%", delta=f"{var_1a:+.2f}%")
+                    
+                    # Gráfico de evolución de precios real
+                    st.subheader("📈 Evolución de Precios (Últimos 30 días)")
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=hist.index,
+                        y=hist['Close'],
+                        mode='lines+markers',
+                        name='Precio de Cierre',
+                        line=dict(color='#0d6efd', width=2),
+                        marker=dict(size=6)
+                    ))
+                    
+                    fig.update_layout(
+                        title=f"Evolución de Precios - {ticker}",
+                        xaxis_title="Fecha",
+                        yaxis_title="Precio (ARS)",
+                        hovermode='x unified',
+                        template='plotly_white'
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Información adicional del bono
+                    st.subheader("📊 Información Adicional")
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Estadísticas del Período:**")
+                        st.write(f"Precio Máximo: ${hist['High'].max():.2f}")
+                        st.write(f"Precio Mínimo: ${hist['Low'].min():.2f}")
+                        st.write(f"Volumen Promedio: {hist['Volume'].mean():.0f}")
+                    
+                    with col2:
+                        st.write("**Volatilidad:**")
+                        st.write(f"Desv. Estándar: ${hist['Close'].std():.2f}")
+                        st.write(f"Coef. Variación: {(hist['Close'].std() / hist['Close'].mean() * 100):.2f}%")
+                
+                else:
+                    st.warning("⚠️ No se pudieron obtener datos reales para este instrumento. Mostrando datos simulados.")
+                    mostrar_datos_simulados(ticker)
+                    
+            except Exception as e:
+                st.warning(f"⚠️ Error al obtener datos reales: {str(e)}. Mostrando datos simulados.")
+                mostrar_datos_simulados(ticker)
+    
+    with tab_calculos:
+        st.subheader("🧮 Flujo de Fondos y TIR")
+        
+        # Selector de instrumento para cálculos
+        bono_calculo = st.selectbox(
+            "Seleccione un instrumento para cálculos:",
+            options=todos_bonos,
+            index=0,
+            key="calculo_bono"
+        )
+        
+        if bono_calculo:
+            ticker_calculo = bono_calculo.split(" - ")[0]
+            st.write(f"**Cálculos para:** {bono_calculo}")
+            
+            # Parámetros del bono
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📊 Parámetros del Bono")
+                valor_nominal = st.number_input("Valor Nominal (USD)", value=100.0, min_value=1.0, step=1.0)
+                precio_mercado = st.number_input("Precio de Mercado (USD)", value=95.0, min_value=1.0, step=0.1)
+                tasa_cupon = st.number_input("Tasa de Cupón (%)", value=2.0, min_value=0.0, step=0.1)
+                frecuencia_cupon = st.selectbox("Frecuencia de Cupón", options=["Anual", "Semestral", "Trimestral"], index=1)
+                años_vencimiento = st.number_input("Años hasta Vencimiento", value=5.0, min_value=0.1, step=0.1)
+            
+            with col2:
+                st.subheader("📈 Resultados")
+                
+                # Calcular flujo de fondos
+                if frecuencia_cupon == "Anual":
+                    frecuencia = 1
+                elif frecuencia_cupon == "Semestral":
+                    frecuencia = 2
+                else:
+                    frecuencia = 4
+                
+                # Generar flujo de fondos
+                flujo_fondos = generar_flujo_fondos(valor_nominal, tasa_cupon/100, frecuencia, años_vencimiento)
+                
+                # Calcular TIR
+                tir = calcular_tir(flujo_fondos, precio_mercado)
+                
+                st.metric("TIR (Yield to Maturity)", f"{tir:.2f}%")
+                st.metric("Precio Teórico", f"${calcular_precio_teorico(flujo_fondos, tir/100):.2f}")
+                
+                # Análisis de sensibilidad
+                st.subheader("📊 Análisis de Sensibilidad")
+                variacion_tir = st.slider("Variación en TIR (±%)", 0.1, 2.0, 0.5, step=0.1)
+                
+                precio_up = calcular_precio_teorico(flujo_fondos, (tir + variacion_tir)/100)
+                precio_down = calcular_precio_teorico(flujo_fondos, (tir - variacion_tir)/100)
+                
+                col_up, col_down = st.columns(2)
+                with col_up:
+                    st.metric("Precio TIR +", f"${precio_up:.2f}", delta=f"{((precio_up-precio_mercado)/precio_mercado*100):.2f}%")
+                with col_down:
+                    st.metric("Precio TIR -", f"${precio_down:.2f}", delta=f"{((precio_down-precio_mercado)/precio_mercado*100):.2f}%")
+            
+            # Mostrar flujo de fondos detallado
+            st.subheader("💰 Flujo de Fondos Detallado")
+            
+            if not flujo_fondos.empty:
+                st.dataframe(flujo_fondos, use_container_width=True)
+                
+                # Gráfico del flujo de fondos
+                fig_ff = go.Figure()
+                
+                fig_ff.add_trace(go.Bar(
+                    x=flujo_fondos['Período'],
+                    y=flujo_fondos['Cupón'],
+                    name='Cupones',
+                    marker_color='#28a745'
+                ))
+                
+                # Agregar valor nominal al final
+                fig_ff.add_trace(go.Bar(
+                    x=[flujo_fondos['Período'].iloc[-1]],
+                    y=[flujo_fondos['Valor Nominal'].iloc[-1]],
+                    name='Valor Nominal',
+                    marker_color='#dc3545'
+                ))
+                
+                fig_ff.update_layout(
+                    title="Flujo de Fondos del Bono",
+                    xaxis_title="Período",
+                    yaxis_title="Flujo (USD)",
+                    barmode='group',
+                    template='plotly_white'
+                )
+                
+                st.plotly_chart(fig_ff, use_container_width=True)
+
+def generar_flujo_fondos(valor_nominal, tasa_cupon, frecuencia, años_vencimiento):
+    """
+    Genera el flujo de fondos de un bono.
+    """
+    periodos = int(años_vencimiento * frecuencia)
+    cupon_periodo = valor_nominal * tasa_cupon / frecuencia
+    
+    flujo = []
+    for i in range(1, periodos + 1):
+        if i == periodos:
+            flujo.append({
+                'Período': i,
+                'Fecha': f"T{i}",
+                'Cupón': cupon_periodo,
+                'Valor Nominal': valor_nominal,
+                'Flujo Total': cupon_periodo + valor_nominal
+            })
+        else:
+            flujo.append({
+                'Período': i,
+                'Fecha': f"T{i}",
+                'Cupón': cupon_periodo,
+                'Valor Nominal': 0,
+                'Flujo Total': cupon_periodo
+            })
+    
+    return pd.DataFrame(flujo)
+
+def calcular_tir(flujo_fondos, precio_mercado):
+    """
+    Calcula la TIR (Yield to Maturity) de un bono.
+    """
+    try:
+        flujos = [-precio_mercado] + flujo_fondos['Flujo Total'].tolist()
+        tir = op.newton(lambda r: sum([f/(1+r)**i for i, f in enumerate(flujos)]), 0.05, maxiter=1000)
+        return tir * 100  # Convertir a porcentaje
+    except:
+        return 0.0
+
+def calcular_precio_teorico(flujo_fondos, tasa_descuento):
+    """
+    Calcula el precio teórico de un bono dado una tasa de descuento.
+    """
+    precio = 0
+    for i, flujo in enumerate(flujo_fondos['Flujo Total']):
+        precio += flujo / ((1 + tasa_descuento) ** (i + 1))
+    return precio
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
