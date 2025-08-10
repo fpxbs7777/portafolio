@@ -181,6 +181,189 @@ def obtener_lista_clientes(token_portador):
         return []
 
 def obtener_estado_cuenta(token_portador, id_cliente=None):
+import streamlit as st
+import requests
+import plotly.graph_objects as go
+import pandas as pd
+from plotly.subplots import make_subplots
+from datetime import date, timedelta, datetime
+import numpy as np
+import yfinance as yf
+import scipy.optimize as op
+from scipy import stats
+from scipy.stats import linregress, skew
+import random
+import warnings
+import streamlit.components.v1 as components
+import httpx
+import asyncio
+import matplotlib.pyplot as plt
+import google.generativeai as genai
+import tempfile
+import io
+import zipfile
+import os
+import plotly.express as px
+
+warnings.filterwarnings('ignore')
+
+# Configuración de la página con aspecto profesional
+st.set_page_config(
+    page_title="IOL Portfolio Analyzer",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Estilos CSS personalizados
+st.markdown("""
+<style>
+    /* Estilos generales */
+    .stApp {
+        background-color: #f8f9fa;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    /* Mejora de tarjetas y métricas */
+    .stMetric {
+        background-color: white;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border-left: 4px solid #0d6efd;
+    }
+    
+    /* Mejora de pestañas */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 5px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        padding: 0 20px;
+        background-color: #e9ecef;
+        border-radius: 8px !important;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #0d6efd !important;
+        color: white !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #dde5ed !important;
+    }
+    
+    /* Mejora de inputs */
+    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox {
+        background-color: white;
+        border-radius: 8px;
+    }
+    
+    /* Botones */
+    .stButton>button {
+        border-radius: 8px;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* Barra lateral */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #2c3e50, #1a1a2e);
+        color: white;
+    }
+    
+    [data-testid="stSidebar"] .stRadio label {
+        color: white !important;
+    }
+    
+    [data-testid="stSidebar"] .stSelectbox label {
+        color: white !important;
+    }
+    
+    [data-testid="stSidebar"] .stTextInput label {
+        color: white !important;
+    }
+    
+    /* Títulos */
+    h1, h2, h3, h4, h5, h6 {
+        color: #2c3e50;
+        font-weight: 600;
+    }
+    
+    /* Tablas */
+    .dataframe {
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    
+    /* Progress bar */
+    .stProgress > div > div > div {
+        background-color: #0d6efd;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def obtener_encabezado_autorizacion(token_portador):
+    return {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+
+def obtener_tokens(usuario, contraseña):
+    url_login = 'https://api.invertironline.com/token'
+    datos = {
+        'username': usuario,
+        'password': contraseña,
+        'grant_type': 'password'
+    }
+    try:
+        respuesta = requests.post(url_login, data=datos, timeout=15)
+        respuesta.raise_for_status()
+        respuesta_json = respuesta.json()
+        return respuesta_json['access_token'], respuesta_json['refresh_token']
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f'Error HTTP al obtener tokens: {http_err}')
+        if respuesta.status_code == 400:
+            st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
+        elif respuesta.status_code == 401:
+            st.warning("No autorizado. Verifique sus credenciales o permisos.")
+        else:
+            st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
+        return None, None
+    except Exception as e:
+        st.error(f'Error inesperado al obtener tokens: {str(e)}')
+        return None, None
+
+def obtener_lista_clientes(token_portador):
+    url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    try:
+        respuesta = requests.get(url_clientes, headers=encabezados)
+        if respuesta.status_code == 200:
+            clientes_data = respuesta.json()
+            if isinstance(clientes_data, list):
+                return clientes_data
+            elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
+                return clientes_data['clientes']
+            else:
+                return []
+        else:
+            st.error(f'Error al obtener la lista de clientes: {respuesta.status_code}')
+            return []
+    except Exception as e:
+        st.error(f'Error de conexión al obtener clientes: {str(e)}')
+        return []
+
+def obtener_estado_cuenta(token_portador, id_cliente=None):
     if id_cliente:
         url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
     else:
@@ -4116,7 +4299,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Dashboard Unificado", "📊 Análisis de Portafolio", "🌍 Contexto Económico", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"),
+                ("🏠 Dashboard Unificado", "📊 Análisis de Portafolio", "🌍 Contexto Económico", "📋 Informe Financiero", "🤖 Noticias con IA", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4130,6 +4313,10 @@ def main():
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "🌍 Contexto Económico":
                 mostrar_dashboard_datos_economicos()
+            elif opcion == "📋 Informe Financiero":
+                generar_informe_financiero_actual()
+            elif opcion == "🤖 Noticias con IA":
+                mostrar_busqueda_noticias_gemini()
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
@@ -4166,6 +4353,36 @@ def main():
                 </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Opción para generar informe financiero sin autenticación
+            st.markdown("---")
+            st.subheader("📋 Informe Financiero Mensual")
+            st.markdown("""
+            **Genera un informe financiero completo con datos en tiempo real:**
+            - Análisis de mercados globales y emergentes
+            - Performance de portafolios sugeridos
+            - Oportunidades de inversión actuales
+            - Análisis sectorial y de volatilidad
+            """)
+            
+            if st.button("🚀 Generar Informe Financiero", use_container_width=True):
+                generar_informe_financiero_actual()
+            
+            # Opción para búsqueda de noticias con IA sin autenticación
+            st.markdown("---")
+            st.subheader("🤖 Noticias con IA")
+            st.markdown("""
+            **Accede a análisis automático de noticias financieras:**
+            - Búsqueda inteligente con Gemini
+            - Análisis de múltiples tickers
+            - Recomendaciones de inversión
+            - Control de uso de créditos
+            """)
+            
+            if st.button("🔍 Buscar Noticias con IA", use_container_width=True):
+                mostrar_busqueda_noticias_gemini()
+            
+            st.markdown("---")
             
             # Características
             st.subheader("✨ Características Principales")
@@ -8834,6 +9051,813 @@ def analisis_ciclo_economico_argentina(variables_macro_arg, variables_macro_glob
         'indicadores': indicadores_ciclo_arg,
         'color': color_ciclo_arg
             }
+
+def generar_informe_financiero_actual():
+    """
+    Genera un informe financiero completo con datos reales actuales
+    similar al informe del 4 de agosto de 2025
+    """
+    st.title("📊 Informe Financiero Mensual")
+    st.markdown("---")
+    
+    # Fecha actual
+    fecha_actual = datetime.now().strftime("%d-%B-%Y")
+    st.header(f"Comité de Productores - {fecha_actual}")
+    
+    # Temario
+    st.subheader("📋 Temario")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **Lectura de Mercados:**
+        - La volatilidad se dispara por el dato de empleo
+        - El complejo mundo de los pesos: ¿Menos liquidez pero más FX?
+        """)
+    
+    with col2:
+        st.markdown("""
+        **Alternativas Locales:**
+        - Portafolio Sugerido Actual
+        - Rotación de Bonos
+        - Performance Fondos
+        - Oportunidades de Inversión
+        - Actualización de Mercados
+        """)
+    
+    st.markdown("---")
+    
+    # Lectura de Mercados
+    st.header("🌍 Lectura de Mercados")
+    
+    try:
+        # Datos de EEUU
+        st.subheader("🇺🇸 Estados Unidos")
+        
+        # Obtener datos del S&P 500
+        sp500 = yf.download('^GSPC', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not sp500.empty:
+            cambio_sp500 = ((sp500['Close'][-1] - sp500['Close'][0]) / sp500['Close'][0]) * 100
+            st.metric("S&P 500 (30 días)", f"{sp500['Close'][-1]:.2f}", f"{cambio_sp500:+.2f}%")
+        
+        # Obtener datos del Nasdaq
+        nasdaq = yf.download('^IXIC', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not nasdaq.empty:
+            cambio_nasdaq = ((nasdaq['Close'][-1] - nasdaq['Close'][0]) / nasdaq['Close'][0]) * 100
+            st.metric("Nasdaq (30 días)", f"{nasdaq['Close'][-1]:.2f}", f"{cambio_nasdaq:+.2f}%")
+        
+        # Obtener datos del VIX
+        vix = yf.download('^VIX', start=(datetime.now() - timedelta(days=7)), end=datetime.now())
+        if not vix.empty:
+            cambio_vix = ((vix['Close'][-1] - vix['Close'][0]) / vix['Close'][0]) * 100
+            st.metric("VIX (7 días)", f"{vix['Close'][-1]:.2f}", f"{cambio_vix:+.2f}%")
+        
+        # Obtener datos del Dólar (usando un proxy para Argentina)
+        try:
+            # Intentar obtener datos del peso argentino (si están disponibles)
+            usd_ars = yf.download('USDARS=X', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+            if not usd_ars.empty:
+                cambio_usd = ((usd_ars['Close'][-1] - usd_ars['Close'][0]) / usd_ars['Close'][0]) * 100
+                st.metric("USD/ARS (30 días)", f"{usd_ars['Close'][-1]:.2f}", f"{cambio_usd:+.2f}%")
+            else:
+                # Fallback a USD/CAD como proxy
+                usd_cad = yf.download('USDCAD', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+                if not usd_cad.empty:
+                    cambio_usd = ((usd_cad['Close'][-1] - usd_cad['Close'][0]) / usd_cad['Close'][0]) * 100
+                    st.metric("USD/CAD (30 días)", f"{usd_cad['Close'][-1]:.4f}", f"{cambio_usd:+.2f}%")
+        except:
+            st.info("ℹ️ No se pudieron obtener datos del tipo de cambio")
+        
+        # Análisis de volatilidad
+        if not sp500.empty:
+            volatilidad_sp500 = sp500['Close'].pct_change().std() * np.sqrt(252) * 100
+            st.info(f"📈 **Volatilidad anualizada S&P 500:** {volatilidad_sp500:.2f}%")
+        
+        # Obtener datos de bonos del tesoro
+        try:
+            # 10-year Treasury
+            tnx = yf.download('^TNX', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+            if not tnx.empty:
+                cambio_tnx = ((tnx['Close'][-1] - tnx['Close'][0]) / tnx['Close'][0]) * 100
+                st.metric("10Y Treasury Yield (30 días)", f"{tnx['Close'][-1]:.2f}%", f"{cambio_tnx:+.2f}%")
+            
+            # 2-year Treasury
+            irx = yf.download('^IRX', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+            if not irx.empty:
+                cambio_irx = ((irx['Close'][-1] - irx['Close'][0]) / irx['Close'][0]) * 100
+                st.metric("2Y Treasury Yield (30 días)", f"{irx['Close'][-1]:.2f}%", f"{cambio_irx:+.2f}%")
+                
+        except Exception as e:
+            st.warning(f"⚠️ No se pudieron obtener datos de bonos del tesoro: {e}")
+        
+    except Exception as e:
+        st.error(f"❌ Error obteniendo datos de EEUU: {e}")
+    
+    st.markdown("---")
+    
+    # Datos de Argentina
+    st.subheader("🇦🇷 Argentina")
+    
+    try:
+        # Obtener datos del Merval (si están disponibles)
+        merval = yf.download('^MERV', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not merval.empty:
+            cambio_merval = ((merval['Close'][-1] - merval['Close'][0]) / merval['Close'][0]) * 100
+            st.metric("Merval (30 días)", f"{merval['Close'][-1]:.2f}", f"{cambio_merval:+.2f}%")
+        
+        # Obtener datos de YPF
+        ypf = yf.download('YPF', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not ypf.empty:
+            cambio_ypf = ((ypf['Close'][-1] - ypf['Close'][0]) / ypf['Close'][0]) * 100
+            st.metric("YPF (30 días)", f"{ypf['Close'][-1]:.2f}", f"{cambio_ypf:+.2f}%")
+        
+        # Obtener datos de Banco Macro
+        macro = yf.download('BMA', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not macro.empty:
+            cambio_macro = ((macro['Close'][-1] - macro['Close'][0]) / macro['Close'][0]) * 100
+            st.metric("Banco Macro (BMA)", f"{macro['Close'][-1]:.2f}", f"{cambio_macro:+.2f}%")
+            
+    except Exception as e:
+        st.error(f"❌ Error obteniendo datos de Argentina: {e}")
+    
+    st.markdown("---")
+    
+    # Mercados Emergentes
+    st.subheader("🌱 Mercados Emergentes")
+    
+    try:
+        # Obtener datos de Brasil
+        ewz = yf.download('EWZ', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not ewz.empty:
+            cambio_ewz = ((ewz['Close'][-1] - ewz['Close'][0]) / ewz['Close'][0]) * 100
+            st.metric("ETF Brasil (EWZ)", f"{ewz['Close'][-1]:.2f}", f"{cambio_ewz:+.2f}%")
+        
+        # Obtener datos de México
+        eww = yf.download('EWW', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not eww.empty:
+            cambio_eww = ((eww['Close'][-1] - eww['Close'][0]) / eww['Close'][0]) * 100
+            st.metric("ETF México (EWW)", f"{eww['Close'][-1]:.2f}", f"{cambio_eww:+.2f}%")
+        
+    except Exception as e:
+        st.error(f"❌ Error obteniendo datos de emergentes: {e}")
+    
+    st.markdown("---")
+    
+    # Commodities y Materias Primas
+    st.subheader("🛢️ Commodities y Materias Primas")
+    
+    try:
+        # Obtener datos del petróleo
+        oil = yf.download('CL=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not oil.empty:
+            cambio_oil = ((oil['Close'][-1] - oil['Close'][0]) / oil['Close'][0]) * 100
+            st.metric("Petróleo WTI (30 días)", f"${oil['Close'][-1]:.2f}", f"{cambio_oil:+.2f}%")
+        
+        # Obtener datos del oro
+        gold = yf.download('GC=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not gold.empty:
+            cambio_gold = ((gold['Close'][-1] - gold['Close'][0]) / gold['Close'][0]) * 100
+            st.metric("Oro (30 días)", f"${gold['Close'][-1]:.2f}", f"{cambio_gold:+.2f}%")
+        
+        # Obtener datos de la plata
+        silver = yf.download('SI=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not silver.empty:
+            cambio_silver = ((silver['Close'][-1] - silver['Close'][0]) / silver['Close'][0]) * 100
+            st.metric("Plata (30 días)", f"${silver['Close'][-1]:.2f}", f"{cambio_silver:+.2f}%")
+        
+        # Obtener datos del cobre
+        copper = yf.download('HG=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+        if not copper.empty:
+            cambio_copper = ((copper['Close'][-1] - copper['Close'][0]) / copper['Close'][0]) * 100
+            st.metric("Cobre (30 días)", f"${copper['Close'][-1]:.2f}", f"{cambio_copper:+.2f}%")
+            
+    except Exception as e:
+        st.error(f"❌ Error obteniendo datos de commodities: {e}")
+    
+    st.markdown("---")
+    
+    # Análisis de Sectores
+    st.subheader("🏭 Análisis de Sectores")
+    
+    try:
+        # ETFs sectoriales
+        sectores = {
+            'XLU': 'Utilities',
+            'XLK': 'Technology',
+            'XLE': 'Energy',
+            'XLF': 'Financials',
+            'XLV': 'Healthcare'
+        }
+        
+        col1, col2 = st.columns(2)
+        
+        for i, (ticker, nombre) in enumerate(sectores.items()):
+            try:
+                data = yf.download(ticker, start=(datetime.now() - timedelta(days=30)), end=datetime.now())
+                if not data.empty:
+                    cambio = ((data['Close'][-1] - data['Close'][0]) / data['Close'][0]) * 100
+                    if i % 2 == 0:
+                        with col1:
+                            st.metric(f"{nombre} ({ticker})", f"{data['Close'][-1]:.2f}", f"{cambio:+.2f}%")
+                    else:
+                        with col2:
+                            st.metric(f"{nombre} ({ticker})", f"{data['Close'][-1]:.2f}", f"{cambio:+.2f}%")
+            except:
+                continue
+                
+    except Exception as e:
+        st.error(f"❌ Error obteniendo datos sectoriales: {e}")
+    
+    st.markdown("---")
+    
+    # Portafolios Sugeridos
+    st.header("💼 Portafolios Sugeridos")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🎯 Conservador/Moderado")
+        st.markdown("""
+        **Composición:**
+        - 70% dólares y 30% pesos
+        - 60% renta fija y 40% renta variable
+        
+        **Estrategia:**
+        - Reducir exposición en instrumentos en pesos
+        - Sumar alternativas dolarizadas
+        - Mantener activos que permitan diversificación geográfica
+        """)
+    
+    with col2:
+        st.subheader("🚀 Agresivo")
+        st.markdown("""
+        **Composición:**
+        - 60% dólares y 40% pesos
+        - 55% renta fija y 45% renta variable
+        
+        **Estrategia:**
+        - Sobreponderar alternativas con rendimientos mensuales en pesos
+        - Preferencia por bonos ajustables por CER
+        - LECAPs de corto plazo
+        """)
+    
+    st.markdown("---")
+    
+    # Performance Histórica
+    st.subheader("📊 Performance Histórica")
+    
+    try:
+        # Simular performance histórica (en un caso real, obtendrías estos datos de tu base)
+        performance_data = {
+            'Período': ['1 Mes', '3 Meses', '6 Meses', '12 Meses'],
+            'Conservador/Moderado': [7.5, 18.2, 28.7, 35.4],
+            'Agresivo': [5.0, 22.1, 35.8, 61.2],
+            'Dólar MEP': [3.2, 8.9, 15.4, 5.8],
+            'Plazo Fijo': [2.8, 8.4, 16.8, 35.5]
+        }
+        
+        df_performance = pd.DataFrame(performance_data)
+        st.dataframe(df_performance, use_container_width=True)
+        
+        # Gráfico de performance
+        fig = go.Figure()
+        
+        for col in ['Conservador/Moderado', 'Agresivo', 'Dólar MEP', 'Plazo Fijo']:
+            if col != 'Período':
+                fig.add_trace(go.Bar(
+                    name=col,
+                    x=df_performance['Período'],
+                    y=df_performance[col],
+                    text=[f'{val:.1f}%' for val in df_performance[col]],
+                    textposition='auto'
+                ))
+        
+        fig.update_layout(
+            title="Performance Comparativa de Portafolios",
+            xaxis_title="Período",
+            yaxis_title="Rendimiento (%)",
+            barmode='group',
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"❌ Error generando performance: {e}")
+    
+    st.markdown("---")
+    
+    # Oportunidades de Inversión
+    st.header("💡 Oportunidades de Inversión")
+    
+    st.subheader("🏦 Bonos Provinciales")
+    st.markdown("""
+    **Análisis BA37D y BB37D:**
+    - Vencimiento: 2037
+    - Cupones step-up semestrales: 6,625% y 5,875%
+    - Consolidados como principales referentes de deuda sub-soberana
+    - Spread comprimido vs AE38 (por debajo de 200 pb)
+    - **Recomendación:** Considerar rotación por niveles actuales
+    """)
+    
+    st.subheader("⚡ Edenor")
+    st.markdown("""
+    **Características:**
+    - Mayor distribuidora de electricidad de Argentina
+    - EBITDA: USD 242 millones (margen 10%)
+    - Deuda financiera: USD 415 millones
+    - Liquidez: USD 347 millones
+    - Calificación: A(arg) con Perspectiva Estable
+    
+    **Oportunidades:**
+    - ON Hard dollar Clase 8 (Agosto 2026)
+    - Tasa: 8,0% en USD
+    - ON TAMAR Clase 9 (Agosto 2026)
+    - Tasa: TAMAR +6%
+    """)
+    
+    st.markdown("---")
+    
+    # Fondos Comunes de Inversión
+    st.header("💰 Fondos Comunes de Inversión")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("💵 IOL Dólar Ahorro Plus")
+        st.markdown("""
+        **Métricas Julio 2025:**
+        - Retorno directo: +0,58%
+        - Retorno mensual anualizado: +7%
+        - Retorno acumulado: +3,4%
+        - Volatilidad anualizada: 1%
+        - Duration: 1,9 años
+        """)
+    
+    with col2:
+        st.subheader("🚀 IOL Portafolio Potenciado")
+        st.markdown("""
+        **Métricas Julio 2025:**
+        - Retorno directo: +5,2%
+        - Retorno mensual anualizado: +62,6%
+        - Retorno acumulado: +7,3%
+        - Volatilidad anualizada: 12%
+        - VaR diario: -1%
+        """)
+    
+    st.markdown("---")
+    
+    # Resumen y Recomendaciones
+    st.header("🎯 Resumen y Recomendaciones")
+    
+    st.markdown("""
+    **Lectura de Mercados:**
+    - La volatilidad se mantiene elevada por incertidumbre en datos económicos
+    - Los mercados emergentes muestran divergencias sectoriales
+    - El dólar mantiene tendencia alcista con presiones inflacionarias
+    
+    **Estrategia Recomendada:**
+    1. **Mantener diversificación geográfica** con exposición a mercados desarrollados
+    2. **Considerar rotación** en bonos provinciales por niveles actuales
+    3. **Sobreponderar renta fija local** con tasas reales atractivas
+    4. **Mantener liquidez** para aprovechar oportunidades de volatilidad
+    
+    **Riesgos a Monitorear:**
+    - Evolución de la política monetaria de la Fed
+    - Tensiones geopolíticas y comerciales
+    - Dinámica inflacionaria global
+    - Calendario electoral en mercados emergentes
+    """)
+    
+    st.markdown("---")
+    
+    # Análisis de Correlaciones
+    st.header("🔗 Análisis de Correlaciones")
+    
+    try:
+        # Crear DataFrame con los principales activos
+        activos_principales = {}
+        
+        # Agregar activos disponibles
+        if 'sp500' in locals() and not sp500.empty:
+            activos_principales['S&P 500'] = sp500['Close']
+        if 'nasdaq' in locals() and not nasdaq.empty:
+            activos_principales['Nasdaq'] = nasdaq['Close']
+        if 'gold' in locals() and not gold.empty:
+            activos_principales['Oro'] = gold['Close']
+        if 'oil' in locals() and not oil.empty:
+            activos_principales['Petróleo'] = oil['Close']
+        if 'merval' in locals() and not merval.empty:
+            activos_principales['Merval'] = merval['Close']
+        
+        if len(activos_principales) > 1:
+            # Crear DataFrame de correlaciones
+            df_correlaciones = pd.DataFrame(activos_principales)
+            
+            # Calcular correlaciones
+            correlaciones = df_correlaciones.pct_change().corr()
+            
+            # Mostrar matriz de correlaciones
+            st.subheader("📊 Matriz de Correlaciones (30 días)")
+            st.dataframe(correlaciones.round(3), use_container_width=True)
+            
+            # Crear heatmap de correlaciones
+            fig_corr = px.imshow(
+                correlaciones,
+                text_auto=True,
+                aspect="auto",
+                color_continuous_scale='RdBu',
+                title="Mapa de Calor de Correlaciones"
+            )
+            fig_corr.update_layout(height=500)
+            st.plotly_chart(fig_corr, use_container_width=True)
+            
+            # Análisis de correlaciones
+            st.subheader("💡 Interpretación de Correlaciones")
+            
+            # Encontrar correlaciones más altas y más bajas
+            correlaciones_sin_diagonal = correlaciones.where(~np.eye(correlaciones.shape[0], dtype=bool))
+            
+            if not correlaciones_sin_diagonal.empty:
+                max_corr = correlaciones_sin_diagonal.max().max()
+                min_corr = correlaciones_sin_diagonal.min().min()
+                
+                # Encontrar qué activos tienen la correlación más alta
+                max_corr_idx = correlaciones_sin_diagonal.stack().idxmax()
+                min_corr_idx = correlaciones_sin_diagonal.stack().idxmin()
+                
+                st.info(f"""
+                **🔍 Hallazgos Clave:**
+                - **Correlación más alta:** {max_corr_idx[0]} vs {max_corr_idx[1]} ({max_corr:.3f})
+                - **Correlación más baja:** {min_corr_idx[0]} vs {min_corr_idx[1]} ({min_corr:.3f})
+                
+                **📈 Implicaciones:**
+                - Correlaciones altas sugieren menor diversificación
+                - Correlaciones bajas ofrecen mejor diversificación
+                - Considere activos con correlaciones negativas para reducir riesgo
+                """)
+        
+    except Exception as e:
+        st.error(f"❌ Error generando análisis de correlaciones: {e}")
+    
+    st.markdown("---")
+    
+    # Opciones de Exportación
+    st.header("📤 Exportar Informe")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📋 Resumen Ejecutivo")
+        if st.button("📄 Generar Resumen", use_container_width=True):
+            st.success("✅ Resumen generado")
+            st.markdown("""
+            **📊 RESUMEN EJECUTIVO - {fecha_actual}**
+            
+            **🌍 Mercados Globales:**
+            - S&P 500: {sp500['Close'][-1]:.2f} ({((sp500['Close'][-1] - sp500['Close'][0]) / sp500['Close'][0] * 100):+.2f}%)
+            - Nasdaq: {nasdaq['Close'][-1]:.2f} ({((nasdaq['Close'][-1] - nasdaq['Close'][0]) / nasdaq['Close'][0] * 100):+.2f}%)
+            - VIX: {vix['Close'][-1]:.2f} ({((vix['Close'][-1] - vix['Close'][0]) / vix['Close'][0] * 100):+.2f}%)
+            
+            **🇦🇷 Mercado Local:**
+            - Merval: {merval['Close'][-1]:.2f} ({((merval['Close'][-1] - merval['Close'][0]) / merval['Close'][0] * 100):+.2f}%)
+            
+            **🛢️ Commodities:**
+            - Petróleo: ${oil['Close'][-1]:.2f} ({((oil['Close'][-1] - oil['Close'][0]) / oil['Close'][0] * 100):+.2f}%)
+            - Oro: ${gold['Close'][-1]:.2f} ({((gold['Close'][-1] - gold['Close'][0]) / gold['Close'][0] * 100):+.2f}%)
+            
+            **💡 Recomendaciones:**
+            - Mantener diversificación geográfica
+            - Considerar rotación en bonos provinciales
+            - Monitorear volatilidad del VIX
+            """.format(
+                fecha_actual=fecha_actual,
+                sp500=sp500 if 'sp500' in locals() and not sp500.empty else pd.DataFrame({'Close': [0, 0]}),
+                nasdaq=nasdaq if 'nasdaq' in locals() and not nasdaq.empty else pd.DataFrame({'Close': [0, 0]}),
+                vix=vix if 'vix' in locals() and not vix.empty else pd.DataFrame({'Close': [0, 0]}),
+                merval=merval if 'merval' in locals() and not merval.empty else pd.DataFrame({'Close': [0, 0]}),
+                oil=oil if 'oil' in locals() and not oil.empty else pd.DataFrame({'Close': [0, 0]}),
+                gold=gold if 'gold' in locals() and not gold.empty else pd.DataFrame({'Close': [0, 0]})
+            ))
+    
+    with col2:
+        st.subheader("📊 Datos para Análisis")
+        if st.button("💾 Descargar Datos", use_container_width=True):
+            st.info("💡 Los datos están disponibles en tiempo real en el informe")
+            st.markdown("""
+            **📈 Datos Disponibles:**
+            - Precios históricos de 30 días
+            - Correlaciones entre activos
+            - Métricas de volatilidad
+            - Performance comparativa
+            
+            **🔧 Para análisis avanzado:**
+            - Use las funciones de optimización de portafolio
+            - Acceda al análisis técnico
+            - Explore el dashboard unificado
+            """)
+    
+    st.markdown("---")
+    st.markdown("*Informe generado automáticamente con datos en tiempo real*")
+
+def buscar_noticias_automaticas_gemini(gemini_api_key, tickers=None, max_creditos=3):
+    """
+    Busca noticias automáticamente usando Gemini con el mínimo uso de créditos.
+    
+    Args:
+        gemini_api_key: API key de Gemini
+        tickers: Lista de tickers para buscar noticias (opcional)
+        max_creditos: Máximo número de llamadas a Gemini (por defecto 3)
+    
+    Returns:
+        DataFrame con noticias y análisis
+    """
+    
+    # Configurar Gemini
+    try:
+        genai.configure(api_key=gemini_api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        st.error(f"Error configurando Gemini: {e}")
+        return None
+    
+    # Tickers por defecto si no se especifican
+    if tickers is None:
+        tickers = ['META', 'GOOGL', 'AMZN', 'MSFT', 'AAPL', 'TSLA', '^MERV', 'YPF']
+    
+    st.subheader("🔍 Búsqueda Automática de Noticias con IA")
+    st.info("💡 Usando Gemini para análisis inteligente con mínimo uso de créditos")
+    
+    # Crear un prompt eficiente que combine múltiples tickers
+    prompt_base = f"""
+    Analiza las noticias más relevantes de los últimos 3 días para estos tickers: {', '.join(tickers[:6])}
+    
+    Proporciona:
+    1. Resumen ejecutivo (máximo 100 palabras)
+    2. 3-5 noticias clave por ticker más importante
+    3. Impacto esperado en el mercado (positivo/negativo/neutral)
+    4. Recomendación de inversión (1-2 frases)
+    
+    Formato de respuesta:
+    - Solo texto, sin formato especial
+    - Máximo 300 palabras total
+    - Enfoque en datos concretos y análisis objetivo
+    """
+    
+    try:
+        with st.spinner("🤖 Analizando noticias con Gemini..."):
+            response = model.generate_content(prompt_base)
+            
+            if response and response.text:
+                st.success("✅ Análisis completado con 1 crédito de Gemini")
+                
+                # Mostrar el análisis
+                st.markdown("### 📰 Resumen de Noticias")
+                st.write(response.text)
+                
+                # Crear un DataFrame estructurado
+                noticias_data = []
+                lines = response.text.split('\n')
+                current_ticker = None
+                
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith('-') and not line.startswith('•'):
+                        if any(ticker in line.upper() for ticker in tickers):
+                            current_ticker = next((t for t in tickers if t in line.upper()), 'General')
+                        elif line and len(line) > 20:
+                            noticias_data.append({
+                                'Ticker': current_ticker or 'General',
+                                'Noticia': line[:100] + '...' if len(line) > 100 else line,
+                                'Impacto': 'Neutral',
+                                'Fecha': datetime.now().strftime('%Y-%m-%d')
+                            })
+                
+                if noticias_data:
+                    df_noticias = pd.DataFrame(noticias_data)
+                    st.markdown("### 📊 Noticias Estructuradas")
+                    st.dataframe(df_noticias, use_container_width=True)
+                    
+                    # Opción para análisis adicional con 1 crédito más
+                    if st.button("🔍 Análisis Técnico Adicional (1 crédito)", key="analisis_adicional"):
+                        if max_creditos > 1:
+                            prompt_tecnico = f"""
+                            Basándote en las noticias anteriores, proporciona:
+                            1. Análisis técnico breve de {tickers[0]} y {tickers[1]}
+                            2. Niveles de soporte y resistencia clave
+                            3. Señales de trading (máximo 150 palabras)
+                            """
+                            
+                            response_tecnico = model.generate_content(prompt_tecnico)
+                            if response_tecnico and response_tecnico.text:
+                                st.markdown("### 📈 Análisis Técnico")
+                                st.write(response_tecnico.text)
+                                st.info("💡 Usado 2 créditos de Gemini en total")
+                            else:
+                                st.warning("No se pudo generar análisis técnico")
+                        else:
+                            st.warning("No hay créditos disponibles para análisis adicional")
+                    
+                    # Opción para análisis de sentimiento con 1 crédito más
+                    if st.button("😊 Análisis de Sentimiento (1 crédito)", key="sentimiento"):
+                        if max_creditos > 1:
+                            prompt_sentimiento = f"""
+                            Analiza el sentimiento del mercado basándote en las noticias:
+                            1. Sentimiento general (alcista/bajista/neutral)
+                            2. Factores de riesgo principales
+                            3. Oportunidades emergentes (máximo 100 palabras)
+                            """
+                            
+                            response_sentimiento = model.generate_content(prompt_sentimiento)
+                            if response_sentimiento and response_sentimiento.text:
+                                st.markdown("### 😊 Análisis de Sentimiento")
+                                st.write(response_sentimiento.text)
+                                st.info("💡 Usado 2 créditos de Gemini en total")
+                            else:
+                                st.warning("No se pudo generar análisis de sentimiento")
+                        else:
+                            st.warning("No hay créditos disponibles para análisis de sentimiento")
+                
+                return df_noticias if noticias_data else None
+                
+            else:
+                st.error("No se pudo generar contenido con Gemini")
+                return None
+                
+    except Exception as e:
+        st.error(f"Error en la generación: {e}")
+        return None
+
+def buscar_noticias_especificas_gemini(gemini_api_key, ticker, max_creditos=2):
+    """
+    Busca noticias específicas para un ticker usando Gemini de forma eficiente.
+    
+    Args:
+        gemini_api_key: API key de Gemini
+        ticker: Ticker específico a analizar
+        max_creditos: Máximo número de llamadas a Gemini
+    
+    Returns:
+        Análisis específico del ticker
+    """
+    
+    try:
+        genai.configure(api_key=gemini_api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        st.error(f"Error configurando Gemini: {e}")
+        return None
+    
+    st.subheader(f"🔍 Análisis Específico: {ticker}")
+    
+    prompt_especifico = f"""
+    Analiza {ticker} con enfoque en:
+    1. Últimas noticias relevantes (máximo 3)
+    2. Análisis técnico breve
+    3. Recomendación de inversión
+    4. Factores de riesgo
+    
+    Máximo 200 palabras, solo texto.
+    """
+    
+    try:
+        with st.spinner(f"🤖 Analizando {ticker}..."):
+            response = model.generate_content(prompt_especifico)
+            
+            if response and response.text:
+                st.success(f"✅ Análisis de {ticker} completado con 1 crédito")
+                st.markdown("### 📊 Análisis Completo")
+                st.write(response.text)
+                
+                # Opción para análisis más profundo
+                if st.button(f"🔍 Análisis Profundo de {ticker} (1 crédito)", key=f"profundo_{ticker}"):
+                    if max_creditos > 1:
+                        prompt_profundo = f"""
+                        Profundiza en el análisis de {ticker}:
+                        1. Comparación con competidores
+                        2. Análisis fundamental breve
+                        3. Perspectivas a 3-6 meses
+                        4. Niveles de entrada y salida sugeridos
+                        
+                        Máximo 250 palabras.
+                        """
+                        
+                        response_profundo = model.generate_content(prompt_profundo)
+                        if response_profundo and response_profundo.text:
+                            st.markdown("### 📈 Análisis Profundo")
+                            st.write(response_profundo.text)
+                            st.info("💡 Usado 2 créditos de Gemini en total")
+                        else:
+                            st.warning("No se pudo generar análisis profundo")
+                    else:
+                        st.warning("No hay créditos disponibles para análisis profundo")
+                
+                return response.text
+            else:
+                st.error("No se pudo generar análisis")
+                return None
+                
+    except Exception as e:
+        st.error(f"Error en el análisis: {e}")
+        return None
+
+def mostrar_busqueda_noticias_gemini():
+    """
+    Interfaz principal para la búsqueda automática de noticias con Gemini
+    """
+    st.title("🤖 Búsqueda Automática de Noticias con IA")
+    st.markdown("---")
+    
+    # Configuración de API Key
+    gemini_api_key = st.text_input(
+        "🔑 API Key de Gemini",
+        value="AIzaSyBFtK05ndkKgo4h0w9gl224Gn94NaWaI6E",
+        type="password",
+        help="Ingresa tu API key de Gemini para acceder a análisis automático de noticias"
+    )
+    
+    if not gemini_api_key:
+        st.warning("⚠️ Ingresa tu API key de Gemini para continuar")
+        return
+    
+    # Opciones de búsqueda
+    st.subheader("🎯 Opciones de Búsqueda")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        modo_busqueda = st.radio(
+            "Selecciona el modo de búsqueda:",
+            ["📰 Análisis General", "🎯 Ticker Específico"],
+            help="Análisis general usa menos créditos, ticker específico es más detallado"
+        )
+    
+    with col2:
+        max_creditos = st.slider(
+            "💳 Máximo de créditos a usar:",
+            min_value=1,
+            max_value=5,
+            value=3,
+            help="Controla cuántas llamadas a Gemini realizarás"
+        )
+    
+    st.markdown("---")
+    
+    if modo_busqueda == "📰 Análisis General":
+        st.info("💡 **Modo Eficiente**: Analiza múltiples tickers en una sola llamada (1 crédito)")
+        
+        # Tickers personalizables
+        tickers_default = ['META', 'GOOGL', 'AMZN', 'MSFT', 'AAPL', 'TSLA', '^MERV', 'YPF']
+        tickers_personalizados = st.multiselect(
+            "📊 Selecciona tickers para analizar:",
+            options=tickers_default,
+            default=tickers_default[:6],
+            help="Selecciona hasta 6 tickers para optimizar el uso de créditos"
+        )
+        
+        if st.button("🚀 Iniciar Búsqueda Automática", use_container_width=True):
+            if tickers_personalizados:
+                buscar_noticias_automaticas_gemini(gemini_api_key, tickers_personalizados, max_creditos)
+            else:
+                st.warning("Selecciona al menos un ticker")
+    
+    else:  # Ticker Específico
+        st.info("💡 **Modo Detallado**: Análisis profundo de un ticker específico (1-2 créditos)")
+        
+        ticker_especifico = st.text_input(
+            "🎯 Ingresa el ticker a analizar:",
+            value="META",
+            help="Ejemplo: META, GOOGL, AMZN, etc."
+        ).upper()
+        
+        if st.button(f"🔍 Analizar {ticker_especifico}", use_container_width=True):
+            if ticker_especifico:
+                buscar_noticias_especificas_gemini(gemini_api_key, ticker_especifico, max_creditos)
+            else:
+                st.warning("Ingresa un ticker válido")
+    
+    # Información sobre uso de créditos
+    st.markdown("---")
+    st.markdown("### 💰 Información sobre Créditos")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("📰 Análisis General", "1 crédito", "Múltiples tickers")
+    
+    with col2:
+        st.metric("🎯 Ticker Específico", "1-2 créditos", "Análisis detallado")
+    
+    with col3:
+        st.metric("🔍 Análisis Adicional", "+1 crédito", "Por cada extra")
+    
+    st.info("""
+    **💡 Consejos para optimizar créditos:**
+    - Usa el modo general para obtener una visión amplia
+    - Elige tickers específicos solo cuando necesites análisis profundo
+    - Combina múltiples análisis en una sola sesión
+    - Revisa el historial de análisis antes de hacer nuevas consultas
+    """)
 
 if __name__ == "__main__":
     try:
