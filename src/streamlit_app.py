@@ -4719,6 +4719,30 @@ def mostrar_dashboard_principal(token_acceso, id_cliente):
         st.error(f"❌ Error al cargar el dashboard principal: {e}")
         st.info("Verifique que el cliente tenga un portafolio activo")
 
+def mostrar_portafolio_actual(cliente, token_acceso):
+    """
+    Muestra el portafolio actual del cliente seleccionado
+    """
+    if not cliente:
+        st.error("No hay cliente seleccionado")
+        return
+
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
+
+    st.title(f"📈 Portafolio Actual - {nombre_cliente}")
+    
+    # Obtener el portafolio del cliente
+    with st.spinner("Obteniendo portafolio actual..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    
+    if not portafolio or not portafolio.get('activos'):
+        st.warning("No se pudo obtener el portafolio del cliente o está vacío")
+        return
+    
+    # Mostrar el resumen del portafolio usando la función existente
+    mostrar_resumen_portafolio(portafolio, token_acceso)
+
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
@@ -11941,6 +11965,19 @@ def buscar_noticias_especificas_gemini(gemini_api_key, ticker, max_creditos=2):
         st.error(f"Error en el análisis: {e}")
         return None
 
+def mostrar_busqueda_noticias():
+    """
+    Interfaz básica para la búsqueda de noticias
+    """
+    st.title("📰 Búsqueda de Noticias")
+    st.markdown("---")
+    
+    st.info("🔍 Esta funcionalidad está en desarrollo. Usa la pestaña '🤖 IA Gemini' para análisis avanzado de noticias.")
+    
+    # Placeholder para futuras funcionalidades
+    st.subheader("📊 Noticias del Mercado")
+    st.write("Próximamente: Búsqueda y análisis de noticias financieras en tiempo real.")
+
 def mostrar_busqueda_noticias_gemini():
     """
     Interfaz principal para la búsqueda automática de noticias con Gemini
@@ -12137,7 +12174,7 @@ def main():
                 cliente_seleccionado = st.selectbox(
                     "Cliente:",
                     options=clientes,
-                    format_func=lambda x: f"{x['nombre']} ({x['numero']})"
+                    format_func=lambda x: f"{x.get('apellidoYNombre', x.get('nombre', 'Cliente'))} ({x.get('numeroCliente', x.get('id', ''))})"
                 )
                 st.session_state.cliente_seleccionado = cliente_seleccionado
                 
@@ -12153,7 +12190,7 @@ def main():
     # Contenido principal
     if st.session_state.cliente_seleccionado:
         cliente = st.session_state.cliente_seleccionado
-        st.header(f"📊 Portafolio de {cliente['nombre']}")
+        st.header(f"📊 Portafolio de {cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))}")
         
         # Tabs principales
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -12164,199 +12201,25 @@ def main():
             mostrar_portafolio_actual(cliente, st.session_state.token_acceso)
         
         with tab2:
-            mostrar_analisis_portafolio(cliente, st.session_state.token_acceso)
+            mostrar_analisis_portafolio()
         
         with tab3:
-            mostrar_optimizacion_portafolio(cliente, st.session_state.token_acceso)
+            id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+            mostrar_optimizacion_portafolio(st.session_state.token_acceso, id_cliente)
         
         with tab4:
-            mostrar_busqueda_noticias()
+            mostrar_busqueda_noticias_gemini()
         
         with tab5:
             mostrar_busqueda_noticias_gemini()
         
         with tab6:
-            mostrar_configuracion()
+            id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+            mostrar_configuracion(st.session_state.token_acceso, id_cliente)
     else:
         st.info("🔐 Conecta a IOL y selecciona un cliente para comenzar el análisis")
 
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error(f"❌ Error fatal al iniciar la aplicación: {str(e)}")
-        st.error(f"Tipo de error: {type(e).__name__}")
-        import traceback
-        st.code(traceback.format_exc())
-        
-        # Información de diagnóstico
-        st.subheader("🔍 Diagnóstico del Sistema")
-        st.write(f"**Streamlit version:** {st.__version__}")
-        st.write(f"**Pandas version:** {pd.__version__}")
-        st.write(f"**Numpy version:** {np.__version__}")
-        
-        # Verificar importaciones críticas
-        try:
-            import yfinance
-            st.success("✅ yfinance importado correctamente")
-        except Exception as e:
-            st.error(f"❌ Error con yfinance: {e}")
-        
-        try:
-            import plotly
-            st.success("✅ plotly importado correctamente")
-        except Exception as e:
-            st.error(f"❌ Error con plotly: {e}")
-        
-        try:
-            import requests
-            st.success("✅ requests importado correctamente")
-        except Exception as e:
-            st.error(f"❌ Error con requests: {e}")
-        
-        try:
-            import scipy
-            st.success("✅ scipy importado correctamente")
-        except Exception as e:
-            st.error(f"❌ Error con scipy: {e}")
-        
-        try:
-            import google.generativeai
-            st.success("✅ google.generativeai importado correctamente")
-        except Exception as e:
-            st.error(f"✅ google.generativeai importado correctamente")
-        except Exception as e:
-            st.error(f"❌ Error con google.generativeai: {e}")
-        
-        st.info("""
-        **🔧 Si persisten los errores:**
-        1. Verifica que todas las dependencias estén instaladas
-        2. Reinicia el servidor Streamlit
-        3. Verifica la versión de Python (recomendado 3.8+)
-        4. Revisa los logs del servidor para más detalles
-        """)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        modo_busqueda = st.radio(
-            "Selecciona el modo de búsqueda:",
-            ["📰 Análisis General", "🎯 Ticker Específico"],
-            help="Análisis general usa menos créditos, ticker específico es más detallado"
-        )
-    
-    with col2:
-        max_creditos = st.slider(
-            "💳 Máximo de créditos a usar:",
-            min_value=1,
-            max_value=5,
-            value=3,
-            help="Controla cuántas llamadas a Gemini realizarás"
-        )
-    
-    st.markdown("---")
-    
-    if modo_busqueda == "📰 Análisis General":
-        st.info("💡 **Modo Eficiente**: Analiza múltiples tickers en una sola llamada (1 crédito)")
-        
-        # Opción para incluir activos del portafolio actual
-        incluir_portafolio = False
-        if 'token_acceso' in st.session_state and st.session_state.token_acceso and st.session_state.cliente_seleccionado:
-            incluir_portafolio = st.checkbox(
-                "📊 Incluir activos del portafolio actual",
-                value=False,
-                help="Agregar automáticamente los activos del portafolio actual a la lista de tickers"
-            )
-        
-        # Tickers personalizables
-        tickers_default = ['META', 'GOOGL', 'AMZN', 'MSFT', 'AAPL', 'TSLA', '^MERV', 'YPF']
-        
-        # Si se selecciona incluir portafolio, obtener activos actuales
-        tickers_portafolio = []
-        if incluir_portafolio:
-            try:
-                portafolio = obtener_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
-                if portafolio and portafolio.get('activos'):
-                    for activo in portafolio['activos']:
-                        titulo = activo.get('titulo', {})
-                        simbolo = titulo.get('simbolo')
-                        if simbolo:
-                            tickers_portafolio.append(simbolo)
-                
-                if tickers_portafolio:
-                    st.success(f"✅ Se agregaron {len(tickers_portafolio)} activos del portafolio actual")
-                    # Mostrar activos del portafolio
-                    with st.expander("📋 Activos del Portafolio Actual", expanded=False):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write("**Símbolos:**")
-                            for i, ticker in enumerate(tickers_portafolio):
-                                if i % 2 == 0:
-                                    st.write(f"• {ticker}")
-                        with col2:
-                            st.write("**Símbolos:**")
-                            for i, ticker in enumerate(tickers_portafolio):
-                                if i % 2 == 1:
-                                    st.write(f"• {ticker}")
-                else:
-                    st.warning("⚠️ No se encontraron activos en el portafolio actual")
-            except Exception as e:
-                st.error(f"❌ Error al obtener portafolio: {e}")
-        
-        # Combinar tickers por defecto con tickers del portafolio
-        tickers_combinados = tickers_default + tickers_portafolio
-        tickers_combinados = list(dict.fromkeys(tickers_combinados))  # Eliminar duplicados
-        
-        tickers_personalizados = st.multiselect(
-            "📊 Selecciona tickers para analizar:",
-            options=tickers_combinados,
-            default=tickers_combinados[:6] if len(tickers_combinados) >= 6 else tickers_combinados,
-            help=f"Selecciona hasta 6 tickers para optimizar el uso de créditos. Total disponible: {len(tickers_combinados)}"
-        )
-        
-        if st.button("🚀 Iniciar Búsqueda Automática", use_container_width=True):
-            if tickers_personalizados:
-                buscar_noticias_automaticas_gemini(gemini_api_key, tickers_personalizados, max_creditos)
-            else:
-                st.warning("Selecciona al menos un ticker")
-    
-    else:  # Ticker Específico
-        st.info("💡 **Modo Detallado**: Análisis profundo de un ticker específico (1-2 créditos)")
-        
-        ticker_especifico = st.text_input(
-            "🎯 Ingresa el ticker a analizar:",
-            value="META",
-            help="Ejemplo: META, GOOGL, AMZN, etc."
-        ).upper()
-        
-        if st.button(f"🔍 Analizar {ticker_especifico}", use_container_width=True):
-            if ticker_especifico:
-                buscar_noticias_especificas_gemini(gemini_api_key, ticker_especifico, max_creditos)
-            else:
-                st.warning("Ingresa un ticker válido")
-    
-    # Información sobre uso de créditos
-    st.markdown("---")
-    st.markdown("### 💰 Información sobre Créditos")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("📰 Análisis General", "1 crédito", "Múltiples tickers")
-    
-    with col2:
-        st.metric("🎯 Ticker Específico", "1-2 créditos", "Análisis detallado")
-    
-    with col3:
-        st.metric("🔍 Análisis Adicional", "+1 crédito", "Por cada extra")
-    
-    st.info("""
-    **💡 Consejos para optimizar créditos:**
-    - Usa el modo general para obtener una visión amplia
-    - Elige tickers específicos solo cuando necesites análisis profundo
-    - Combina múltiples análisis en una sola sesión
-    - Revisa el historial de análisis antes de hacer nuevas consultas
-    """)
+
 
 if __name__ == "__main__":
     try:
