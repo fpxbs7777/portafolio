@@ -9155,186 +9155,156 @@ def generar_informe_financiero_actual():
     
     st.markdown("---")
     
-    # Lectura de Mercados
+    # Lectura de Mercados - Sistema Centralizado y Robusto
     st.header("🌍 Lectura de Mercados")
     
-    try:
-        # Datos de EEUU
-        st.subheader("🇺🇸 Estados Unidos")
-        
-        # Obtener datos del S&P 500
-        sp500 = yf.download('^GSPC', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not sp500.empty:
-            cambio_sp500 = ((sp500['Close'][-1] - sp500['Close'][0]) / sp500['Close'][0]) * 100
-            st.metric("S&P 500 (30 días)", f"{sp500['Close'][-1]:.2f}", f"{cambio_sp500:+.2f}%")
-        
-        # Obtener datos del Nasdaq
-        nasdaq = yf.download('^IXIC', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not nasdaq.empty:
-            cambio_nasdaq = ((nasdaq['Close'][-1] - nasdaq['Close'][0]) / nasdaq['Close'][0]) * 100
-            st.metric("Nasdaq (30 días)", f"{nasdaq['Close'][-1]:.2f}", f"{cambio_nasdaq:+.2f}%")
-        
-        # Obtener datos del VIX
-        vix = yf.download('^VIX', start=(datetime.now() - timedelta(days=7)), end=datetime.now())
-        if not vix.empty:
-            cambio_vix = ((vix['Close'][-1] - vix['Close'][0]) / vix['Close'][0]) * 100
-            st.metric("VIX (7 días)", f"{vix['Close'][-1]:.2f}", f"{cambio_vix:+.2f}%")
-        
-        # Obtener datos del Dólar (usando un proxy para Argentina)
+    @st.cache_data(ttl=1800)  # Cache por 30 minutos
+    def obtener_datos_mercado(ticker, dias=30, nombre_display=None):
+        """
+        Función centralizada para obtener datos de mercado con manejo robusto de errores
+        """
         try:
-            # Intentar obtener datos del peso argentino (si están disponibles)
-            usd_ars = yf.download('USDARS=X', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-            if not usd_ars.empty:
-                cambio_usd = ((usd_ars['Close'][-1] - usd_ars['Close'][0]) / usd_ars['Close'][0]) * 100
-                st.metric("USD/ARS (30 días)", f"{usd_ars['Close'][-1]:.2f}", f"{cambio_usd:+.2f}%")
-            else:
-                # Fallback a USD/CAD como proxy
-                usd_cad = yf.download('USDCAD', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-                if not usd_cad.empty:
-                    cambio_usd = ((usd_cad['Close'][-1] - usd_cad['Close'][0]) / usd_cad['Close'][0]) * 100
-                    st.metric("USD/CAD (30 días)", f"{usd_cad['Close'][-1]:.4f}", f"{cambio_usd:+.2f}%")
-        except:
-            st.info("ℹ️ No se pudieron obtener datos del tipo de cambio")
-        
-        # Análisis de volatilidad
-        if not sp500.empty:
-            volatilidad_sp500 = sp500['Close'].pct_change().std() * np.sqrt(252) * 100
-            st.info(f"📈 **Volatilidad anualizada S&P 500:** {volatilidad_sp500:.2f}%")
-        
-        # Obtener datos de bonos del tesoro
-        try:
-            # 10-year Treasury
-            tnx = yf.download('^TNX', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-            if not tnx.empty:
-                cambio_tnx = ((tnx['Close'][-1] - tnx['Close'][0]) / tnx['Close'][0]) * 100
-                st.metric("10Y Treasury Yield (30 días)", f"{tnx['Close'][-1]:.2f}%", f"{cambio_tnx:+.2f}%")
+            # Intentar obtener datos con diferentes estrategias
+            data = yf.download(ticker, start=(datetime.now() - timedelta(days=dias)), end=datetime.now(), progress=False)
             
-            # 2-year Treasury
-            irx = yf.download('^IRX', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-            if not irx.empty:
-                cambio_irx = ((irx['Close'][-1] - irx['Close'][0]) / irx['Close'][0]) * 100
-                st.metric("2Y Treasury Yield (30 días)", f"{irx['Close'][-1]:.2f}%", f"{cambio_irx:+.2f}%")
-                
+            if data.empty:
+                return None, f"No hay datos disponibles para {nombre_display or ticker}"
+            
+            # Verificar que tenemos suficientes datos
+            if len(data) < 2:
+                return None, f"Datos insuficientes para {nombre_display or ticker}"
+            
+            # Calcular cambio porcentual
+            cambio = ((data['Close'].iloc[-1] - data['Close'].iloc[0]) / data['Close'].iloc[0]) * 100
+            
+            return {
+                'precio_actual': data['Close'].iloc[-1],
+                'cambio_porcentual': cambio,
+                'datos': data
+            }, None
+            
         except Exception as e:
-            st.warning(f"⚠️ No se pudieron obtener datos de bonos del tesoro: {e}")
+            return None, f"Error al obtener {nombre_display or ticker}: {str(e)}"
+    
+    def mostrar_metricas_mercado(ticker, dias=30, nombre_display=None, formato_precio=".2f", formato_cambio="+.2f"):
+        """
+        Función para mostrar métricas de mercado de manera consistente
+        """
+        datos, error = obtener_datos_mercado(ticker, dias, nombre_display)
         
-    except Exception as e:
-        st.error(f"❌ Error obteniendo datos de EEUU: {e}")
+        if datos:
+            precio_formateado = f"{datos['precio_actual']:{formato_precio}}"
+            cambio_formateado = f"{datos['cambio_porcentual']:{formato_cambio}}%"
+            
+            # Formatear el nombre del ticker para display
+            nombre_mostrar = nombre_display or ticker
+            if ticker.startswith('^'):
+                nombre_mostrar = ticker[1:]  # Remover el ^ para display
+            elif ticker.endswith('=F'):
+                nombre_mostrar = ticker[:-2]  # Remover =F para display
+            
+            st.metric(f"{nombre_mostrar} ({dias} días)", precio_formateado, cambio_formateado)
+            return datos
+        else:
+            st.warning(f"⚠️ {error}")
+            return None
+    
+    # Datos de EEUU
+    st.subheader("🇺🇸 Estados Unidos")
+    
+    # Obtener datos principales de EEUU
+    sp500_data = mostrar_metricas_mercado('^GSPC', 30, 'S&P 500')
+    nasdaq_data = mostrar_metricas_mercado('^IXIC', 30, 'Nasdaq')
+    vix_data = mostrar_metricas_mercado('^VIX', 7, 'VIX')
+    
+    # Análisis de volatilidad del S&P 500
+    if sp500_data and 'datos' in sp500_data:
+        try:
+            volatilidad_sp500 = sp500_data['datos']['Close'].pct_change().std() * np.sqrt(252) * 100
+            st.info(f"📈 **Volatilidad anualizada S&P 500:** {volatilidad_sp500:.2f}%")
+        except:
+            st.info("📈 Información de volatilidad no disponible")
+    
+    # Bonos del Tesoro
+    st.markdown("**Bonos del Tesoro:**")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        mostrar_metricas_mercado('^TNX', 30, '10Y Treasury', '.2f', '+.2f')
+    
+    with col2:
+        mostrar_metricas_mercado('^IRX', 30, '2Y Treasury', '.2f', '+.2f')
     
     st.markdown("---")
     
     # Datos de Argentina
     st.subheader("🇦🇷 Argentina")
     
-    try:
-        # Obtener datos del Merval (si están disponibles)
-        merval = yf.download('^MERV', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not merval.empty:
-            cambio_merval = ((merval['Close'][-1] - merval['Close'][0]) / merval['Close'][0]) * 100
-            st.metric("Merval (30 días)", f"{merval['Close'][-1]:.2f}", f"{cambio_merval:+.2f}%")
-        
-        # Obtener datos de YPF
-        ypf = yf.download('YPF', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not ypf.empty:
-            cambio_ypf = ((ypf['Close'][-1] - ypf['Close'][0]) / ypf['Close'][0]) * 100
-            st.metric("YPF (30 días)", f"{ypf['Close'][-1]:.2f}", f"{cambio_ypf:+.2f}%")
-        
-        # Obtener datos de Banco Macro
-        macro = yf.download('BMA', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not macro.empty:
-            cambio_macro = ((macro['Close'][-1] - macro['Close'][0]) / macro['Close'][0]) * 100
-            st.metric("Banco Macro (BMA)", f"{macro['Close'][-1]:.2f}", f"{cambio_macro:+.2f}%")
-            
-    except Exception as e:
-        st.error(f"❌ Error obteniendo datos de Argentina: {e}")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        mostrar_metricas_mercado('^MERV', 30, 'Merval')
+    
+    with col2:
+        mostrar_metricas_mercado('YPF', 30, 'YPF')
+    
+    with col3:
+        mostrar_metricas_mercado('BMA', 30, 'Banco Macro')
     
     st.markdown("---")
     
     # Mercados Emergentes
     st.subheader("🌱 Mercados Emergentes")
     
-    try:
-        # Obtener datos de Brasil
-        ewz = yf.download('EWZ', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not ewz.empty:
-            cambio_ewz = ((ewz['Close'][-1] - ewz['Close'][0]) / ewz['Close'][0]) * 100
-            st.metric("ETF Brasil (EWZ)", f"{ewz['Close'][-1]:.2f}", f"{cambio_ewz:+.2f}%")
-        
-        # Obtener datos de México
-        eww = yf.download('EWW', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not eww.empty:
-            cambio_eww = ((eww['Close'][-1] - eww['Close'][0]) / eww['Close'][0]) * 100
-            st.metric("ETF México (EWW)", f"{eww['Close'][-1]:.2f}", f"{cambio_eww:+.2f}%")
-        
-    except Exception as e:
-        st.error(f"❌ Error obteniendo datos de emergentes: {e}")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        mostrar_metricas_mercado('EWZ', 30, 'ETF Brasil')
+    
+    with col2:
+        mostrar_metricas_mercado('EWW', 30, 'ETF México')
     
     st.markdown("---")
     
     # Commodities y Materias Primas
     st.subheader("🛢️ Commodities y Materias Primas")
     
-    try:
-        # Obtener datos del petróleo
-        oil = yf.download('CL=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not oil.empty:
-            cambio_oil = ((oil['Close'][-1] - oil['Close'][0]) / oil['Close'][0]) * 100
-            st.metric("Petróleo WTI (30 días)", f"${oil['Close'][-1]:.2f}", f"{cambio_oil:+.2f}%")
-        
-        # Obtener datos del oro
-        gold = yf.download('GC=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not gold.empty:
-            cambio_gold = ((gold['Close'][-1] - gold['Close'][0]) / gold['Close'][0]) * 100
-            st.metric("Oro (30 días)", f"${gold['Close'][-1]:.2f}", f"{cambio_gold:+.2f}%")
-        
-        # Obtener datos de la plata
-        silver = yf.download('SI=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not silver.empty:
-            cambio_silver = ((silver['Close'][-1] - silver['Close'][0]) / silver['Close'][0]) * 100
-            st.metric("Plata (30 días)", f"${silver['Close'][-1]:.2f}", f"{cambio_silver:+.2f}%")
-        
-        # Obtener datos del cobre
-        copper = yf.download('HG=F', start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-        if not copper.empty:
-            cambio_copper = ((copper['Close'][-1] - copper['Close'][0]) / copper['Close'][0]) * 100
-            st.metric("Cobre (30 días)", f"${copper['Close'][-1]:.2f}", f"{cambio_copper:+.2f}%")
-            
-    except Exception as e:
-        st.error(f"❌ Error obteniendo datos de commodities: {e}")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        mostrar_metricas_mercado('CL=F', 30, 'Petróleo WTI', '.2f', '+.2f')
+        mostrar_metricas_mercado('GC=F', 30, 'Oro', '.2f', '+.2f')
+    
+    with col2:
+        mostrar_metricas_mercado('SI=F', 30, 'Plata', '.2f', '+.2f')
+        mostrar_metricas_mercado('HG=F', 30, 'Cobre', '.2f', '+.2f')
     
     st.markdown("---")
     
     # Análisis de Sectores
     st.subheader("🏭 Análisis de Sectores")
     
-    try:
-        # ETFs sectoriales
-        sectores = {
-            'XLU': 'Utilities',
-            'XLK': 'Technology',
-            'XLE': 'Energy',
-            'XLF': 'Financials',
-            'XLV': 'Healthcare'
-        }
+    # Definir sectores de manera centralizada
+    sectores = {
+        'XLU': 'Utilities',
+        'XLK': 'Technology', 
+        'XLE': 'Energy',
+        'XLF': 'Financials',
+        'XLV': 'Healthcare'
+    }
+    
+    col1, col2 = st.columns(2)
+    
+    for i, (ticker, nombre) in enumerate(sectores.items()):
+        datos, error = obtener_datos_mercado(ticker, 30, nombre)
         
-        col1, col2 = st.columns(2)
-        
-        for i, (ticker, nombre) in enumerate(sectores.items()):
-            try:
-                data = yf.download(ticker, start=(datetime.now() - timedelta(days=30)), end=datetime.now())
-                if not data.empty:
-                    cambio = ((data['Close'][-1] - data['Close'][0]) / data['Close'][0]) * 100
-                    if i % 2 == 0:
-                        with col1:
-                            st.metric(f"{nombre} ({ticker})", f"{data['Close'][-1]:.2f}", f"{cambio:+.2f}%")
-                    else:
-                        with col2:
-                            st.metric(f"{nombre} ({ticker})", f"{data['Close'][-1]:.2f}", f"{cambio:+.2f}%")
-            except:
-                continue
-                
-    except Exception as e:
-        st.error(f"❌ Error obteniendo datos sectoriales: {e}")
+        if datos:
+            if i % 2 == 0:
+                with col1:
+                    st.metric(f"{nombre} ({ticker})", f"{datos['precio_actual']:.2f}", f"{datos['cambio_porcentual']:+.2f}%")
+            else:
+                with col2:
+                    st.metric(f"{nombre} ({ticker})", f"{datos['precio_actual']:.2f}", f"{datos['cambio_porcentual']:+.2f}%")
     
     st.markdown("---")
     
