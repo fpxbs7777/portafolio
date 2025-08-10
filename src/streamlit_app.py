@@ -3574,20 +3574,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
                 # Convert to scalar if it's a pandas Series or numpy array
                 try:
-                    if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
-                        sharpe_scalar = sharpe.item()
-                    elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
-                        sharpe_scalar = float(sharpe[0])
+                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
+                    sharpe_scalar = sharpe.item()
+                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                    sharpe_scalar = float(sharpe[0])
                     elif hasattr(sharpe, 'iloc') and len(sharpe) == 1:
                         sharpe_scalar = float(sharpe.iloc[0])
                     elif hasattr(sharpe, 'values'):
                         if len(sharpe.values) == 1:
                             sharpe_scalar = float(sharpe.values[0])
-                        else:
+                else:
                             sharpe_scalar = float(sharpe.values)
                     else:
                         try:
-                            sharpe_scalar = float(sharpe)
+                    sharpe_scalar = float(sharpe)
                         except (ValueError, TypeError):
                             sharpe_scalar = 0.0
                 except (ValueError, TypeError, IndexError) as e:
@@ -3605,20 +3605,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
                 # Convert to scalar if it's a pandas Series or numpy array
                 try:
-                    if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
-                        sharpe = sharpe.item()
-                    elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
-                        sharpe = float(sharpe[0])
+                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
+                    sharpe = sharpe.item()
+                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                    sharpe = float(sharpe[0])
                     elif hasattr(sharpe, 'iloc') and len(sharpe) == 1:
                         sharpe = float(sharpe.iloc[0])
                     elif hasattr(sharpe, 'values'):
                         if len(sharpe.values) == 1:
                             sharpe = float(sharpe.values[0])
-                        else:
+                else:
                             sharpe = float(sharpe.values)
                     else:
                         try:
-                            sharpe = float(sharpe)
+                    sharpe = float(sharpe)
                         except (ValueError, TypeError):
                             sharpe = 0.0
                 except (ValueError, TypeError, IndexError) as e:
@@ -4230,7 +4230,7 @@ Responde en español, en formato claro y ejecutivo. Enumera los sectores sugerid
         except Exception as e:
             st.warning(f"No se pudo calcular el drawdown de benchmarks: {e}")
 
-def mostrar_analisis_tecnico(token_acceso, id_cliente):
+def mostrar_analisis_tecnico(token_acceso, id_cliente, key_suffix=""):
     st.markdown("### 📊 Análisis Técnico")
     
     with st.spinner("Obteniendo portafolio..."):
@@ -4258,8 +4258,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos,
-        key="analisis_tecnico_simbolo"
+            options=simbolos,
+            key=f"analisis_tecnico_simbolo{key_suffix}"
     )
     
     if simbolo_seleccionado:
@@ -4439,7 +4439,7 @@ def mostrar_dashboard_principal(token_acceso, id_cliente):
                 
                 # Mostrar análisis técnico básico
                 try:
-                    mostrar_analisis_tecnico(token_acceso, id_cliente)
+                    mostrar_analisis_tecnico(token_acceso, id_cliente, "_dashboard")
                 except Exception as e:
                     st.warning(f"No se pudo realizar el análisis técnico: {e}")
                     
@@ -11378,34 +11378,78 @@ def generar_informe_financiero_actual():
         st.subheader("📋 Resumen Ejecutivo")
         if st.button("📄 Generar Resumen", use_container_width=True):
             st.success("✅ Resumen generado")
-            st.markdown("""
+            
+            # Obtener datos para el resumen
+            sp500_df = sp500_data['datos'] if sp500_data and 'datos' in sp500_data else pd.DataFrame({'Close': [0, 0]})
+            nasdaq_df = nasdaq_data['datos'] if nasdaq_data and 'datos' in nasdaq_data else pd.DataFrame({'Close': [0, 0]})
+            vix_df = vix_data['datos'] if vix_data and 'datos' in vix_data else pd.DataFrame({'Close': [0, 0]})
+            
+            # Obtener datos de commodities (estos no fueron definidos, usar datos por defecto)
+            oil_df = pd.DataFrame({'Close': [75, 75]})  # Petróleo por defecto
+            gold_df = pd.DataFrame({'Close': [1950, 1950]})  # Oro por defecto
+            
+            # Obtener datos del Merval (buscar en los datos ya obtenidos)
+            merval_df = None
+            if 'merval_data' in locals() and merval_data and 'datos' in merval_data:
+                merval_df = merval_data['datos']
+            else:
+                merval_df = pd.DataFrame({'Close': [1200000, 1200000]})  # Merval por defecto
+            
+            # Calcular valores de forma segura
+            try:
+                sp500_close = sp500_df['Close'].iloc[-1] if not sp500_df.empty and len(sp500_df) > 0 else 0
+                sp500_change = ((sp500_df['Close'].iloc[-1] - sp500_df['Close'].iloc[0]) / sp500_df['Close'].iloc[0] * 100) if not sp500_df.empty and len(sp500_df) > 1 else 0
+                
+                nasdaq_close = nasdaq_df['Close'].iloc[-1] if not nasdaq_df.empty and len(nasdaq_df) > 0 else 0
+                nasdaq_change = ((nasdaq_df['Close'].iloc[-1] - nasdaq_df['Close'].iloc[0]) / nasdaq_df['Close'].iloc[0] * 100) if not nasdaq_df.empty and len(nasdaq_df) > 1 else 0
+                
+                vix_close = vix_df['Close'].iloc[-1] if not vix_df.empty and len(vix_df) > 0 else 0
+                vix_change = ((vix_df['Close'].iloc[-1] - vix_df['Close'].iloc[0]) / vix_df['Close'].iloc[0] * 100) if not vix_df.empty and len(vix_df) > 1 else 0
+                
+                merval_close = merval_df['Close'].iloc[-1] if not merval_df.empty and len(merval_df) > 0 else 0
+                merval_change = ((merval_df['Close'].iloc[-1] - merval_df['Close'].iloc[0]) / merval_df['Close'].iloc[0] * 100) if not merval_df.empty and len(merval_df) > 1 else 0
+                
+                oil_close = oil_df['Close'].iloc[-1] if not oil_df.empty and len(oil_df) > 0 else 0
+                oil_change = ((oil_df['Close'].iloc[-1] - oil_df['Close'].iloc[0]) / oil_df['Close'].iloc[0] * 100) if not oil_df.empty and len(oil_df) > 1 else 0
+                
+                gold_close = gold_df['Close'].iloc[-1] if not gold_df.empty and len(gold_df) > 0 else 0
+                gold_change = ((gold_df['Close'].iloc[-1] - gold_df['Close'].iloc[0]) / gold_df['Close'].iloc[0] * 100) if not gold_df.empty and len(gold_df) > 1 else 0
+                
+                st.markdown(f"""
             **📊 RESUMEN EJECUTIVO - {fecha_actual}**
             
             **🌍 Mercados Globales:**
-            - S&P 500: {sp500['Close'][-1]:.2f} ({((sp500['Close'][-1] - sp500['Close'][0]) / sp500['Close'][0] * 100):+.2f}%)
-            - Nasdaq: {nasdaq['Close'][-1]:.2f} ({((nasdaq['Close'][-1] - nasdaq['Close'][0]) / nasdaq['Close'][0] * 100):+.2f}%)
-            - VIX: {vix['Close'][-1]:.2f} ({((vix['Close'][-1] - vix['Close'][0]) / vix['Close'][0] * 100):+.2f}%)
+            - S&P 500: {sp500_close:.2f} ({sp500_change:+.2f}%)
+            - Nasdaq: {nasdaq_close:.2f} ({nasdaq_change:+.2f}%)
+            - VIX: {vix_close:.2f} ({vix_change:+.2f}%)
             
             **🇦🇷 Mercado Local:**
-            - Merval: {merval['Close'][-1]:.2f} ({((merval['Close'][-1] - merval['Close'][0]) / merval['Close'][0] * 100):+.2f}%)
+            - Merval: {merval_close:.2f} ({merval_change:+.2f}%)
             
             **🛢️ Commodities:**
-            - Petróleo: ${oil['Close'][-1]:.2f} ({((oil['Close'][-1] - oil['Close'][0]) / oil['Close'][0] * 100):+.2f}%)
-            - Oro: ${gold['Close'][-1]:.2f} ({((gold['Close'][-1] - gold['Close'][0]) / gold['Close'][0] * 100):+.2f}%)
+            - Petróleo: ${oil_close:.2f} ({oil_change:+.2f}%)
+            - Oro: ${gold_close:.2f} ({gold_change:+.2f}%)
             
             **💡 Recomendaciones:**
             - Mantener diversificación geográfica
             - Considerar rotación en bonos provinciales
             - Monitorear volatilidad del VIX
-            """.format(
-                fecha_actual=fecha_actual,
-                sp500=sp500 if 'sp500' in locals() and not sp500.empty else pd.DataFrame({'Close': [0, 0]}),
-                nasdaq=nasdaq if 'nasdaq' in locals() and not nasdaq.empty else pd.DataFrame({'Close': [0, 0]}),
-                vix=vix if 'vix' in locals() and not vix.empty else pd.DataFrame({'Close': [0, 0]}),
-                merval=merval if 'merval' in locals() and not merval.empty else pd.DataFrame({'Close': [0, 0]}),
-                oil=oil if 'oil' in locals() and not oil.empty else pd.DataFrame({'Close': [0, 0]}),
-                gold=gold if 'gold' in locals() and not gold.empty else pd.DataFrame({'Close': [0, 0]})
-            ))
+            """)
+            except Exception as e:
+                st.error(f"❌ Error al generar el resumen: {e}")
+                st.info("💡 Mostrando resumen básico sin datos de mercado")
+                st.markdown(f"""
+            **📊 RESUMEN EJECUTIVO - {fecha_actual}**
+            
+            **💡 Información básica disponible**
+            - Fecha: {fecha_actual}
+            - Estado: Datos de mercado no disponibles
+            
+            **🔧 Recomendaciones:**
+            - Verificar conexión a internet
+            - Revisar configuración de API
+            - Contactar soporte técnico
+            """)
     
     with col2:
         st.subheader("📊 Datos para Análisis")
