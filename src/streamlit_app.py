@@ -2184,6 +2184,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     datos_activos = []
     valor_total = 0
     
+    # Validar datos del portafolio
+    if not activos:
+        st.warning("No se encontraron activos en el portafolio")
+        return
+    
     for activo in activos:
         try:
             titulo = activo.get('titulo', {})
@@ -2287,6 +2292,16 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             continue
     
     if datos_activos:
+        # Validar que el valor total sea razonable
+        if valor_total <= 0:
+            st.error("❌ Error: El valor total del portafolio debe ser mayor a 0")
+            return
+            
+        # Validar que no haya valores extremos
+        valuaciones = [activo.get('Valuación', 0) for activo in datos_activos]
+        if max(valuaciones) > valor_total * 10:  # Ningún activo debe valer más de 10x el total
+            st.warning("⚠️ Advertencia: Se detectaron valores de activos extremadamente altos")
+            
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
@@ -2354,7 +2369,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             cols[0].metric("Ganancia", f"{(probs.get('ganancia', 0) or 0)*100:.1f}%")
             cols[1].metric("Pérdida", f"{(probs.get('perdida', 0) or 0)*100:.1f}%")
             cols[2].metric("Ganancia >10%", f"{(probs.get('ganancia_mayor_10', 0) or 0)*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{(probs.get('perdida_mayor_10', 0) or 0)*100:.1f}")
+            cols[3].metric("Pérdida >10%", f"{(probs.get('perdida_mayor_10', 0) or 0)*100:.1f}%")
             
 
         
@@ -2528,11 +2543,28 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             st.error("❌ No se pudo construir el DataFrame del portafolio. Verifique los datos históricos de los activos seleccionados.")
                             return
                         
-                        # Mostrar información de debug
+                        # Mostrar información de debug y validar datos
                         st.info(f"🔍 Debug: Valor total actual del portafolio: ${valor_total:,.2f}")
                         st.info(f"🔍 Debug: Columnas en df_portfolio: {list(df_portfolio.columns)}")
                         if len(df_portfolio) > 0:
-                            st.info(f"🔍 Debug: Último valor calculado: ${df_portfolio['Portfolio_Total'].iloc[-1]:,.2f}")
+                            ultimo_valor = df_portfolio['Portfolio_Total'].iloc[-1]
+                            diferencia = abs(ultimo_valor - valor_total)
+                            diferencia_pct = (diferencia / valor_total) * 100 if valor_total > 0 else 0
+                            st.info(f"🔍 Debug: Último valor calculado: ${ultimo_valor:,.2f}")
+                            
+                            # Validar la calidad de los datos históricos
+                            if diferencia_pct > 10:  # Más de 10% de diferencia
+                                st.error(f"❌ Diferencia crítica: {diferencia_pct:.1f}% entre valor actual y calculado")
+                                st.warning("⚠️ Los datos históricos pueden no ser confiables para este análisis")
+                                # Ajustar el DataFrame para que coincida con el valor actual
+                                factor_ajuste = valor_total / ultimo_valor
+                                df_portfolio['Portfolio_Total'] = df_portfolio['Portfolio_Total'] * factor_ajuste
+                                st.info(f"💡 Se ajustaron los datos históricos por un factor de {factor_ajuste:.4f}")
+                            elif diferencia_pct > 5:  # Entre 5% y 10% de diferencia
+                                st.warning(f"⚠️ Diferencia significativa: {diferencia_pct:.1f}% entre valor actual y calculado")
+                                st.info("💡 Esto puede deberse a cambios recientes en precios o datos históricos")
+                            else:
+                                st.success(f"✅ Datos históricos consistentes (diferencia: {diferencia_pct:.1f}%)")
                         
                         # Eliminar filas con valores NaN
                         df_portfolio = df_portfolio.dropna()
@@ -2584,9 +2616,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             col3.metric("Valor Mínimo (P5)", f"${percentil_5:,.2f}")
                             col4.metric("Valor Máximo (P95)", f"${percentil_95:,.2f}")
                             
-                            # Mostrar evolución temporal del portafolio
+                                                        # Mostrar evolución temporal del portafolio
                             st.markdown("#### 📈 Evolución Temporal del Portafolio")
-                            # --- ELIMINAR GRÁFICO DUPLICADO Y DEJAR SOLO UNO ---
                             fig_evolucion = go.Figure()
                             # Usar fechas reales como eje X
                             fechas = df_portfolio.index
@@ -2699,10 +2730,22 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     normalidad = "✅ Normal" if is_normal else "❌ No Normal"
                                     col4.metric("Normalidad", normalidad)
                                     
-                                    # Calcular métricas anualizadas
+                                    # Calcular métricas anualizadas con validación
                                     mean_return_annual = mean_return * 252
                                     std_return_annual = std_return * np.sqrt(252)
-                                    sharpe_ratio = mean_return_annual / std_return_annual if std_return_annual > 0 else 0
+                                    
+                                    # Validar que la volatilidad sea finita y positiva
+                                    if not np.isfinite(std_return_annual) or std_return_annual <= 0:
+                                        st.warning("⚠️ La volatilidad calculada no es válida, usando valor por defecto")
+                                        std_return_annual = 0.2  # 20% anual por defecto
+                                    
+                                    # Calcular Sharpe ratio con validación
+                                    if std_return_annual > 0:
+                                        sharpe_ratio = mean_return_annual / std_return_annual
+                                        # Limitar el Sharpe ratio a valores razonables
+                                        sharpe_ratio = np.clip(sharpe_ratio, -5, 5)
+                                    else:
+                                        sharpe_ratio = 0
                                     
                                     st.markdown("#### 📊 Métricas Anualizadas")
                                     col1, col2, col3 = st.columns(3)
@@ -2811,11 +2854,33 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     st.markdown("#### 📊 Estadísticas del Valor Real")
                                     col1, col2, col3, col4 = st.columns(4)
                                     
+                                    # Validar que los valores sean finitos y positivos
                                     valor_inicial_ars = df_portfolio['Portfolio_Total'].iloc[0]
                                     valor_final_ars = df_portfolio['Portfolio_Total'].iloc[-1]
+                                    
+                                    if not np.isfinite(valor_inicial_ars) or valor_inicial_ars <= 0:
+                                        st.error("❌ Error: Valor inicial del portafolio no válido")
+                                        return
+                                    
+                                    if not np.isfinite(valor_final_ars) or valor_final_ars <= 0:
+                                        st.error("❌ Error: Valor final del portafolio no válido")
+                                        return
+                                    
+                                    # Validar tasa MEP
+                                    if not np.isfinite(tasa_mep) or tasa_mep <= 0:
+                                        st.warning("⚠️ Tasa MEP no válida, usando valor por defecto")
+                                        tasa_mep = 1000
+                                    
                                     valor_inicial_usd = valor_inicial_ars / tasa_mep
                                     valor_final_usd = valor_final_ars / tasa_mep
-                                    retorno_total_real = (valor_final_ars / valor_inicial_ars - 1) * 100
+                                    
+                                    # Calcular retorno con validación
+                                    if valor_inicial_ars > 0:
+                                        retorno_total_real = (valor_final_ars / valor_inicial_ars - 1) * 100
+                                        # Limitar retorno a valores razonables
+                                        retorno_total_real = np.clip(retorno_total_real, -100, 1000)
+                                    else:
+                                        retorno_total_real = 0
                                     
                                     col1.metric("Valor Inicial (ARS)", f"${valor_inicial_ars:,.2f}")
                                     col2.metric("Valor Final (ARS)", f"${valor_final_ars:,.2f}")
@@ -4115,7 +4180,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         </script>
         """
         # Usar ancho completo de contenedor para el gráfico
-        components.html(tv_widget, height=680, use_container_width=True)
+        components.html(tv_widget, height=680)
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
