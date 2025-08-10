@@ -394,6 +394,44 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
 
+def refresh_access_token(refresh_token):
+    """
+    Refresca el token de acceso usando el refresh token sin recargar la página
+    """
+    url = "https://api.invertironline.com/token"
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token
+    }
+    
+    try:
+        response = requests.post(url, data=payload, timeout=30)
+        if response.status_code == 200:
+            respuesta_json = response.json()
+            return respuesta_json['access_token'], respuesta_json.get('refresh_token', refresh_token)
+        else:
+            st.warning(f"⚠️ Error al refrescar token: {response.status_code}")
+            return None, None
+    except Exception as e:
+        st.warning(f"⚠️ Error de conexión al refrescar: {str(e)}")
+        return None, None
+
+def verificar_token_valido(token_acceso):
+    """
+    Verifica si el token de acceso es válido haciendo una llamada de prueba
+    """
+    if not token_acceso:
+        return False
+    
+    try:
+        # Hacer una llamada simple para verificar el token
+        url = "https://api.invertironline.com/api/v2/Asesor/Clientes"
+        headers = {'Authorization': f'Bearer {token_acceso}'}
+        response = requests.get(url, headers=headers, timeout=10)
+        return response.status_code == 200
+    except:
+        return False
+
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
     url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
@@ -448,7 +486,7 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
-    Obtiene los movimientos de los clientes de un asesor
+    Obtiene los movimientos de los clientes de un asesor con manejo robusto de errores
     
     Args:
         token_portador (str): Token de autenticación
@@ -465,7 +503,15 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
     Returns:
         dict: Diccionario con los movimientos o None en caso de error
     """
-    url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
+    import time
+    
+    # Múltiples endpoints para intentar
+    endpoints = [
+        "https://api.invertironline.com/api/v2/Asesor/Movimientos",
+        "https://api.invertironline.com/api/v2/asesor/movimientos",
+        "https://api.invertironline.com/api/v2/Asesor/movimientos"
+    ]
+    
     headers = {
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
@@ -484,16 +530,60 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         "cuentaComitente": cuenta_comitente or ""
     }
     
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Error al obtener movimientos: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Error de conexión: {str(e)}")
-        return None
+    # Intentar con cada endpoint con retry logic
+    for attempt, url in enumerate(endpoints):
+        try:
+            st.info(f"🔄 Intentando obtener movimientos desde endpoint {attempt + 1}/{len(endpoints)}...")
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                st.success(f"✅ Movimientos obtenidos exitosamente")
+                return data
+                
+            elif response.status_code == 401:
+                st.error("❌ Error de autenticación. Por favor, verifique su token de acceso.")
+                return None
+                
+            elif response.status_code == 500:
+                st.warning(f"⚠️ Error 500 del servidor en endpoint {attempt + 1}. Intentando siguiente endpoint...")
+                if attempt < len(endpoints) - 1:
+                    time.sleep(2)  # Esperar antes del siguiente intento
+                    continue
+                else:
+                    st.error("❌ Todos los endpoints devolvieron error 500. El servidor de IOL parece tener problemas.")
+                    st.info("💡 Sugerencia: Intente más tarde o verifique la conectividad con IOL.")
+                    break
+                    
+            else:
+                st.warning(f"⚠️ Error {response.status_code} en endpoint {attempt + 1}: {response.text}")
+                if attempt < len(endpoints) - 1:
+                    time.sleep(1)
+                    continue
+                else:
+                    st.error(f"❌ Error final: {response.status_code} - {response.text}")
+                    break
+                    
+        except requests.exceptions.Timeout:
+            st.warning(f"⏰ Timeout en endpoint {attempt + 1}. Intentando siguiente...")
+            if attempt < len(endpoints) - 1:
+                time.sleep(2)
+                continue
+            else:
+                st.error("❌ Todos los endpoints fallaron por timeout.")
+                break
+                
+        except Exception as e:
+            st.warning(f"⚠️ Error de conexión en endpoint {attempt + 1}: {str(e)}")
+            if attempt < len(endpoints) - 1:
+                time.sleep(1)
+                continue
+            else:
+                st.error(f"❌ Error final de conexión: {str(e)}")
+                break
+    
+    return None
 
 def obtener_tasas_caucion(token_portador):
     """
@@ -4146,7 +4236,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     if simbolo_seleccionado:
         st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
         
-                # Widget de TradingView con ancho completo de página
+        # Widget de TradingView con ancho completo de página
         tv_widget = f"""
         <div id="tradingview_{simbolo_seleccionado}" style="height:650px; width:100%;"></div>
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
@@ -4288,6 +4378,10 @@ def mostrar_movimientos_asesor():
                 st.warning("No se encontraron movimientos o hubo un error en la consulta")
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
+                
+                # Mostrar datos de ejemplo cuando la API falla
+                st.info("💡 Mostrando datos de ejemplo para demostración...")
+                mostrar_datos_movimientos_ejemplo()
 
 def mostrar_dashboard_principal(token_acceso, id_cliente):
     """
@@ -4339,20 +4433,21 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos más organizados
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Dashboard Principal", 
         "📈 Análisis Detallado", 
         "💱 Mercado y Cotizaciones",
         "🔄 Optimización",
         "⚙️ Configuración",
-        "🇦🇷 Decreto 676/2020"
+        "🇦🇷 Decreto 676/2020",
+        "🏦 BCRA"
     ])
 
     with tab1:
         mostrar_dashboard_principal(token_acceso, id_cliente)
     
     with tab2:
-        mostrar_analisis_detallado(token_acceso, id_cliente)
+        mostrar_analisis_tecnico(token_acceso, id_cliente)
     
     with tab3:
         mostrar_mercado_cotizaciones(token_acceso)
@@ -4365,6 +4460,91 @@ def mostrar_analisis_portafolio():
     
     with tab6:
         mostrar_instrumentos_decreto_676(token_acceso)
+    
+    with tab7:
+        mostrar_dashboard_bcra()
+
+def mostrar_datos_movimientos_ejemplo():
+    """
+    Muestra datos de ejemplo de movimientos cuando la API falla
+    """
+    st.subheader("📋 Datos de Ejemplo - Movimientos")
+    
+    # Datos de ejemplo
+    datos_ejemplo = [
+        {
+            'fecha': '2025-01-15',
+            'tipo': 'Compra',
+            'instrumento': 'YPF',
+            'cantidad': 100,
+            'precio': 1250.50,
+            'monto': 125050.00,
+            'estado': 'Confirmado',
+            'moneda': 'ARS'
+        },
+        {
+            'fecha': '2025-01-14',
+            'tipo': 'Venta',
+            'instrumento': 'GGAL',
+            'cantidad': 50,
+            'precio': 890.25,
+            'monto': 44512.50,
+            'estado': 'Confirmado',
+            'moneda': 'ARS'
+        },
+        {
+            'fecha': '2025-01-13',
+            'tipo': 'Compra',
+            'instrumento': 'BONCER 2026',
+            'cantidad': 1000,
+            'precio': 95.75,
+            'monto': 95750.00,
+            'estado': 'Pendiente',
+            'moneda': 'USD'
+        },
+        {
+            'fecha': '2025-01-12',
+            'tipo': 'Venta',
+            'instrumento': 'META',
+            'cantidad': 10,
+            'precio': 380.00,
+            'monto': 3800.00,
+            'estado': 'Confirmado',
+            'moneda': 'USD'
+        }
+    ]
+    
+    df_ejemplo = pd.DataFrame(datos_ejemplo)
+    st.dataframe(df_ejemplo, use_container_width=True)
+    
+    # Resumen de datos de ejemplo
+    st.subheader("📊 Resumen de Datos de Ejemplo")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Movimientos", len(df_ejemplo))
+    
+    with col2:
+        monto_total = df_ejemplo['monto'].sum()
+        st.metric("Monto Total", f"${monto_total:,.2f}")
+    
+    with col3:
+        tipos = df_ejemplo['tipo'].value_counts().to_dict()
+        st.metric("Tipos", ", ".join([f"{k} ({v})" for k, v in tipos.items()]))
+    
+    # Gráfico de movimientos por fecha
+    st.subheader("📈 Movimientos por Fecha")
+    df_ejemplo['fecha'] = pd.to_datetime(df_ejemplo['fecha'])
+    
+    fig = px.bar(
+        df_ejemplo.groupby('fecha')['monto'].sum().reset_index(),
+        x='fecha',
+        y='monto',
+        title="Monto de Movimientos por Fecha",
+        labels={'monto': 'Monto (USD/ARS)', 'fecha': 'Fecha'}
+    )
+    fig.update_layout(xaxis_title="Fecha", yaxis_title="Monto")
+    st.plotly_chart(fig, use_container_width=True)
 
 def mostrar_datos_simulados(ticker):
     """
@@ -4771,6 +4951,227 @@ def calcular_precio_teorico(flujo_fondos, tasa_descuento):
         precio += flujo / ((1 + tasa_descuento) ** (i + 1))
     return precio
 
+# Funciones para obtener datos del BCRA
+@st.cache_data(ttl=3600)  # Cachear por 1 hora
+def get_bcra_variables():
+    url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables.asp"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        requests.packages.urllib3.disable_warnings()
+        response = requests.get(url, headers=headers, verify=False, timeout=30)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        variables = []
+        
+        tables = soup.find_all('table', {'class': 'table'})
+        if not tables:
+            return pd.DataFrame()
+            
+        table = tables[0]
+        rows = table.find_all('tr')
+        
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                link = cols[0].find('a')
+                href = link.get('href') if link else ''
+                serie = ''
+                
+                if href and 'serie=' in href:
+                    serie = href.split('serie=')[1].split('&')[0]
+                
+                variable = {
+                    'Nombre': cols[0].get_text(strip=True),
+                    'Fecha': cols[1].get_text(strip=True) if len(cols) > 1 else '',
+                    'Valor': cols[2].get_text(strip=True) if len(cols) > 2 else '',
+                    'Serie ID': serie,
+                    'URL': f"https://www.bcra.gob.ar{href}" if href else ''
+                }
+                variables.append(variable)
+        
+        return pd.DataFrame(variables)
+    
+    except Exception as e:
+        st.error(f"Error al obtener las variables del BCRA: {str(e)}")
+        return pd.DataFrame()
+
+def get_historical_data(serie_id, fecha_desde=None, fecha_hasta=None):
+    if not fecha_desde:
+        fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    if not fecha_hasta:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    
+    url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables_datos.asp"
+    params = {
+        'serie': serie_id,
+        'fecha_desde': fecha_desde,
+        'fecha_hasta': fecha_hasta,
+        'primeravez': '1'
+    }
+    
+    try:
+        response = requests.get(url, params=params, verify=False)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        table = soup.find('table', {'class': 'table'})
+        if table:
+            data = []
+            rows = table.find_all('tr')
+            if not rows:
+                return pd.DataFrame()
+                
+            headers = [th.get_text(strip=True) for th in rows[0].find_all('th')]
+            
+            for row in rows[1:]:
+                cols = row.find_all('td')
+                if cols:
+                    row_data = [col.get_text(strip=True) for col in cols]
+                    data.append(row_data)
+            
+            if data:
+                df = pd.DataFrame(data, columns=headers)
+                if 'Fecha' in df.columns:
+                    df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
+                    df = df.sort_values('Fecha')
+                return df
+            return pd.DataFrame()
+        return pd.DataFrame()
+    
+    except Exception as e:
+        st.error(f"Error al obtener datos históricos: {str(e)}")
+        return pd.DataFrame()
+
+def mostrar_dashboard_bcra():
+    """
+    Muestra el dashboard del BCRA con variables principales y datos históricos.
+    """
+    st.header("🏦 Dashboard BCRA")
+    st.markdown("### Variables Económicas Principales del Banco Central")
+    
+    # Mostrar indicadores de carga
+    with st.spinner('Obteniendo datos del BCRA...'):
+        variables_df = get_bcra_variables()
+    
+    if not variables_df.empty:
+        # Filtro de búsqueda
+        search_term = st.sidebar.text_input("🔍 Buscar variable BCRA")
+        
+        # Filtrar variables según búsqueda
+        if search_term:
+            filtered_df = variables_df[variables_df['Nombre'].str.contains(search_term, case=False, na=False)]
+        else:
+            filtered_df = variables_df
+        
+        # Mostrar métricas principales
+        st.subheader("📈 Variables Principales")
+        
+        # Mostrar las primeras 6 variables como tarjetas de métricas
+        cols = st.columns(3)
+        for idx, (_, row) in enumerate(filtered_df.head(6).iterrows()):
+            with cols[idx % 3]:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">{row['Nombre']}</div>
+                    <div class="metric-value">{row['Valor']}</div>
+                    <div class="metric-label">{row['Fecha']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Sección de datos históricos
+        st.markdown("---")
+        st.subheader("📊 Datos Históricos")
+        
+        # Selector de variable para datos históricos
+        selected_var = st.selectbox(
+            "Seleccione una variable para ver su histórico:",
+            options=filtered_df['Nombre'].tolist(),
+            index=0
+        )
+        
+        # Obtener el ID de la serie seleccionada
+        selected_serie = filtered_df[filtered_df['Nombre'] == selected_var].iloc[0]
+        
+        # Selector de rango de fechas
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Fecha de inicio",
+                value=datetime.now() - timedelta(days=30),
+                max_value=datetime.now()
+            )
+        with col2:
+            end_date = st.date_input(
+                "Fecha de fin",
+                value=datetime.now(),
+                max_value=datetime.now()
+            )
+        
+        # Botón para cargar datos históricos
+        if st.button("Cargar Datos Históricos"):
+            with st.spinner('Obteniendo datos históricos...'):
+                hist_data = get_historical_data(
+                    selected_serie['Serie ID'],
+                    start_date.strftime('%Y-%m-%d'),
+                    end_date.strftime('%Y-%m-%d')
+                )
+                
+                if not hist_data.empty:
+                    # Mostrar datos en tabla
+                    st.dataframe(hist_data, use_container_width=True)
+                    
+                    # Mostrar gráfico si hay datos de fecha y valor
+                    if 'Fecha' in hist_data.columns and 'Valor' in hist_data.columns:
+                        try:
+                            hist_data['Valor'] = pd.to_numeric(hist_data['Valor'].str.replace(',', '.'), errors='coerce')
+                            fig = px.line(
+                                hist_data, 
+                                x='Fecha', 
+                                y='Valor',
+                                title=f"Evolución de {selected_var}",
+                                labels={'Valor': selected_var, 'Fecha': 'Fecha'}
+                            )
+                            fig.update_layout(
+                                xaxis_title="Fecha",
+                                yaxis_title="Valor",
+                                hovermode="x unified"
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Botón de descarga
+                            csv = hist_data.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                label="📥 Descargar datos en CSV",
+                                data=csv,
+                                file_name=f"historico_{selected_serie['Serie ID']}_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime='text/csv'
+                            )
+                            
+                        except Exception as e:
+                            st.warning("No se pudo generar el gráfico. Verifique los datos.")
+                else:
+                    st.warning("No se encontraron datos históricos para el período seleccionado.")
+        
+        # Mostrar todas las variables en una tabla expandible
+        with st.expander("📋 Ver todas las variables"):
+            st.dataframe(
+                filtered_df[['Nombre', 'Valor', 'Fecha', 'Serie ID']],
+                use_container_width=True,
+                hide_index=True
+            )
+    
+    # Pie de página
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #6c757d; font-size: 0.9rem;">
+        <p>Datos obtenidos del <a href="https://www.bcra.gob.ar/" target="_blank">Banco Central de la República Argentina</a></p>
+        <p>Actualizado: {}</p>
+    </div>
+    """.format(datetime.now().strftime("%d/%m/%Y %H:%M")), unsafe_allow_html=True)
+
 def main():
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
@@ -4808,7 +5209,7 @@ def main():
                                 st.session_state.token_acceso = token_acceso
                                 st.session_state.refresh_token = refresh_token
                                 st.success("✅ Conexión exitosa!")
-                                st.rerun()
+                                # No usar st.rerun() para evitar recarga de página
                             else:
                                 st.error("❌ Error en la autenticación")
                     else:
@@ -4834,6 +5235,22 @@ def main():
             
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
+            
+                    # Verificar y refrescar token automáticamente si es necesario
+            if st.session_state.token_acceso and st.session_state.refresh_token:
+                if not verificar_token_valido(st.session_state.token_acceso):
+                    st.info("🔄 Token expirado, refrescando automáticamente...")
+                    with st.spinner("Refrescando token..."):
+                        nuevo_token, nuevo_refresh = refresh_access_token(st.session_state.refresh_token)
+                        if nuevo_token:
+                            st.session_state.token_acceso = nuevo_token
+                            if nuevo_refresh:
+                                st.session_state.refresh_token = nuevo_refresh
+                            st.success("✅ Token refrescado automáticamente!")
+                        else:
+                            st.warning("⚠️ No se pudo refrescar el token automáticamente")
+                            st.session_state.token_acceso = None
+                            st.session_state.refresh_token = None
             
             # Obtener lista de clientes
             if not st.session_state.clientes and st.session_state.token_acceso:
@@ -4871,7 +5288,24 @@ def main():
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
                         st.session_state.clientes = nuevos_clientes
                         st.success("✅ Lista actualizada")
-                        st.rerun()
+                        # No usar st.rerun() para evitar recarga de página
+                
+                # Botón para refrescar token manualmente si es necesario
+                if st.button("🔄 Refrescar Token", use_container_width=True):
+                    with st.spinner("Refrescando token..."):
+                        if st.session_state.refresh_token:
+                            nuevo_token, nuevo_refresh = refresh_access_token(st.session_state.refresh_token)
+                            if nuevo_token:
+                                st.session_state.token_acceso = nuevo_token
+                                if nuevo_refresh:
+                                    st.session_state.refresh_token = nuevo_refresh
+                                st.success("✅ Token refrescado exitosamente!")
+                            else:
+                                st.error("❌ Error al refrescar token. Debe volver a autenticarse.")
+                                st.session_state.token_acceso = None
+                                st.session_state.refresh_token = None
+                        else:
+                            st.error("❌ No hay refresh token disponible")
             else:
                 st.warning("No se encontraron clientes")
 
@@ -10588,39 +11022,6 @@ def generar_informe_financiero_actual():
     
     st.markdown("---")
     
-    # Portafolios Sugeridos
-    st.header("💼 Portafolios Sugeridos")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🎯 Conservador/Moderado")
-        st.markdown("""
-        **Composición:**
-        - 70% dólares y 30% pesos
-        - 60% renta fija y 40% renta variable
-        
-        **Estrategia:**
-        - Reducir exposición en instrumentos en pesos
-        - Sumar alternativas dolarizadas
-        - Mantener activos que permitan diversificación geográfica
-        """)
-    
-    with col2:
-        st.subheader("🚀 Agresivo")
-        st.markdown("""
-        **Composición:**
-        - 60% dólares y 40% pesos
-        - 55% renta fija y 45% renta variable
-        
-        **Estrategia:**
-        - Sobreponderar alternativas con rendimientos mensuales en pesos
-        - Preferencia por bonos ajustables por CER
-        - LECAPs de corto plazo
-        """)
-    
-    st.markdown("---")
-    
     # Performance Histórica
     st.subheader("📊 Performance Histórica")
     
@@ -10693,35 +11094,6 @@ def generar_informe_financiero_actual():
     - ON TAMAR Clase 9 (Agosto 2026)
     - Tasa: TAMAR +6%
     """)
-    
-    st.markdown("---")
-    
-    # Fondos Comunes de Inversión
-    st.header("💰 Fondos Comunes de Inversión")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("💵 IOL Dólar Ahorro Plus")
-        st.markdown("""
-        **Métricas Julio 2025:**
-        - Retorno directo: +0,58%
-        - Retorno mensual anualizado: +7%
-        - Retorno acumulado: +3,4%
-        - Volatilidad anualizada: 1%
-        - Duration: 1,9 años
-        """)
-    
-    with col2:
-        st.subheader("🚀 IOL Portafolio Potenciado")
-        st.markdown("""
-        **Métricas Julio 2025:**
-        - Retorno directo: +5,2%
-        - Retorno mensual anualizado: +62,6%
-        - Retorno acumulado: +7,3%
-        - Volatilidad anualizada: 12%
-        - VaR diario: -1%
-        """)
     
     st.markdown("---")
     
@@ -11179,7 +11551,6 @@ def mostrar_busqueda_noticias_gemini():
 
 if __name__ == "__main__":
     try:
-        st.write("🚀 Iniciando aplicación...")
         main()
     except Exception as e:
         st.error(f"❌ Error fatal al iniciar la aplicación: {str(e)}")
