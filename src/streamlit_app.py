@@ -3629,7 +3629,8 @@ def _convertir_a_escalar(valor, nombre_campo="valor"):
         else:
             return float(valor)  # Para escalares normales
     except (ValueError, TypeError, IndexError) as e:
-        st.warning(f"⚠️ Error al convertir {nombre_campo} a escalar: {e}. Usando valor por defecto 0.")
+        # Usar print en lugar de st.warning para evitar problemas de scope
+        print(f"⚠️ Error al convertir {nombre_campo} a escalar: {e}. Usando valor por defecto 0.")
         return 0.0
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
@@ -4028,13 +4029,42 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         precios_inter[k] = data.dropna()
             except Exception:
                 continue
-        df_inter = pd.DataFrame(precios_inter).dropna()
-        retornos_inter = df_inter.pct_change().dropna()
-    # Señal simple intermarket
-    dxy_trend = retornos_inter['DXY'].tail(20).sum() if 'DXY' in retornos_inter else 0
-    soja_trend = retornos_inter['Soja'].tail(20).sum() if 'Soja' in retornos_inter else 0
-    vix_actual = df_inter['VIX'].iloc[-1] if 'VIX' in df_inter else 20
-    merval_momentum = retornos_inter['Merval'].tail(10).sum() if 'Merval' in retornos_inter else 0
+        # Verificar que precios_inter no esté vacío y contenga datos válidos
+        if precios_inter and any(len(data) > 0 for data in precios_inter.values()):
+            try:
+                df_inter = pd.DataFrame(precios_inter).dropna()
+                if not df_inter.empty:
+                    retornos_inter = df_inter.pct_change().dropna()
+                    
+                    # Señal simple intermarket
+                    dxy_trend = retornos_inter['DXY'].tail(20).sum() if 'DXY' in retornos_inter.columns else 0
+                    soja_trend = retornos_inter['Soja'].tail(20).sum() if 'Soja' in retornos_inter.columns else 0
+                    vix_actual = df_inter['VIX'].iloc[-1] if 'VIX' in df_inter.columns else 20
+                    merval_momentum = retornos_inter['Merval'].tail(10).sum() if 'Merval' in retornos_inter.columns else 0
+                else:
+                    # Si df_inter está vacío, usar valores por defecto
+                    df_inter = None
+                    retornos_inter = None
+                    dxy_trend = 0
+                    soja_trend = 0
+                    vix_actual = 20
+                    merval_momentum = 0
+            except Exception as e:
+                st.warning(f"Error al procesar datos intermarket: {e}. Usando valores por defecto.")
+                df_inter = None
+                retornos_inter = None
+                dxy_trend = 0
+                soja_trend = 0
+                vix_actual = 20
+                merval_momentum = 0
+        else:
+            # Si no hay datos, usar valores por defecto
+            df_inter = None
+            retornos_inter = None
+            dxy_trend = 0
+            soja_trend = 0
+            vix_actual = 20
+            merval_momentum = 0
     if dxy_trend < -0.01 and soja_trend > 0.03 and vix_actual < 20 and merval_momentum > 0.02:
         regimen = "ALCISTA"
         recomendacion = "Contexto favorable para activos de riesgo y commodities."
@@ -4047,18 +4077,26 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         regimen = "NEUTRAL"
         recomendacion = "Contexto neutral: portafolio balanceado y esperar señales claras."
         explicacion = "No hay señales claras de tendencia, se recomienda mantener un portafolio diversificado."
+    
     st.info(f"Régimen Intermarket: **{regimen}**. {recomendacion}")
     st.caption(f"Explicación: {explicacion}")
-    # Mostrar gráfico de activos de referencia
-    fig, ax = plt.subplots()
-    activos_graf = ['Merval', 'S&P 500', 'DXY', 'VIX', 'Soja']
-    for activo in activos_graf:
-        if activo in df_inter:
-            precios_norm = df_inter[activo] / df_inter[activo].iloc[0] * 100
-            ax.plot(precios_norm.index, precios_norm, label=activo)
-    ax.legend()
-    ax.set_title("Evolución de activos de referencia (base 100)")
-    st.pyplot(fig)
+    
+    # Mostrar gráfico de activos de referencia solo si hay datos
+    if df_inter is not None and not df_inter.empty:
+        try:
+            fig, ax = plt.subplots()
+            activos_graf = ['Merval', 'S&P 500', 'DXY', 'VIX', 'Soja']
+            for activo in activos_graf:
+                if activo in df_inter.columns:
+                    precios_norm = df_inter[activo] / df_inter[activo].iloc[0] * 100
+                    ax.plot(precios_norm.index, precios_norm, label=activo)
+            ax.legend()
+            ax.set_title("Evolución de activos de referencia (base 100)")
+            st.pyplot(fig)
+        except Exception as e:
+            st.warning(f"No se pudo generar el gráfico intermarket: {e}")
+    else:
+        st.info("📊 No hay datos suficientes para mostrar el gráfico intermarket. Se usaron valores por defecto para el análisis.")
     # --- FIN BLOQUE INTERMARKET ---
 
     # --- Análisis de Ciclo Económico BCRA ---
