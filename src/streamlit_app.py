@@ -497,7 +497,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
 
 def obtener_tasas_caucion(token_portador):
     """
-    Obtiene las tasas de caución desde la API de IOL
+    Obtiene las tasas de caución desde la API de IOL con manejo robusto de errores
     
     Args:
         token_portador (str): Token de autenticación Bearer
@@ -505,7 +505,15 @@ def obtener_tasas_caucion(token_portador):
     Returns:
         DataFrame: DataFrame con las tasas de caución o None en caso de error
     """
-    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
+    import time
+    
+    # Múltiples endpoints para intentar
+    endpoints = [
+        "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables",
+        "https://api.invertironline.com/api/v2/cotizaciones/cauciones/argentina/Todos",
+        "https://api.invertironline.com/api/v2/Cotizaciones/cauciones/argentina/Todos"
+    ]
+    
     params = {
         'cotizacionInstrumentoModel.instrumento': 'cauciones',
         'cotizacionInstrumentoModel.pais': 'argentina'
@@ -515,61 +523,106 @@ def obtener_tasas_caucion(token_portador):
         'Authorization': f'Bearer {token_portador}'
     }
     
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
+    # Intentar con cada endpoint con retry logic
+    for attempt, url in enumerate(endpoints):
+        try:
+            st.info(f"🔄 Intentando endpoint {attempt + 1}/{len(endpoints)}: {url.split('/')[-2]}")
             
-            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
-                df = pd.DataFrame(data['titulos'])
-                
-                # Filtrar solo las cauciónes y limpiar los datos
-                df = df[df['plazo'].notna()].copy()
-                
-                # Extraer el plazo en días
-                df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
-                
-                # Limpiar la tasa (convertir a float si es necesario)
-                if 'ultimoPrecio' in df.columns:
-                    df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
-                
-                # Asegurarse de que las columnas necesarias existan
-                if 'monto' not in df.columns and 'volumen' in df.columns:
-                    df['monto'] = df['volumen']
-                
-                # Ordenar por plazo
-                df = df.sort_values('plazo_dias')
-                
-                # Seleccionar solo las columnas necesarias
-                columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
-                columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
-                
-                return df[columnas_disponibles]
+            response = requests.get(url, headers=headers, params=params, timeout=20)
             
-            st.warning("No se encontraron datos de tasas de caución en la respuesta")
-            return None
-            
-        elif response.status_code == 401:
-            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
-            return None
-            
-        else:
-            error_msg = f"Error {response.status_code} al obtener tasas de caución"
-            try:
-                error_data = response.json()
-                error_msg += f": {error_data.get('message', 'Error desconocido')}"
-            except:
-                error_msg += f": {response.text}"
-            st.error(error_msg)
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error de conexión: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
-        return None
+            if response.status_code == 200:
+                data = response.json()
+                
+                if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
+                    df = pd.DataFrame(data['titulos'])
+                    
+                    # Filtrar solo las cauciónes y limpiar los datos
+                    df = df[df['plazo'].notna()].copy()
+                    
+                    # Extraer el plazo en días
+                    df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
+                    
+                    # Limpiar la tasa (convertir a float si es necesario)
+                    if 'ultimoPrecio' in df.columns:
+                        df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                    
+                    # Asegurarse de que las columnas necesarias existan
+                    if 'monto' not in df.columns and 'volumen' in df.columns:
+                        df['monto'] = df['volumen']
+                    
+                    # Ordenar por plazo
+                    df = df.sort_values('plazo_dias')
+                    
+                    # Seleccionar solo las columnas necesarias
+                    columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
+                    columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
+                    
+                    st.success(f"✅ Datos obtenidos exitosamente del endpoint {url.split('/')[-2]}")
+                    return df[columnas_disponibles]
+                
+                st.warning(f"No se encontraron datos de tasas de caución en la respuesta del endpoint {url.split('/')[-2]}")
+                continue
+                
+            elif response.status_code == 401:
+                st.error("❌ Error de autenticación. Por favor, verifique su token de acceso.")
+                return None
+                
+            elif response.status_code == 500:
+                st.warning(f"⚠️ Error 500 del servidor en endpoint {url.split('/')[-2]}. Intentando siguiente endpoint...")
+                if attempt < len(endpoints) - 1:
+                    time.sleep(2)  # Esperar antes del siguiente intento
+                    continue
+                else:
+                    st.error("❌ Todos los endpoints devolvieron error 500. El servidor de IOL parece tener problemas.")
+                    break
+                    
+            else:
+                error_msg = f"Error {response.status_code} al obtener tasas de caución del endpoint {url.split('/')[-2]}"
+                try:
+                    error_data = response.json()
+                    error_msg += f": {error_data.get('message', 'Error desconocido')}"
+                except:
+                    error_msg += f": {response.text[:200]}..."  # Limitar el texto del error
+                st.warning(error_msg)
+                if attempt < len(endpoints) - 1:
+                    continue
+                else:
+                    break
+                    
+        except requests.exceptions.Timeout:
+            st.warning(f"⏰ Timeout en endpoint {url.split('/')[-2]}. Intentando siguiente...")
+            if attempt < len(endpoints) - 1:
+                continue
+            else:
+                st.error("❌ Todos los endpoints tuvieron timeout.")
+                break
+                
+        except requests.exceptions.RequestException as e:
+            st.warning(f"🌐 Error de conexión en endpoint {url.split('/')[-2]}: {str(e)}. Intentando siguiente...")
+            if attempt < len(endpoints) - 1:
+                time.sleep(1)
+                continue
+            else:
+                st.error(f"❌ Todos los endpoints fallaron por errores de conexión: {str(e)}")
+                break
+                
+        except Exception as e:
+            st.warning(f"⚠️ Error inesperado en endpoint {url.split('/')[-2]}: {str(e)}. Intentando siguiente...")
+            if attempt < len(endpoints) - 1:
+                continue
+            else:
+                st.error(f"❌ Todos los endpoints fallaron por errores inesperados: {str(e)}")
+                break
+    
+    # Si todos los endpoints fallaron, mostrar datos de ejemplo o sugerencias
+    st.error("🚨 No se pudieron obtener tasas de caución de ningún endpoint")
+    st.info("💡 Sugerencias para resolver el problema:")
+    st.info("• Verifique su conexión a internet")
+    st.info("• El servidor de IOL puede estar temporalmente fuera de servicio")
+    st.info("• Intente nuevamente en unos minutos")
+    st.info("• Verifique que su token de acceso sea válido")
+    
+    return None
 
 def mostrar_tasas_caucion(token_portador):
     """
@@ -3508,9 +3561,17 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         precios_inter = {}
         for k, v in tickers_intermarket.items():
             try:
-                data = yf.download(v, period='1y')['Adj Close']
-                if not data.empty:
-                    precios_inter[k] = data.dropna()
+                df = yf.download(v, period='1y')
+                if not df.empty:
+                    # Intentar obtener 'Adj Close', si no está disponible usar 'Close'
+                    if 'Adj Close' in df.columns:
+                        data = df['Adj Close']
+                    elif 'Close' in df.columns:
+                        data = df['Close']
+                    else:
+                        continue
+                    if not data.empty:
+                        precios_inter[k] = data.dropna()
             except Exception:
                 continue
         df_inter = pd.DataFrame(precios_inter).dropna()
@@ -4440,7 +4501,15 @@ def crear_indice_ciclo_economico_argentino():
             try:
                 df = yf.download(ticker, start='2020-01-01', end=pd.Timestamp.now(), progress=False)
                 if not df.empty:
-                    data[nombre] = df['Adj Close']
+                    # Intentar obtener 'Adj Close', si no está disponible usar 'Close'
+                    if 'Adj Close' in df.columns:
+                        data[nombre] = df['Adj Close']
+                    elif 'Close' in df.columns:
+                        data[nombre] = df['Close']
+                        st.info(f"⚠️ Usando 'Close' para {nombre} (no hay 'Adj Close' disponible)")
+                    else:
+                        st.warning(f"No se encontraron columnas de precio para {nombre}")
+                        continue
             except Exception as e:
                 st.warning(f"No se pudo obtener {nombre}: {e}")
                 continue
