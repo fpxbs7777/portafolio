@@ -3482,9 +3482,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 if not res or not hasattr(res, 'returns') or not hasattr(res, 'risk'):
                     continue
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
-                # Convert to scalar if it's a pandas Series
-                if hasattr(sharpe, 'item'):
+                # Convert to scalar if it's a pandas Series or numpy array
+                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
                     sharpe_scalar = sharpe.item()
+                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                    sharpe_scalar = float(sharpe[0])
                 else:
                     sharpe_scalar = float(sharpe)
                 
@@ -3497,9 +3499,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             res = manager_inst.compute_portfolio(strategy=clave)
             if res:
                 sharpe = res.returns / (res.risk if res.risk else 1e-6)
-                # Convert to scalar if it's a pandas Series
-                if hasattr(sharpe, 'item'):
+                # Convert to scalar if it's a pandas Series or numpy array
+                if hasattr(sharpe, 'item') and hasattr(sharpe, 'size') and sharpe.size == 1:
                     sharpe = sharpe.item()
+                elif hasattr(sharpe, '__len__') and len(sharpe) == 1:
+                    sharpe = float(sharpe[0])
                 else:
                     sharpe = float(sharpe)
                 resultados[clave] = (res, sharpe, None)
@@ -4298,37 +4302,29 @@ def mostrar_analisis_portafolio():
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
-    # Crear tabs con iconos
+    # Crear tabs con iconos más organizados
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Resumen Portafolio", 
-        "💰 Estado de Cuenta", 
-        "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "📊 Dashboard Principal", 
+        "📈 Análisis Detallado", 
+        "💱 Mercado y Cotizaciones",
+        "🔄 Optimización",
+        "⚙️ Configuración"
     ])
 
     with tab1:
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
-        else:
-            st.warning("No se pudo obtener el portafolio del cliente")
+        mostrar_dashboard_principal(token_acceso, id_cliente)
     
     with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
+        mostrar_analisis_detallado(token_acceso, id_cliente)
     
     with tab3:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
+        mostrar_mercado_cotizaciones(token_acceso)
     
     with tab4:
-        mostrar_cotizaciones_mercado(token_acceso)
+        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
     
     with tab5:
-        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+        mostrar_configuracion(token_acceso, id_cliente)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
