@@ -2012,61 +2012,6 @@ class PortfolioManager:
 def _deprecated_serie_historica_iol(*args, **kwargs):
     """Deprecated duplicate of `obtener_serie_historica_iol`. Kept for backward compatibility."""
     return None
-    """Obtiene series históricas desde la API de IOL
-    
-    Args:
-        token_portador: Token de autenticación Bearer
-        mercado: Mercado (BCBA, NYSE, NASDAQ, ROFEX)
-        simbolo: Símbolo del activo (puede ser string o dict con clave 'simbolo')
-        fecha_desde: Fecha inicio (YYYY-MM-DD)
-        fecha_hasta: Fecha fin (YYYY-MM-DD)
-        ajustada: "Ajustada" o "SinAjustar"
-    
-    Returns:
-        DataFrame con datos históricos o None si hay error
-    """
-    # Manejar caso donde simbolo es un diccionario
-    if isinstance(simbolo, dict):
-        simbolo = simbolo.get('simbolo', '')
-    
-    if not simbolo:
-        st.warning("No se proporcionó un símbolo válido")
-        return None
-        
-    # Asegurarse de que el mercado esté en mayúsculas
-    mercado = mercado.upper() if mercado else 'BCBA'
-    try:
-        # Construir la URL de la API
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {token_portador}'
-        }
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        data = response.json()
-        df = pd.DataFrame(data)
-        
-        if 'fechaHora' in df.columns:
-            # Handle different datetime formats
-            df['fecha'] = pd.to_datetime(
-                df['fechaHora'], 
-                format='mixed',  # Automatically infer format for each element
-                utc=True,        # Ensure timezone awareness
-                errors='coerce'  # Convert parsing errors to NaT
-            ).dt.tz_convert(None).dt.date  # Convert to naive date
-            
-            # Drop rows where date parsing failed
-            df = df.dropna(subset=['fecha'])
-            df = df.sort_values('fecha')
-            
-        return df
-        
-    except Exception as e:
-        st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
-        return None
 
 # --- Portfolio Metrics Function ---
 def calcular_alpha_beta(portfolio_returns, benchmark_returns, risk_free_rate=0.0):
@@ -3660,6 +3605,33 @@ def mostrar_cotizaciones_mercado(token_acceso):
             else:
                 st.error("❌ No se pudieron obtener las tasas de caución")
 
+def _convertir_a_escalar(valor, nombre_campo="valor"):
+    """
+    Convierte un valor (que puede ser Series, array, o escalar) a un escalar float.
+    
+    Args:
+        valor: Valor a convertir
+        nombre_campo: Nombre del campo para logging
+        
+    Returns:
+        float: Valor escalar convertido
+    """
+    if valor is None:
+        return 0.0
+    
+    try:
+        if hasattr(valor, 'iloc') and len(valor) > 0:
+            return float(valor.iloc[-1])  # Tomar el último valor de Series
+        elif hasattr(valor, '__len__') and len(valor) > 0:
+            return float(valor[-1])  # Tomar el último valor de array
+        elif hasattr(valor, 'item'):
+            return float(valor.item())  # Para numpy scalars
+        else:
+            return float(valor)  # Para escalares normales
+    except (ValueError, TypeError, IndexError) as e:
+        st.warning(f"⚠️ Error al convertir {nombre_campo} a escalar: {e}. Usando valor por defecto 0.")
+        return 0.0
+
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     """
     Menú avanzado de optimización de portafolio.
@@ -3907,8 +3879,12 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         res, sharpe, ret = resultados.get(clave, (None, None, None))
         if res:
             cols[i+1].metric(f"{nombre}\nSharpe", f"{sharpe:.2f}")
-            cols[i+1].metric(f"{nombre}\nRetorno", f"{getattr(res,'returns',0)*100:.2f}%")
-            cols[i+1].metric(f"{nombre}\nRiesgo", f"{getattr(res,'risk',0)*100:.2f}%")
+            # Convertir valores a escalares usando la función auxiliar
+            returns_val = _convertir_a_escalar(getattr(res, 'returns', 0), 'returns')
+            risk_val = _convertir_a_escalar(getattr(res, 'risk', 0), 'risk')
+            
+            cols[i+1].metric(f"{nombre}\nRetorno", f"{returns_val*100:.2f}%")
+            cols[i+1].metric(f"{nombre}\nRiesgo", f"{risk_val*100:.2f}%")
             if clave == 'markowitz' and ret is not None:
                 cols[i+1].caption(f"Retorno objetivo: {ret*100:.2f}%")
     st.markdown("---")
@@ -3935,8 +3911,11 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 st.plotly_chart(fig_pie, use_container_width=True, key=f"pie_{clave}")
             else:
                 st.info("No hay datos suficientes para mostrar la distribución de pesos.")
-        # Métricas
-        st.write(f"Retorno esperado: {getattr(res,'returns',0)*100:.2f}% | Riesgo: {getattr(res,'risk',0)*100:.2f}% | Sharpe: {sharpe:.2f}")
+        # Métricas - convertir a escalares usando la función auxiliar
+        returns_metric = _convertir_a_escalar(getattr(res, 'returns', 0), 'returns')
+        risk_metric = _convertir_a_escalar(getattr(res, 'risk', 0), 'risk')
+        
+        st.write(f"Retorno esperado: {returns_metric*100:.2f}% | Riesgo: {risk_metric*100:.2f}% | Sharpe: {sharpe:.2f}")
         st.markdown("---")
 
     # Frontera eficiente
@@ -3968,12 +3947,16 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     for clave, nombre in estrategias:
         res, sharpe, _ = resultados.get(clave, (None, None, None))
         if res:
+            # Convertir valores a escalares usando la función auxiliar
+            returns_comp = _convertir_a_escalar(getattr(res, 'returns', 0), 'returns')
+            risk_comp = _convertir_a_escalar(getattr(res, 'risk', 0), 'risk')
+            
             df_comp.append({
                 'Estrategia': nombre,
-                'Retorno': getattr(res,'returns',0)*100,
-                'Riesgo': getattr(res,'risk',0)*100,
+                'Retorno': returns_comp*100,
+                'Riesgo': risk_comp*100,
                 'Sharpe': sharpe,
-                'Mejora Retorno (%)': (getattr(res,'returns',0)-(metricas_actual.get('retorno_esperado_anual',0) or 0))*100,
+                'Mejora Retorno (%)': (returns_comp-(metricas_actual.get('retorno_esperado_anual',0) or 0))*100,
                 'Mejora Sharpe': sharpe-(metricas_actual.get('retorno_esperado_anual',0)/(metricas_actual.get('riesgo_anual',1e-6)))
             })
     if df_comp:
