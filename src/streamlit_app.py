@@ -4450,7 +4450,7 @@ def mostrar_analisis_portafolio():
         mostrar_analisis_tecnico(token_acceso, id_cliente)
     
     with tab3:
-        mostrar_mercado_cotizaciones(token_acceso)
+        mostrar_cotizaciones_mercado(token_acceso)
     
     with tab4:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
