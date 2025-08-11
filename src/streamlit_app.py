@@ -5180,8 +5180,6 @@ def mostrar_monitoreo_tiempo_real(portafolio_actual, precios_historicos):
         st.caption(f"Última actualización: {resultado_monitoreo['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
 
 # --- FIN FUNCIONES ROBUSTAS ---
-
-def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
     """
     Selecciona aleatoriamente tickers de los paneles seleccionados, descarga sus series históricas y devuelve:
     - series_historicas: dict[ticker] -> DataFrame de precios
@@ -5190,42 +5188,75 @@ def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_
     """
     import random
     import yfinance as yf
-    import pandas as pd
+    import numpy as np
+    from datetime import datetime, timedelta
+    
+    if not tickers_por_panel or not paneles_seleccionados or cantidad_activos <= 0:
+        raise ValueError("Parámetros de entrada inválidos")
+        
     series_historicas = {}
     seleccion_final = {}
-    for panel in paneles_seleccionados:
-        tickers = tickers_por_panel.get(panel, [])
-        if not tickers:
-            continue
-        seleccionados = random.sample(tickers, min(cantidad_activos, len(tickers)))
-        seleccion_final[panel] = seleccionados
-        for ticker in seleccionados:
-            try:
-                # Preferir yfinance para tickers internacionales y Cedears
-                if panel.lower() in ['cedears', 'adrs'] or ticker.isalpha():
-                    df = yf.download(ticker, start=fecha_desde, end=fecha_hasta)[['Close']]
-                    if not df.empty:
-                        df = df.rename(columns={'Close': 'precio'})
-                        df = df.reset_index().rename(columns={'Date': 'fecha'})
-                        series_historicas[ticker] = df
-                else:
-                    # Para acciones locales, usar la API de IOL si es necesario
-                    df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
-                    if df is not None and not df.empty:
-                        series_historicas[ticker] = df
-            except Exception as e:
+    
+    try:
+        for panel in paneles_seleccionados:
+            tickers = tickers_por_panel.get(panel, [])
+            if not tickers:
                 continue
-    # Validar que haya suficientes series
-    total_activos = sum(len(v) for v in seleccion_final.values())
-    if total_activos == 0 or not series_historicas:
-        raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
-    return series_historicas, seleccion_final
-
-# --- Función robusta para histogramas de retornos ---
-def plot_histogram_streamlit(retornos, title="Distribución de Retornos"):
-    import numpy as np
-    import plotly.graph_objects as go
-    import streamlit as st
+                
+            # Asegurarse de no seleccionar más tickers de los disponibles
+            num_a_seleccionar = min(cantidad_activos, len(tickers))
+            if num_a_seleccionar <= 0:
+                continue
+                
+            seleccionados = random.sample(tickers, num_a_seleccionar)
+            seleccion_final[panel] = []
+            
+            for ticker in seleccionados:
+                try:
+                    df = None
+                    # Preferir yfinance para tickers internacionales y Cedears
+                    if panel.lower() in ['cedears', 'adrs'] or (isinstance(ticker, str) and ticker.isalpha()):
+                        try:
+                            df_temp = yf.download(ticker, start=fecha_desde, end=fecha_hasta, progress=False)
+                            if not df_temp.empty and 'Close' in df_temp.columns:
+                                df = df_temp[['Close']].copy()
+                                df = df.rename(columns={'Close': 'precio'})
+                                df = df.reset_index().rename(columns={'Date': 'fecha'})
+                        except Exception as e:
+                            print(f"Error descargando {ticker} con yfinance: {str(e)}")
+                            continue
+                    else:
+                        # Para acciones locales, usar la API de IOL
+                        try:
+                            df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
+                        except Exception as e:
+                            print(f"Error obteniendo serie histórica para {ticker} de IOL: {str(e)}")
+                            continue
+                    
+                    # Validar y limpiar los datos
+                    if df is not None and not df.empty and 'precio' in df.columns:
+                        # Eliminar filas con precios inválidos
+                        df = df.dropna(subset=['precio'])
+                        df = df[df['precio'] > 0]
+                        
+                        if not df.empty:
+                            series_historicas[ticker] = df
+                            seleccion_final[panel].append(ticker)
+                            
+                except Exception as e:
+                    print(f"Error procesando {ticker}: {str(e)}")
+                    continue
+        
+        # Validar que haya suficientes series
+        total_activos = sum(len(v) for v in seleccion_final.values() if v)
+        if total_activos == 0 or not series_historicas:
+            raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
+            
+        return series_historicas, seleccion_final
+        
+    except Exception as e:
+        print(f"Error en obtener_series_historicas_aleatorias_con_capital: {str(e)}")
+        raise
     if retornos is None or len(retornos) == 0 or np.all(np.isnan(retornos)) or np.all(retornos == 0):
         st.warning("No hay datos suficientes para mostrar el histograma de retornos.")
         return
