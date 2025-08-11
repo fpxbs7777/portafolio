@@ -11581,7 +11581,7 @@ if __name__ == "__main__":
             import requests
             st.success("✅ requests importado correctamente")
         except Exception as e:
-            st.error(f"❌ Error con requests: {e}")import streamlit as st
+            st.error(f"❌ Error con requests: {e}")
 import requests
 import plotly.graph_objects as go
 import pandas as pd
