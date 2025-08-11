@@ -1044,6 +1044,9 @@ class output:
         self.dataframe_allocation = None
         # Compatibilidad: alias para risk y returns (usados en la interfaz)
         self.risk = self.volatility_annual
+        # Preservar los retornos originales para el histograma, pero crear alias para compatibilidad
+        self.returns_original = returns  # Guardar los retornos originales
+        # Mantener compatibilidad: returns debe ser el retorno anual para la interfaz
         self.returns = self.return_annual
 
     def get_metrics_dict(self):
@@ -1067,7 +1070,8 @@ class output:
         # Asegura que self.returns sea una secuencia (array, lista, o pandas Series), no un escalar
         import numpy as np
         import pandas as pd
-        returns = self.returns
+        # Usar los retornos originales preservados para el histograma
+        returns = getattr(self, 'returns_original', self.returns)
         # Si es None o vacío
         if returns is None or (hasattr(returns, '__len__') and len(returns) == 0):
             fig = go.Figure()
@@ -3118,7 +3122,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         try:
             series_historicas, seleccion_final = obtener_series_historicas_aleatorias_con_capital(
                 tickers_por_panel, paneles_seleccionados, cantidad_activos,
-                fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars
+                fecha_desde, fecha_hasta, ajustada, token_acceso
             )
         except Exception as e:
             st.error(f"Error al obtener series históricas para el universo aleatorio: {e}")
@@ -3150,7 +3154,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         ('equi-weight', 'Pesos Iguales'),
         ('long-only', 'Solo Largos')
     ]
-    target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, max_value=3.0, value=0.8, step=0.01)
+    target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, value=0.8, step=0.01)
     st.caption("Si no es posible alcanzar el Sharpe exacto, se mostrará el portafolio más cercano.")
 
     # Cargar datos y preparar manager
@@ -4102,7 +4106,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
             )
 
@@ -4114,6 +4118,14 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "💰 Tasas de Caución":
+                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
+                    mostrar_tasas_caucion(st.session_state.token_acceso)
+                else:
+                    st.warning("Por favor inicie sesión para ver las tasas de caución")
+            elif opcion == "👨\u200d💼 Panel del Asesor":
+                mostrar_movimientos_asesor()
+                st.info("👆 Seleccione una opción del menú para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
@@ -4174,67 +4186,41 @@ def main():
 def obtener_tickers_por_panel(token_portador, paneles, pais='Argentina'):
     """
     Devuelve un diccionario con listas de tickers reales por panel para el universo aleatorio.
-    Si no hay API, usa listas fijas de tickers representativos.
+    Usa la API de IOL para obtener tickers operables en tiempo real.
     Retorna: (dict panel->tickers, dict panel->descripciones)
     """
+    import requests
+    
     tickers = {}
     descripciones = {}
-    # Paneles y ejemplos (puedes reemplazar por consulta a la API de IOL si tienes endpoint)
-    paneles_dict = {
-        'acciones': [
-            ('GGAL', 'Grupo Financiero Galicia'),
-            ('YPFD', 'YPF S.A.'),
-            ('PAMP', 'Pampa Energía'),
-            ('BMA', 'Banco Macro'),
-            ('SUPV', 'Grupo Supervielle'),
-            ('CEPU', 'Central Puerto'),
-            ('TXAR', 'Ternium Argentina'),
-            ('ALUA', 'Aluar'),
-            ('TGSU2', 'Transportadora Gas del Sur'),
-            ('EDN', 'Edenor'),
-        ],
-        'cedears': [
-            ('AAPL', 'Apple'),
-            ('TSLA', 'Tesla'),
-            ('AMZN', 'Amazon'),
-            ('GOOGL', 'Alphabet'),
-            ('MSFT', 'Microsoft'),
-            ('KO', 'Coca-Cola'),
-            ('MELI', 'Mercado Libre'),
-            ('BABA', 'Alibaba'),
-            ('JNJ', 'Johnson & Johnson'),
-            ('PG', 'Procter & Gamble'),
-        ],
-        'aDRs': [
-            ('BBAR', 'BBVA Argentina'),
-            ('BMA', 'Banco Macro'),
-            ('GGAL', 'Grupo Galicia'),
-            ('PAM', 'Pampa Energia'),
-            ('SUPV', 'Supervielle'),
-        ],
-        'titulosPublicos': [
-            ('AL30', 'Bonar 2030'),
-            ('GD30', 'Global 2030'),
-            ('AL35', 'Bonar 2035'),
-            ('GD35', 'Global 2035'),
-            ('AL29', 'Bonar 2029'),
-            ('GD29', 'Global 2029'),
-        ],
-        'obligacionesNegociables': [
-            ('PBY22', 'Pampa Energía ON'),
-            ('CGC24', 'Compañía General de Combustibles ON'),
-            ('YPF23', 'YPF ON'),
-            ('TGSU2', 'Transportadora Gas del Sur ON'),
-        ]
-    }
+    
     for panel in paneles:
-        panel_l = panel.lower()
-        if panel_l in paneles_dict:
-            tickers[panel] = [t[0] for t in paneles_dict[panel_l]]
-            descripciones[panel] = [t[1] for t in paneles_dict[panel_l]]
-        else:
+        try:
+            url = f'https://api.invertironline.com/api/v2/cotizaciones-orleans/{panel}/{pais}/Operables'
+            params = {
+                'cotizacionInstrumentoModel.instrumento': panel,
+                'cotizacionInstrumentoModel.pais': pais.lower()
+            }
+            encabezados = obtener_encabezado_autorizacion(token_portador)
+            respuesta = requests.get(url, headers=encabezados, params=params)
+            
+            if respuesta.status_code == 200:
+                datos = respuesta.json()
+                tickers_list = [titulo['simbolo'] for titulo in datos.get('titulos', [])]
+                tickers[panel] = tickers_list
+                descripciones[panel] = [titulo.get('descripcion', '') for titulo in datos.get('titulos', [])]
+            else:
+                print(f'Error en la solicitud para {panel}: {respuesta.status_code}')
+                # Fallback a listas fijas si la API falla
+                tickers[panel] = []
+                descripciones[panel] = []
+                
+        except Exception as e:
+            print(f'Error obteniendo tickers para {panel}: {str(e)}')
+            # Fallback a listas fijas si hay error
             tickers[panel] = []
             descripciones[panel] = []
+    
     return tickers, descripciones
 
 # --- Función: calcular retornos y covarianza con ventana móvil ---
@@ -5171,107 +5157,169 @@ def mostrar_monitoreo_tiempo_real(portafolio_actual, precios_historicos):
         # Mostrar timestamp
         st.caption(f"Última actualización: {resultado_monitoreo['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
 
-# --- FUNCIONES DE OBTENCIÓN DE DATOS ---
+# --- FIN FUNCIONES ROBUSTAS ---
 
-def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
+def obtener_series_historicas_aleatorias_con_capital(
+    tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde,
+    fecha_hasta, ajustada="SinAjustar", token_acceso=None
+):
     """
-    Selecciona aleatoriamente tickers de los paneles seleccionados, descarga sus series históricas y devuelve:
-    - series_historicas: dict[ticker] -> DataFrame de precios
-    - seleccion_final: dict[panel] -> lista de tickers seleccionados
-    Respeta la cantidad de activos por panel y el capital disponible.
+    Selecciona aleatoriamente activos por panel, pero solo descarga series históricas
+    de aquellos cuyo último precio permite comprar al menos 1 unidad con el capital disponible.
+    Si no alcanza, descarta los más caros y reintenta.
     """
     import random
-    import yfinance as yf
-    import numpy as np
+    import pandas as pd
     
-    if not tickers_por_panel or not paneles_seleccionados or cantidad_activos <= 0:
-        raise ValueError("Parámetros de entrada inválidos")
-        
-    series_historicas = {}
+    series_historicas = pd.DataFrame()
+    precios_ultimos = {}
     seleccion_final = {}
-    
-    try:
-        for panel in paneles_seleccionados:
-            tickers = tickers_por_panel.get(panel, [])
-            if not tickers:
-                continue
-                
-            # Asegurarse de no seleccionar más tickers de los disponibles
-            num_a_seleccionar = min(cantidad_activos, len(tickers))
-            if num_a_seleccionar <= 0:
-                continue
-                
-            seleccionados = random.sample(tickers, num_a_seleccionar)
-            seleccion_final[panel] = []
-            
-            for ticker in seleccionados:
-                try:
-                    df = None
-                    # Preferir yfinance para tickers internacionales y Cedears
-                    if panel.lower() in ['cedears', 'adrs'] or (isinstance(ticker, str) and ticker.isalpha()):
-                        try:
-                            df_temp = yf.download(ticker, start=fecha_desde, end=fecha_hasta, progress=False)
-                            if not df_temp.empty and 'Close' in df_temp.columns:
-                                df = df_temp[['Close']].copy()
-                                df = df.rename(columns={'Close': 'precio'})
-                                df = df.reset_index().rename(columns={'Date': 'fecha'})
-                        except Exception as e:
-                            print(f"Error descargando {ticker} con yfinance: {str(e)}")
-                            continue
-                    else:
-                        # Para acciones locales, usar la API de IOL
-                        try:
-                            df = obtener_serie_historica_iol(token_acceso, 'BCBA', ticker, fecha_desde, fecha_hasta, ajustada)
-                        except Exception as e:
-                            print(f"Error obteniendo serie histórica para {ticker} de IOL: {str(e)}")
-                            continue
-                    
-                    # Validar y limpiar los datos
-                    if df is not None and not df.empty and 'precio' in df.columns:
-                        # Eliminar filas con precios inválidos
-                        df = df.dropna(subset=['precio'])
-                        df = df[df['precio'] > 0]
-                        
-                        if not df.empty:
-                            series_historicas[ticker] = df
-                            seleccion_final[panel].append(ticker)
-                            
-                except Exception as e:
-                    print(f"Error procesando {ticker}: {str(e)}")
-                    continue
-        
-        # Validar que haya suficientes series
-        total_activos = sum(len(v) for v in seleccion_final.values() if v)
-        if total_activos == 0 or not series_historicas:
-            raise Exception("No se pudieron obtener series históricas suficientes para el universo aleatorio.")
-            
-        return series_historicas, seleccion_final
-        
-    except Exception as e:
-        print(f"Error en obtener_series_historicas_aleatorias_con_capital: {str(e)}")
-        raise
 
-# --- Función robusta para histogramas de retornos ---
-def plot_histogram_streamlit(retornos, title="Distribución de Retornos"):
-    import numpy as np
-    import plotly.graph_objects as go
-    import streamlit as st
+    for panel in paneles_seleccionados:
+        if panel in tickers_por_panel:
+            tickers = tickers_por_panel[panel]
+            random.shuffle(tickers)
+            seleccionados = []
+            for simbolo in tickers:
+                mercado = 'BCBA'
+                serie = obtener_serie_historica_iol(token_acceso, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+                if serie and isinstance(serie, list) and len(serie) > 0:
+                    df = pd.DataFrame(serie)
+                    # Buscar columna de precio (puede variar según API, aquí se asume 'ultimoPrecio')
+                    col_precio = None
+                    for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                        if c in df.columns:
+                            col_precio = c
+                            break
+                    if col_precio is not None:
+                        precio_final = df[col_precio].dropna().iloc[-1]
+                        precios_ultimos[simbolo] = precio_final
+                        seleccionados.append((simbolo, df, precio_final))
+                if len(seleccionados) >= cantidad_activos:
+                    break
+            # Ordenar por precio y filtrar por capital
+            seleccionados.sort(key=lambda x: x[2])
+            seleccionables = []
+            capital_restante = 100000  # Capital por defecto para compatibilidad
+            for simbolo, df, precio in seleccionados:
+                if precio <= capital_restante:
+                    seleccionables.append((simbolo, df, precio))
+                    capital_restante -= precio
+            # Si no hay suficientes activos asequibles, tomar los que se pueda
+            if len(seleccionables) < 2:
+                print(f"No hay suficientes activos asequibles en el panel {panel} para el capital disponible.")
+            else:
+                for simbolo, df, precio in seleccionables:
+                    df['simbolo'] = simbolo
+                    df['panel'] = panel
+                    series_historicas = pd.concat([series_historicas, df], ignore_index=True)
+                seleccion_final[panel] = [s[0] for s in seleccionables]
     
+    # Convertir el DataFrame a formato de diccionario para compatibilidad
+    series_dict = {}
+    for simbolo in series_historicas['simbolo'].unique():
+        df_simbolo = series_historicas[series_historicas['simbolo'] == simbolo].copy()
+        # Buscar columna de precio
+        col_precio = None
+        for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+            if c in df_simbolo.columns:
+                col_precio = c
+                break
+        if col_precio:
+            df_simbolo = df_simbolo[['fecha', col_precio]].rename(columns={col_precio: 'precio'})
+            series_dict[simbolo] = df_simbolo
+    
+    return series_dict, seleccion_final
+
+def plot_histogram_returns(retornos, title="Distribución de Retornos"):
+    """Función auxiliar para mostrar histograma de retornos"""
     if retornos is None or len(retornos) == 0 or np.all(np.isnan(retornos)) or np.all(retornos == 0):
         st.warning("No hay datos suficientes para mostrar el histograma de retornos.")
         return
-        
     fig = go.Figure()
     fig.add_trace(go.Histogram(x=retornos, nbinsx=50))
     fig.update_layout(title=title, xaxis_title="Retorno", yaxis_title="Frecuencia")
     st.plotly_chart(fig, use_container_width=True)
 
-# --- Refuerzo en create_professional_chart ---
 def create_professional_chart(data, title, variable_name):
+    """
+    Crea un gráfico profesional con análisis estadístico completo.
+    
+    Args:
+        data: DataFrame con columnas 'Fecha' y 'Valor'
+        title: Título del gráfico
+        variable_name: Nombre de la variable para el análisis
+        
+    Returns:
+        tuple: (fig, mean_val, std_val, min_val, max_val, trend)
+    """
     if data is None or data.empty or 'Valor' not in data.columns or 'Fecha' not in data.columns:
         st.warning("No hay datos suficientes para mostrar el gráfico o análisis.")
         return go.Figure(), 0, 0, 0, 0, 0
-    # ... resto del código original ...
+    
+    try:
+        # Calcular estadísticas básicas
+        valores = data['Valor'].dropna()
+        if len(valores) == 0:
+            st.warning("No hay valores válidos para analizar.")
+            return go.Figure(), 0, 0, 0, 0, 0
+            
+        mean_val = float(valores.mean())
+        std_val = float(valores.std())
+        min_val = float(valores.min())
+        max_val = float(valores.max())
+        
+        # Calcular tendencia (pendiente de regresión lineal)
+        if len(valores) > 1:
+            x = np.arange(len(valores))
+            slope, intercept = np.polyfit(x, valores, 1)
+            trend = float(slope)
+        else:
+            trend = 0.0
+        
+        # Crear gráfico
+        fig = go.Figure()
+        
+        # Línea principal
+        fig.add_trace(go.Scatter(
+            x=data['Fecha'],
+            y=data['Valor'],
+            mode='lines+markers',
+            name=variable_name,
+            line=dict(color='#1f77b4', width=2),
+            marker=dict(size=4)
+        ))
+        
+        # Línea de tendencia
+        if len(valores) > 1:
+            x_trend = np.linspace(0, len(valores)-1, 100)
+            y_trend = slope * x_trend + intercept
+            fig.add_trace(go.Scatter(
+                x=data['Fecha'].iloc[[0, -1]],
+                y=[y_trend[0], y_trend[-1]],
+                line=dict(color='red', width=2, dash='dash'),
+                name='Tendencia'
+            ))
+        
+        # Línea de media
+        fig.add_hline(y=mean_val, line_dash="dot", line_color="orange", 
+                     annotation_text=f"Media: {mean_val:.4f}")
+        
+        # Configurar layout
+        fig.update_layout(
+            title=title,
+            xaxis_title="Fecha",
+            yaxis_title=variable_name,
+            hovermode='x unified',
+            showlegend=True,
+            template='plotly_white'
+        )
+        
+        return fig, mean_val, std_val, min_val, max_val, trend
+        
+    except Exception as e:
+        st.error(f"Error al crear el gráfico: {str(e)}")
+        return go.Figure(), 0, 0, 0, 0, 0
 
 # --- FIN DEL ARCHIVO ---
 
