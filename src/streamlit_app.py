@@ -2712,7 +2712,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             ],
             format_func=lambda x: x[0],
             index=3,  # Por defecto 180 días
-            help="Seleccione el período de tiempo para el análisis de retornos"
+            help="Seleccione el período de tiempo para el análisis de retornos",
+            key="horizonte_inversion_portfolio"
         )
         
         # Intervalo de análisis fijo en diario
@@ -3589,7 +3590,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         st.error("❌ No se pudo obtener la cotización MEP")
     
     with st.expander("🏦 Tasas de Caución", expanded=True):
-        if st.button("🔄 Actualizar Tasas"):
+        if st.button("🔄 Actualizar Tasas", key="btn_actualizar_tasas"):
             with st.spinner("Consultando tasas de caución..."):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
             
@@ -3722,7 +3723,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     universo = st.radio(
         "¿Con qué universo de activos desea optimizar?",
         ["Portafolio actual", "Universo aleatorio"],
-        help="Puede optimizar con sus activos actuales o simular con un universo aleatorio por tipo/cantidad."
+        help="Puede optimizar con sus activos actuales o simular con un universo aleatorio por tipo/cantidad.",
+        key="universe_optimization"
     )
     if universo == "Portafolio actual":
         universe_activos = [
@@ -3737,7 +3739,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         paneles_seleccionados = st.multiselect("Paneles de universo aleatorio", paneles, default=paneles)
         capital_mode = st.radio(
             "¿Cómo definir el capital disponible?",
-            ["Manual", "Saldo valorizado + disponible (actual)"]
+            ["Manual", "Saldo valorizado + disponible (actual)"],
+            key="capital_mode_selection"
         )
         capital_ars = 100000
         capital_auto = valor_total + saldo_disponible
@@ -3793,7 +3796,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         ('equi-weight', 'Pesos Iguales'),
         ('long-only', 'Solo Largos')
     ]
-    target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, max_value=3.0, value=0.8, step=0.01)
+    target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, max_value=3.0, value=0.8, step=0.01, key="target_sharpe_optimization")
     st.caption("Si no es posible alcanzar el Sharpe exacto, se mostrará el portafolio más cercano.")
 
     # Cargar datos y preparar manager
@@ -5565,7 +5568,7 @@ def mostrar_dashboard_bcra():
             )
         
         # Botón para cargar datos históricos
-        if st.button("Cargar Datos Históricos"):
+        if st.button("Cargar Datos Históricos", key="btn_cargar_datos_historicos"):
             with st.spinner('Obteniendo datos históricos...'):
                 hist_data = get_historical_data(
                     selected_serie['Serie ID'],
@@ -12025,7 +12028,8 @@ def mostrar_busqueda_noticias_gemini():
     modo_busqueda = st.radio(
         "Selecciona el modo de búsqueda:",
         ["🔍 Búsqueda Automática", "🎯 Ticker Específico"],
-        help="Búsqueda automática analiza múltiples tickers, ticker específico se enfoca en uno solo"
+        help="Búsqueda automática analiza múltiples tickers, ticker específico se enfoca en uno solo",
+        key="search_mode_selection"
     )
     
     # Configuración de créditos
@@ -12095,6 +12099,31 @@ def mostrar_busqueda_noticias_gemini():
     - Combina múltiples análisis en una sola sesión
     - Revisa el historial de análisis antes de hacer nuevas consultas
     """)
+
+def mostrar_ia_gemini_avanzada():
+    """
+    Función para mostrar funcionalidades avanzadas de IA Gemini
+    """
+    st.header("🤖 IA Gemini Avanzada")
+    st.markdown("### Funcionalidades Avanzadas de Inteligencia Artificial")
+    
+    st.info("""
+    **🚀 Funcionalidades Disponibles:**
+    - Análisis de sentimiento de noticias
+    - Predicciones de tendencias de mercado
+    - Recomendaciones personalizadas de portafolio
+    - Análisis de correlaciones entre activos
+    """)
+    
+    # Aquí puedes agregar más funcionalidades avanzadas de IA
+    st.subheader("🔮 Predicciones de Mercado")
+    st.write("Funcionalidad en desarrollo...")
+    
+    st.subheader("📊 Análisis de Correlaciones")
+    st.write("Funcionalidad en desarrollo...")
+    
+    st.subheader("🎯 Recomendaciones Personalizadas")
+    st.write("Funcionalidad en desarrollo...")
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -12195,11 +12224,12 @@ def main():
                 cliente_seleccionado = st.selectbox(
                     "Cliente:",
                     options=clientes,
-                    format_func=lambda x: f"{x.get('apellidoYNombre', x.get('nombre', 'Cliente'))} ({x.get('numeroCliente', x.get('id', ''))})"
+                    format_func=lambda x: f"{x.get('apellidoYNombre', x.get('nombre', 'Cliente'))} ({x.get('numeroCliente', x.get('id', ''))})",
+                    key="cliente_seleccionado_main"
                 )
                 st.session_state.cliente_seleccionado = cliente_seleccionado
                 
-                if st.button("📊 Analizar Portafolio", use_container_width=True):
+                if st.button("📊 Analizar Portafolio", use_container_width=True, key="btn_analizar_portfolio"):
                     if cliente_seleccionado:
                         st.session_state.cliente_seleccionado = cliente_seleccionado
                         st.rerun()
@@ -12232,7 +12262,7 @@ def main():
             mostrar_busqueda_noticias_gemini()
         
         with tab5:
-            mostrar_busqueda_noticias_gemini()
+            mostrar_ia_gemini_avanzada()
         
         with tab6:
             id_cliente = cliente.get('numeroCliente', cliente.get('id'))
