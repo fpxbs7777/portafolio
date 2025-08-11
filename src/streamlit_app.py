@@ -5179,7 +5179,9 @@ def mostrar_monitoreo_tiempo_real(portafolio_actual, precios_historicos):
         # Mostrar timestamp
         st.caption(f"Última actualización: {resultado_monitoreo['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
 
-# --- FIN FUNCIONES ROBUSTAS ---
+# --- FUNCIONES DE OBTENCIÓN DE DATOS ---
+
+def obtener_series_historicas_aleatorias_con_capital(tickers_por_panel, paneles_seleccionados, cantidad_activos, fecha_desde, fecha_hasta, ajustada, token_acceso, capital_ars):
     """
     Selecciona aleatoriamente tickers de los paneles seleccionados, descarga sus series históricas y devuelve:
     - series_historicas: dict[ticker] -> DataFrame de precios
@@ -5189,7 +5191,6 @@ def mostrar_monitoreo_tiempo_real(portafolio_actual, precios_historicos):
     import random
     import yfinance as yf
     import numpy as np
-    from datetime import datetime, timedelta
     
     if not tickers_por_panel or not paneles_seleccionados or cantidad_activos <= 0:
         raise ValueError("Parámetros de entrada inválidos")
@@ -5257,9 +5258,17 @@ def mostrar_monitoreo_tiempo_real(portafolio_actual, precios_historicos):
     except Exception as e:
         print(f"Error en obtener_series_historicas_aleatorias_con_capital: {str(e)}")
         raise
+
+# --- Función robusta para histogramas de retornos ---
+def plot_histogram_streamlit(retornos, title="Distribución de Retornos"):
+    import numpy as np
+    import plotly.graph_objects as go
+    import streamlit as st
+    
     if retornos is None or len(retornos) == 0 or np.all(np.isnan(retornos)) or np.all(retornos == 0):
         st.warning("No hay datos suficientes para mostrar el histograma de retornos.")
         return
+        
     fig = go.Figure()
     fig.add_trace(go.Histogram(x=retornos, nbinsx=50))
     fig.update_layout(title=title, xaxis_title="Retorno", yaxis_title="Frecuencia")
