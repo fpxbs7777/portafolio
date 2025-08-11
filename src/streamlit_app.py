@@ -4106,7 +4106,7 @@ def main():
             st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor", "🧮 Calculadora de Retornos"),
                 index=0,
             )
 
@@ -4126,6 +4126,8 @@ def main():
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
+            elif opcion == "🧮 Calculadora de Retornos":
+                mostrar_calculadora_retornos()
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
@@ -5178,56 +5180,80 @@ def obtener_series_historicas_aleatorias_con_capital(
     for panel in paneles_seleccionados:
         if panel in tickers_por_panel:
             tickers = tickers_por_panel[panel]
+            if not tickers:  # Skip if no tickers for this panel
+                continue
             random.shuffle(tickers)
             seleccionados = []
             for simbolo in tickers:
-                mercado = 'BCBA'
-                serie = obtener_serie_historica_iol(token_acceso, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
-                if serie and isinstance(serie, list) and len(serie) > 0:
-                    df = pd.DataFrame(serie)
-                    # Buscar columna de precio (puede variar según API, aquí se asume 'ultimoPrecio')
-                    col_precio = None
-                    for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
-                        if c in df.columns:
-                            col_precio = c
-                            break
-                    if col_precio is not None:
-                        precio_final = df[col_precio].dropna().iloc[-1]
-                        precios_ultimos[simbolo] = precio_final
-                        seleccionados.append((simbolo, df, precio_final))
+                try:
+                    mercado = 'BCBA'
+                    serie = obtener_serie_historica_iol(token_acceso, mercado, simbolo, fecha_desde, fecha_hasta, ajustada)
+                    if serie and isinstance(serie, list) and len(serie) > 0:
+                        df = pd.DataFrame(serie)
+                        # Buscar columna de precio (puede variar según API, aquí se asume 'ultimoPrecio')
+                        col_precio = None
+                        for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                            if c in df.columns:
+                                col_precio = c
+                                break
+                        if col_precio is not None and not df[col_precio].dropna().empty:
+                            precio_final = df[col_precio].dropna().iloc[-1]
+                            if pd.notna(precio_final) and precio_final > 0:
+                                precios_ultimos[simbolo] = precio_final
+                                seleccionados.append((simbolo, df, precio_final))
+                except Exception as e:
+                    print(f"Error procesando {simbolo}: {str(e)}")
+                    continue
+                    
                 if len(seleccionados) >= cantidad_activos:
                     break
+                    
             # Ordenar por precio y filtrar por capital
-            seleccionados.sort(key=lambda x: x[2])
-            seleccionables = []
-            capital_restante = 100000  # Capital por defecto para compatibilidad
-            for simbolo, df, precio in seleccionados:
-                if precio <= capital_restante:
-                    seleccionables.append((simbolo, df, precio))
-                    capital_restante -= precio
-            # Si no hay suficientes activos asequibles, tomar los que se pueda
-            if len(seleccionables) < 2:
-                print(f"No hay suficientes activos asequibles en el panel {panel} para el capital disponible.")
-            else:
-                for simbolo, df, precio in seleccionables:
-                    df['simbolo'] = simbolo
-                    df['panel'] = panel
-                    series_historicas = pd.concat([series_historicas, df], ignore_index=True)
-                seleccion_final[panel] = [s[0] for s in seleccionables]
+            if seleccionados:
+                seleccionados.sort(key=lambda x: x[2])
+                seleccionables = []
+                capital_restante = 100000  # Capital por defecto para compatibilidad
+                for simbolo, df, precio in seleccionados:
+                    if precio <= capital_restante:
+                        seleccionables.append((simbolo, df, precio))
+                        capital_restante -= precio
+                
+                # Si no hay suficientes activos asequibles, tomar los que se pueda
+                if len(seleccionables) >= 1:  # Changed from 2 to 1 to allow single assets
+                    for simbolo, df, precio in seleccionables:
+                        df_copy = df.copy()
+                        df_copy['simbolo'] = simbolo
+                        df_copy['panel'] = panel
+                        if series_historicas.empty:
+                            series_historicas = df_copy
+                        else:
+                            series_historicas = pd.concat([series_historicas, df_copy], ignore_index=True)
+                    seleccion_final[panel] = [s[0] for s in seleccionables]
+                else:
+                    print(f"No hay suficientes activos asequibles en el panel {panel} para el capital disponible.")
     
     # Convertir el DataFrame a formato de diccionario para compatibilidad
     series_dict = {}
-    for simbolo in series_historicas['simbolo'].unique():
-        df_simbolo = series_historicas[series_historicas['simbolo'] == simbolo].copy()
-        # Buscar columna de precio
-        col_precio = None
-        for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
-            if c in df_simbolo.columns:
-                col_precio = c
-                break
-        if col_precio:
-            df_simbolo = df_simbolo[['fecha', col_precio]].rename(columns={col_precio: 'precio'})
-            series_dict[simbolo] = df_simbolo
+    if not series_historicas.empty and 'simbolo' in series_historicas.columns:
+        for simbolo in series_historicas['simbolo'].unique():
+            df_simbolo = series_historicas[series_historicas['simbolo'] == simbolo].copy()
+            # Buscar columna de precio
+            col_precio = None
+            for c in ['ultimoPrecio', 'ultimo_precio', 'precio', 'close', 'cierre']:
+                if c in df_simbolo.columns:
+                    col_precio = c
+                    break
+            if col_precio and not df_simbolo[col_precio].empty:
+                # Buscar columna de fecha
+                col_fecha = None
+                for c in ['fecha', 'date', 'fechaHora', 'fechaCotizacion']:
+                    if c in df_simbolo.columns:
+                        col_fecha = c
+                        break
+                
+                if col_fecha:
+                    df_simbolo = df_simbolo[[col_fecha, col_precio]].rename(columns={col_precio: 'precio', col_fecha: 'fecha'})
+                    series_dict[simbolo] = df_simbolo
     
     return series_dict, seleccion_final
 
@@ -5320,6 +5346,261 @@ def create_professional_chart(data, title, variable_name):
     except Exception as e:
         st.error(f"Error al crear el gráfico: {str(e)}")
         return go.Figure(), 0, 0, 0, 0, 0
+
+def mostrar_calculadora_retornos():
+    """
+    Calculadora de retornos que permite al usuario ingresar capital inicial y retorno esperado manualmente.
+    """
+    st.subheader("🧮 Calculadora de Retornos")
+    st.markdown("### Calcula el crecimiento de tu inversión con diferentes escenarios")
+    
+    # Configuración de entrada
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        capital_inicial = st.number_input(
+            "💰 Capital Inicial (ARS)", 
+            min_value=1000.0, 
+            value=100000.0, 
+            step=1000.0,
+            help="Ingrese el monto inicial que desea invertir"
+        )
+        
+        retorno_anual = st.number_input(
+            "📈 Retorno Anual Esperado (%)", 
+            min_value=-50.0, 
+            value=15.0, 
+            step=0.5,
+            help="Retorno anual esperado en porcentaje"
+        )
+    
+    with col2:
+        plazo_anos = st.number_input(
+            "⏰ Plazo de Inversión (años)", 
+            min_value=1, 
+            max_value=30, 
+            value=5, 
+            step=1,
+            help="Período de tiempo para la inversión"
+        )
+        
+        contribucion_mensual = st.number_input(
+            "💸 Contribución Mensual (ARS)", 
+            min_value=0.0, 
+            value=10000.0, 
+            step=1000.0,
+            help="Aportes mensuales adicionales (opcional)"
+        )
+    
+    # Cálculos
+    retorno_decimal = retorno_anual / 100
+    
+    # Capital final sin contribuciones mensuales
+    capital_final_simple = capital_inicial * (1 + retorno_decimal) ** plazo_anos
+    
+    # Capital final con contribuciones mensuales
+    if contribucion_mensual > 0:
+        # Fórmula para valor futuro con contribuciones mensuales
+        tasa_mensual = (1 + retorno_decimal) ** (1/12) - 1
+        meses = plazo_anos * 12
+        capital_final_contribuciones = (
+            capital_inicial * (1 + retorno_decimal) ** plazo_anos +
+            contribucion_mensual * ((1 + tasa_mensual) ** meses - 1) / tasa_mensual
+        )
+    else:
+        capital_final_contribuciones = capital_final_simple
+    
+    # Métricas de resultado
+    st.markdown("### 📊 Resultados del Cálculo")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        ganancia_total = capital_final_contribuciones - capital_inicial
+        st.metric(
+            "💰 Capital Final", 
+            f"${capital_final_contribuciones:,.2f}",
+            delta=f"${ganancia_total:,.2f}"
+        )
+    
+    with col2:
+        retorno_total = ((capital_final_contribuciones / capital_inicial) - 1) * 100
+        st.metric(
+            "📈 Retorno Total", 
+            f"{retorno_total:.2f}%",
+            delta=f"{retorno_total - retorno_anual:.2f}% vs anual"
+        )
+    
+    with col3:
+        if contribucion_mensual > 0:
+            contribuciones_totales = contribucion_mensual * 12 * plazo_anos
+            st.metric(
+                "💸 Contribuciones Totales", 
+                f"${contribuciones_totales:,.2f}",
+                delta=f"${contribucion_mensual:,.2f}/mes"
+            )
+        else:
+            st.metric(
+                "⏰ Tiempo", 
+                f"{plazo_anos} años",
+                delta=f"{plazo_anos * 12} meses"
+            )
+    
+    # Gráfico de evolución temporal
+    st.markdown("### 📈 Evolución del Capital en el Tiempo")
+    
+    import numpy as np
+    import plotly.graph_objects as go
+    from datetime import datetime, timedelta
+    
+    # Generar datos para el gráfico
+    anos = np.arange(0, plazo_anos + 1, 0.1)
+    
+    # Capital sin contribuciones
+    capital_simple = capital_inicial * (1 + retorno_decimal) ** anos
+    
+    # Capital con contribuciones mensuales
+    if contribucion_mensual > 0:
+        capital_con_contrib = []
+        for ano in anos:
+            meses = ano * 12
+            if meses > 0:
+                tasa_mensual = (1 + retorno_decimal) ** (1/12) - 1
+                capital_ano = (
+                    capital_inicial * (1 + retorno_decimal) ** ano +
+                    contribucion_mensual * ((1 + tasa_mensual) ** meses - 1) / tasa_mensual
+                )
+            else:
+                capital_ano = capital_inicial
+            capital_con_contrib.append(capital_ano)
+        capital_con_contrib = np.array(capital_con_contrib)
+    else:
+        capital_con_contrib = capital_simple
+    
+    # Crear gráfico
+    fig = go.Figure()
+    
+    # Línea de capital inicial
+    fig.add_hline(y=capital_inicial, line_dash="dash", line_color="gray", 
+                  annotation_text=f"Capital Inicial: ${capital_inicial:,.0f}")
+    
+    # Línea de capital simple
+    fig.add_trace(go.Scatter(
+        x=anos, y=capital_simple,
+        mode='lines',
+        name='Sin contribuciones mensuales',
+        line=dict(color='blue', width=3),
+        hovertemplate='Año %{x:.1f}<br>Capital: $%{y:,.2f}<extra></extra>'
+    ))
+    
+    # Línea de capital con contribuciones
+    if contribucion_mensual > 0:
+        fig.add_trace(go.Scatter(
+            x=anos, y=capital_con_contrib,
+            mode='lines',
+            name='Con contribuciones mensuales',
+            line=dict(color='green', width=3),
+            hovertemplate='Año %{x:.1f}<br>Capital: $%{y:,.2f}<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        title=f"Proyección de Capital: ${capital_inicial:,.0f} → ${capital_final_contribuciones:,.0f}",
+        xaxis_title="Años",
+        yaxis_title="Capital (ARS)",
+        hovermode='x unified',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        yaxis=dict(tickformat=",.0f", tickprefix="$")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Análisis de escenarios
+    st.markdown("### 🔍 Análisis de Escenarios")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**📊 Escenario Conservador**")
+        retorno_conservador = retorno_anual * 0.7
+        capital_conservador = capital_inicial * (1 + retorno_conservador/100) ** plazo_anos
+        st.metric("Retorno", f"{retorno_conservador:.1f}%", f"${capital_conservador:,.2f}")
+        
+        st.markdown("**📊 Escenario Moderado**")
+        retorno_moderado = retorno_anual
+        capital_moderado = capital_final_simple
+        st.metric("Retorno", f"{retorno_moderado:.1f}%", f"${capital_moderado:,.2f}")
+        
+        st.markdown("**📊 Escenario Optimista**")
+        retorno_optimista = retorno_anual * 1.3
+        capital_optimista = capital_inicial * (1 + retorno_optimista/100) ** plazo_anos
+        st.metric("Retorno", f"{retorno_optimista:.1f}%", f"${capital_optimista:,.2f}")
+    
+    with col2:
+        st.markdown("**📈 Comparación con Inflación**")
+        inflacion_anual = 25.0  # Valor típico para Argentina
+        capital_inflacion = capital_inicial * (1 + inflacion_anual/100) ** plazo_anos
+        poder_adquisitivo = capital_final_contribuciones / capital_inflacion
+        
+        st.metric("Inflación proyectada", f"{inflacion_anual:.1f}%", f"${capital_inflacion:,.2f}")
+        st.metric("Poder adquisitivo", f"{poder_adquisitivo:.2f}x", "vs. inflación")
+        
+        if poder_adquisitivo > 1:
+            st.success("✅ Su inversión supera la inflación")
+        else:
+            st.warning("⚠️ Su inversión no supera la inflación")
+    
+    # Tabla de resultados detallados
+    st.markdown("### 📋 Tabla de Resultados Detallados")
+    
+    anos_tabla = list(range(plazo_anos + 1))
+    datos_tabla = []
+    
+    for ano in anos_tabla:
+        capital_ano = capital_inicial * (1 + retorno_decimal) ** ano
+        ganancia_ano = capital_ano - capital_inicial
+        retorno_ano = ((capital_ano / capital_inicial) - 1) * 100
+        
+        if contribucion_mensual > 0:
+            meses = ano * 12
+            if meses > 0:
+                tasa_mensual = (1 + retorno_decimal) ** (1/12) - 1
+                contribuciones_ano = contribucion_mensual * ((1 + tasa_mensual) ** meses - 1) / tasa_mensual
+                capital_total_ano = capital_ano + contribuciones_ano
+            else:
+                contribuciones_ano = 0
+                capital_total_ano = capital_ano
+        else:
+            contribuciones_ano = 0
+            capital_total_ano = capital_ano
+        
+        datos_tabla.append({
+            "Año": ano,
+            "Capital Base": f"${capital_ano:,.2f}",
+            "Ganancia": f"${ganancia_ano:,.2f}",
+            "Retorno": f"{retorno_ano:.2f}%",
+            "Contribuciones": f"${contribuciones_ano:,.2f}",
+            "Capital Total": f"${capital_total_ano:,.2f}"
+        })
+    
+    import pandas as pd
+    df_resultados = pd.DataFrame(datos_tabla)
+    st.dataframe(df_resultados, use_container_width=True, hide_index=True)
+    
+    # Información adicional y consejos
+    st.markdown("---")
+    st.markdown("""
+    **💡 Consejos de Inversión:**
+    - **Diversificación**: No ponga todos sus huevos en una sola canasta
+    - **Horizonte temporal**: A mayor plazo, mayor potencial de crecimiento
+    - **Contribuciones regulares**: Los aportes mensuales aceleran el crecimiento
+    - **Revisión periódica**: Monitoree y ajuste su estrategia regularmente
+    
+    **⚠️ Advertencias:**
+    - Los retornos pasados no garantizan resultados futuros
+    - Considere la inflación y los impuestos en sus cálculos
+    - Diversifique entre diferentes clases de activos
+    - Consulte con un asesor financiero para decisiones importantes
+    """)
 
 # --- FIN DEL ARCHIVO ---
 
