@@ -3724,7 +3724,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         "¿Con qué universo de activos desea optimizar?",
         ["Portafolio actual", "Universo aleatorio"],
         help="Puede optimizar con sus activos actuales o simular con un universo aleatorio por tipo/cantidad.",
-        key="universe_optimization"
+        key=f"universe_optimization_{id_cliente}"
     )
     if universo == "Portafolio actual":
         universe_activos = [
@@ -3736,20 +3736,20 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     else:
         st.info("Seleccione el universo aleatorio de mercado real")
         paneles = ['acciones', 'cedears', 'aDRs', 'titulosPublicos', 'obligacionesNegociables']
-        paneles_seleccionados = st.multiselect("Paneles de universo aleatorio", paneles, default=paneles)
+        paneles_seleccionados = st.multiselect("Paneles de universo aleatorio", paneles, default=paneles, key=f"paneles_universo_aleatorio_{id_cliente}")
         capital_mode = st.radio(
             "¿Cómo definir el capital disponible?",
             ["Manual", "Saldo valorizado + disponible (actual)"],
-            key="capital_mode_selection"
+            key=f"capital_mode_selection_{id_cliente}"
         )
         capital_ars = 100000
         capital_auto = valor_total + saldo_disponible
         if capital_mode == "Manual":
-            capital_ars = st.number_input("Capital disponible para universo aleatorio (ARS)", min_value=10000, value=100000)
+            capital_ars = st.number_input("Capital disponible para universo aleatorio (ARS)", min_value=10000, value=100000, key=f"capital_manual_universo_{id_cliente}")
         else:
             st.success(f"Capital valorizado + disponible: ${capital_auto:,.2f}")
             capital_ars = capital_auto
-        cantidad_activos = st.slider("Cantidad de activos por panel", 2, 10, 5)
+        cantidad_activos = st.slider("Cantidad de activos por panel", 2, 10, 5, key=f"cantidad_activos_panel_{id_cliente}")
         fecha_desde = st.session_state.fecha_desde.strftime('%Y-%m-%d')
         fecha_hasta = st.session_state.fecha_hasta.strftime('%Y-%m-%d')
         ajustada = "SinAjustar"
@@ -3796,7 +3796,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         ('equi-weight', 'Pesos Iguales'),
         ('long-only', 'Solo Largos')
     ]
-    target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, max_value=3.0, value=0.8, step=0.01, key="target_sharpe_optimization")
+    target_sharpe = st.number_input("Sharpe objetivo (opcional, Markowitz)", min_value=0.0, max_value=3.0, value=0.8, step=0.01, key=f"target_sharpe_optimization_{id_cliente}")
     st.caption("Si no es posible alcanzar el Sharpe exacto, se mostrará el portafolio más cercano.")
 
     # Cargar datos y preparar manager
@@ -12125,6 +12125,34 @@ def mostrar_ia_gemini_avanzada():
     st.subheader("🎯 Recomendaciones Personalizadas")
     st.write("Funcionalidad en desarrollo...")
 
+def mostrar_optimizacion_portafolio_avanzada(token_acceso, id_cliente):
+    """
+    Función avanzada de optimización de portafolio con funcionalidades adicionales
+    """
+    st.header("🔍 Optimización Avanzada de Portafolio")
+    st.markdown("### Herramientas de Optimización y Análisis de Riesgo")
+    
+    st.info("""
+    **🚀 Funcionalidades Avanzadas:**
+    - Optimización multi-objetivo
+    - Análisis de escenarios
+    - Simulación Monte Carlo
+    - Backtesting de estrategias
+    """)
+    
+    # Funcionalidades en desarrollo
+    st.subheader("📊 Optimización Multi-Objetivo")
+    st.write("Funcionalidad en desarrollo...")
+    
+    st.subheader("🎲 Simulación Monte Carlo")
+    st.write("Funcionalidad en desarrollo...")
+    
+    st.subheader("📈 Backtesting de Estrategias")
+    st.write("Funcionalidad en desarrollo...")
+    
+    st.subheader("🌍 Análisis de Escenarios")
+    st.write("Funcionalidad en desarrollo...")
+
 def main():
     st.title("📊 IOL Portfolio Analyzer")
     st.markdown("### Analizador Avanzado de Portafolios IOL")
@@ -12256,7 +12284,7 @@ def main():
         
         with tab3:
             id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-            mostrar_optimizacion_portafolio(st.session_state.token_acceso, id_cliente)
+            mostrar_optimizacion_portafolio_avanzada(st.session_state.token_acceso, id_cliente)
         
         with tab4:
             mostrar_busqueda_noticias_gemini()
