@@ -27,49 +27,85 @@ st.set_page_config(
 # Estilos CSS personalizados
 st.markdown("""
 <style>
-    /* Estilos generales */
+    /* Estilos generales - Tema Oscuro */
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #1a1a1a;
+        color: #ffffff;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    /* Contenedor principal */
+    .main .block-container {
+        background-color: #1a1a1a;
+        color: #ffffff;
+    }
+    
+    /* Texto general */
+    .stMarkdown, .stText, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+        color: #ffffff !important;
     }
     
     /* Mejora de tarjetas y métricas */
     .stMetric {
-        background-color: white;
+        background-color: #2d2d2d;
         border-radius: 10px;
         padding: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         border-left: 4px solid #0d6efd;
+        color: #ffffff;
+    }
+    
+    .stMetric label {
+        color: #ffffff !important;
+    }
+    
+    .stMetric div[data-testid="metric-container"] {
+        color: #ffffff !important;
     }
     
     /* Mejora de pestañas */
     .stTabs [data-baseweb="tab-list"] {
         gap: 5px;
+        background-color: #2d2d2d;
     }
     
     .stTabs [data-baseweb="tab"] {
         height: 45px;
         padding: 0 20px;
-        background-color: #e9ecef;
+        background-color: #404040;
         border-radius: 8px !important;
         font-weight: 500;
         transition: all 0.3s ease;
+        color: #ffffff;
     }
     
     .stTabs [aria-selected="true"] {
         background-color: #0d6efd !important;
         color: white !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
     
     .stTabs [data-baseweb="tab"]:hover {
-        background-color: #dde5ed !important;
+        background-color: #505050 !important;
+        color: #ffffff;
     }
     
     /* Mejora de inputs */
     .stTextInput, .stNumberInput, .stDateInput, .stSelectbox {
-        background-color: white;
+        background-color: #2d2d2d;
         border-radius: 8px;
+        color: #ffffff;
+    }
+    
+    .stTextInput input, .stNumberInput input, .stDateInput input {
+        background-color: #2d2d2d !important;
+        color: #ffffff !important;
+        border: 1px solid #404040;
+    }
+    
+    .stSelectbox select {
+        background-color: #2d2d2d !important;
+        color: #ffffff !important;
     }
     
     /* Botones */
@@ -77,16 +113,19 @@ st.markdown("""
         border-radius: 8px;
         font-weight: 500;
         transition: all 0.2s;
+        background-color: #0d6efd;
+        color: #ffffff;
     }
     
     .stButton>button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        background-color: #0056b3;
     }
     
     /* Barra lateral */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2c3e50, #1a1a2e);
+        background: linear-gradient(180deg, #1a1a1a, #2d2d2d);
         color: white;
     }
     
@@ -98,28 +137,85 @@ st.markdown("""
         color: white !important;
     }
     
-    [data-testid="stSidebar"] .stTextInput label {
-        color: white !important;
-    }
-    
-    /* Títulos */
-    h1, h2, h3, h4, h5, h6 {
-        color: #2c3e50;
-        font-weight: 600;
-    }
-    
     /* Tablas */
-    .dataframe {
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    .stDataFrame {
+        background-color: #2d2d2d;
+        color: #ffffff;
     }
     
-    /* Progress bar */
-    .stProgress > div > div > div {
-        background-color: #0d6efd;
+    .stDataFrame table {
+        background-color: #2d2d2d;
+        color: #ffffff;
+    }
+    
+    .stDataFrame th, .stDataFrame td {
+        background-color: #2d2d2d !important;
+        color: #ffffff !important;
+        border: 1px solid #404040;
+    }
+    
+    /* Alertas y mensajes */
+    .stAlert {
+        background-color: #2d2d2d;
+        color: #ffffff;
+        border: 1px solid #404040;
+    }
+    
+    /* Gráficos */
+    .js-plotly-plot {
+        background-color: #2d2d2d !important;
+    }
+    
+    /* Listas */
+    ul, ol {
+        color: #ffffff !important;
+    }
+    
+    li {
+        color: #ffffff !important;
+    }
+    
+    /* Enlaces */
+    a {
+        color: #0d6efd !important;
+    }
+    
+    a:hover {
+        color: #0056b3 !important;
+    }
+    
+    /* Separadores */
+    hr {
+        border-color: #404040;
+    }
+    
+    /* Formularios */
+    .stForm {
+        background-color: #2d2d2d;
+        border: 1px solid #404040;
+        border-radius: 10px;
+        padding: 20px;
+    }
+    
+    /* Spinner */
+    .stSpinner {
+        background-color: #2d2d2d;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        background-color: #2d2d2d !important;
+        color: #ffffff !important;
+        border: 1px solid #404040;
+    }
+    
+    .streamlit-expanderContent {
+        background-color: #2d2d2d;
+        color: #ffffff;
+        border: 1px solid #404040;
     }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 def obtener_encabezado_autorizacion(token_portador):
     return {
@@ -462,17 +558,127 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         return None
 
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
+    """Obtiene el portafolio de un cliente para un país específico"""
     url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
         respuesta = requests.get(url_portafolio, headers=encabezados)
         if respuesta.status_code == 200:
             return respuesta.json()
+        elif respuesta.status_code == 401:
+            st.warning(f"⚠️ No autorizado para acceder al portafolio de {pais}")
+            return None
         else:
+            st.warning(f"⚠️ Error {respuesta.status_code} al obtener portafolio de {pais}")
             return None
     except Exception as e:
-        st.error(f'Error al obtener portafolio: {str(e)}')
+        st.error(f'Error al obtener portafolio de {pais}: {str(e)}')
         return None
+
+def obtener_portafolios_completos(token_portador, id_cliente):
+    """Obtiene los portafolios de Argentina y Estados Unidos"""
+    portafolios = {}
+    
+    # Obtener portafolio argentino
+    portafolio_ar = obtener_portafolio(token_portador, id_cliente, 'Argentina')
+    if portafolio_ar:
+        portafolios['Argentina'] = portafolio_ar
+    
+    # Obtener portafolio estadounidense - probar diferentes formatos
+    portafolio_us = None
+    formatos_pais = ['Estados Unidos', 'USA', 'US', 'estados_Unidos']
+    
+    for formato in formatos_pais:
+        portafolio_us = obtener_portafolio(token_portador, id_cliente, formato)
+        if portafolio_us:
+            st.success(f"✅ Portfolio USA obtenido con formato: '{formato}'")
+            break
+    
+    if portafolio_us:
+        portafolios['Estados_Unidos'] = portafolio_us
+    
+    return portafolios
+
+def crear_portfolio_usa_template():
+    """Crea un portfolio USA de ejemplo para testing cuando la API no está disponible"""
+    return {
+        'activos': [
+            {
+                'titulo': {
+                    'simbolo': 'AAPL',
+                    'descripcion': 'Apple Inc.',
+                    'tipo': 'STOCK',
+                    'mercado': 'NASDAQ'
+                },
+                'cantidad': 100,
+                'valorizado': 15000.0,
+                'valuacionDolar': 15000.0
+            },
+            {
+                'titulo': {
+                    'simbolo': 'MSFT',
+                    'descripcion': 'Microsoft Corporation',
+                    'tipo': 'STOCK',
+                    'mercado': 'NASDAQ'
+                },
+                'cantidad': 50,
+                'valorizado': 18000.0,
+                'valuacionDolar': 18000.0
+            },
+            {
+                'titulo': {
+                    'simbolo': 'SPY',
+                    'descripcion': 'SPDR S&P 500 ETF Trust',
+                    'tipo': 'ETF',
+                    'mercado': 'NYSE'
+                },
+                'cantidad': 200,
+                'valorizado': 80000.0,
+                'valuacionDolar': 80000.0
+            }
+        ],
+        'total': 113000.0,
+        'moneda': 'USD'
+    }
+
+def probar_formatos_pais(token_portador, id_cliente):
+    """Función de debug para probar diferentes formatos de país en la API"""
+    st.markdown("### 🔍 **Debug: Probando Formatos de País**")
+    
+    formatos_a_probar = [
+        'Argentina', 'Estados Unidos', 'USA', 'US', 'estados_Unidos',
+        'EstadosUnidos', 'estadosunidos', 'ESTADOS_UNIDOS'
+    ]
+    
+    resultados = {}
+    
+    for formato in formatos_a_probar:
+        with st.spinner(f"Probando formato: '{formato}'"):
+            try:
+                url = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{formato}'
+                headers = obtener_encabezado_autorizacion(token_portador)
+                respuesta = requests.get(url, headers=headers, timeout=10)
+                
+                resultados[formato] = {
+                    'status_code': respuesta.status_code,
+                    'success': respuesta.status_code == 200,
+                    'data': respuesta.json() if respuesta.status_code == 200 else None
+                }
+                
+                if respuesta.status_code == 200:
+                    st.success(f"✅ '{formato}': Status {respuesta.status_code}")
+                else:
+                    st.warning(f"⚠️ '{formato}': Status {respuesta.status_code}")
+                    
+            except Exception as e:
+                resultados[formato] = {
+                    'status_code': 'ERROR',
+                    'success': False,
+                    'error': str(e)
+                }
+                st.error(f"❌ '{formato}': Error - {str(e)}")
+    
+    return resultados
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
@@ -2288,9 +2494,9 @@ def detectar_moneda_portafolio(portafolio):
         tipo = titulo.get('tipo', '').upper()
         
         # Detectar por mercado
-        if mercado in ['NYSE', 'NASDAQ', 'AMEX', 'OTC']:
+        if mercado in ['NYSE', 'NASDAQ', 'AMEX', 'OTC', 'NASDAQ_OTC']:
             indicadores_usd += 2  # Peso alto para mercados estadounidenses
-        elif mercado in ['BCBA', 'BCRA']:
+        elif mercado in ['BCBA', 'BCRA', 'ROFEX']:
             indicadores_ars += 2  # Peso alto para mercados argentinos
         
         # Detectar por tipo de instrumento
@@ -2335,28 +2541,28 @@ def obtener_formato_moneda(moneda):
         return "ARS", "AR$", "Pesos Argentinos"
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador):
+def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
     # Detectar moneda del portafolio
     moneda_portafolio = detectar_moneda_portafolio(portafolio)
     codigo_moneda, simbolo_moneda, nombre_moneda = obtener_formato_moneda(moneda_portafolio)
     
-    st.markdown(f"### 📊 **INFORME AUTOMÁTICO COMPLETO DEL PORTAFOLIO ({codigo_moneda})**")
+    # Título con bandera del país
+    if pais == "Argentina":
+        st.markdown(f"## 🇦🇷 **Portfolio Argentina - {codigo_moneda}**")
+    else:
+        st.markdown(f"## 🇺🇸 **Portfolio USA - {codigo_moneda}**")
+    
     st.markdown("---")
     
-    # Mostrar información de moneda
-    col1, col2, col3 = st.columns(3)
+    # Información de moneda simplificada
+    col1, col2 = st.columns(2)
     with col1:
-        st.info(f"💱 **Moneda del Portafolio**: {codigo_moneda}")
+        st.info(f"💱 **Moneda**: {codigo_moneda}")
     with col2:
         if moneda_portafolio == "USD":
-            st.success("🇺🇸 **Portafolio en Dólares Estadounidenses**")
+            st.success("🇺🇸 **Dólares Estadounidenses**")
         else:
-            st.success("🇦🇷 **Portafolio en Pesos Argentinos**")
-    with col3:
-        if moneda_portafolio == "USD":
-            st.info("📊 **Análisis en USD** - Todas las métricas se calculan en dólares")
-        else:
-            st.info("📊 **Análisis en ARS** - Todas las métricas se calculan en pesos")
+            st.success("🇦🇷 **Pesos Argentinos**")
     
     st.markdown("---")
     
@@ -2515,24 +2721,24 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         st.error(f"❌ Error al calcular métricas: {str(e)}")
         metricas = {}
     
-    # === SECCIÓN 1: RESUMEN GENERAL ===
-    st.markdown("## 📊 **RESUMEN GENERAL DEL PORTAFOLIO**")
+    # === RESUMEN GENERAL ===
+    st.markdown("## 📊 **Resumen del Portfolio**")
     
     # Métricas principales en columnas
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("💰 **Valor Total**", f"{simbolo_moneda}{valor_total:,.2f} {codigo_moneda}")
+        st.metric("💰 **Valor Total**", f"{simbolo_moneda}{valor_total:,.2f}")
     with col2:
-        st.metric("📈 **Total de Activos**", len(datos_activos))
+        st.metric("📈 **Activos**", len(datos_activos))
     with col3:
-        st.metric("🎯 **Símbolos Únicos**", df_activos['Símbolo'].nunique())
+        st.metric("🎯 **Símbolos**", df_activos['Símbolo'].nunique())
     with col4:
-        st.metric("🏦 **Tipos de Activos**", df_activos['Tipo'].nunique())
+        st.metric("🏦 **Tipos**", df_activos['Tipo'].nunique())
     
     st.markdown("---")
     
-    # === SECCIÓN 2: DISTRIBUCIÓN Y COMPOSICIÓN ===
-    st.markdown("## 📊 **DISTRIBUCIÓN Y COMPOSICIÓN**")
+    # === DISTRIBUCIÓN ===
+    st.markdown("## 📊 **Distribución del Portfolio**")
     
     col1, col2 = st.columns([2, 1])
     
@@ -2548,33 +2754,35 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'])
             )])
             fig_pie.update_layout(
-                title="Distribución por Tipo de Activo",
+                title="Distribución por Tipo",
                 height=400,
-                showlegend=True
+                showlegend=True,
+                paper_bgcolor='#2d2d2d',
+                plot_bgcolor='#2d2d2d',
+                font=dict(color='#ffffff')
             )
             st.plotly_chart(fig_pie, use_container_width=True)
     
     with col2:
-        # Tabla de distribución
-        st.markdown("#### 📋 **Distribución por Tipo**")
+        # Tabla de distribución simplificada
+        st.markdown("#### 📋 **Resumen por Tipo**")
         tipo_dist = df_activos.groupby('Tipo').agg({
             'Valuación': ['sum', 'count']
         }).round(2)
-        tipo_dist.columns = ['Valor Total', 'Cantidad']
-        tipo_dist['Porcentaje'] = (tipo_dist['Valor Total'] / valor_total * 100).round(2)
-        tipo_dist = tipo_dist.sort_values('Valor Total', ascending=False)
+        tipo_dist.columns = ['Valor', 'Cantidad']
+        tipo_dist['%'] = (tipo_dist['Valor'] / valor_total * 100).round(1)
+        tipo_dist = tipo_dist.sort_values('Valor', ascending=False)
         
+        # Mostrar como tabla simple
         for tipo, row in tipo_dist.iterrows():
             st.markdown(f"**{tipo}**")
-            st.markdown(f"- Valor: {simbolo_moneda}{row['Valor Total']:,.2f} {codigo_moneda}")
-            st.markdown(f"- Cantidad: {row['Cantidad']}")
-            st.markdown(f"- Peso: {row['Porcentaje']:.1f}%")
+            st.markdown(f"{simbolo_moneda}{row['Valor']:,.0f} ({row['%']:.0f}%)")
             st.markdown("---")
     
     st.markdown("---")
     
-    # === SECCIÓN 3: ANÁLISIS DE RIESGO ===
-    st.markdown("## ⚖️ **ANÁLISIS DE RIESGO**")
+    # === ANÁLISIS DE RIESGO ===
+    st.markdown("## ⚖️ **Análisis de Riesgo**")
     
     if metricas and isinstance(metricas, dict):
         col1, col2, col3 = st.columns(3)
@@ -2583,17 +2791,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         concentracion = metricas.get('concentracion', 0)
         concentracion_pct = concentracion * 100
         with col1:
-            st.metric("🎯 **Concentración**", 
-                     f"{concentracion_pct:.1f}%",
-                     help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+            st.metric("🎯 **Concentración**", f"{concentracion_pct:.1f}%")
         
         # Volatilidad
         volatilidad = metricas.get('std_dev_activo', 0)
         volatilidad_pct = volatilidad * 100
         with col2:
-            st.metric("📊 **Volatilidad Anual**", 
-                     f"{volatilidad_pct:.1f}%",
-                     help="Riesgo medido como desviación estándar de retornos anuales")
+            st.metric("📊 **Volatilidad**", f"{volatilidad_pct:.1f}%")
         
         # Nivel de concentración
         if concentracion < 0.3:
@@ -2604,10 +2808,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             concentracion_status = "🔴 Alta"
         
         with col3:
-            st.metric("⚠️ **Nivel de Riesgo**", concentracion_status)
+            st.metric("⚠️ **Riesgo**", concentracion_status)
         
-        # Probabilidades
-        st.markdown("#### 🎯 **Probabilidades de Rendimiento**")
+        # Probabilidades simplificadas
+        st.markdown("#### 🎯 **Probabilidades**")
         cols = st.columns(4)
         probs = metricas.get('probabilidades', {})
         
@@ -2616,45 +2820,22 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         with cols[1]:
             st.metric("📉 **Pérdida**", f"{probs.get('perdida', 0)*100:.1f}%")
         with cols[2]:
-            st.metric("🚀 **Ganancia >10%**", f"{probs.get('ganancia_mayor_10', 0)*100:.1f}%")
+            st.metric("🚀 **>10%**", f"{probs.get('ganancia_mayor_10', 0)*100:.1f}%")
         with cols[3]:
-            st.metric("⚠️ **Pérdida >10%**", f"{probs.get('perdida_mayor_10', 0)*100:.1f}%")
+            st.metric("⚠️ **<-10%**", f"{probs.get('perdida_mayor_10', 0)*100:.1f}%")
         
-        # Recomendaciones de riesgo
-        st.markdown("#### 💡 **Recomendaciones de Riesgo**")
+        # Recomendaciones simplificadas
         if concentracion > 0.5:
-            st.warning("""
-            **⚠️ Portafolio Altamente Concentrado**  
-            Considere diversificar sus inversiones para reducir el riesgo.
-            """)
+            st.warning("⚠️ **Portfolio muy concentrado** - Considere diversificar")
         elif concentracion > 0.25:
-            st.info("""
-            **ℹ️ Concentración Moderada**  
-            Podría mejorar su diversificación para optimizar el riesgo.
-            """)
+            st.info("ℹ️ **Concentración moderada** - Podría mejorar diversificación")
         else:
-            st.success("""
-            **✅ Buena Diversificación**  
-            Su portafolio está bien diversificado.
-            """)
-        
-        # Ratio riesgo-retorno
-        ratio_riesgo_retorno = metricas.get('retorno_esperado_anual', 0) / metricas.get('riesgo_anual', 1) if metricas.get('riesgo_anual', 0) > 0 else 0
-        if ratio_riesgo_retorno > 0.5:
-            st.success("""
-            **✅ Buen Balance Riesgo-Retorno**  
-            La relación entre riesgo y retorno es favorable.
-            """)
-        else:
-            st.warning("""
-            **⚠️ Revisar Balance Riesgo-Retorno**  
-            El riesgo podría ser alto en relación al retorno esperado.
-            """)
+            st.success("✅ **Buena diversificación**")
     
     st.markdown("---")
     
-    # === SECCIÓN 4: PROYECCIONES Y RENDIMIENTO ===
-    st.markdown("## 📈 **PROYECCIONES Y RENDIMIENTO**")
+    # === PROYECCIONES ===
+    st.markdown("## 📈 **Proyecciones**")
     
     if metricas and isinstance(metricas, dict):
         col1, col2, col3 = st.columns(3)
@@ -2663,9 +2844,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         retorno_esperado = metricas.get('retorno_esperado_anual', 0)
         retorno_anual_pct = retorno_esperado * 100
         with col1:
-            st.metric("📊 **Retorno Esperado Anual**", 
-                     f"{retorno_anual_pct:+.1f}%",
-                     help="Retorno anual esperado basado en datos históricos")
+            st.metric("📊 **Retorno Esperado**", f"{retorno_anual_pct:+.1f}%")
         
         # Escenarios
         pl_max = metricas.get('pl_esperado_max', 0)
@@ -2674,29 +2853,25 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         pesimista_pct = (pl_min / valor_total) * 100 if valor_total > 0 else 0
         
         with col2:
-            st.metric("🚀 **Escenario Optimista (95%)**", 
-                     f"{optimista_pct:+.1f}%",
-                     help="Mejor escenario con 95% de confianza")
+            st.metric("🚀 **Optimista (95%)**", f"{optimista_pct:+.1f}%")
         with col3:
-            st.metric("⚠️ **Escenario Pesimista (5%)**", 
-                     f"{pesimista_pct:+.1f}%",
-                     help="Peor escenario con 5% de confianza")
+            st.metric("⚠️ **Pesimista (5%)**", f"{pesimista_pct:+.1f}%")
         
-        # Proyecciones monetarias
-        st.markdown("#### 💰 **Proyecciones Monetarias**")
+        # Proyecciones monetarias simplificadas
+        st.markdown("#### 💰 **Proyecciones**")
         cols = st.columns(3)
         
         with cols[0]:
-            st.metric("📊 **Proyección Esperada**", f"{simbolo_moneda}{valor_total * (1 + retorno_esperado):,.2f} {codigo_moneda}")
+            st.metric("📊 **Esperada**", f"{simbolo_moneda}{valor_total * (1 + retorno_esperado):,.0f}")
         with cols[1]:
-            st.metric("🚀 **Proyección Optimista**", f"{simbolo_moneda}{valor_total * (1 + optimista_pct/100):,.2f} {codigo_moneda}")
+            st.metric("🚀 **Optimista**", f"{simbolo_moneda}{valor_total * (1 + optimista_pct/100):,.0f}")
         with cols[2]:
-            st.metric("⚠️ **Proyección Pesimista**", f"{simbolo_moneda}{valor_total * (1 + pesimista_pct/100):,.2f} {codigo_moneda}")
+            st.metric("⚠️ **Pesimista**", f"{simbolo_moneda}{valor_total * (1 + pesimista_pct/100):,.0f}")
     
     st.markdown("---")
     
-    # === SECCIÓN 5: ANÁLISIS HISTÓRICO ===
-    st.markdown("## 📊 **ANÁLISIS HISTÓRICO Y EVOLUCIÓN**")
+    # === ANÁLISIS HISTÓRICO ===
+    st.markdown("## 📊 **Análisis Histórico**")
     
     # Configuración del horizonte
     horizonte_inversion = st.selectbox(
@@ -2712,13 +2887,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         ],
         format_func=lambda x: x[0],
         index=3,  # Por defecto 180 días
-        help="Seleccione el período de tiempo para el análisis de retornos"
     )
     
     dias_analisis = horizonte_inversion[1]
-    st.info("ℹ️ **Nota**: Los datos se obtienen en frecuencia diaria desde la API de IOL")
+    st.info("ℹ️ Datos diarios desde API de IOL")
     
-    with st.spinner(f"🔄 Analizando evolución histórica del portafolio para {dias_analisis} días..."):
+    with st.spinner(f"🔄 Analizando {dias_analisis} días..."):
         try:
             # Obtener fechas para el histórico
             fecha_hasta = datetime.now().strftime('%Y-%m-%d')
@@ -2768,7 +2942,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 'serie': serie
                             })
                         else:
-                            st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+                            st.warning(f"⚠️ Sin datos para {simbolo}")
                 
                 if len(activos_exitosos) > 0:
                     # Crear DataFrame del portafolio
@@ -2855,28 +3029,30 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                              annotation_text=f"P95: {simbolo_moneda}{percentil_95:,.2f}")
                             
                             fig_hist.update_layout(
-                                title=f"📊 Distribución del Valor Total del Portafolio ({codigo_moneda})",
-                                xaxis_title=f"Valor del Portafolio ({codigo_moneda})",
+                                title=f"📊 Distribución del Portfolio",
+                                xaxis_title=f"Valor ({codigo_moneda})",
                                 yaxis_title="Frecuencia",
                                 height=500,
                                 showlegend=False,
-                                template='plotly_white'
+                                paper_bgcolor='#2d2d2d',
+                                plot_bgcolor='#2d2d2d',
+                                font=dict(color='#ffffff')
                             )
                             
                             st.plotly_chart(fig_hist, use_container_width=True)
                             
                             # Estadísticas del histograma
-                            st.markdown("#### 📊 **Estadísticas del Histograma**")
+                            st.markdown("#### 📊 **Estadísticas**")
                             col1, col2, col3, col4 = st.columns(4)
                             
                             with col1:
-                                st.metric("📊 **Valor Promedio**", f"{simbolo_moneda}{media_valor:,.2f} {codigo_moneda}")
+                                st.metric("📊 **Promedio**", f"{simbolo_moneda}{media_valor:,.0f}")
                             with col2:
-                                st.metric("📈 **Valor Mediano**", f"{simbolo_moneda}{mediana_valor:,.2f} {codigo_moneda}")
+                                st.metric("📈 **Mediano**", f"{simbolo_moneda}{mediana_valor:,.0f}")
                             with col3:
-                                st.metric("📉 **Valor Mínimo (P5)**", f"{simbolo_moneda}{percentil_5:,.2f} {codigo_moneda}")
+                                st.metric("📉 **Mínimo (P5)**", f"{simbolo_moneda}{percentil_5:,.0f}")
                             with col4:
-                                st.metric("🚀 **Valor Máximo (P95)**", f"{simbolo_moneda}{percentil_95:,.2f} {codigo_moneda}")
+                                st.metric("🚀 **Máximo (P95)**", f"{simbolo_moneda}{percentil_95:,.0f}")
                             
                             # Gráfico de evolución temporal
                             fig_evolucion = go.Figure()
@@ -2889,11 +3065,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             ))
                             
                             fig_evolucion.update_layout(
-                                title=f"📈 Evolución Temporal del Portafolio ({codigo_moneda})",
+                                title=f"📈 Evolución Temporal",
                                 xaxis_title="Fecha",
-                                yaxis_title=f"Valor del Portafolio ({codigo_moneda})",
+                                yaxis_title=f"Valor ({codigo_moneda})",
                                 height=400,
-                                template='plotly_white'
+                                paper_bgcolor='#2d2d2d',
+                                plot_bgcolor='#2d2d2d',
+                                font=dict(color='#ffffff')
                             )
                             
                             st.plotly_chart(fig_evolucion, use_container_width=True)
@@ -3046,7 +3224,30 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     
     st.markdown("---")
     
-    # === SECCIÓN 7: RECOMENDACIONES FINALES ===
+    # === TABLA CONSOLIDADA ===
+    st.markdown("## 📊 **Tabla Consolidada del Portfolio**")
+    
+    # Crear tabla consolidada con métricas clave
+    df_consolidado = df_activos.copy()
+    df_consolidado['Peso (%)'] = (df_consolidado['Valuación'] / valor_total * 100).round(1)
+    df_consolidado['Valor Formateado'] = df_consolidado['Valuación'].apply(
+        lambda x: f"{simbolo_moneda}{x:,.0f}" if x > 0 else "N/A"
+    )
+    df_consolidado['País'] = pais
+    
+    # Ordenar por valor
+    df_consolidado = df_consolidado.sort_values('Valuación', ascending=False)
+    
+    # Mostrar tabla consolidada
+    st.dataframe(
+        df_consolidado[['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valor Formateado', 'Peso (%)', 'País']],
+        use_container_width=True,
+        height=300
+    )
+    
+    st.markdown("---")
+    
+    # === RECOMENDACIONES FINALES ===
     st.markdown("## 💡 **RECOMENDACIONES Y CONCLUSIONES**")
     
     # Análisis general del portafolio
@@ -3876,21 +4077,156 @@ def mostrar_analisis_portafolio():
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
 
-    st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
+    st.title(f"🌍 Análisis de Portafolios Globales - {nombre_cliente}")
     st.markdown("---")
     
-    # Análisis completo y unificado del portafolio
-    st.markdown("## 📊 **ANÁLISIS COMPLETO Y UNIFICADO DEL PORTAFOLIO**")
+    # Obtener portafolios de ambos países
+    with st.spinner("🔄 Obteniendo portafolios..."):
+        portafolios = obtener_portafolios_completos(token_acceso, id_cliente)
     
-    # Obtener datos del portafolio
-    portafolio = obtener_portafolio(token_acceso, id_cliente)
-    if portafolio:
-        mostrar_resumen_portafolio(portafolio, token_acceso)
+    if not portafolios:
+        st.warning("⚠️ No se pudieron obtener los portafolios del cliente")
+        return
+    
+    # Mostrar resumen consolidado
+    st.markdown("## 🌍 **Resumen Consolidado de Portafolios**")
+    
+    # Información sobre disponibilidad de portafolios
+    if 'Estados_Unidos' not in portafolios:
+        st.info("ℹ️ **Nota**: El portfolio de Estados Unidos requiere autorización adicional. Si no lo ve, contacte a su asesor.")
+    
+    # Calcular totales por país
+    totales_por_pais = {}
+    for pais, portafolio in portafolios.items():
+        activos = portafolio.get('activos', [])
+        valor_total = sum(activo.get('valorizado', 0) for activo in activos)
+        totales_por_pais[pais] = valor_total
+    
+    # Mostrar métricas consolidadas
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        total_ar = totales_por_pais.get('Argentina', 0)
+        st.metric("🇦🇷 **Portfolio AR**", f"AR${total_ar:,.0f}")
+    with col2:
+        total_us = totales_por_pais.get('Estados_Unidos', 0)
+        st.metric("🇺🇸 **Portfolio US**", f"US${total_us:,.0f}")
+    with col3:
+        total_activos = sum(len(portafolio.get('activos', [])) for portafolio in portafolios.values())
+        st.metric("📊 **Total Activos**", total_activos)
+    
+    st.markdown("---")
+    
+    # Mostrar cada portafolio individualmente
+    for pais, portafolio in portafolios.items():
+        mostrar_resumen_portafolio(portafolio, token_acceso, pais)
+        st.markdown("---")
+    
+    # Mostrar placeholder para portfolio US si no está disponible
+    if 'Estados_Unidos' not in portafolios:
+        st.markdown("## 🇺🇸 **Portfolio USA - No Disponible**")
+        st.info("""
+        **⚠️ Portfolio de Estados Unidos no accesible**
+        
+        Este portfolio requiere autorización adicional de IOL. 
+        Para acceder, contacte a su asesor financiero o verifique sus permisos.
+        
+        **Posibles causas:**
+        - Permisos insuficientes en la cuenta
+        - Formato de país incorrecto en la API
+        - Portfolio USA no habilitado para este cliente
+        
+        **Formatos probados:** Argentina, Estados Unidos, USA, US, estados_Unidos
+        **Endpoint API**: `/api/v2/Asesores/Portafolio/{id_cliente}/{pais}`
+        """)
+        
+        # Botón para reintentar con diferentes formatos
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🔄 Reintentar obtener Portfolio USA"):
+                st.rerun()
+        
+        with col2:
+            if st.button("🔍 Debug: Probar Formatos de País"):
+                st.session_state.mostrar_debug_pais = True
+        
+        with col3:
+            if st.button("📋 Usar Portfolio USA Template"):
+                st.session_state.usar_template_usa = True
+        
+        # Mostrar debug si está activado
+        if st.session_state.get('mostrar_debug_pais', False):
+            probar_formatos_pais(token_acceso, id_cliente)
+        
+        # Usar template si está activado
+        if st.session_state.get('usar_template_usa', False):
+            st.success("✅ Usando Portfolio USA Template para demostración")
+            portafolios['Estados_Unidos'] = crear_portfolio_usa_template()
+            st.rerun()
+        
+        st.markdown("---")
+    
+    # === TABLA CONSOLIDADA GLOBAL ===
+    st.markdown("## 🌍 **Tabla Consolidada Global - Todos los Portfolios**")
+    
+    # Crear tabla consolidada global
+    df_global = pd.DataFrame()
+    
+    for pais, portafolio in portafolios.items():
+        activos = portafolio.get('activos', [])
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            descripcion = titulo.get('descripcion', 'Sin descripción')
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            valorizado = activo.get('valorizado', 0)
+            
+            # Agregar a DataFrame global
+            df_global = pd.concat([df_global, pd.DataFrame([{
+                'País': pais,
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valor': valorizado,
+                'Moneda': 'USD' if pais == 'Estados_Unidos' else 'ARS'
+            }])], ignore_index=True)
+    
+    if not df_global.empty:
+        # Calcular peso total global
+        valor_total_global = df_global['Valor'].sum()
+        df_global['Peso (%)'] = (df_global['Valor'] / valor_total_global * 100).round(1)
+        
+        # Formatear valores
+        df_global['Valor Formateado'] = df_global.apply(
+            lambda row: f"${row['Valor']:,.0f}" if row['Valor'] > 0 else "N/A", axis=1
+        )
+        
+        # Ordenar por valor
+        df_global = df_global.sort_values('Valor', ascending=False)
+        
+        # Mostrar tabla consolidada global
+        st.dataframe(
+            df_global[['País', 'Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valor Formateado', 'Peso (%)', 'Moneda']],
+            use_container_width=True,
+            height=400
+        )
+        
+        # Resumen global
+        st.markdown("#### 📊 **Resumen Global**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("🌍 **Total Global**", f"${valor_total_global:,.0f}")
+        with col2:
+            st.metric("🇦🇷 **Portfolio AR**", f"AR${totales_por_pais.get('Argentina', 0):,.0f}")
+        with col3:
+            st.metric("🇺🇸 **Portfolio US**", f"US${totales_por_pais.get('Estados_Unidos', 0):,.0f}")
     else:
-        st.warning("No se pudo obtener el portafolio del cliente")
+        st.info("ℹ️ No hay activos para mostrar en la tabla consolidada")
+    
+    st.markdown("---")
     
     # Información adicional del estado de cuenta
-    st.markdown("---")
     st.markdown("## 💰 **ESTADO DE CUENTA COMPLEMENTARIO**")
     estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
     if estado_cuenta:
@@ -3973,6 +4309,10 @@ def main():
         st.session_state.mostrar_cotizaciones = False
     if 'mostrar_optimizacion' not in st.session_state:
         st.session_state.mostrar_optimizacion = False
+    if 'mostrar_debug_pais' not in st.session_state:
+        st.session_state.mostrar_debug_pais = False
+    if 'usar_template_usa' not in st.session_state:
+        st.session_state.usar_template_usa = False
     if 'pagina_actual' not in st.session_state:
         st.session_state.pagina_actual = "inicio"
     
@@ -4147,18 +4487,19 @@ def mostrar_pagina_inicio():
         <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
         <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
         <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                <h3>📊 Análisis Completo</h3>
-                <p>Visualice todos sus activos en un solo lugar con detalle</p>
-            </div>
-            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                <h3>📈 Gráficos Interactivos</h3>
-                <p>Comprenda su portafolio con visualizaciones avanzadas</p>
-            </div>
-            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                <h3>⚖️ Gestión de Riesgo</h3>
-                <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-            </div>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+            <h3>🌍 Portfolios Globales</h3>
+            <p>Analice sus portfolios de Argentina y Estados Unidos</p>
+            <small style="opacity: 0.8;">🇺🇸 Portfolio USA con template de demostración</small>
+        </div>
+        <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+            <h3>📊 Análisis Unificado</h3>
+            <p>Vea todos sus activos consolidados en una sola tabla</p>
+        </div>
+        <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+            <h3>⚖️ Gestión de Riesgo</h3>
+            <p>Identifique concentraciones y optimice su perfil de riesgo</p>
+        </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -4168,17 +4509,18 @@ def mostrar_pagina_inicio():
     cols = st.columns(3)
     with cols[0]:
         st.markdown("""
-        **📊 Análisis Detallado**  
-        - Valuación completa de activos  
-        - Distribución por tipo de instrumento  
-        - Concentración del portafolio  
+        **🌍 Portfolios Globales**  
+        - Portfolio Argentina (ARS)  
+        - Portfolio Estados Unidos (USD)  
+        - Análisis consolidado  
+        - Template USA para demostración  
         """)
     with cols[1]:
         st.markdown("""
-        **📈 Herramientas Profesionales**  
-        - Optimización de portafolio  
-        - Análisis técnico avanzado  
-        - Proyecciones de rendimiento  
+        **📊 Análisis Unificado**  
+        - Tabla consolidada global  
+        - Métricas por país  
+        - Gestión de riesgo integrada  
         """)
     with cols[2]:
         st.markdown("""
