@@ -559,7 +559,13 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
 
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     """Obtiene el portafolio de un cliente para un país específico"""
-    url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
+    # Usar el endpoint correcto según la documentación de la API
+    if pais == 'estados_Unidos':
+        url_portafolio = f'https://api.invertironline.com/api/v2/portafolio/{pais}'
+    else:
+        # Para otros países, usar el endpoint de asesores
+        url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
+    
     encabezados = obtener_encabezado_autorizacion(token_portador)
     try:
         respuesta = requests.get(url_portafolio, headers=encabezados)
@@ -584,101 +590,19 @@ def obtener_portafolios_completos(token_portador, id_cliente):
     if portafolio_ar:
         portafolios['Argentina'] = portafolio_ar
     
-    # Obtener portafolio estadounidense - probar diferentes formatos
-    portafolio_us = None
-    formatos_pais = ['Estados Unidos', 'USA', 'US', 'estados_Unidos']
-    
-    for formato in formatos_pais:
-        portafolio_us = obtener_portafolio(token_portador, id_cliente, formato)
-        if portafolio_us:
-            st.success(f"✅ Portfolio USA obtenido con formato: '{formato}'")
-            break
+    # Obtener portafolio estadounidense usando el formato correcto
+    portafolio_us = obtener_portafolio(token_portador, id_cliente, 'estados_Unidos')
+    if portafolio_us:
+        st.success("✅ Portfolio USA obtenido correctamente")
     
     if portafolio_us:
         portafolios['Estados_Unidos'] = portafolio_us
     
     return portafolios
 
-def crear_portfolio_usa_template():
-    """Crea un portfolio USA de ejemplo para testing cuando la API no está disponible"""
-    return {
-        'activos': [
-            {
-                'titulo': {
-                    'simbolo': 'AAPL',
-                    'descripcion': 'Apple Inc.',
-                    'tipo': 'STOCK',
-                    'mercado': 'NASDAQ'
-                },
-                'cantidad': 100,
-                'valorizado': 15000.0,
-                'valuacionDolar': 15000.0
-            },
-            {
-                'titulo': {
-                    'simbolo': 'MSFT',
-                    'descripcion': 'Microsoft Corporation',
-                    'tipo': 'STOCK',
-                    'mercado': 'NASDAQ'
-                },
-                'cantidad': 50,
-                'valorizado': 18000.0,
-                'valuacionDolar': 18000.0
-            },
-            {
-                'titulo': {
-                    'simbolo': 'SPY',
-                    'descripcion': 'SPDR S&P 500 ETF Trust',
-                    'tipo': 'ETF',
-                    'mercado': 'NYSE'
-                },
-                'cantidad': 200,
-                'valorizado': 80000.0,
-                'valuacionDolar': 80000.0
-            }
-        ],
-        'total': 113000.0,
-        'moneda': 'USD'
-    }
 
-def probar_formatos_pais(token_portador, id_cliente):
-    """Función de debug para probar diferentes formatos de país en la API"""
-    st.markdown("### 🔍 **Debug: Probando Formatos de País**")
-    
-    formatos_a_probar = [
-        'Argentina', 'Estados Unidos', 'USA', 'US', 'estados_Unidos',
-        'EstadosUnidos', 'estadosunidos', 'ESTADOS_UNIDOS'
-    ]
-    
-    resultados = {}
-    
-    for formato in formatos_a_probar:
-        with st.spinner(f"Probando formato: '{formato}'"):
-            try:
-                url = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{formato}'
-                headers = obtener_encabezado_autorizacion(token_portador)
-                respuesta = requests.get(url, headers=headers, timeout=10)
-                
-                resultados[formato] = {
-                    'status_code': respuesta.status_code,
-                    'success': respuesta.status_code == 200,
-                    'data': respuesta.json() if respuesta.status_code == 200 else None
-                }
-                
-                if respuesta.status_code == 200:
-                    st.success(f"✅ '{formato}': Status {respuesta.status_code}")
-                else:
-                    st.warning(f"⚠️ '{formato}': Status {respuesta.status_code}")
-                    
-            except Exception as e:
-                resultados[formato] = {
-                    'status_code': 'ERROR',
-                    'success': False,
-                    'error': str(e)
-                }
-                st.error(f"❌ '{formato}': Error - {str(e)}")
-    
-    return resultados
+
+
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
@@ -917,7 +841,7 @@ def mostrar_tasas_caucion(token_portador):
                     showlegend=False
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="cauciones_chart")
             
             # Mostrar resumen estadístico
             if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
@@ -2761,7 +2685,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
                 plot_bgcolor='#2d2d2d',
                 font=dict(color='#ffffff')
             )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, use_container_width=True, key="portfolio_pie_chart")
     
     with col2:
         # Tabla de distribución simplificada
@@ -3039,7 +2963,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
                                 font=dict(color='#ffffff')
                             )
                             
-                            st.plotly_chart(fig_hist, use_container_width=True)
+                            st.plotly_chart(fig_hist, use_container_width=True, key="portfolio_hist_chart")
                             
                             # Estadísticas del histograma
                             st.markdown("#### 📊 **Estadísticas**")
@@ -3074,7 +2998,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
                                 font=dict(color='#ffffff')
                             )
                             
-                            st.plotly_chart(fig_evolucion, use_container_width=True)
+                            st.plotly_chart(fig_evolucion, use_container_width=True, key="portfolio_evolucion_chart")
                             
                             # Contribución de activos
                             if len(activos_exitosos) > 1:
@@ -3098,7 +3022,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
                                     template='plotly_white'
                                 )
                                 
-                                st.plotly_chart(fig_contribucion, use_container_width=True)
+                                st.plotly_chart(fig_contribucion, use_container_width=True, key="portfolio_contribucion_chart")
                             
                             # Análisis de retornos
                             if len(valores_portfolio) > 1:
@@ -3139,7 +3063,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
                                     template='plotly_white'
                                 )
                                 
-                                st.plotly_chart(fig_retornos, use_container_width=True)
+                                st.plotly_chart(fig_retornos, use_container_width=True, key="portfolio_retornos_chart")
                                 
                                 # Estadísticas de retornos
                                 col1, col2 = st.columns(2)
@@ -3473,7 +3397,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                                 yaxis_title="Variación (%)",
                                 height=400
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, use_container_width=True, key="cotizaciones_chart")
                     else:
                         st.warning("No se encontraron títulos para los parámetros seleccionados")
                 else:
@@ -3596,7 +3520,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                         if portfolio_result.returns is not None:
                             st.markdown("#### 📊 Distribución de Retornos del Portafolio Optimizado")
                             fig = portfolio_result.plot_histogram_streamlit()
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, use_container_width=True, key="optimizacion_hist_chart")
                         
                         # Gráfico de evolución temporal del portafolio
                         if hasattr(portfolio_result, 'dataframe_allocation') and portfolio_result.dataframe_allocation is not None:
@@ -3627,7 +3551,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 tickformat='%d/%m/%Y',
                                 tickangle=45
                             )
-                            st.plotly_chart(fig_evolucion, use_container_width=True)
+                            st.plotly_chart(fig_evolucion, use_container_width=True, key="optimizacion_evolucion_chart")
                         
                         # Gráfico de pesos
                         if portfolio_result.weights is not None:
@@ -3653,7 +3577,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                                 title="Distribución Optimizada de Activos",
                                 template='plotly_white'
                             )
-                            st.plotly_chart(fig_pie, use_container_width=True)
+                            st.plotly_chart(fig_pie, use_container_width=True, key="optimizacion_pie_chart")
                         
                     else:
                         st.error("❌ Error en la optimización")
@@ -3711,7 +3635,7 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             height=500
                         )
                         
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="frontera_eficiente_chart")
                         
                         # Tabla comparativa de portafolios
                         st.markdown("#### 📊 Comparación de Estrategias")
@@ -3927,7 +3851,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
                             nticks=10
                         )
                         
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="tecnico_precio_chart")
                         
                         # Gráfico de volumen si está disponible
                         if 'volumen' in df.columns:
@@ -3952,7 +3876,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
                                 tickangle=45
                             )
                             
-                            st.plotly_chart(fig_vol, use_container_width=True)
+                            st.plotly_chart(fig_vol, use_container_width=True, key="tecnico_volumen_chart")
                         
                         # Métricas básicas
                         col1, col2, col3 = st.columns(3)
@@ -4135,32 +4059,11 @@ def mostrar_analisis_portafolio():
         - Formato de país incorrecto en la API
         - Portfolio USA no habilitado para este cliente
         
-        **Formatos probados:** Argentina, Estados Unidos, USA, US, estados_Unidos
-        **Endpoint API**: `/api/v2/Asesores/Portafolio/{id_cliente}/{pais}`
+        **Endpoint API**: `/api/v2/portafolio/estados_Unidos`
         """)
         
-        # Botón para reintentar con diferentes formatos
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("🔄 Reintentar obtener Portfolio USA"):
-                st.rerun()
-        
-        with col2:
-            if st.button("🔍 Debug: Probar Formatos de País"):
-                st.session_state.mostrar_debug_pais = True
-        
-        with col3:
-            if st.button("📋 Usar Portfolio USA Template"):
-                st.session_state.usar_template_usa = True
-        
-        # Mostrar debug si está activado
-        if st.session_state.get('mostrar_debug_pais', False):
-            probar_formatos_pais(token_acceso, id_cliente)
-        
-        # Usar template si está activado
-        if st.session_state.get('usar_template_usa', False):
-            st.success("✅ Usando Portfolio USA Template para demostración")
-            portafolios['Estados_Unidos'] = crear_portfolio_usa_template()
+        # Botón para reintentar
+        if st.button("🔄 Reintentar obtener Portfolio USA"):
             st.rerun()
         
         st.markdown("---")
@@ -4309,10 +4212,7 @@ def main():
         st.session_state.mostrar_cotizaciones = False
     if 'mostrar_optimizacion' not in st.session_state:
         st.session_state.mostrar_optimizacion = False
-    if 'mostrar_debug_pais' not in st.session_state:
-        st.session_state.mostrar_debug_pais = False
-    if 'usar_template_usa' not in st.session_state:
-        st.session_state.usar_template_usa = False
+
     if 'pagina_actual' not in st.session_state:
         st.session_state.pagina_actual = "inicio"
     
@@ -4490,7 +4390,7 @@ def mostrar_pagina_inicio():
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
             <h3>🌍 Portfolios Globales</h3>
             <p>Analice sus portfolios de Argentina y Estados Unidos</p>
-            <small style="opacity: 0.8;">🇺🇸 Portfolio USA con template de demostración</small>
+
         </div>
         <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
             <h3>📊 Análisis Unificado</h3>
@@ -4513,7 +4413,6 @@ def mostrar_pagina_inicio():
         - Portfolio Argentina (ARS)  
         - Portfolio Estados Unidos (USD)  
         - Análisis consolidado  
-        - Template USA para demostración  
         """)
     with cols[1]:
         st.markdown("""
