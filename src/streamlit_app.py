@@ -471,68 +471,8 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         else:
             return None
     except Exception as e:
-        st.error(f'Error al obtener portafolio de {pais}: {str(e)}')
+        st.error(f'Error al obtener portafolio: {str(e)}')
         return None
-
-def obtener_portafolio_consolidado(token_portador, id_cliente):
-    """
-    Obtiene el portafolio consolidado de Argentina y Estados Unidos
-    """
-    portafolio_argentina = obtener_portafolio(token_portador, id_cliente, 'Argentina')
-    portafolio_eeuu = obtener_portafolio(token_portador, id_cliente, 'Estados_Unidos')
-    
-    portafolio_consolidado = {
-        'activos': [],
-        'total_en_pesos': 0,
-        'total_en_dolares': 0,
-        'cuentas': {
-            'Argentina': portafolio_argentina,
-            'Estados_Unidos': portafolio_eeuu
-        }
-    }
-    
-    # Consolidar activos de Argentina
-    if portafolio_argentina and 'activos' in portafolio_argentina:
-        for activo in portafolio_argentina['activos']:
-            activo['pais'] = 'Argentina'
-            activo['moneda'] = 'ARS'
-            portafolio_consolidado['activos'].append(activo)
-    
-    # Consolidar activos de Estados Unidos
-    if portafolio_eeuu and 'activos' in portafolio_eeuu:
-        for activo in portafolio_eeuu['activos']:
-            activo['pais'] = 'Estados Unidos'
-            activo['moneda'] = 'USD'
-            portafolio_consolidado['activos'].append(activo)
-    
-    # Calcular totales
-    for activo in portafolio_consolidado['activos']:
-        try:
-            valuacion = 0
-            campos_valuacion = [
-                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
-                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
-                'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
-            ]
-            
-            for campo in campos_valuacion:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        val = float(activo[campo])
-                        if val > 0:
-                            valuacion = val
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            if activo['moneda'] == 'ARS':
-                portafolio_consolidado['total_en_pesos'] += valuacion
-            elif activo['moneda'] == 'USD':
-                portafolio_consolidado['total_en_dolares'] += valuacion
-        except Exception:
-            continue
-    
-    return portafolio_consolidado
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
@@ -2328,13 +2268,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
     # Crear tabs para organizar mejor la información
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Resumen General", 
-        "🌍 Por País", 
         "⚖️ Análisis de Riesgo", 
         "📈 Proyecciones", 
-        "📋 Detalle de Activos",
-        "📊 Análisis VWAP Históricos"
+        "📋 Detalle de Activos"
     ])
     
     activos = portafolio.get('activos', [])
@@ -2534,48 +2472,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
         
-        # Tab 2: Por País
+        # Tab 2: Análisis de Riesgo
         with tab2:
-            st.subheader("🌍 Distribución por País")
-            
-            # Agrupar activos por país
-            if 'pais' in df_activos.columns:
-                pais_stats = df_activos.groupby('pais')['Valuación'].sum().reset_index()
-                
-                # Mostrar métricas por país
-                cols = st.columns(len(pais_stats))
-                for i, (_, row) in enumerate(pais_stats.iterrows()):
-                    pais = row['pais']
-                    valor = row['Valuación']
-                    moneda = 'ARS' if pais == 'Argentina' else 'USD'
-                    cols[i].metric(f"Total {pais}", f"${valor:,.2f} {moneda}")
-                
-                # Gráfico de distribución por país
-                fig_pais = go.Figure(data=[go.Pie(
-                    labels=pais_stats['pais'],
-                    values=pais_stats['Valuación'],
-                    textinfo='label+percent+value',
-                    hole=0.4,
-                    marker=dict(colors=['#1f77b4', '#ff7f0e'])
-                )])
-                fig_pais.update_layout(
-                    title="Distribución por País",
-                    height=400
-                )
-                st.plotly_chart(fig_pais, use_container_width=True)
-                
-                # Tabla detallada por país
-                st.subheader("📋 Detalle por País")
-                for pais in pais_stats['pais']:
-                    activos_pais = df_activos[df_activos['pais'] == pais]
-                    st.write(f"**{pais}** ({len(activos_pais)} activos)")
-                    st.dataframe(activos_pais[['Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'Valuación']], 
-                               use_container_width=True, height=200)
-            else:
-                st.info("No hay información de país disponible en los datos")
-        
-        # Tab 3: Análisis de Riesgo
-        with tab3:
             if metricas and isinstance(metricas, dict):
                 st.subheader("⚖️ Análisis de Riesgo")
                 cols = st.columns(3)
@@ -2659,8 +2557,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     El riesgo podría ser alto en relación al retorno esperado.
                     """)
         
-        # Tab 4: Proyecciones
-        with tab4:
+        # Tab 3: Proyecciones
+        with tab3:
             if metricas and isinstance(metricas, dict):
                 st.subheader("📈 Proyecciones de Rendimiento")
                 cols = st.columns(3)
@@ -2687,8 +2585,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             
 
         
-        # Tab 5: Detalle de Activos
-        with tab5:
+        # Tab 4: Detalle de Activos
+        with tab4:
             st.subheader("📋 Detalle de Activos")
             df_display = df_activos.copy()
             df_display['Valuación'] = df_display['Valuación'].apply(
@@ -2698,297 +2596,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             df_display = df_display.sort_values('Peso (%)', ascending=False)
             
             st.dataframe(df_display, use_container_width=True, height=400)
-        
-        # Tab 6: Análisis VWAP Históricos
-        with tab6:
-            st.subheader("📊 Análisis VWAP Históricos")
-            
-            # Selección de activo para análisis VWAP
-            if datos_activos:
-                simbolos_disponibles = [activo['Símbolo'] for activo in datos_activos if activo['Símbolo'] != 'N/A']
-                if simbolos_disponibles:
-                    simbolo_seleccionado = st.selectbox(
-                        "Seleccione un activo para análisis VWAP:",
-                        options=simbolos_disponibles,
-                        index=0
-                    )
-                    
-                    # Configuración de fechas para VWAP
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        fecha_desde_vwap = st.date_input(
-                            "Fecha desde:",
-                            value=date.today() - timedelta(days=30),
-                            max_value=date.today()
-                        )
-                    with col2:
-                        fecha_hasta_vwap = st.date_input(
-                            "Fecha hasta:",
-                            value=date.today(),
-                            max_value=date.today()
-                        )
-                    
-                    # Configuración de VWAP
-                    st.subheader("⚙️ Configuración VWAP")
-                    
-                    # Configuración del fondo
-                    st.write("**🎨 Configuración del Fondo**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        fondo_color = st.color_picker("Color del fondo", "#4caf50")
-                        fondo_transparencia = st.slider("Transparencia del fondo", 0, 100, 95)
-                    with col2:
-                        fondo_visible = st.checkbox("Fondo visible", value=True)
-                    
-                    # Configuración de bandas inferiores
-                    st.write("**📉 Configuración de Bandas Inferiores**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        banda_inf1_color = st.color_picker("Banda Inf. 1 - Color", "#4caf50")
-                        banda_inf1_display = st.slider("Banda Inf. 1 - Display", 0, 100, 15)
-                    with col2:
-                        banda_inf1_linestyle = st.selectbox("Banda Inf. 1 - Estilo", [0, 1, 2, 3], index=0)
-                        banda_inf1_width = st.slider("Banda Inf. 1 - Ancho", 1, 10, 1)
-                    with col3:
-                        banda_inf1_plottype = st.selectbox("Banda Inf. 1 - Tipo", ["line", "histogram", "cross"], index=0)
-                        banda_inf1_trackprice = st.checkbox("Banda Inf. 1 - Track Price", value=False)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        banda_inf2_color = st.color_picker("Banda Inf. 2 - Color", "#808000")
-                        banda_inf2_display = st.slider("Banda Inf. 2 - Display", 0, 100, 15)
-                    with col2:
-                        banda_inf2_linestyle = st.selectbox("Banda Inf. 2 - Estilo", [0, 1, 2, 3], index=0)
-                        banda_inf2_width = st.slider("Banda Inf. 2 - Ancho", 1, 10, 1)
-                    with col3:
-                        banda_inf2_plottype = st.selectbox("Banda Inf. 2 - Tipo", ["line", "histogram", "cross"], index=0)
-                        banda_inf2_trackprice = st.checkbox("Banda Inf. 2 - Track Price", value=False)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        banda_inf3_color = st.color_picker("Banda Inf. 3 - Color", "#00897b")
-                        banda_inf3_display = st.slider("Banda Inf. 3 - Display", 0, 100, 15)
-                    with col2:
-                        banda_inf3_linestyle = st.selectbox("Banda Inf. 3 - Estilo", [0, 1, 2, 3], index=0)
-                        banda_inf3_width = st.slider("Banda Inf. 3 - Ancho", 1, 10, 1)
-                    with col3:
-                        banda_inf3_plottype = st.selectbox("Banda Inf. 3 - Tipo", ["line", "histogram", "cross"], index=0)
-                        banda_inf3_trackprice = st.checkbox("Banda Inf. 3 - Track Price", value=False)
-                    
-                    # Configuración de bandas superiores
-                    st.write("**📈 Configuración de Bandas Superiores**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        banda_sup1_color = st.color_picker("Banda Sup. 1 - Color", "#4caf50")
-                        banda_sup1_display = st.slider("Banda Sup. 1 - Display", 0, 100, 15)
-                    with col2:
-                        banda_sup1_linestyle = st.selectbox("Banda Sup. 1 - Estilo", [0, 1, 2, 3], index=0)
-                        banda_sup1_width = st.slider("Banda Sup. 1 - Ancho", 1, 10, 1)
-                    with col3:
-                        banda_sup1_plottype = st.selectbox("Banda Sup. 1 - Tipo", ["line", "histogram", "cross"], index=0)
-                        banda_sup1_trackprice = st.checkbox("Banda Sup. 1 - Track Price", value=False)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        banda_sup2_color = st.color_picker("Banda Sup. 2 - Color", "#808000")
-                        banda_sup2_display = st.slider("Banda Sup. 2 - Display", 0, 100, 15)
-                    with col2:
-                        banda_sup2_linestyle = st.selectbox("Banda Sup. 2 - Estilo", [0, 1, 2, 3], index=0)
-                        banda_sup2_width = st.slider("Banda Sup. 2 - Ancho", 1, 10, 1)
-                    with col3:
-                        banda_sup2_plottype = st.selectbox("Banda Sup. 2 - Tipo", ["line", "histogram", "cross"], index=0)
-                        banda_sup2_trackprice = st.checkbox("Banda Sup. 2 - Track Price", value=False)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        banda_sup3_color = st.color_picker("Banda Sup. 3 - Color", "#00897b")
-                        banda_sup3_display = st.slider("Banda Sup. 3 - Display", 0, 100, 15)
-                    with col2:
-                        banda_sup3_linestyle = st.selectbox("Banda Sup. 3 - Estilo", [0, 1, 2, 3], index=0)
-                        banda_sup3_width = st.slider("Banda Sup. 3 - Ancho", 1, 10, 1)
-                    with col3:
-                        banda_sup3_plottype = st.selectbox("Banda Sup. 3 - Tipo", ["line", "histogram", "cross"], index=0)
-                        banda_sup3_trackprice = st.checkbox("Banda Sup. 3 - Track Price", value=False)
-                    
-                    # Configuración del VWAP principal
-                    st.write("**📊 Configuración del VWAP Principal**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        vwap_color = st.color_picker("Color VWAP", "#1e88e5")
-                        vwap_display = st.slider("Display VWAP", 0, 100, 15)
-                    with col2:
-                        vwap_linestyle = st.selectbox("Estilo VWAP", [0, 1, 2, 3], index=0)
-                        vwap_width = st.slider("Ancho VWAP", 1, 10, 1)
-                    with col3:
-                        vwap_plottype = st.selectbox("Tipo VWAP", ["line", "histogram", "cross"], index=0)
-                        vwap_trackprice = st.checkbox("Track Price VWAP", value=False)
-                    
-                    # Botón para generar análisis VWAP
-                    if st.button("🔍 Generar Análisis VWAP"):
-                        with st.spinner("Generando análisis VWAP..."):
-                            try:
-                                # Obtener datos históricos del activo seleccionado
-                                mercado = 'BCBA'  # Default
-                                for activo_original in activos:
-                                    if activo_original.get('titulo', {}).get('simbolo') == simbolo_seleccionado:
-                                        mercado = activo_original.get('titulo', {}).get('mercado', 'BCBA')
-                                        break
-                                
-                                serie_historica = obtener_serie_historica_iol(
-                                    token_portador,
-                                    mercado,
-                                    simbolo_seleccionado,
-                                    fecha_desde_vwap.strftime('%Y-%m-%d'),
-                                    fecha_hasta_vwap.strftime('%Y-%m-%d')
-                                )
-                                
-                                if serie_historica is not None and not serie_historica.empty:
-                                    st.success(f"✅ Datos obtenidos para {simbolo_seleccionado}")
-                                    
-                                    # Mostrar configuración VWAP aplicada
-                                    st.subheader("⚙️ Configuración VWAP Aplicada")
-                                    
-                                    config_vwap = {
-                                        "Fondo": {
-                                            "Color": fondo_color,
-                                            "Transparencia": f"{fondo_transparencia}%",
-                                            "Visible": fondo_visible
-                                        },
-                                        "Bandas Inferiores": {
-                                            "Banda 1": {
-                                                "Color": banda_inf1_color,
-                                                "Display": banda_inf1_display,
-                                                "Estilo": banda_inf1_linestyle,
-                                                "Ancho": banda_inf1_width,
-                                                "Tipo": banda_inf1_plottype,
-                                                "Track Price": banda_inf1_trackprice
-                                            },
-                                            "Banda 2": {
-                                                "Color": banda_inf2_color,
-                                                "Display": banda_inf2_display,
-                                                "Estilo": banda_inf2_linestyle,
-                                                "Ancho": banda_inf2_width,
-                                                "Tipo": banda_inf2_plottype,
-                                                "Track Price": banda_inf2_trackprice
-                                            },
-                                            "Banda 3": {
-                                                "Color": banda_inf3_color,
-                                                "Display": banda_inf3_display,
-                                                "Estilo": banda_inf3_linestyle,
-                                                "Ancho": banda_inf3_width,
-                                                "Tipo": banda_inf3_plottype,
-                                                "Track Price": banda_inf3_trackprice
-                                            }
-                                        },
-                                        "Bandas Superiores": {
-                                            "Banda 1": {
-                                                "Color": banda_sup1_color,
-                                                "Display": banda_sup1_display,
-                                                "Estilo": banda_sup1_linestyle,
-                                                "Ancho": banda_sup1_width,
-                                                "Tipo": banda_sup1_plottype,
-                                                "Track Price": banda_sup1_trackprice
-                                            },
-                                            "Banda 2": {
-                                                "Color": banda_sup2_color,
-                                                "Display": banda_sup2_display,
-                                                "Estilo": banda_sup2_linestyle,
-                                                "Ancho": banda_sup2_width,
-                                                "Tipo": banda_sup2_plottype,
-                                                "Track Price": banda_sup2_trackprice
-                                            },
-                                            "Banda 3": {
-                                                "Color": banda_sup3_color,
-                                                "Display": banda_sup3_display,
-                                                "Estilo": banda_sup3_linestyle,
-                                                "Ancho": banda_sup3_width,
-                                                "Tipo": banda_sup3_plottype,
-                                                "Track Price": banda_sup3_trackprice
-                                            }
-                                        },
-                                        "VWAP Principal": {
-                                            "Color": vwap_color,
-                                            "Display": vwap_display,
-                                            "Estilo": vwap_linestyle,
-                                            "Ancho": vwap_width,
-                                            "Tipo": vwap_plottype,
-                                            "Track Price": vwap_trackprice
-                                        }
-                                    }
-                                    
-                                    st.json(config_vwap)
-                                    
-                                    # Mostrar datos históricos
-                                    st.subheader("📊 Datos Históricos del Activo")
-                                    st.dataframe(serie_historica, use_container_width=True, height=300)
-                                    
-                                    # Gráfico de precios con VWAP
-                                    if 'close' in serie_historica.columns or 'ultimoPrecio' in serie_historica.columns:
-                                        st.subheader("📈 Gráfico de Precios con VWAP")
-                                        
-                                        # Determinar columna de precios
-                                        precio_col = 'close' if 'close' in serie_historica.columns else 'ultimoPrecio'
-                                        
-                                        # Crear gráfico con Plotly
-                                        fig = go.Figure()
-                                        
-                                        # Agregar línea de precios
-                                        fig.add_trace(go.Scatter(
-                                            x=serie_historica.index if serie_historica.index.name else range(len(serie_historica)),
-                                            y=serie_historica[precio_col],
-                                            mode='lines',
-                                            name=f'Precio {simbolo_seleccionado}',
-                                            line=dict(color='#1f77b4', width=2)
-                                        ))
-                                        
-                                        # Agregar VWAP (línea horizontal promedio)
-                                        if len(serie_historica) > 0:
-                                            vwap_value = serie_historica[precio_col].mean()
-                                            fig.add_hline(
-                                                y=vwap_value,
-                                                line_dash="dash",
-                                                line_color=vwap_color,
-                                                annotation_text=f"VWAP: ${vwap_value:.2f}",
-                                                annotation_position="top right"
-                                            )
-                                        
-                                        fig.update_layout(
-                                            title=f"Análisis VWAP - {simbolo_seleccionado}",
-                                            xaxis_title="Fecha",
-                                            yaxis_title="Precio",
-                                            height=500
-                                        )
-                                        
-                                        st.plotly_chart(fig, use_container_width=True)
-                                        
-                                        # Información adicional del VWAP
-                                        if len(serie_historica) > 0:
-                                            st.subheader("📊 Métricas VWAP")
-                                            col1, col2, col3 = st.columns(3)
-                                            col1.metric("Precio Promedio (VWAP)", f"${vwap_value:.2f}")
-                                            col1.metric("Precio Máximo", f"${serie_historica[precio_col].max():.2f}")
-                                            col1.metric("Precio Mínimo", f"${serie_historica[precio_col].min():.2f}")
-                                            
-                                            # Calcular bandas
-                                            std_precio = serie_historica[precio_col].std()
-                                            col2.metric("Desviación Estándar", f"${std_precio:.2f}")
-                                            col2.metric("Banda Superior +1σ", f"${vwap_value + std_precio:.2f}")
-                                            col2.metric("Banda Inferior -1σ", f"${vwap_value - std_precio:.2f}")
-                                            
-                                            # Calcular percentiles
-                                            col3.metric("Percentil 25", f"${serie_historica[precio_col].quantile(0.25):.2f}")
-                                            col3.metric("Percentil 75", f"${serie_historica[precio_col].quantile(0.75):.2f}")
-                                            col3.metric("Rango Intercuartil", f"${serie_historica[precio_col].quantile(0.75) - serie_historica[precio_col].quantile(0.25):.2f}")
-                                    
-                                else:
-                                    st.error(f"❌ No se pudieron obtener datos históricos para {simbolo_seleccionado}")
-                                    
-                            except Exception as e:
-                                st.error(f"❌ Error al generar análisis VWAP: {str(e)}")
-                else:
-                    st.warning("⚠️ No hay activos disponibles para análisis VWAP")
-            else:
-                st.info("ℹ️ Seleccione un cliente y obtenga su portafolio para realizar análisis VWAP")
         
         # Histograma del portafolio total valorizado
         st.subheader("📈 Histograma del Portafolio Total Valorizado")
@@ -4128,86 +3735,29 @@ def mostrar_estado_cuenta(estado_cuenta):
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
-    # Crear tabs para organizar mejor la información
-    tab1, tab2 = st.tabs(["📊 Resumen General", "🌍 Por País"])
+    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+    cuentas = estado_cuenta.get('cuentas', [])
     
-    with tab1:
-        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-        total_en_dolares = estado_cuenta.get('totalEnDolares', 0)
-        cuentas = estado_cuenta.get('cuentas', [])
-        
-        cols = st.columns(3)
-        cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-        cols[1].metric("Total en Dólares", f"US$ {total_en_dolares:,.2f}")
-        cols[2].metric("Número de Cuentas", len(cuentas))
-        
-        if cuentas:
-            st.subheader("📊 Detalle de Cuentas")
-            
-            datos_cuentas = []
-            for cuenta in cuentas:
-                datos_cuentas.append({
-                    'Número': cuenta.get('numero', 'N/A'),
-                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                    'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                    'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                    'Total': f"${cuenta.get('total', 0):,.2f}",
-                })
-            
-            df_cuentas = pd.DataFrame(datos_cuentas)
-            st.dataframe(df_cuentas, use_container_width=True, height=300)
+    cols = st.columns(3)
+    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
+    cols[1].metric("Número de Cuentas", len(cuentas))
     
-    with tab2:
-        st.subheader("🌍 Estado de Cuenta por País")
+    if cuentas:
+        st.subheader("📊 Detalle de Cuentas")
         
-        # Mostrar cuentas de Argentina
-        if 'Argentina' in estado_cuenta.get('cuentas', {}):
-            st.write("**🇦🇷 Cuentas de Argentina**")
-            cuentas_argentina = estado_cuenta['cuentas']['Argentina']
-            if cuentas_argentina and 'cuentas' in cuentas_argentina:
-                datos_cuentas_ar = []
-                for cuenta in cuentas_argentina['cuentas']:
-                    datos_cuentas_ar.append({
-                        'Número': cuenta.get('numero', 'N/A'),
-                        'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                        'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                        'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                        'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                        'Total': f"${cuenta.get('total', 0):,.2f}",
-                    })
-                
-                if datos_cuentas_ar:
-                    df_cuentas_ar = pd.DataFrame(datos_cuentas_ar)
-                    st.dataframe(df_cuentas_ar, use_container_width=True, height=200)
-                else:
-                    st.info("No hay cuentas de Argentina disponibles")
-            else:
-                st.info("No hay cuentas de Argentina disponibles")
+        datos_cuentas = []
+        for cuenta in cuentas:
+            datos_cuentas.append({
+                'Número': cuenta.get('numero', 'N/A'),
+                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                'Total': f"${cuenta.get('total', 0):,.2f}",
+            })
         
-        # Mostrar cuentas de Estados Unidos
-        if 'Estados_Unidos' in estado_cuenta.get('cuentas', {}):
-            st.write("**🇺🇸 Cuentas de Estados Unidos**")
-            cuentas_eeuu = estado_cuenta['cuentas']['Estados_Unidos']
-            if cuentas_eeuu and 'cuentas' in cuentas_eeuu:
-                datos_cuentas_us = []
-                for cuenta in cuentas_eeuu['cuentas']:
-                    datos_cuentas_us.append({
-                        'Número': cuenta.get('numero', 'N/A'),
-                        'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                        'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                        'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                        'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                        'Total': f"${cuenta.get('total', 0):,.2f}",
-                    })
-                
-                if datos_cuentas_us:
-                    df_cuentas_us = pd.DataFrame(datos_cuentas_us)
-                    st.dataframe(df_cuentas_us, use_container_width=True, height=200)
-                else:
-                    st.info("No hay cuentas de Estados Unidos disponibles")
-            else:
-                st.info("No hay cuentas de Estados Unidos disponibles")
+        df_cuentas = pd.DataFrame(datos_cuentas)
+        st.dataframe(df_cuentas, use_container_width=True, height=300)
 
 def mostrar_cotizaciones_mercado(token_acceso):
     st.markdown("### 💱 Cotizaciones y Mercado")
@@ -4887,7 +4437,7 @@ def mostrar_movimientos_asesor():
         )
         
         # Filtros adicionales
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             tipo_fecha = st.selectbox(
                 "Tipo de fecha",
@@ -4902,12 +4452,6 @@ def mostrar_movimientos_asesor():
         with col2:
             tipo_operacion = st.text_input("Tipo de operación")
             moneda = st.text_input("Moneda", "ARS")
-        with col3:
-            pais_operacion = st.selectbox(
-                "País",
-                ["", "Argentina", "Estados_Unidos"],
-                index=0
-            )
         
         buscar = st.form_submit_button("🔍 Buscar movimientos")
     
@@ -4921,7 +4465,6 @@ def mostrar_movimientos_asesor():
                 tipo_fecha=tipo_fecha,
                 estado=estado or None,
                 tipo_operacion=tipo_operacion or None,
-                pais=pais_operacion or None,
                 moneda=moneda or None
             )
             
@@ -4973,11 +4516,11 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
-        portafolio = obtener_portafolio_consolidado(token_acceso, id_cliente)
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
-            st.warning("No se pudo obtener el portafolio consolidado del cliente")
+            st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
         estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
@@ -5196,10 +4739,6 @@ def main():
             elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
-            
-            # Información sobre funcionalidad de Estados Unidos
-            if st.session_state.cliente_seleccionado:
-                st.success("✅ **Nueva funcionalidad disponible:** Ahora puede ver activos, series, movimientos y estado de cuenta de cuentas de Estados Unidos además de Argentina.")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
             
@@ -5225,10 +4764,6 @@ def main():
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
                         <h3>⚖️ Gestión de Riesgo</h3>
                         <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis VWAP</h3>
-                        <p>Análisis VWAP históricos con configuración completa de bandas y personalización visual</p>
                     </div>
                 </div>
             </div>
@@ -5257,8 +4792,6 @@ def main():
                 - Cotizaciones MEP en tiempo real  
                 - Tasas de caución actualizadas  
                 - Estado de cuenta consolidado  
-                - **NUEVO:** Cuentas de Estados Unidos  
-                - **NUEVO:** Análisis VWAP históricos  
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
