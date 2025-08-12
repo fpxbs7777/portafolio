@@ -2263,9 +2263,101 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     
     return resultados
 
+# --- Funciones de Detección de Moneda ---
+def detectar_moneda_portafolio(portafolio):
+    """
+    Detecta automáticamente la moneda del portafolio basándose en:
+    1. Campos de valuación en dólares
+    2. Mercado de los activos (NYSE, NASDAQ = USD, BCBA = ARS)
+    3. Tipos de instrumentos
+    """
+    if not portafolio or 'activos' not in portafolio:
+        return "ARS"  # Default
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        return "ARS"
+    
+    # Contadores para cada moneda
+    indicadores_usd = 0
+    indicadores_ars = 0
+    
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        mercado = titulo.get('mercado', '').upper()
+        tipo = titulo.get('tipo', '').upper()
+        
+        # Detectar por mercado
+        if mercado in ['NYSE', 'NASDAQ', 'AMEX', 'OTC']:
+            indicadores_usd += 2  # Peso alto para mercados estadounidenses
+        elif mercado in ['BCBA', 'BCRA']:
+            indicadores_ars += 2  # Peso alto para mercados argentinos
+        
+        # Detectar por tipo de instrumento
+        if tipo in ['STOCK', 'ETF', 'OPTION', 'FUTURE'] and mercado in ['NYSE', 'NASDAQ']:
+            indicadores_usd += 1
+        elif tipo in ['TITULOSPUBLICOS', 'ACCIONES', 'BONOS'] and mercado in ['BCBA', 'BCRA']:
+            indicadores_ars += 1
+        
+        # Detectar por campos de valuación
+        if 'valuacionDolar' in activo and activo['valuacionDolar']:
+            try:
+                if float(activo['valuacionDolar']) > 0:
+                    indicadores_usd += 1
+            except:
+                pass
+        
+        if 'valuacionEnMonedaOriginal' in activo and activo['valuacionEnMonedaOriginal']:
+            try:
+                if float(activo['valuacionEnMonedaOriginal']) > 0:
+                    # Si el valor es muy alto, probablemente sea ARS
+                    valor = float(activo['valuacionEnMonedaOriginal'])
+                    if valor > 1000:  # Umbral para distinguir ARS de USD
+                        indicadores_ars += 1
+                    else:
+                        indicadores_usd += 1
+            except:
+                pass
+    
+    # Determinar moneda dominante
+    if indicadores_usd > indicadores_ars:
+        return "USD"
+    else:
+        return "ARS"
+
+def obtener_formato_moneda(moneda):
+    """
+    Retorna el formato de moneda apropiado
+    """
+    if moneda == "USD":
+        return "USD", "$", "Dólares Estadounidenses"
+    else:
+        return "ARS", "AR$", "Pesos Argentinos"
+
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
-    st.markdown("### 📊 **INFORME AUTOMÁTICO COMPLETO DEL PORTAFOLIO**")
+    # Detectar moneda del portafolio
+    moneda_portafolio = detectar_moneda_portafolio(portafolio)
+    codigo_moneda, simbolo_moneda, nombre_moneda = obtener_formato_moneda(moneda_portafolio)
+    
+    st.markdown(f"### 📊 **INFORME AUTOMÁTICO COMPLETO DEL PORTAFOLIO ({codigo_moneda})**")
+    st.markdown("---")
+    
+    # Mostrar información de moneda
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.info(f"💱 **Moneda del Portafolio**: {codigo_moneda}")
+    with col2:
+        if moneda_portafolio == "USD":
+            st.success("🇺🇸 **Portafolio en Dólares Estadounidenses**")
+        else:
+            st.success("🇦🇷 **Portafolio en Pesos Argentinos**")
+    with col3:
+        if moneda_portafolio == "USD":
+            st.info("📊 **Análisis en USD** - Todas las métricas se calculan en dólares")
+        else:
+            st.info("📊 **Análisis en ARS** - Todas las métricas se calculan en pesos")
+    
     st.markdown("---")
     
     activos = portafolio.get('activos', [])
@@ -2429,7 +2521,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     # Métricas principales en columnas
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("💰 **Valor Total**", f"${valor_total:,.2f}")
+        st.metric("💰 **Valor Total**", f"{simbolo_moneda}{valor_total:,.2f} {codigo_moneda}")
     with col2:
         st.metric("📈 **Total de Activos**", len(datos_activos))
     with col3:
@@ -2474,7 +2566,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         for tipo, row in tipo_dist.iterrows():
             st.markdown(f"**{tipo}**")
-            st.markdown(f"- Valor: ${row['Valor Total']:,.2f}")
+            st.markdown(f"- Valor: {simbolo_moneda}{row['Valor Total']:,.2f} {codigo_moneda}")
             st.markdown(f"- Cantidad: {row['Cantidad']}")
             st.markdown(f"- Peso: {row['Porcentaje']:.1f}%")
             st.markdown("---")
@@ -2595,11 +2687,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         cols = st.columns(3)
         
         with cols[0]:
-            st.metric("📊 **Proyección Esperada**", f"${valor_total * (1 + retorno_esperado):,.2f}")
+            st.metric("📊 **Proyección Esperada**", f"{simbolo_moneda}{valor_total * (1 + retorno_esperado):,.2f} {codigo_moneda}")
         with cols[1]:
-            st.metric("🚀 **Proyección Optimista**", f"${valor_total * (1 + optimista_pct/100):,.2f}")
+            st.metric("🚀 **Proyección Optimista**", f"{simbolo_moneda}{valor_total * (1 + optimista_pct/100):,.2f} {codigo_moneda}")
         with cols[2]:
-            st.metric("⚠️ **Proyección Pesimista**", f"${valor_total * (1 + pesimista_pct/100):,.2f}")
+            st.metric("⚠️ **Proyección Pesimista**", f"{simbolo_moneda}{valor_total * (1 + pesimista_pct/100):,.2f} {codigo_moneda}")
     
     st.markdown("---")
     
@@ -2754,17 +2846,17 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             percentil_95 = np.percentile(valores_portfolio, 95)
                             
                             fig_hist.add_vline(x=media_valor, line_dash="dash", line_color="red", 
-                                             annotation_text=f"Media: ${media_valor:,.2f}")
+                                             annotation_text=f"Media: {simbolo_moneda}{media_valor:,.2f}")
                             fig_hist.add_vline(x=mediana_valor, line_dash="dash", line_color="green", 
-                                             annotation_text=f"Mediana: ${mediana_valor:,.2f}")
+                                             annotation_text=f"Mediana: {simbolo_moneda}{mediana_valor:,.2f}")
                             fig_hist.add_vline(x=percentil_5, line_dash="dash", line_color="orange", 
-                                             annotation_text=f"P5: ${percentil_5:,.2f}")
+                                             annotation_text=f"P5: {simbolo_moneda}{percentil_5:,.2f}")
                             fig_hist.add_vline(x=percentil_95, line_dash="dash", line_color="purple", 
-                                             annotation_text=f"P95: ${percentil_95:,.2f}")
+                                             annotation_text=f"P95: {simbolo_moneda}{percentil_95:,.2f}")
                             
                             fig_hist.update_layout(
-                                title="📊 Distribución del Valor Total del Portafolio",
-                                xaxis_title="Valor del Portafolio ($)",
+                                title=f"📊 Distribución del Valor Total del Portafolio ({codigo_moneda})",
+                                xaxis_title=f"Valor del Portafolio ({codigo_moneda})",
                                 yaxis_title="Frecuencia",
                                 height=500,
                                 showlegend=False,
@@ -2778,13 +2870,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             col1, col2, col3, col4 = st.columns(4)
                             
                             with col1:
-                                st.metric("📊 **Valor Promedio**", f"${media_valor:,.2f}")
+                                st.metric("📊 **Valor Promedio**", f"{simbolo_moneda}{media_valor:,.2f} {codigo_moneda}")
                             with col2:
-                                st.metric("📈 **Valor Mediano**", f"${mediana_valor:,.2f}")
+                                st.metric("📈 **Valor Mediano**", f"{simbolo_moneda}{mediana_valor:,.2f} {codigo_moneda}")
                             with col3:
-                                st.metric("📉 **Valor Mínimo (P5)**", f"${percentil_5:,.2f}")
+                                st.metric("📉 **Valor Mínimo (P5)**", f"{simbolo_moneda}{percentil_5:,.2f} {codigo_moneda}")
                             with col4:
-                                st.metric("🚀 **Valor Máximo (P95)**", f"${percentil_95:,.2f}")
+                                st.metric("🚀 **Valor Máximo (P95)**", f"{simbolo_moneda}{percentil_95:,.2f} {codigo_moneda}")
                             
                             # Gráfico de evolución temporal
                             fig_evolucion = go.Figure()
@@ -2797,9 +2889,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             ))
                             
                             fig_evolucion.update_layout(
-                                title="📈 Evolución Temporal del Portafolio",
+                                title=f"📈 Evolución Temporal del Portafolio ({codigo_moneda})",
                                 xaxis_title="Fecha",
-                                yaxis_title="Valor del Portafolio ($)",
+                                yaxis_title=f"Valor del Portafolio ({codigo_moneda})",
                                 height=400,
                                 template='plotly_white'
                             )
@@ -3073,152 +3165,120 @@ def mostrar_estado_cuenta(estado_cuenta):
         st.dataframe(df_cuentas, use_container_width=True, height=300)
 
 def mostrar_cotizaciones_mercado(token_acceso):
-    st.markdown("### 💱 Cotizaciones y Mercado")
+    st.title("💱 Cotizaciones y Mercado")
+    st.markdown("---")
     
-    tab1, tab2, tab3 = st.tabs(["💰 Cotización MEP", "🏦 Tasas de Caución", "📈 Gráficos con Fechas"])
-    
-    with tab1:
-        with st.form("mep_form"):
-            col1, col2, col3 = st.columns(3)
-            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
-            id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
-            id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
-            
-            if st.form_submit_button("🔍 Consultar MEP"):
-                if simbolo_mep:
-                    with st.spinner("Consultando cotización MEP..."):
-                        cotizacion_mep = obtener_cotizacion_mep(
-                            token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
-                        )
-                    
-                    if cotizacion_mep:
-                        st.success("✅ Cotización MEP obtenida")
-                        precio_mep = cotizacion_mep.get('precio', 'N/A')
-                        st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
-                    else:
-                        st.error("❌ No se pudo obtener la cotización MEP")
-    
-    with tab2:
-        if st.button("🔄 Actualizar Tasas"):
-            with st.spinner("Consultando tasas de caución..."):
-                tasas_caucion = obtener_tasas_caucion(token_acceso)
-            
-            if tasas_caucion is not None and not tasas_caucion.empty:
-                df_tasas = pd.DataFrame(tasas_caucion)
-                columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
-                columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
+    # Sección 1: Cotización MEP
+    st.markdown("## 💰 **Cotización MEP**")
+    with st.form("mep_form"):
+        col1, col2, col3 = st.columns(3)
+        simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
+        id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
+        id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
+        
+        if st.form_submit_button("🔍 Consultar MEP"):
+            if simbolo_mep:
+                with st.spinner("Consultando cotización MEP..."):
+                    cotizacion_mep = obtener_cotizacion_mep(
+                        token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
+                    )
                 
-                if columnas_disponibles:
-                    st.dataframe(df_tasas[columnas_disponibles].head(10))
+                if cotizacion_mep:
+                    st.success("✅ Cotización MEP obtenida")
+                    precio_mep = cotizacion_mep.get('precio', 'N/A')
+                    st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
                 else:
-                    st.dataframe(df_tasas.head(10))
-            else:
-                st.error("❌ No se pudieron obtener las tasas de caución")
+                    st.error("❌ No se pudo obtener la cotización MEP")
     
-    with tab3:
-        st.subheader("📈 Gráficos con Fechas Reales")
+    st.markdown("---")
+    
+    # Sección 2: Tasas de Caución
+    st.markdown("## 🏦 **Tasas de Caución**")
+    if st.button("🔄 Actualizar Tasas"):
+        with st.spinner("Consultando tasas de caución..."):
+            tasas_caucion = obtener_tasas_caucion(token_acceso)
         
-        # Configuración de paneles
-        paneles = {
-            "Acciones": ["Panel%20General", "Burcap", "Todas"],
-            "Bonos": ["Panel%20General", "Burcap", "Todas"],
-            "Opciones": ["Panel%20General", "Burcap", "Todas"],
-            "Monedas": ["Panel%20General", "Burcap", "Todas"],
-            "Cauciones": ["Panel%20General", "Burcap", "Todas"],
-            "CHPD": ["Panel%20General", "Burcap", "Todas"],
-            "Futuros": ["Panel%20General", "Burcap", "Todas"],
-            "ADRs": ["Panel%20General", "Burcap", "Todas"]
-        }
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            instrumento = st.selectbox("Instrumento", list(paneles.keys()))
-        with col2:
-            panel = st.selectbox("Panel", paneles[instrumento])
-        
-        pais = st.selectbox("País", ["Argentina", "Estados_Unidos"])
-        
-        if st.button("🔍 Buscar Cotizaciones"):
-            with st.spinner("Obteniendo cotizaciones..."):
-                try:
-                    url = f'https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}'
-                    headers = obtener_encabezado_autorizacion(token_acceso)
+        if tasas_caucion is not None and not tasas_caucion.empty:
+            df_tasas = pd.DataFrame(tasas_caucion)
+            columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
+            columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
+            
+            if columnas_disponibles:
+                st.dataframe(df_tasas[columnas_disponibles].head(10))
+            else:
+                st.dataframe(df_tasas.head(10))
+        else:
+            st.error("❌ No se pudieron obtener las tasas de caución")
+    
+    st.markdown("---")
+    
+    # Sección 3: Gráficos con Fechas
+    st.markdown("## 📈 **Gráficos con Fechas Reales**")
+    
+    # Configuración de paneles
+    paneles = {
+        "Acciones": ["Panel%20General", "Burcap", "Todas"],
+        "Bonos": ["Panel%20General", "Burcap", "Todas"],
+        "Opciones": ["Panel%20General", "Burcap", "Todas"],
+        "Monedas": ["Panel%20General", "Burcap", "Todas"],
+        "Cauciones": ["Panel%20General", "Burcap", "Todas"],
+        "CHPD": ["Panel%20General", "Burcap", "Todas"],
+        "Futuros": ["Panel%20General", "Burcap", "Todas"],
+        "ADRs": ["Panel%20General", "Burcap", "Todas"]
+    }
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        instrumento = st.selectbox("Instrumento", list(paneles.keys()))
+    with col2:
+        panel = st.selectbox("Panel", paneles[instrumento])
+    
+    pais = st.selectbox("País", ["Argentina", "Estados_Unidos"])
+    
+    if st.button("🔍 Buscar Cotizaciones"):
+        with st.spinner("Obteniendo cotizaciones..."):
+            try:
+                url = f'https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{panel}/{pais}'
+                headers = obtener_encabezado_autorizacion(token_acceso)
+                
+                params = {
+                    'panelCotizacion.instrumento': instrumento.lower(),
+                    'panelCotizacion.panel': panel,
+                    'panelCotizacion.pais': pais.lower()
+                }
+                
+                respuesta = requests.get(url, headers=headers, params=params)
+                
+                if respuesta.status_code == 200:
+                    datos = respuesta.json()
+                    titulos = datos.get('titulos', [])
                     
-                    params = {
-                        'panelCotizacion.instrumento': instrumento.lower(),
-                        'panelCotizacion.panel': panel,
-                        'panelCotizacion.pais': pais.lower()
-                    }
-                    
-                    respuesta = requests.get(url, headers=headers, params=params)
-                    
-                    if respuesta.status_code == 200:
-                        datos = respuesta.json()
-                        titulos = datos.get('titulos', [])
+                    if titulos:
+                        df = pd.DataFrame(titulos)
+                        st.success(f"✅ Se encontraron {len(df)} títulos")
+                        st.dataframe(df, use_container_width=True)
                         
-                        if titulos:
-                            df = pd.DataFrame(titulos)
-                            st.success(f"✅ Se encontraron {len(df)} títulos")
-                            st.dataframe(df, use_container_width=True)
-                            
-                            # Gráfico de variación
-                            if 'variacionPorcentual' in df.columns:
-                                fig = go.Figure()
-                                fig.add_trace(go.Bar(
-                                    x=df['simbolo'],
-                                    y=df['variacionPorcentual'],
-                                    marker_color=['green' if x > 0 else 'red' for x in df['variacionPorcentual']]
-                                ))
-                                fig.update_layout(
-                                    title=f"Variación Porcentual - {instrumento}",
-                                    xaxis_title="Símbolo",
-                                    yaxis_title="Variación (%)",
-                                    template='plotly_white'
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Gráfico de precios con fechas si están disponibles
-                            if 'fecha' in df.columns and 'ultimoPrecio' in df.columns:
-                                # Convertir fechas
-                                df['fecha'] = pd.to_datetime(df['fecha'])
-                                df = df.sort_values('fecha')
-                                
-                                fig_precios = go.Figure()
-                                fig_precios.add_trace(go.Scatter(
-                                    x=df['fecha'],
-                                    y=df['ultimoPrecio'],
-                                    mode='lines+markers',
-                                    name='Precio',
-                                    line=dict(color='#1f77b4', width=2)
-                                ))
-                                
-                                fig_precios.update_layout(
-                                    title=f"Evolución de Precios - {instrumento}",
-                                    xaxis_title="Fecha",
-                                    yaxis_title="Precio",
-                                    template='plotly_white',
-                                    height=400
-                                )
-                                
-                                # Configurar eje X para mostrar fechas reales
-                                fig_precios.update_xaxes(
-                                    tickformat='%d/%m/%Y',
-                                    tickangle=45,
-                                    tickmode='auto',
-                                    nticks=10
-                                )
-                                
-                                st.plotly_chart(fig_precios, use_container_width=True)
-                                
-                                # Información de fechas
-                                st.info(f"📅 Período de datos: {df['fecha'].min().strftime('%d/%m/%Y')} - {df['fecha'].max().strftime('%d/%m/%Y')}")
-                        else:
-                            st.warning("No se encontraron cotizaciones")
+                        # Gráfico de variación
+                        if 'variacionPorcentual' in df.columns:
+                            fig = go.Figure()
+                            fig.add_trace(go.Bar(
+                                x=df['simbolo'],
+                                y=df['variacionPorcentual'],
+                                marker_color=['green' if x > 0 else 'red' for x in df['variacionPorcentual']]
+                            ))
+                            fig.update_layout(
+                                title=f"Variación Porcentual - {instrumento}",
+                                xaxis_title="Símbolo",
+                                yaxis_title="Variación (%)",
+                                height=400
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
                     else:
-                        st.error(f"Error al obtener cotizaciones: {respuesta.status_code}")
-                        
-                except Exception as e:
-                    st.error(f"Error de conexión: {str(e)}")
+                        st.warning("No se encontraron títulos para los parámetros seleccionados")
+                else:
+                    st.error(f"❌ Error al obtener cotizaciones: {respuesta.status_code}")
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
 
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
@@ -3817,10 +3877,10 @@ def mostrar_analisis_portafolio():
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
-    
-    # Tab único unificado para el análisis completo del portafolio
-    st.markdown("## 📊 **ANÁLISIS COMPLETO Y UNIFICADO DEL PORTAFOLIO**")
     st.markdown("---")
+    
+    # Análisis completo y unificado del portafolio
+    st.markdown("## 📊 **ANÁLISIS COMPLETO Y UNIFICADO DEL PORTAFOLIO**")
     
     # Obtener datos del portafolio
     portafolio = obtener_portafolio(token_acceso, id_cliente)
@@ -3838,66 +3898,41 @@ def mostrar_analisis_portafolio():
     else:
         st.warning("No se pudo obtener el estado de cuenta")
     
-    # Enlaces a herramientas adicionales
+    # Información sobre herramientas adicionales disponibles
     st.markdown("---")
     st.markdown("## 🛠️ **HERRAMIENTAS ADICIONALES DISPONIBLES**")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("""
+        st.info("""
         **📊 Análisis Técnico**
         - Gráficos interactivos TradingView
         - Indicadores técnicos avanzados
         - Análisis de patrones de precios
+        
+        *Accesible desde el menú lateral*
         """)
-        if st.button("🔍 Ir a Análisis Técnico", key="btn_tecnico"):
-            st.session_state.mostrar_tecnico = True
     
     with col2:
-        st.markdown("""
+        st.info("""
         **💱 Cotizaciones de Mercado**
         - Cotizaciones MEP en tiempo real
         - Tasas de caución actualizadas
         - Datos de mercado históricos
+        
+        *Accesible desde el menú lateral*
         """)
-        if st.button("🔍 Ir a Cotizaciones", key="btn_cotizaciones"):
-            st.session_state.mostrar_cotizaciones = True
     
     with col3:
-        st.markdown("""
+        st.info("""
         **🧮 Optimización Avanzada**
         - Optimización Markowitz
         - Frontera eficiente
         - Rebalanceo automático
+        
+        *Accesible desde el menú lateral*
         """)
-        if st.button("🔍 Ir a Optimización", key="btn_optimizacion"):
-            st.session_state.mostrar_optimizacion = True
-    
-    # Mostrar herramientas adicionales si se solicitan
-    if st.session_state.get('mostrar_tecnico', False):
-        st.markdown("---")
-        st.markdown("## 📊 **ANÁLISIS TÉCNICO**")
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
-        if st.button("❌ Cerrar Análisis Técnico"):
-            st.session_state.mostrar_tecnico = False
-            st.rerun()
-    
-    if st.session_state.get('mostrar_cotizaciones', False):
-        st.markdown("---")
-        st.markdown("## 💱 **COTIZACIONES DE MERCADO**")
-        mostrar_cotizaciones_mercado(token_acceso)
-        if st.button("❌ Cerrar Cotizaciones"):
-            st.session_state.mostrar_cotizaciones = False
-            st.rerun()
-    
-    if st.session_state.get('mostrar_optimizacion', False):
-        st.markdown("---")
-        st.markdown("## 🧮 **OPTIMIZACIÓN AVANZADA**")
-        mostrar_optimizacion_portafolio(token_acceso, id_cliente)
-        if st.button("❌ Cerrar Optimización"):
-            st.session_state.mostrar_optimizacion = False
-            st.rerun()
 
 def seleccionar_activos_aleatorios_por_valor(activos, saldo_objetivo, incluir_saldo_disponible, saldo_disponible, cantidad_activos):
     activos_shuffled = activos.copy()
@@ -3938,6 +3973,8 @@ def main():
         st.session_state.mostrar_cotizaciones = False
     if 'mostrar_optimizacion' not in st.session_state:
         st.session_state.mostrar_optimizacion = False
+    if 'pagina_actual' not in st.session_state:
+        st.session_state.pagina_actual = "inicio"
     
     # Barra lateral - Autenticación
     with st.sidebar:
@@ -4028,90 +4065,153 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            st.sidebar.title("Menú Principal")
-            opcion = st.sidebar.radio(
-                "Seleccione una opción:",
-                ("🏠 Inicio", "👥 Gestión de Clientes", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
-                index=0,
-            )
-
-            # Mostrar la página seleccionada
-            if opcion == "🏠 Inicio":
-                st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "👥 Gestión de Clientes":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_gestion_clientes()
-                else:
-                    st.warning("Por favor inicie sesión para gestionar clientes")
-            elif opcion == "📊 Análisis de Portafolio":
+            # Menú principal unificado y categorizado
+            st.sidebar.title("📋 Menú Principal")
+            st.sidebar.markdown("---")
+            
+            # Categoría 1: Gestión de Clientes
+            st.sidebar.subheader("👥 **GESTIÓN DE CLIENTES**")
+            if st.sidebar.button("📋 Lista de Clientes", use_container_width=True):
+                st.session_state.pagina_actual = "gestion_clientes"
+            
+            # Categoría 2: Análisis de Portafolio (Principal)
+            st.sidebar.subheader("📊 **ANÁLISIS DE PORTAFOLIO**")
+            if st.sidebar.button("📈 Análisis Completo", use_container_width=True):
+                st.session_state.pagina_actual = "analisis_portafolio"
+            
+            # Categoría 3: Herramientas de Mercado
+            st.sidebar.subheader("💱 **HERRAMIENTAS DE MERCADO**")
+            if st.sidebar.button("💰 Cotizaciones MEP", use_container_width=True):
+                st.session_state.pagina_actual = "cotizaciones_mep"
+            if st.sidebar.button("🏦 Tasas de Caución", use_container_width=True):
+                st.session_state.pagina_actual = "tasas_caucion"
+            
+            # Categoría 4: Herramientas Avanzadas
+            st.sidebar.subheader("🧮 **HERRAMIENTAS AVANZADAS**")
+            if st.sidebar.button("📊 Análisis Técnico", use_container_width=True):
+                st.session_state.pagina_actual = "analisis_tecnico"
+            if st.sidebar.button("⚖️ Optimización", use_container_width=True):
+                st.session_state.pagina_actual = "optimizacion"
+            
+            # Categoría 5: Panel del Asesor
+            st.sidebar.subheader("👨‍💼 **PANEL DEL ASESOR**")
+            if st.sidebar.button("📋 Movimientos", use_container_width=True):
+                st.session_state.pagina_actual = "movimientos_asesor"
+            
+            # Inicializar página actual si no existe
+            if 'pagina_actual' not in st.session_state:
+                st.session_state.pagina_actual = "inicio"
+            
+            # Mostrar contenido según la página seleccionada
+            if st.session_state.pagina_actual == "inicio":
+                mostrar_pagina_inicio()
+            elif st.session_state.pagina_actual == "gestion_clientes":
+                mostrar_gestion_clientes()
+            elif st.session_state.pagina_actual == "analisis_portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
                 else:
                     st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
+            elif st.session_state.pagina_actual == "cotizaciones_mep":
+                mostrar_cotizaciones_mep_simplificado(st.session_state.token_acceso)
+            elif st.session_state.pagina_actual == "tasas_caucion":
+                mostrar_tasas_caucion(st.session_state.token_acceso)
+            elif st.session_state.pagina_actual == "analisis_tecnico":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_analisis_tecnico(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id')))
                 else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
+                    st.info("👆 Seleccione un cliente para el análisis técnico")
+            elif st.session_state.pagina_actual == "optimizacion":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_optimizacion_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id')))
+                else:
+                    st.info("👆 Seleccione un cliente para la optimización")
+            elif st.session_state.pagina_actual == "movimientos_asesor":
                 mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
+            mostrar_pagina_inicio()
             
-            # Panel de bienvenida
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
-                        border-radius: 15px; 
-                        padding: 40px; 
-                        color: white;
-                        text-align: center;
-                        margin: 30px 0;">
-                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
-                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
-                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis Completo</h3>
-                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
-                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>⚖️ Gestión de Riesgo</h3>
-                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Características
-            st.subheader("✨ Características Principales")
-            cols = st.columns(3)
-            with cols[0]:
-                st.markdown("""
-                **📊 Análisis Detallado**  
-                - Valuación completa de activos  
-                - Distribución por tipo de instrumento  
-                - Concentración del portafolio  
-                """)
-            with cols[1]:
-                st.markdown("""
-                **📈 Herramientas Profesionales**  
-                - Optimización de portafolio  
-                - Análisis técnico avanzado  
-                - Proyecciones de rendimiento  
-                """)
-            with cols[2]:
-                st.markdown("""
-                **💱 Datos de Mercado**  
-                - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
-                - Estado de cuenta consolidado  
-                """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+def mostrar_pagina_inicio():
+    """Página de inicio con información general"""
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
+                border-radius: 15px; 
+                padding: 40px; 
+                color: white;
+                text-align: center;
+                margin: 30px 0;">
+        <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
+        <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
+        <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                <h3>📊 Análisis Completo</h3>
+                <p>Visualice todos sus activos en un solo lugar con detalle</p>
+            </div>
+            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                <h3>📈 Gráficos Interactivos</h3>
+                <p>Comprenda su portafolio con visualizaciones avanzadas</p>
+            </div>
+            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                <h3>⚖️ Gestión de Riesgo</h3>
+                <p>Identifique concentraciones y optimice su perfil de riesgo</p>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Características
+    st.subheader("✨ Características Principales")
+    cols = st.columns(3)
+    with cols[0]:
+        st.markdown("""
+        **📊 Análisis Detallado**  
+        - Valuación completa de activos  
+        - Distribución por tipo de instrumento  
+        - Concentración del portafolio  
+        """)
+    with cols[1]:
+        st.markdown("""
+        **📈 Herramientas Profesionales**  
+        - Optimización de portafolio  
+        - Análisis técnico avanzado  
+        - Proyecciones de rendimiento  
+        """)
+    with cols[2]:
+        st.markdown("""
+        **💱 Datos de Mercado**  
+        - Cotizaciones MEP en tiempo real  
+        - Tasas de caución actualizadas  
+        - Estado de cuenta consolidado  
+        """)
+
+def mostrar_cotizaciones_mep_simplificado(token_acceso):
+    """Versión simplificada de cotizaciones MEP sin tabs internos"""
+    st.title("💰 Cotizaciones MEP")
+    st.markdown("---")
+    
+    with st.form("mep_form"):
+        col1, col2, col3 = st.columns(3)
+        simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
+        id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
+        id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
+        
+        if st.form_submit_button("🔍 Consultar MEP"):
+            if simbolo_mep:
+                with st.spinner("Consultando cotización MEP..."):
+                    cotizacion_mep = obtener_cotizacion_mep(
+                        token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
+                    )
+                
+                if cotizacion_mep:
+                    st.success("✅ Cotización MEP obtenida")
+                    precio_mep = cotizacion_mep.get('precio', 'N/A')
+                    st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
+                else:
+                    st.error("❌ No se pudo obtener la cotización MEP")
 
 if __name__ == "__main__":
     main()
