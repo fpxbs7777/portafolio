@@ -7699,6 +7699,9 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                     
                     st.write(f"✅ {simbolo} vs {benchmark_ticker}: Sharpe={sharpe:.4f}, Beta={beta:.4f}, Alpha={alpha:.4f}, R²={r_squared:.4f}")
                     
+                    # Debug: mostrar que se agregaron las métricas
+                    st.write(f"🔍 {simbolo}: métricas agregadas para {benchmark_ticker}")
+                    
                 except Exception as e:
                     st.warning(f"⚠️ Error calculando métricas para {simbolo} vs {benchmark_ticker}: {str(e)}")
                     st.write(f"📊 Detalles del error: {type(e).__name__}")
@@ -7727,8 +7730,19 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
     st.success(f"🎯 Total de métricas calculadas: {total_metricas}")
     st.success(f"📊 Activos procesados: {len(resultados_metricas)}")
     
+    # Debug: mostrar qué contiene cada resultado
+    st.write("🔍 **DEBUG: Contenido de resultados_metricas:**")
+    for i, resultado in enumerate(resultados_metricas):
+        st.write(f"📊 Activo {i+1} ({resultado.get('Símbolo', 'N/A')}): {list(resultado.keys())}")
+    
     # Crear DataFrame de resultados
     df_metricas = pd.DataFrame(resultados_metricas)
+    
+    # Debug: mostrar estructura del DataFrame
+    st.write("🔍 **DEBUG: Estructura del DataFrame:**")
+    st.write(f"📊 Columnas: {list(df_metricas.columns)}")
+    st.write(f"📊 Filas: {len(df_metricas)}")
+    st.write(f"📊 Primeras filas: {df_metricas.head()}")
     
     # Mostrar tabla de métricas
     st.markdown("#### 📊 Tabla de Métricas Individuales")
