@@ -2332,8 +2332,7 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
         
         usar_tasa_manual = st.checkbox(
             "Usar Tasa Libre de Riesgo Manual",
-            help="Marcar para usar tasa personalizada en lugar de la del benchmark",
-            key="tasa_manual_avanzada"
+            help="Marcar para usar tasa personalizada en lugar de la del benchmark"
         )
     
     # Configuración de estrategias
@@ -2358,8 +2357,8 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
         )
     
     with col3:
-        mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="histogramas_avanzada")
-        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True, key="frontera_avanzada")
+        mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
+        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True)
     
     # Botón de ejecución
     ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Avanzada", type="primary")
@@ -3532,7 +3531,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
+def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -3796,8 +3795,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
             mostrar_histograma_retornos = st.checkbox(
                 "📈 Mostrar Histograma de Retornos por Activo", 
                 value=False,
-                help="Muestra histogramas de retornos históricos para cada activo del portafolio",
-                key=f"histograma_retornos_resumen_{pais.lower().replace(' ', '_')}"
+                help="Muestra histogramas de retornos históricos para cada activo del portafolio"
             )
             
             col1, col2 = st.columns(2)
@@ -3859,8 +3857,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
                 tipo_grafico = st.selectbox(
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
-                    help="Seleccione el tipo de visualización para los valores de activos",
-                    key=f"tipo_grafico_{pais.lower().replace(' ', '_')}"
+                    help="Seleccione el tipo de visualización para los valores de activos"
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
@@ -4188,6 +4185,333 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="Argentina"):
                         st.warning("⚠️ No se pudieron cargar los datos históricos para el análisis de retornos")
                 else:
                     st.warning("⚠️ No hay símbolos válidos en el portafolio para análisis de retornos")
+        
+        # Recomendaciones
+        st.subheader("💡 Recomendaciones")
+        if metricas:
+            if metricas['concentracion'] > 0.5:
+                st.warning("""
+                **⚠️ Portafolio Altamente Concentrado**  
+                Considere diversificar sus inversiones para reducir el riesgo.
+                """)
+            elif metricas['concentracion'] > 0.25:
+                st.info("""
+                **ℹ️ Concentración Moderada**  
+                Podría mejorar su diversificación para optimizar el riesgo.
+                """)
+            else:
+                st.success("""
+                **✅ Buena Diversificación**  
+                Su portafolio está bien diversificado.
+                """)
+            
+            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
+            if ratio_riesgo_retorno > 0.5:
+                st.success("""
+                **✅ Buen Balance Riesgo-Retorno**  
+                La relación entre riesgo y retorno es favorable.
+                """)
+            else:
+                st.warning("""
+                **⚠️ Revisar Balance Riesgo-Retorno**  
+                El riesgo podría ser alto en relación al retorno esperado.
+                """)
+    else:
+        st.warning("No se encontraron activos en el portafolio")
+
+def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
+    """
+    Muestra el estado de cuenta, con soporte para cuentas filtradas de EEUU
+    
+    Args:
+        estado_cuenta (dict): Datos del estado de cuenta
+        es_eeuu (bool): Si es True, muestra información específica para cuentas de EEUU
+    """
+    if es_eeuu:
+        st.markdown("### 🇺🇸 Estado de Cuenta EEUU")
+    else:
+        st.markdown("### 💰 Estado de Cuenta")
+    
+    if not estado_cuenta:
+        st.warning("No hay datos de estado de cuenta disponibles")
+        return
+    
+    # Verificar si es un estado de cuenta filtrado de EEUU
+    if estado_cuenta.get('filtrado', False):
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        cuentas = estado_cuenta.get('cuentas', [])
+        total_cuentas_eeuu = estado_cuenta.get('total_cuentas_eeuu', 0)
+        
+        cols = st.columns(3)
+        cols[0].metric("Total EEUU en Pesos", f"AR$ {total_en_pesos:,.2f}")
+        cols[1].metric("Cuentas de EEUU", total_cuentas_eeuu)
+        cols[2].metric("Total General", f"AR$ {total_en_pesos:,.2f}")
+        
+        if cuentas:
+            st.subheader("📊 Detalle de Cuentas de EEUU")
+            
+            datos_cuentas = []
+            for cuenta in cuentas:
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                    'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                    'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                    'Total': f"${cuenta.get('total', 0):,.2f}",
+                })
+            
+            df_cuentas = pd.DataFrame(datos_cuentas)
+            st.dataframe(df_cuentas, use_container_width=True, height=300)
+            
+            # Mostrar resumen específico para EEUU
+            st.info(f"💡 **Resumen EEUU**: {total_cuentas_eeuu} cuentas con saldo total de AR$ {total_en_pesos:,.2f}")
+        else:
+            st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+    else:
+        # Estado de cuenta general (no filtrado)
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        cuentas = estado_cuenta.get('cuentas', [])
+        
+        cols = st.columns(3)
+        cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
+        cols[1].metric("Número de Cuentas", len(cuentas))
+        
+        if cuentas:
+            st.subheader("📊 Detalle de Cuentas")
+            
+            datos_cuentas = []
+            for cuenta in cuentas:
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                    'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                    'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                    'Total': f"${cuenta.get('total', 0):,.2f}",
+                })
+            
+            df_cuentas = pd.DataFrame(datos_cuentas)
+            st.dataframe(df_cuentas, use_container_width=True, height=300)
+
+def mostrar_cotizaciones_mercado(token_acceso):
+    st.markdown("### 💱 Cotizaciones y Mercado")
+    
+    with st.expander("💰 Cotización MEP", expanded=True):
+        with st.form("mep_form"):
+            col1, col2, col3 = st.columns(3)
+            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
+            id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
+            id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
+            
+            if st.form_submit_button("🔍 Consultar MEP"):
+                if simbolo_mep:
+                    with st.spinner("Consultando cotización MEP..."):
+                        cotizacion_mep = obtener_cotizacion_mep(
+                            token_acceso, simbolo_mep, id_plazo_compra, id_plazo_venta
+                        )
+                    
+                    if cotizacion_mep:
+                        st.success("✅ Cotización MEP obtenida")
+                        precio_mep = cotizacion_mep.get('precio', 'N/A')
+                        st.metric("Precio MEP", f"${precio_mep}" if precio_mep != 'N/A' else 'N/A')
+                    else:
+                        st.error("❌ No se pudo obtener la cotización MEP")
+    
+    with st.expander("🏦 Tasas de Caución", expanded=True):
+        if st.button("🔄 Actualizar Tasas"):
+            with st.spinner("Consultando tasas de caución..."):
+                tasas_caucion = obtener_tasas_caucion(token_acceso)
+            
+            if tasas_caucion is not None and not tasas_caucion.empty:
+                df_tasas = pd.DataFrame(tasas_caucion)
+                columnas_relevantes = ['simbolo', 'tasa', 'bid', 'offer', 'ultimo']
+                columnas_disponibles = [col for col in columnas_relevantes if col in df_tasas.columns]
+                
+                if columnas_disponibles:
+                    st.dataframe(df_tasas[columnas_disponibles].head(10))
+                else:
+                    st.dataframe(df_tasas.head(10))
+            else:
+                st.error("❌ No se pudieron obtener las tasas de caución")
+
+
+
+def mostrar_analisis_tecnico(token_acceso, id_cliente):
+    st.markdown("### 📊 Análisis Técnico")
+    
+    with st.spinner("Obteniendo portafolio..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    
+    if not portafolio:
+        st.warning("No se pudo obtener el portafolio del cliente")
+        return
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("El portafolio está vacío")
+        return
+    
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
+    
+    if not simbolos:
+        st.warning("No se encontraron símbolos válidos")
+        return
+    
+    simbolo_seleccionado = st.selectbox(
+        "Seleccione un activo para análisis técnico:",
+        options=simbolos
+    )
+    
+    if simbolo_seleccionado:
+        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
+        
+        # Widget de TradingView
+        tv_widget = f"""
+        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+          "container_id": "tradingview_{simbolo_seleccionado}",
+          "width": "100%",
+          "height": 650,
+          "symbol": "{simbolo_seleccionado}",
+          "interval": "D",
+          "timezone": "America/Argentina/Buenos_Aires",
+          "theme": "light",
+          "style": "1",
+          "locale": "es",
+          "toolbar_bg": "#f4f7f9",
+          "enable_publishing": false,
+          "allow_symbol_change": true,
+          "hide_side_toolbar": false,
+          "studies": [
+            "MACD@tv-basicstudies",
+            "RSI@tv-basicstudies",
+            "StochasticRSI@tv-basicstudies",
+            "Volume@tv-basicstudies",
+            "Moving Average@tv-basicstudies"
+          ],
+          "drawings_access": {{
+            "type": "black",
+            "tools": [
+              {{"name": "Trend Line"}},
+              {{"name": "Horizontal Line"}},
+              {{"name": "Fibonacci Retracement"}},
+              {{"name": "Rectangle"}},
+              {{"name": "Text"}}
+            ]
+          }},
+          "enabled_features": [
+            "study_templates",
+            "header_indicators",
+            "header_compare",
+            "header_screenshot",
+            "header_fullscreen_button",
+            "header_settings",
+            "header_symbol_search"
+          ]
+        }});
+        </script>
+        """
+        components.html(tv_widget, height=680)
+
+def mostrar_movimientos_asesor():
+    st.title("👨‍💼 Panel del Asesor")
+    
+    if 'token_acceso' not in st.session_state or not st.session_state.token_acceso:
+        st.error("Debe iniciar sesión primero")
+        return
+        
+    token_acceso = st.session_state.token_acceso
+    
+    # Obtener lista de clientes
+    clientes = obtener_lista_clientes(token_acceso)
+    if not clientes:
+        st.warning("No se encontraron clientes")
+        return
+    
+    # Formulario de búsqueda
+    with st.form("form_buscar_movimientos"):
+        st.subheader("🔍 Buscar Movimientos")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30))
+        with col2:
+            fecha_hasta = st.date_input("Fecha hasta", value=date.today())
+        
+        # Selección múltiple de clientes
+        cliente_opciones = [{"label": f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} ({c.get('numeroCliente', c.get('id', ''))})", 
+                           "value": c.get('numeroCliente', c.get('id'))} for c in clientes]
+        
+        clientes_seleccionados = st.multiselect(
+            "Seleccione clientes",
+            options=[c['value'] for c in cliente_opciones],
+            format_func=lambda x: next((c['label'] for c in cliente_opciones if c['value'] == x), x),
+            default=[cliente_opciones[0]['value']] if cliente_opciones else []
+        )
+        
+        # Filtros adicionales
+        col1, col2 = st.columns(2)
+        with col1:
+            tipo_fecha = st.selectbox(
+                "Tipo de fecha",
+                ["fechaOperacion", "fechaLiquidacion"],
+                index=0
+            )
+            estado = st.selectbox(
+                "Estado",
+                ["", "Pendiente", "Aprobado", "Rechazado"],
+                index=0
+            )
+        with col2:
+            tipo_operacion = st.text_input("Tipo de operación")
+            moneda = st.text_input("Moneda", "ARS")
+        
+        buscar = st.form_submit_button("🔍 Buscar movimientos")
+    
+    if buscar and clientes_seleccionados:
+        with st.spinner("Buscando movimientos..."):
+            movimientos = obtener_movimientos_asesor(
+                token_portador=token_acceso,
+                clientes=clientes_seleccionados,
+                fecha_desde=fecha_desde.isoformat(),
+                fecha_hasta=fecha_hasta.isoformat(),
+                tipo_fecha=tipo_fecha,
+                estado=estado or None,
+                tipo_operacion=tipo_operacion or None,
+                moneda=moneda or None
+            )
+            
+            if movimientos and isinstance(movimientos, list):
+                df = pd.DataFrame(movimientos)
+                if not df.empty:
+                    st.subheader("📋 Resultados de la búsqueda")
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # Mostrar resumen
+                    st.subheader("📊 Resumen de Movimientos")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Total Movimientos", len(df))
+                    
+                    if 'monto' in df.columns:
+                        col2.metric("Monto Total", f"${df['monto'].sum():,.2f}")
+                    
+                    if 'estado' in df.columns:
+                        estados = df['estado'].value_counts().to_dict()
+                        col3.metric("Estados", ", ".join([f"{k} ({v})" for k, v in estados.items()]))
+                else:
+                    st.info("No se encontraron movimientos con los filtros seleccionados")
+            else:
+                st.warning("No se encontraron movimientos o hubo un error en la consulta")
+                if movimientos and not isinstance(movimientos, list):
+                    st.json(movimientos)  # Mostrar respuesta cruda para depuración
 
 # Clase PortfolioManager simplificada para compatibilidad
 class PortfolioManager:
@@ -4657,8 +4981,7 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         usar_benchmark = st.checkbox(
             "Usar Benchmark como Tasa Libre de Riesgo",
             value=True,
-            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones",
-            key="benchmark_tasa_libre_rebalanceo_1"
+            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones"
         )
     
     # Configuración de optimización
@@ -4687,7 +5010,7 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         )
     
     with col3:
-        mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True, key="comparacion_rebalanceo_1")
+        mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
     
     # Botón de ejecución
     col1, col2 = st.columns(2)
@@ -4755,8 +5078,7 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
     incluir_saldo_disponible = st.checkbox(
         "💳 Incluir saldo disponible del estado de cuenta",
         value=False,
-        help="Si está marcado, se incluirá el saldo disponible en el capital total",
-        key="incluir_saldo_disponible_rebalanceo"
+        help="Si está marcado, se incluirá el saldo disponible en el capital total"
     )
     
     capital_disponible = 0
@@ -4796,8 +5118,7 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
         incluir_actuales = st.checkbox(
             "🔄 Incluir símbolos actuales",
             value=True,
-            help="Incluir algunos símbolos del portafolio actual en la selección aleatoria",
-            key="incluir_actuales_rebalanceo"
+            help="Incluir algunos símbolos del portafolio actual en la selección aleatoria"
         )
     
     with col3:
@@ -4855,9 +5176,9 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
                 help="Para cálculo del ratio de Sharpe"
             )
         with col2:
-            mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True, key="comparacion_rebalanceo_2")
+            mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
         with col3:
-            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="metricas_rebalanceo_2")
+            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
     
     # Botón de ejecución
     col1, col2, col3 = st.columns(3)
@@ -5295,8 +5616,7 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
         usar_portafolio_actual = st.checkbox(
             "🔄 Usar portafolio actual como benchmark",
             value=False,
-            help="Si está marcado, se usará el portafolio actual como benchmark",
-            key="usar_portafolio_actual_optimizacion"
+            help="Si está marcado, se usará el portafolio actual como benchmark"
         )
     
     with col3:
@@ -5347,9 +5667,9 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
                 }[x]
             )
         with col2:
-            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="histogramas_optimizacion_aleatoria")
+            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
         with col3:
-            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False, key="frontera_optimizacion_aleatoria")
+            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False)
     
     # Botones de ejecución
     col1, col2, col3 = st.columns(3)
@@ -6026,26 +6346,24 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
         )
     
     with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier_frontera")
+        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
     
     # Configuración avanzada de frontera eficiente
     with st.expander("⚙️ Configuración Avanzada de Frontera Eficiente", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
             calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, 
-                                       help="Calcula automáticamente todas las estrategias disponibles",
-                                       key="calcular_todos_frontera")
+                                       help="Calcula automáticamente todas las estrategias disponibles")
             num_puntos = st.slider("Número de Puntos en Frontera", min_value=10, max_value=100, value=50,
                                  help="Más puntos = frontera más suave pero más lento")
         with col2:
             incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True,
-                                       help="Muestra el portafolio actual en la frontera",
-                                       key="incluir_actual_frontera")
-            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="metricas_frontera")
+                                       help="Muestra el portafolio actual en la frontera")
+            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
         with col3:
             target_return_frontier = st.number_input("Retorno Objetivo Frontera", min_value=0.0, max_value=1.0, 
                                                    value=0.08, step=0.01, help="Para optimización de frontera")
-            auto_refresh = st.checkbox("Auto-refresh", value=True, help="Actualiza automáticamente con cambios", key="auto_refresh_frontera")
+            auto_refresh = st.checkbox("Auto-refresh", value=True, help="Actualiza automáticamente con cambios")
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -6592,9 +6910,9 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                         with col1:
                             zoom_level = st.slider("Zoom", min_value=0.5, max_value=3.0, value=1.0, step=0.1)
                         with col2:
-                            mostrar_grid = st.checkbox("Mostrar Grid", value=True, key="mostrar_grid_frontera")
+                            mostrar_grid = st.checkbox("Mostrar Grid", value=True)
                         with col3:
-                            mostrar_leyenda = st.checkbox("Mostrar Leyenda", value=True, key="mostrar_leyenda_frontera")
+                            mostrar_leyenda = st.checkbox("Mostrar Leyenda", value=True)
                         
                         # Aplicar configuraciones al gráfico
                         if fig:
@@ -6780,12 +7098,12 @@ def mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hast
         num_puntos = st.slider("Número de Puntos", min_value=10, max_value=100, value=50)
     
     with col2:
-        incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True, key="incluir_actual_frontera_simple")
-        mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="metricas_frontera_simple")
+        incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True)
+        mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
     
     with col3:
-        calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, key="calcular_todos_frontera_simple")
-        auto_refresh = st.checkbox("Auto-refresh", value=True, key="auto_refresh_frontera_simple")
+        calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True)
+        auto_refresh = st.checkbox("Auto-refresh", value=True)
     
     ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", use_container_width=True)
     
@@ -6845,27 +7163,26 @@ def mostrar_analisis_portafolio():
         portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🇦🇷 Portafolio Argentina", 
         "🇺🇸 Portafolio EEUU",
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
-        "📈 Métricas Individuales",
         "💱 Cotizaciones"
     ])
 
     with tab1:
         if portafolio_ar:
             st.subheader("🇦🇷 Portafolio Argentina")
-            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "Argentina")
+            mostrar_resumen_portafolio(portafolio_ar, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
         if portafolio_eeuu:
             st.subheader("🇺🇸 Portafolio Estados Unidos")
-            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "Estados Unidos")
+            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio de EEUU")
     
@@ -6964,612 +7281,7 @@ def mostrar_analisis_portafolio():
         mostrar_analisis_tecnico(token_acceso, id_cliente)
     
     with tab6:
-        st.subheader("📈 Métricas Individuales de Activos")
-        st.info("Esta sección calcula métricas individuales para cada activo del portafolio incluyendo Sharpe, Alpha, Beta y R² respecto a múltiples benchmarks.")
-        
-        # Selección de portafolio para análisis
-        col1, col2 = st.columns(2)
-        with col1:
-            portafolio_analisis = st.selectbox(
-                "Seleccionar Portafolio para Análisis:",
-                ["🇦🇷 Argentina", "🇺🇸 Estados Unidos", "🔄 Combinado"],
-                key="portafolio_analisis_metricas"
-            )
-        
-        with col2:
-            periodo_analisis = st.selectbox(
-                "Período de Análisis:",
-                ["1 Mes", "3 Meses", "6 Meses", "1 Año", "2 Años"],
-                index=3,  # 1 Año por defecto
-                key="periodo_analisis_metricas"
-            )
-        
-        # Mapear período a días
-        mapeo_periodos = {
-            "1 Mes": 30,
-            "3 Meses": 90,
-            "6 Meses": 180,
-            "1 Año": 365,
-            "2 Años": 730
-        }
-        
-        dias_analisis = mapeo_periodos[periodo_analisis]
-        fecha_desde = (datetime.now() - timedelta(days=dias_analisis)).strftime('%Y-%m-%d')
-        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-        
-        # Seleccionar portafolio según la opción
-        if portafolio_analisis == "🇦🇷 Argentina":
-            portafolio_seleccionado = portafolio_ar
-            nombre_portafolio = "Argentina"
-        elif portafolio_analisis == "🇺🇸 Estados Unidos":
-            portafolio_seleccionado = portafolio_eeuu
-            nombre_portafolio = "Estados Unidos"
-        else:  # Combinado
-            # Combinar ambos portafolios
-            if portafolio_ar and portafolio_eeuu:
-                portafolio_combinado = {
-                    'activos': portafolio_ar.get('activos', []) + portafolio_eeuu.get('activos', [])
-                }
-                portafolio_seleccionado = portafolio_combinado
-                nombre_portafolio = "Combinado"
-            elif portafolio_ar:
-                portafolio_seleccionado = portafolio_ar
-                nombre_portafolio = "Argentina"
-            elif portafolio_eeuu:
-                portafolio_seleccionado = portafolio_eeuu
-                nombre_portafolio = "Estados Unidos"
-            else:
-                portafolio_seleccionado = None
-        
-        if portafolio_seleccionado:
-            st.success(f"✅ Analizando portafolio de {nombre_portafolio}")
-            
-            # Botón para ejecutar análisis
-            if st.button("🚀 Calcular Métricas Individuales", type="primary", key="calcular_metricas_btn"):
-                with st.spinner(f"🔄 Calculando métricas para {nombre_portafolio}..."):
-                    try:
-                        df_metricas = calcular_metricas_individuales_activos(
-                            portafolio_seleccionado, 
-                            token_acceso, 
-                            fecha_desde, 
-                            fecha_hasta
-                        )
-                        
-                        if df_metricas is not None:
-                            st.success(f"✅ Análisis completado para {len(df_metricas)} activos")
-                            
-                            # Mostrar resumen de métricas
-                            st.markdown("#### 📊 Resumen de Métricas Calculadas")
-                            
-                            # Contar benchmarks disponibles
-                            benchmarks_sharpe = [col for col in df_metricas.columns if col.endswith('_Sharpe')]
-                            st.info(f"📈 Benchmarks analizados: {len(benchmarks_sharpe)}")
-                            
-                            # Mostrar mejores activos por Sharpe
-                            if benchmarks_sharpe:
-                                mejor_benchmark = benchmarks_sharpe[0]
-                                mejores_activos = df_metricas.nlargest(5, mejor_benchmark)[['Símbolo', 'Descripción', mejor_benchmark]]
-                                st.markdown(f"**🏆 Top 5 Activos por Sharpe ({mejor_benchmark.replace('_Sharpe', '')})**")
-                                st.dataframe(mejores_activos, use_container_width=True)
-                        else:
-                            st.error("❌ No se pudieron calcular las métricas")
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error durante el análisis: {str(e)}")
-                        st.exception(e)
-        else:
-            st.warning("⚠️ No hay portafolio disponible para análisis")
-    
-    with tab7:
         mostrar_cotizaciones_mercado(token_acceso)
-
-def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde=None, fecha_hasta=None):
-    """
-    Calcula métricas individuales para cada activo del portafolio incluyendo:
-    - Sharpe, Alpha, Beta, R² respecto a múltiples benchmarks
-    - Benchmarks: ^MERV, SPY, QQQ, Dólar MEP, Dólar CCL, AL30/AL30D, AL30/AL30C
-    """
-    
-    if not portafolio or 'activos' not in portafolio:
-        st.warning("No hay activos en el portafolio para analizar")
-        return None
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        st.warning("No hay activos en el portafolio para analizar")
-        return None
-    
-    # Configuración de fechas
-    if fecha_desde is None:
-        fecha_desde = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-    if fecha_hasta is None:
-        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
-    
-    # Convertir fechas a datetime para yfinance
-    try:
-        fecha_desde_dt = pd.to_datetime(fecha_desde)
-        fecha_hasta_dt = pd.to_datetime(fecha_hasta)
-    except Exception as e:
-        st.error(f"❌ Error en el formato de fechas: {str(e)}")
-        return None
-    
-    st.markdown("#### 📊 Métricas Individuales de Activos")
-    st.info(f"📅 Período de análisis: {fecha_desde} a {fecha_hasta}")
-    
-    # Input para tasa libre de riesgo
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        tasa_libre_riesgo = st.number_input(
-            "Tasa Libre de Riesgo (%)",
-            min_value=0.0,
-            max_value=20.0,
-            value=4.0,
-            step=0.1,
-            help="Tasa libre de riesgo anual para el cálculo del Sharpe Ratio",
-            key="tasa_libre_riesgo_metricas"
-        ) / 100  # Convertir de porcentaje a decimal
-    
-    with col2:
-        st.write(f"💡 Tasa libre de riesgo: **{tasa_libre_riesgo:.1%}** anual")
-    
-    # Lista de benchmarks
-    benchmarks = {
-        '^MERV': 'Merval',
-        'SPY': 'S&P 500 ETF',
-        'QQQ': 'NASDAQ ETF',
-        'IWM': 'Russell 2000 ETF',
-        'EFA': 'MSCI EAFE ETF',
-        'EEM': 'MSCI Emerging Markets ETF',
-        'AGG': 'US Aggregate Bond ETF',
-        '^GSPC': 'S&P 500 Index',
-        '^IXIC': 'NASDAQ Index',
-        '^DJI': 'Dow Jones Index'
-    }
-    
-    # Obtener datos de benchmarks usando yfinance
-    st.info("🔄 Obteniendo datos de benchmarks...")
-    datos_benchmarks = {}
-    
-    for ticker, nombre in benchmarks.items():
-        try:
-            datos = yf.download(ticker, start=fecha_desde, end=fecha_hasta, progress=False)
-            if not datos.empty:
-                datos_benchmarks[ticker] = datos['Close']
-                st.success(f"✅ {nombre} ({ticker})")
-            else:
-                st.warning(f"⚠️ No se obtuvieron datos para {nombre} ({ticker})")
-        except Exception as e:
-            st.warning(f"⚠️ Error obteniendo {nombre} ({ticker}): {str(e)}")
-    
-    # Obtener datos de dólares desde IOL
-    st.info("🔄 Obteniendo datos de dólares desde IOL...")
-    try:
-        # Dólar MEP (AL30/AL30D)
-        mep_data = obtener_serie_historica_iol(token_acceso, 'AL30', 'AL30D', fecha_desde, fecha_hasta)
-        if mep_data is not None and not mep_data.empty:
-            # Verificar la estructura de datos
-            if isinstance(mep_data, pd.Series):
-                # IOL retorna una Serie, usar directamente
-                datos_benchmarks['DOLAR_MEP'] = mep_data
-                st.success("✅ Dólar MEP (AL30/AL30D) - Serie de IOL")
-            elif 'precio' in mep_data.columns:
-                datos_benchmarks['DOLAR_MEP'] = mep_data['precio']
-                st.success("✅ Dólar MEP (AL30/AL30D)")
-            elif 'cierre' in mep_data.columns:
-                datos_benchmarks['DOLAR_MEP'] = mep_data['cierre']
-                st.success("✅ Dólar MEP (AL30/AL30D) - usando columna 'cierre'")
-            else:
-                st.warning(f"⚠️ Estructura inesperada para Dólar MEP. Columnas: {list(mep_data.columns)}")
-        else:
-            st.warning("⚠️ No se obtuvieron datos de Dólar MEP")
-        
-        # Dólar CCL (AL30/AL30C)
-        ccl_data = obtener_serie_historica_iol(token_acceso, 'AL30', 'AL30C', fecha_desde, fecha_hasta)
-        if ccl_data is not None and not ccl_data.empty:
-            # Verificar la estructura de datos
-            if isinstance(ccl_data, pd.Series):
-                # IOL retorna una Serie, usar directamente
-                datos_benchmarks['DOLAR_CCL'] = ccl_data
-                st.success("✅ Dólar CCL (AL30/AL30C) - Serie de IOL")
-            elif 'precio' in ccl_data.columns:
-                datos_benchmarks['DOLAR_CCL'] = ccl_data['precio']
-                st.success("✅ Dólar CCL (AL30/AL30C)")
-            elif 'cierre' in ccl_data.columns:
-                datos_benchmarks['DOLAR_CCL'] = ccl_data['cierre']
-                st.success("✅ Dólar CCL (AL30/AL30C) - usando columna 'cierre'")
-            else:
-                st.warning(f"⚠️ Estructura inesperada para Dólar CCL. Columnas: {list(ccl_data.columns)}")
-        else:
-            st.warning("⚠️ No se obtuvieron datos de Dólar CCL")
-            
-    except Exception as e:
-        st.warning(f"⚠️ Error obteniendo datos de dólares: {str(e)}")
-        st.write(f"📊 Detalles del error: {type(e).__name__}")
-    
-    if not datos_benchmarks:
-        st.error("❌ No se pudieron obtener datos de ningún benchmark")
-        return None
-    
-    # Calcular métricas para cada activo
-    st.info("🔄 Calculando métricas individuales...")
-    resultados_metricas = []
-    
-    for i, activo in enumerate(activos):
-        try:
-            titulo = activo.get('titulo', {})
-            simbolo = titulo.get('simbolo', 'N/A')
-            descripcion = titulo.get('descripcion', 'Sin descripción')
-            tipo = titulo.get('tipo', 'N/A')
-            
-            st.write(f"📈 Analizando {simbolo} ({descripcion})...")
-            
-            # Obtener datos históricos del activo
-            datos_activo = None
-            
-            # Intentar obtener datos desde IOL primero
-            if 'mercado' in titulo:
-                try:
-                    st.write(f"🔍 Intentando obtener datos de IOL para {simbolo} desde mercado {titulo['mercado']}")
-                    st.write(f"📅 Fechas: desde {fecha_desde} hasta {fecha_hasta}")
-                    datos_activo = obtener_serie_historica_iol(token_acceso, titulo['mercado'], simbolo, fecha_desde, fecha_hasta)
-                    
-                    # Debug: mostrar qué retornó la función
-                    if datos_activo is not None:
-                        st.write(f"📊 IOL retornó datos para {simbolo}: tipo={type(datos_activo)}, vacío={datos_activo.empty if hasattr(datos_activo, 'empty') else 'N/A'}")
-                        if isinstance(datos_activo, pd.Series):
-                            st.write(f"📊 Serie de IOL: {len(datos_activo)} registros, índice: {type(datos_activo.index)}")
-                            if not datos_activo.empty:
-                                st.write(f"📊 Primeros valores: {datos_activo.head()}")
-                        elif hasattr(datos_activo, 'columns'):
-                            st.write(f"📊 DataFrame de IOL: columnas={list(datos_activo.columns)}")
-                            if not datos_activo.empty:
-                                st.write(f"📊 Primeras filas: {datos_activo.head()}")
-                    else:
-                        st.write(f"📊 IOL no retornó datos para {simbolo}")
-                    
-                    # Verificar la estructura de datos retornada por IOL
-                    if datos_activo is not None and not datos_activo.empty:
-                        # Convertir Serie a DataFrame si es necesario
-                        if isinstance(datos_activo, pd.Series):
-                            # IOL retorna una Serie, convertir a DataFrame manteniendo las fechas reales
-                            datos_activo = pd.DataFrame({
-                                'fecha': datos_activo.index,
-                                'precio': datos_activo.values
-                            })
-                            # Normalizar fechas: convertir a solo fecha (sin hora) para alinear con benchmarks
-                            datos_activo['fecha'] = pd.to_datetime(datos_activo['fecha']).dt.date
-                            # Establecer la columna fecha como índice para poder alinear con benchmarks
-                            datos_activo.set_index('fecha', inplace=True)
-                            # Renombrar la columna de precio para que sea accesible
-                            datos_activo.columns = ['precio']
-                            st.write(f"✅ {simbolo}: convertida Serie de IOL a DataFrame con fechas normalizadas (solo fecha)")
-                        elif 'precio' in datos_activo.columns:
-                            # Ya tiene la estructura correcta
-                            st.write(f"✅ {simbolo}: usando columna 'precio'")
-                        elif 'cierre' in datos_activo.columns:
-                            datos_activo = datos_activo.rename(columns={'cierre': 'precio'})
-                            st.write(f"✅ {simbolo}: renombrando 'cierre' a 'precio'")
-                        elif 'valor' in datos_activo.columns:
-                            datos_activo = datos_activo.rename(columns={'valor': 'precio'})
-                            st.write(f"✅ {simbolo}: renombrando 'valor' a 'precio'")
-                        elif len(datos_activo.columns) >= 2:
-                            # Asumir que la segunda columna es el precio
-                            datos_activo = datos_activo.rename(columns={datos_activo.columns[1]: 'precio'})
-                            st.write(f"✅ {simbolo}: renombrando '{datos_activo.columns[1]}' a 'precio'")
-                        else:
-                            st.warning(f"⚠️ Estructura de datos inesperada para {simbolo} desde IOL")
-                            datos_activo = None
-                except Exception as e:
-                    st.warning(f"⚠️ Error obteniendo datos de IOL para {simbolo}: {str(e)}")
-                    st.write(f"📊 Tipo de error: {type(e).__name__}")
-                    datos_activo = None
-            
-            # Si no hay datos de IOL, usar yfinance como fallback
-            if datos_activo is None or datos_activo.empty:
-                try:
-                    # Mapear símbolos de IOL a yfinance
-                    ticker_yf = mapear_simbolo_a_yfinance(simbolo)
-                    if ticker_yf:
-                        datos_yf = yf.download(ticker_yf, start=fecha_desde_dt, end=fecha_hasta_dt, progress=False)
-                        if not datos_yf.empty:
-                            datos_activo = pd.DataFrame({
-                                'fecha': datos_yf.index,
-                                'precio': datos_yf['Close']
-                            })
-                            # Normalizar fechas: convertir a solo fecha (sin hora) para alinear con benchmarks
-                            datos_activo['fecha'] = pd.to_datetime(datos_activo['fecha']).dt.date
-                            # Establecer la columna fecha como índice para poder alinear con benchmarks
-                            datos_activo.set_index('fecha', inplace=True)
-                            st.info(f"📊 Usando datos de yfinance para {simbolo}")
-                        else:
-                            st.warning(f"⚠️ No hay datos de yfinance para {simbolo}")
-                    else:
-                        st.warning(f"⚠️ No hay mapeo de yfinance para {simbolo}")
-                except Exception as e:
-                    st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}: {str(e)}")
-                    continue
-            
-            if datos_activo is None or datos_activo.empty:
-                st.warning(f"⚠️ No hay datos históricos para {simbolo}")
-                continue
-            
-            # Verificar que tenemos la columna 'precio'
-            if 'precio' not in datos_activo.columns:
-                st.error(f"❌ Estructura de datos incorrecta para {simbolo}. Columnas disponibles: {list(datos_activo.columns)}")
-                st.write(f"📊 Primeras filas de datos: {datos_activo.head()}")
-                continue
-            
-            # Mostrar información de debug
-            st.write(f"📊 Datos obtenidos para {simbolo}: {len(datos_activo)} registros, columnas: {list(datos_activo.columns)}")
-            st.write(f"📊 Tipos de datos: {datos_activo.dtypes}")
-            st.write(f"📊 Primeras filas de precio: {datos_activo['precio'].head()}")
-            st.write(f"📊 Últimas filas de precio: {datos_activo['precio'].tail()}")
-            
-            # Calcular retornos del activo
-            try:
-                datos_activo['retorno'] = datos_activo['precio'].pct_change().dropna()
-                st.write(f"📊 Retornos calculados para {simbolo}: {len(datos_activo['retorno'])} registros válidos")
-            except Exception as e:
-                st.error(f"❌ Error calculando retornos para {simbolo}: {str(e)}")
-                st.write(f"📊 Datos de precio: {datos_activo['precio'].head()}")
-                continue
-            
-            # Calcular métricas para cada benchmark
-            metricas_activo = {
-                'Símbolo': simbolo,
-                'Descripción': descripcion,
-                'Tipo': tipo,
-                'Datos_Disponibles': len(datos_activo)
-            }
-            
-            for benchmark_ticker, benchmark_data in datos_benchmarks.items():
-                try:
-                    st.write(f"🔍 Procesando benchmark {benchmark_ticker} para {simbolo}")
-                    
-                    # Calcular retornos del benchmark
-                    benchmark_returns = benchmark_data.pct_change().dropna()
-                    st.write(f"📊 {benchmark_ticker}: {len(benchmark_returns)} retornos calculados")
-                    
-                    # Mostrar rango de fechas del benchmark
-                    if not benchmark_returns.empty:
-                        st.write(f"📅 {benchmark_ticker}: fechas desde {benchmark_returns.index.min()} hasta {benchmark_returns.index.max()}")
-                    
-                    # Mostrar rango de fechas del activo
-                    st.write(f"📅 {simbolo}: fechas desde {datos_activo.index.min()} hasta {datos_activo.index.max()}")
-                    
-                    # Debug: mostrar algunas fechas del activo y benchmark
-                    st.write(f"🔍 {simbolo}: primeras 5 fechas: {list(datos_activo.index[:5])}")
-                    st.write(f"🔍 {benchmark_ticker}: primeras 5 fechas: {list(benchmark_returns.index[:5])}")
-                    
-                    # Alinear fechas
-                    fechas_comunes = datos_activo.index.intersection(benchmark_returns.index)
-                    st.write(f"🔍 {simbolo} vs {benchmark_ticker}: {len(fechas_comunes)} fechas comunes encontradas")
-                    
-                    if len(fechas_comunes) < 10:  # Reducido de 30 a 10 días para análisis
-                        st.write(f"⚠️ {simbolo} vs {benchmark_ticker}: Insuficientes fechas comunes ({len(fechas_comunes)} < 10)")
-                        if len(fechas_comunes) > 0:
-                            st.write(f"🔍 Fechas comunes encontradas: {list(fechas_comunes[:5])}")
-                        continue
-                    
-                    retornos_activo = datos_activo.loc[fechas_comunes, 'retorno']
-                    retornos_benchmark = benchmark_returns.loc[fechas_comunes]
-                    
-                    st.write(f"✅ {simbolo} vs {benchmark_ticker}: {len(retornos_activo)} retornos alineados")
-                    
-                    # Calcular métricas
-                    # Sharpe Ratio usando la tasa libre de riesgo ingresada por el usuario
-                    rf_diario = tasa_libre_riesgo / 252
-                    excess_return = retornos_activo.mean() - rf_diario
-                    volatility = retornos_activo.std()
-                    sharpe = (excess_return * 252) / (volatility * np.sqrt(252)) if volatility > 0 else 0
-                    
-                    # Beta y Alpha
-                    cov_matrix = np.cov(retornos_activo, retornos_benchmark)
-                    beta = cov_matrix[0, 1] / cov_matrix[1, 1] if cov_matrix[1, 1] > 0 else 0
-                    
-                    # R²
-                    correlation = np.corrcoef(retornos_activo, retornos_benchmark)[0, 1]
-                    r_squared = correlation ** 2 if not np.isnan(correlation) else 0
-                    
-                    # Alpha (exceso de retorno no explicado por beta)
-                    alpha = (retornos_activo.mean() * 252) - (beta * retornos_benchmark.mean() * 252)
-                    
-                    # Agregar métricas al diccionario
-                    metricas_activo[f'{benchmark_ticker}_Sharpe'] = round(sharpe, 4)
-                    metricas_activo[f'{benchmark_ticker}_Beta'] = round(beta, 4)
-                    metricas_activo[f'{benchmark_ticker}_Alpha'] = round(alpha, 4)
-                    metricas_activo[f'{benchmark_ticker}_R2'] = round(r_squared, 4)
-                    
-                    st.write(f"✅ {simbolo} vs {benchmark_ticker}: Sharpe={sharpe:.4f}, Beta={beta:.4f}, Alpha={alpha:.4f}, R²={r_squared:.4f}")
-                    
-                    # Debug: mostrar que se agregaron las métricas
-                    st.write(f"🔍 {simbolo}: métricas agregadas para {benchmark_ticker}")
-                    
-                except Exception as e:
-                    st.warning(f"⚠️ Error calculando métricas para {simbolo} vs {benchmark_ticker}: {str(e)}")
-                    st.write(f"📊 Detalles del error: {type(e).__name__}")
-                    continue
-            
-            # Contar cuántas métricas se calcularon
-            metricas_calculadas = sum(1 for key in metricas_activo.keys() if any(key.endswith(suffix) for suffix in ['_Sharpe', '_Beta', '_Alpha', '_R2']))
-            st.success(f"✅ {simbolo} - {metricas_calculadas} métricas calculadas")
-            
-            resultados_metricas.append(metricas_activo)
-            
-        except Exception as e:
-            st.error(f"❌ Error procesando {simbolo}: {str(e)}")
-            continue
-    
-    if not resultados_metricas:
-        st.error("❌ No se pudieron calcular métricas para ningún activo")
-        return None
-    
-    # Resumen de métricas calculadas
-    total_metricas = 0
-    for resultado in resultados_metricas:
-        metricas_por_activo = sum(1 for key in resultado.keys() if any(key.endswith(suffix) for suffix in ['_Sharpe', '_Beta', '_Alpha', '_R2']))
-        total_metricas += metricas_por_activo
-    
-    st.success(f"🎯 Total de métricas calculadas: {total_metricas}")
-    st.success(f"📊 Activos procesados: {len(resultados_metricas)}")
-    
-    # Debug: mostrar qué contiene cada resultado
-    st.write("🔍 **DEBUG: Contenido de resultados_metricas:**")
-    for i, resultado in enumerate(resultados_metricas):
-        st.write(f"📊 Activo {i+1} ({resultado.get('Símbolo', 'N/A')}): {list(resultado.keys())}")
-    
-    # Crear DataFrame de resultados
-    df_metricas = pd.DataFrame(resultados_metricas)
-    
-    # Debug: mostrar estructura del DataFrame
-    st.write("🔍 **DEBUG: Estructura del DataFrame:**")
-    st.write(f"📊 Columnas: {list(df_metricas.columns)}")
-    st.write(f"📊 Filas: {len(df_metricas)}")
-    st.write(f"📊 Primeras filas: {df_metricas.head()}")
-    
-    # Mostrar tabla de métricas
-    st.markdown("#### 📊 Tabla de Métricas Individuales")
-    
-    # Crear columnas para organizar la información
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.markdown("**Configuración de Visualización**")
-        mostrar_metricas_detalladas = st.checkbox(
-            "Mostrar Métricas Detalladas", 
-            value=False,
-            key="metricas_detalladas_individuales"
-        )
-        
-        # Filtros
-        st.markdown("**Filtros**")
-        tipos_disponibles = df_metricas['Tipo'].unique()
-        tipo_filtro = st.selectbox(
-            "Filtrar por Tipo:",
-            ['Todos'] + list(tipos_disponibles),
-            key="filtro_tipo_metricas"
-        )
-        
-        # Benchmark principal para ordenamiento
-        benchmarks_disponibles = [col for col in df_metricas.columns if col.endswith('_Sharpe')]
-        benchmark_ordenamiento = st.selectbox(
-            "Ordenar por Benchmark:",
-            benchmarks_disponibles,
-            key="benchmark_ordenamiento"
-        )
-    
-    with col2:
-        st.markdown("**Resumen de Métricas**")
-        st.info(f"📊 {len(resultados_metricas)} activos analizados")
-        
-        if benchmark_ordenamiento in df_metricas.columns:
-            # Ordenar por Sharpe del benchmark seleccionado
-            df_ordenado = df_metricas.sort_values(benchmark_ordenamiento, ascending=False)
-        else:
-            df_ordenado = df_metricas
-        
-        # Aplicar filtro de tipo
-        if tipo_filtro != 'Todos':
-            df_filtrado = df_ordenado[df_ordenado['Tipo'] == tipo_filtro]
-        else:
-            df_filtrado = df_ordenado
-        
-        # Mostrar tabla
-        st.dataframe(df_filtrado, use_container_width=True, height=400)
-        
-        # Botón para descargar
-        csv = df_filtrado.to_csv(index=False)
-        st.download_button(
-            label="📥 Descargar CSV",
-            data=csv,
-            file_name=f"metricas_individuales_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-    
-    # Mostrar métricas detalladas si está habilitado
-    if mostrar_metricas_detalladas:
-        st.markdown("#### 📈 Análisis Detallado por Benchmark")
-        
-        for benchmark_ticker in benchmarks_disponibles:
-            benchmark_nombre = benchmark_ticker.replace('_Sharpe', '')
-            st.markdown(f"**Benchmark: {benchmark_nombre}**")
-            
-            # Crear subconjunto de columnas para este benchmark
-            columnas_benchmark = [col for col in df_metricas.columns if benchmark_ticker.replace('_Sharpe', '') in col]
-            columnas_basicas = ['Símbolo', 'Descripción', 'Tipo']
-            columnas_mostrar = columnas_basicas + columnas_benchmark
-            
-            df_benchmark = df_metricas[columnas_mostrar].copy()
-            
-            # Ordenar por Sharpe
-            if benchmark_ticker in df_benchmark.columns:
-                df_benchmark = df_benchmark.sort_values(benchmark_ticker, ascending=False)
-            
-            # Mostrar tabla
-            st.dataframe(df_benchmark, use_container_width=True, height=300)
-            
-            # Gráfico de barras para Sharpe
-            if benchmark_ticker in df_benchmark.columns:
-                fig = go.Figure(data=[go.Bar(
-                    x=df_benchmark['Símbolo'],
-                    y=df_benchmark[benchmark_ticker],
-                    text=df_benchmark[benchmark_ticker].round(3),
-                    textposition='auto',
-                    marker_color='#0d6efd'
-                )])
-                fig.update_layout(
-                    title=f"Ratio de Sharpe vs {benchmark_nombre}",
-                    xaxis_title="Activo",
-                    yaxis_title="Sharpe Ratio",
-                    height=400
-                )
-                st.plotly_chart(fig, use_container_width=True)
-    
-    return df_metricas
-
-def mapear_simbolo_a_yfinance(simbolo):
-    """
-    Mapea símbolos de IOL a símbolos de yfinance
-    """
-    mapeo = {
-        # CEDEARS
-        'MELI': 'MELI',
-        'GOOGL': 'GOOGL',
-        'AAPL': 'AAPL',
-        'MSFT': 'MSFT',
-        'AMZN': 'AMZN',
-        'TSLA': 'TSLA',
-        'NVDA': 'NVDA',
-        'META': 'META',
-        'NFLX': 'NFLX',
-        'PYPL': 'PYPL',
-        
-        # Acciones argentinas
-        'GGAL': 'GGAL.BA',
-        'PAMP': 'PAMP.BA',
-        'YPF': 'YPF.BA',
-        'TEN': 'TEN.BA',
-        'CRES': 'CRES.BA',
-        'EDN': 'EDN.BA',
-        'LOMA': 'LOMA.BA',
-        'TGS': 'TGS.BA',
-        'ALUA': 'ALUA.BA',
-        'COME': 'COME.BA',
-        
-        # Bonos
-        'AL30': 'AL30.BA',
-        'GD30': 'GD30.BA',
-        'GD35': 'GD35.BA',
-        'GD38': 'GD38.BA',
-        'GD41': 'GD41.BA',
-        'GD46': 'GD46.BA',
-        
-        # Letras
-        'S30S5': None,  # No disponible en yfinance
-        'S10N5': None,  # No disponible en yfinance
-    }
-    
-    return mapeo.get(simbolo, simbolo)
 
 def main():
     # Configuración de rendimiento
