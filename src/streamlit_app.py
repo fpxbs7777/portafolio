@@ -3846,7 +3846,280 @@ def mostrar_resumen_portafolio_eeuu(portafolio_eeuu, token_portador):
         st.info("ℹ️ No hay activos en el portafolio de EE.UU.")
 
 def mostrar_resumen_portafolio(portafolio, token_portador):
+    """
+    Muestra el resumen del portafolio de Argentina y EE.UU.
+    """
     st.markdown("### 📈 Resumen del Portafolio")
+    
+    # Obtener portafolio de EE.UU. para el resumen consolidado
+    portafolio_eeuu = None
+    try:
+        portafolio_eeuu = obtener_resumen_portafolio_eeuu(token_portador)
+    except:
+        pass
+    
+    # Mostrar resumen consolidado
+    st.markdown("#### 🌍 Resumen Consolidado")
+    mostrar_resumen_consolidado(portafolio, portafolio_eeuu, token_portador)
+    
+    # Crear tabs para separar los portafolios
+    tab_argentina, tab_eeuu = st.tabs(["🇦🇷 Portafolio Argentina", "🇺🇸 Portafolio EE.UU."])
+    
+    # Tab de Portafolio Argentina
+    with tab_argentina:
+        st.markdown("#### 🇦🇷 Portafolio de Argentina")
+        mostrar_resumen_portafolio_argentina(portafolio, token_portador)
+    
+    # Tab de Portafolio EE.UU.
+    with tab_eeuu:
+        st.markdown("#### 🇺🇸 Portafolio de Estados Unidos")
+        if portafolio_eeuu:
+            mostrar_resumen_portafolio_eeuu(portafolio_eeuu, token_portador)
+        else:
+            st.info("ℹ️ No se pudo obtener el portafolio de EE.UU.")
+            st.info("💡 Verifique que tenga permisos para acceder al portafolio de EE.UU.")
+            st.info("💡 El portafolio de EE.UU. puede no estar disponible para su cuenta")
+
+def mostrar_resumen_consolidado(portafolio_argentina, portafolio_eeuu, token_portador):
+    """
+    Muestra un resumen consolidado de ambos portafolios incluyendo saldos de cuentas
+    """
+    # Calcular métricas del portafolio argentino
+    activos_argentina = portafolio_argentina.get('activos', [])
+    valor_total_argentina = 0
+    simbolos_argentina = set()
+    tipos_argentina = set()
+    
+    for activo in activos_argentina:
+        try:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            tipo = titulo.get('tipo', '')
+            
+            if simbolo:
+                simbolos_argentina.add(simbolo)
+            if tipo:
+                tipos_argentina.add(tipo)
+            
+            # Calcular valuación
+            campos_valuacion = [
+                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
+                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
+                'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
+            ]
+            
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            valor_total_argentina += valuacion
+            
+        except Exception as e:
+            continue
+    
+    # Calcular métricas del portafolio de EE.UU.
+    valor_total_eeuu = 0
+    simbolos_eeuu = set()
+    tipos_eeuu = set()
+    
+    if portafolio_eeuu and 'portafolio' in portafolio_eeuu:
+        activos_eeuu = portafolio_eeuu['portafolio'].get('activos', [])
+        
+        for activo in activos_eeuu:
+            try:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', '')
+                tipo = titulo.get('tipo', '')
+                
+                if simbolo:
+                    simbolos_eeuu.add(simbolo)
+                if tipo:
+                    tipos_eeuu.add(tipo)
+                
+                # Calcular valuación para EE.UU.
+                campos_valuacion_eeuu = [
+                    'valorizado', 'valuacionDolar', 'valuacionActual', 'valorTotal', 'importe'
+                ]
+                
+                valuacion = 0
+                for campo in campos_valuacion_eeuu:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            val = float(activo[campo])
+                            if val > 0:
+                                valuacion = val
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                valor_total_eeuu += valuacion
+                
+            except Exception as e:
+                continue
+    
+    # Obtener saldos de cuentas para incluir en el valor total
+    saldo_pesos_argentina = 0
+    saldo_dolares_argentina = 0
+    saldo_dolares_eeuu = 0
+    
+    try:
+        # Obtener estado de cuenta de Argentina
+        estado_cuenta_argentina = obtener_estado_cuenta(token_portador)
+        if estado_cuenta_argentina and 'cuentas' in estado_cuenta_argentina:
+            for cuenta in estado_cuenta_argentina['cuentas']:
+                if 'saldoDisponible' in cuenta and cuenta['saldoDisponible'] is not None:
+                    saldo = float(cuenta['saldoDisponible'])
+                    if saldo > 0:
+                        # Identificar tipo de cuenta por el nombre o ID
+                        nombre_cuenta = cuenta.get('nombre', '').lower()
+                        if 'dolar' in nombre_cuenta or 'usd' in nombre_cuenta:
+                            saldo_dolares_argentina += saldo
+                        else:
+                            saldo_pesos_argentina += saldo
+    except:
+        pass
+    
+    try:
+        # Obtener estado de cuenta de EE.UU.
+        estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token_portador)
+        if estado_cuenta_eeuu and 'cuentas' in estado_cuenta_eeuu:
+            for cuenta in estado_cuenta_eeuu['cuentas']:
+                if 'saldoDisponible' in cuenta and cuenta['saldoDisponible'] is not None:
+                    saldo = float(cuenta['saldoDisponible'])
+                    if saldo > 0:
+                        saldo_dolares_eeuu += saldo
+    except:
+        pass
+    
+    # Calcular totales consolidados incluyendo saldos
+    valor_total_consolidado = valor_total_argentina + valor_total_eeuu + saldo_pesos_argentina + saldo_dolares_argentina + saldo_dolares_eeuu
+    total_activos = len(activos_argentina) + (len(portafolio_eeuu['portafolio'].get('activos', [])) if portafolio_eeuu else 0)
+    total_simbolos = len(simbolos_argentina | simbolos_eeuu)
+    total_tipos = len(tipos_argentina | tipos_eeuu)
+    
+    # Mostrar métricas consolidadas
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("💰 Valor Total Consolidado", f"${valor_total_consolidado:,.2f}")
+    
+    with col2:
+        st.metric("📊 Total de Activos", total_activos)
+    
+    with col3:
+        st.metric("🎯 Símbolos Únicos", total_simbolos)
+    
+    with col4:
+        st.metric("🏷️ Tipos de Activos", total_tipos)
+    
+    # Mostrar desglose de saldos
+    st.markdown("#### 💳 Saldos Disponibles")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("🇦🇷 Saldo Pesos", f"AR$ {saldo_pesos_argentina:,.2f}")
+    
+    with col2:
+        st.metric("🇦🇷 Saldo Dólares", f"USD {saldo_dolares_argentina:,.2f}")
+    
+    with col3:
+        st.metric("🇺🇸 Saldo Dólares", f"USD {saldo_dolares_eeuu:,.2f}")
+    
+    # Desglose por país
+    st.markdown("#### 📍 Desglose por País")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**🇦🇷 Argentina**")
+        st.metric("Valor Activos", f"${valor_total_argentina:,.2f}")
+        st.metric("Saldo Pesos", f"AR$ {saldo_pesos_argentina:,.2f}")
+        st.metric("Saldo Dólares", f"USD {saldo_dolares_argentina:,.2f}")
+        st.metric("Total Argentina", f"${valor_total_argentina + saldo_pesos_argentina + saldo_dolares_argentina:,.2f}")
+        st.metric("Activos", len(activos_argentina))
+        st.metric("Símbolos", len(simbolos_argentina))
+        st.metric("Tipos", len(tipos_argentina))
+    
+    with col2:
+        st.markdown("**🇺🇸 Estados Unidos**")
+        if portafolio_eeuu:
+            st.metric("Valor Activos", f"${valor_total_eeuu:,.2f}")
+            st.metric("Saldo Dólares", f"USD {saldo_dolares_eeuu:,.2f}")
+            st.metric("Total EE.UU.", f"${valor_total_eeuu + saldo_dolares_eeuu:,.2f}")
+            st.metric("Activos", len(portafolio_eeuu['portafolio'].get('activos', [])))
+            st.metric("Símbolos", len(simbolos_eeuu))
+            st.metric("Tipos", len(tipos_eeuu))
+        else:
+            st.metric("Valor Activos", "N/A")
+            st.metric("Saldo Dólares", f"USD {saldo_dolares_eeuu:,.2f}")
+            st.metric("Total EE.UU.", f"USD {saldo_dolares_eeuu:,.2f}")
+            st.metric("Activos", "N/A")
+            st.metric("Símbolos", "N/A")
+            st.metric("Tipos", "N/A")
+    
+    # Gráfico de distribución por país incluyendo saldos
+    if valor_total_consolidado > 0:
+        st.markdown("#### 📊 Distribución por País (Incluyendo Saldos)")
+        
+        # Preparar datos para el gráfico incluyendo saldos
+        paises = ['Argentina', 'Estados Unidos']
+        valores_activos = [valor_total_argentina, valor_total_eeuu]
+        valores_saldos = [saldo_pesos_argentina + saldo_dolares_argentina, saldo_dolares_eeuu]
+        valores_totales = [valor_total_argentina + saldo_pesos_argentina + saldo_dolares_argentina, valor_total_eeuu + saldo_dolares_eeuu]
+        
+        # Solo mostrar países con valor > 0
+        paises_filtrados = []
+        valores_filtrados = []
+        colores_filtrados = []
+        
+        for i, valor in enumerate(valores_totales):
+            if valor > 0:
+                paises_filtrados.append(paises[i])
+                valores_filtrados.append(valor)
+                colores_filtrados.append(['#75B798', '#FF6B6B'][i])
+        
+        if len(paises_filtrados) > 1:
+            # Gráfico de barras apiladas para mostrar activos vs saldos
+            fig = go.Figure()
+            
+            # Agregar barras de activos
+            fig.add_trace(go.Bar(
+                name='Activos',
+                x=paises_filtrados,
+                y=[valores_activos[i] for i, pais in enumerate(paises) if pais in paises_filtrados],
+                marker_color='#75B798'
+            ))
+            
+            # Agregar barras de saldos
+            fig.add_trace(go.Bar(
+                name='Saldos',
+                x=paises_filtrados,
+                y=[valores_saldos[i] for i, pais in enumerate(paises) if pais in paises_filtrados],
+                marker_color='#FF6B6B'
+            ))
+            
+            fig.update_layout(
+                title="Distribución del Portafolio por País (Activos + Saldos)",
+                barmode='stack',
+                height=400,
+                xaxis_title="País",
+                yaxis_title="Valor ($)"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        elif len(paises_filtrados) == 1:
+            st.info(f"ℹ️ Solo hay datos disponibles para {paises_filtrados[0]}")
+
+def mostrar_resumen_portafolio_argentina(portafolio, token_portador):
+    """
+    Muestra el resumen del portafolio de Argentina (función original)
+    """
+    st.markdown("#### 🇦🇷 Portafolio de Argentina")
     
     activos = portafolio.get('activos', [])
     datos_activos = []
@@ -5557,18 +5830,30 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
             try:
                 # Obtener datos del benchmark
                 benchmark_data = obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
-                if benchmark_data is not None and not benchmark_data.empty:
+                
+                # Verificar que benchmark_data sea válido y no esté vacío
+                if (benchmark_data is not None and 
+                    hasattr(benchmark_data, 'empty') and 
+                    not benchmark_data.empty and 
+                    hasattr(benchmark_data, 'iloc')):
+                    
                     # Calcular retorno anual del benchmark
-                    benchmark_returns = benchmark_data.iloc[:, 0].dropna()
-                    if len(benchmark_returns) > 0:
-                        benchmark_return = benchmark_returns.mean() * 252  # Anualizar
-                        st.success(f"✅ Retorno benchmark calculado: {benchmark_return:.2%}")
-                    else:
-                        st.warning("⚠️ No se pudieron calcular retornos del benchmark")
+                    try:
+                        benchmark_returns = benchmark_data.iloc[:, 0].dropna()
+                        if len(benchmark_returns) > 0:
+                            benchmark_return = benchmark_returns.mean() * 252  # Anualizar
+                            st.success(f"✅ Retorno benchmark calculado: {benchmark_return:.2%}")
+                        else:
+                            st.warning("⚠️ No se pudieron calcular retornos del benchmark")
+                    except Exception as e:
+                        st.warning(f"⚠️ Error procesando datos del benchmark: {str(e)}")
+                        st.warning("⚠️ Usando valor por defecto del benchmark")
                 else:
                     st.warning("⚠️ No se pudieron obtener datos del benchmark")
+                    st.info("ℹ️ Usando valor por defecto del benchmark")
             except Exception as e:
                 st.error(f"❌ Error calculando retorno del benchmark: {str(e)}")
+                st.info("ℹ️ Usando valor por defecto del benchmark")
         
         st.metric("Retorno Anual del Benchmark", f"{benchmark_return:.2%}")
     
