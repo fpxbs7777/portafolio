@@ -1730,13 +1730,15 @@ def mostrar_menu_optimizacion():
         fecha_desde = st.date_input(
             "Desde:",
             value=date.today() - timedelta(days=365),
-            max_value=date.today()
+            max_value=date.today(),
+            key="opt_fecha_desde"
         )
     with col2:
         fecha_hasta = st.date_input(
             "Hasta:",
             value=date.today(),
-            max_value=date.today()
+            max_value=date.today(),
+            key="opt_fecha_hasta"
         )
     
     # Botón de ejecución
@@ -1773,16 +1775,29 @@ def mostrar_menu_optimizacion():
         with st.spinner("🔄 Ejecutando optimización..."):
             try:
                 # Obtener portafolios según selección
+                cliente = st.session_state.get('cliente_seleccionado')
+                if not cliente:
+                    st.error("❌ No hay cliente seleccionado")
+                    return
+                    
+                id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+                
                 if portafolio_seleccionado == "argentina":
-                    portafolio_ar, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+                    portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+                    portafolio_ar = portafolios.get('argentina')
+                    portafolio_us = portafolios.get('estados_unidos')
                     portafolio_principal = portafolio_ar
                     nombre_portafolio = "🇦🇷 Argentina"
                 elif portafolio_seleccionado == "estados_unidos":
-                    portafolio_ar, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+                    portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+                    portafolio_ar = portafolios.get('argentina')
+                    portafolio_us = portafolios.get('estados_unidos')
                     portafolio_principal = portafolio_us
                     nombre_portafolio = "🇺🇸 Estados Unidos"
                 else:  # ambos
-                    portafolio_ar, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+                    portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+                    portafolio_ar = portafolios.get('argentina')
+                    portafolio_us = portafolios.get('estados_unidos')
                     portafolio_principal = portafolio_ar  # Usar argentino como base para consolidación
                     nombre_portafolio = "🌍 Consolidado"
                 
@@ -2213,14 +2228,16 @@ def mostrar_series_historicas_iol(token_acceso, id_cliente):
         fecha_desde = st.date_input(
             "Fecha desde:",
             value=date.today() - timedelta(days=30),
-            max_value=date.today()
+            max_value=date.today(),
+            key="iol_hist_fecha_desde"
         )
     
     with col2:
         fecha_hasta = st.date_input(
             "Fecha hasta:",
             value=date.today(),
-            max_value=date.today()
+            max_value=date.today(),
+            key="iol_hist_fecha_hasta"
         )
     
     with col3:
@@ -2637,9 +2654,9 @@ def mostrar_cotizaciones_mercado(token_acceso):
         
         col1, col2 = st.columns(2)
         with col1:
-            fecha_desde = st.date_input("Fecha desde:", value=date.today() - timedelta(days=30))
+            fecha_desde = st.date_input("Fecha desde:", value=date.today() - timedelta(days=30), key="hist_fecha_desde")
         with col2:
-            fecha_hasta = st.date_input("Fecha hasta:", value=date.today())
+            fecha_hasta = st.date_input("Fecha hasta:", value=date.today(), key="hist_fecha_hasta")
         
         # Botón para obtener serie histórica
         st.markdown("---")
@@ -2820,9 +2837,9 @@ def mostrar_movimientos_asesor():
         
         col1, col2 = st.columns(2)
         with col1:
-            fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30))
+            fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30), key="caucion_fecha_desde")
         with col2:
-            fecha_hasta = st.date_input("Fecha hasta", value=date.today())
+            fecha_hasta = st.date_input("Fecha hasta", value=date.today(), key="caucion_fecha_hasta")
         
         # Selección de clientes
         cliente_opciones = [{"label": f"{c.get('apellidoYNombre', c.get('nombre', 'Cliente'))} ({c.get('numeroCliente', c.get('id', ''))})", 
@@ -3000,8 +3017,16 @@ def diagnosticar_portafolios_vacios():
     st.markdown("### 🔍 Diagnóstico de Portafolios Vacíos")
     
     try:
-        # Obtener portafolios
-        portafolio_ar, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+        # Obtener portafolios - necesitamos el id_cliente del session state
+        cliente = st.session_state.get('cliente_seleccionado')
+        if not cliente:
+            st.error("❌ No hay cliente seleccionado")
+            return
+            
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+        portafolio_ar = portafolios.get('argentina')
+        portafolio_us = portafolios.get('estados_unidos')
         
         # Diagnóstico del portafolio argentino
         st.markdown("#### 🇦🇷 Portafolio Argentino")
@@ -3080,8 +3105,16 @@ def mostrar_portafolios_con_diagnostico():
     st.markdown("### 📊 Análisis de Portafolios")
     
     try:
-        # Obtener portafolios
-        portafolio_ar, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+        # Obtener portafolios - necesitamos el id_cliente del session state
+        cliente = st.session_state.get('cliente_seleccionado')
+        if not cliente:
+            st.error("❌ No hay cliente seleccionado")
+            return
+            
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+        portafolio_ar = portafolios.get('argentina')
+        portafolio_us = portafolios.get('estados_unidos')
         
         # Mostrar información del portafolio argentino
         st.markdown("#### 🇦🇷 Portafolio Argentino")
@@ -3344,13 +3377,15 @@ def main():
             fecha_desde = st.date_input(
                 "Desde:",
                 value=st.session_state.fecha_desde,
-                max_value=date.today()
+                max_value=date.today(),
+                key="main_fecha_desde"
             )
         with col2:
             fecha_hasta = st.date_input(
                 "Hasta:",
                 value=st.session_state.fecha_hasta,
-                max_value=date.today()
+                max_value=date.today(),
+                key="main_fecha_hasta"
             )
         
         st.session_state.fecha_desde = fecha_desde
@@ -3551,7 +3586,15 @@ def mostrar_analisis_portafolio():
 def obtener_simbolos_portafolio_argentina():
     """Obtiene los símbolos del portafolio argentino"""
     try:
-        portafolio_ar, _ = obtener_portafolio(st.session_state.get('token_acceso'))
+        # Necesitamos el id_cliente del session state
+        cliente = st.session_state.get('cliente_seleccionado')
+        if not cliente:
+            st.warning("⚠️ No hay cliente seleccionado")
+            return []
+            
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+        portafolio_ar = portafolios.get('argentina')
         if portafolio_ar and 'activos' in portafolio_ar and portafolio_ar['activos']:
             return [activo['titulo']['simbolo'] for activo in portafolio_ar['activos']]
         else:
@@ -3564,7 +3607,15 @@ def obtener_simbolos_portafolio_argentina():
 def obtener_simbolos_portafolio_eeuu():
     """Obtiene los símbolos del portafolio estadounidense"""
     try:
-        _, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+        # Necesitamos el id_cliente del session state
+        cliente = st.session_state.get('cliente_seleccionado')
+        if not cliente:
+            st.warning("⚠️ No hay cliente seleccionado")
+            return []
+            
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+        portafolio_us = portafolios.get('estados_unidos')
         if portafolio_us and 'activos' in portafolio_us and portafolio_us['activos']:
             return [activo['titulo']['simbolo'] for activo in portafolio_us['activos']]
         else:
@@ -3577,7 +3628,16 @@ def obtener_simbolos_portafolio_eeuu():
 def obtener_simbolos_portafolio_consolidado():
     """Obtiene los símbolos consolidados de ambos portafolios"""
     try:
-        portafolio_ar, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+        # Necesitamos el id_cliente del session state
+        cliente = st.session_state.get('cliente_seleccionado')
+        if not cliente:
+            st.warning("⚠️ No hay cliente seleccionado")
+            return []
+            
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+        portafolio_ar = portafolios.get('argentina')
+        portafolio_us = portafolios.get('estados_unidos')
         simbolos_consolidados = []
         
         # Agregar símbolos argentinos
@@ -3606,8 +3666,17 @@ def obtener_simbolos_portafolio_consolidado():
 def mostrar_info_portafolio_seleccionado(portafolio_seleccionado):
     """Muestra información sobre el portafolio seleccionado"""
     try:
+        # Necesitamos el id_cliente del session state
+        cliente = st.session_state.get('cliente_seleccionado')
+        if not cliente:
+            st.warning("⚠️ No hay cliente seleccionado")
+            return
+            
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        
         if portafolio_seleccionado == "argentina":
-            portafolio_ar, _ = obtener_portafolio(st.session_state.get('token_acceso'))
+            portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+            portafolio_ar = portafolios.get('argentina')
             if portafolio_ar and 'activos' in portafolio_ar:
                 num_activos = len(portafolio_ar['activos'])
                 st.metric("🇦🇷 Activos AR", num_activos)
@@ -3617,7 +3686,8 @@ def mostrar_info_portafolio_seleccionado(portafolio_seleccionado):
                 st.metric("🇦🇷 Activos AR", "N/A")
                 
         elif portafolio_seleccionado == "estados_unidos":
-            _, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+            portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+            portafolio_us = portafolios.get('estados_unidos')
             if portafolio_us and 'activos' in portafolio_us:
                 num_activos = len(portafolio_us['activos'])
                 st.metric("🇺🇸 Activos US", num_activos)
@@ -3627,7 +3697,9 @@ def mostrar_info_portafolio_seleccionado(portafolio_seleccionado):
                 st.metric("🇺🇸 Activos US", "N/A")
                 
         else:  # ambos
-            portafolio_ar, portafolio_us = obtener_portafolio(st.session_state.get('token_acceso'))
+            portafolios = obtener_portafolio(st.session_state.get('token_acceso'), id_cliente)
+            portafolio_ar = portafolios.get('argentina')
+            portafolio_us = portafolios.get('estados_unidos')
             total_activos = 0
             
             if portafolio_ar and 'activos' in portafolio_ar:
