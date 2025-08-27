@@ -605,93 +605,69 @@ def obtener_encabezado_autorizacion(token_portador):
         'Content-Type': 'application/json'
     }
 
-def obtener_tokens(usuario, contraseña):
-    """Obtiene tokens de autenticación de IOL con manejo mejorado de errores"""
-    url_login = 'https://api.invertironline.com/token'
-    datos = {
-        'username': usuario,
-        'password': contraseña,
+def obtener_tokens(username, password, max_retries=3, base_delay=5):
+    """Obtiene tokens de acceso para la API de IOL con manejo de rate limiting"""
+    token_url = 'https://api.invertironline.com/token'
+    payload = {
+        'username': username,
+        'password': password,
         'grant_type': 'password'
     }
-    
-    session = requests.Session()
-    session.mount('https://', requests.adapters.HTTPAdapter(
-        max_retries=3,
-        pool_connections=10,
-        pool_maxsize=10
-    ))
-    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded'
     }
     
-    max_attempts = 3
-    for attempt in range(max_attempts):
+    for attempt in range(max_retries):
         try:
-            st.info(f"🔄 Intento {attempt + 1}/{max_attempts} de conexión a IOL...")
+            response = requests.post(token_url, data=payload, headers=headers, timeout=30)
             
-            timeout = 30 if attempt == 0 else 15
-            respuesta = session.post(url_login, data=datos, headers=headers, timeout=timeout)
+            if response.status_code == 200:
+                tokens = response.json()
+                return tokens['access_token'], tokens['refresh_token']
             
-            if respuesta.status_code == 200:
-                respuesta_json = respuesta.json()
-                if 'access_token' in respuesta_json and 'refresh_token' in respuesta_json:
-                    st.success("✅ Autenticación exitosa con IOL")
-                    return respuesta_json['access_token'], respuesta_json['refresh_token']
-                else:
-                    st.error("❌ Respuesta de IOL incompleta")
-                    return None, None
-            
-            elif respuesta.status_code == 400:
-                st.error("❌ Verifique sus credenciales (usuario/contraseña)")
-                return None, None
-            elif respuesta.status_code == 401:
-                st.error("❌ Credenciales inválidas o cuenta bloqueada")
-                return None, None
-            elif respuesta.status_code == 429:
-                st.warning("⚠️ Demasiadas solicitudes. Esperando...")
-                if attempt < max_attempts - 1:
-                    time.sleep(2 ** attempt)
+            elif response.status_code == 429:
+                # Rate limiting - esperar y reintentar
+                delay = base_delay * (2 ** attempt)  # Backoff exponencial
+                st.warning(f"⚠️ Rate limiting detectado (intento {attempt + 1}/{max_retries})")
+                st.info(f"⏳ Esperando {delay} segundos antes de reintentar...")
+                
+                # Registrar el error 429 en el session state
+                if 'st' in globals():
+                    if 'ultimo_error_429' not in st.session_state:
+                        st.session_state.ultimo_error_429 = time.time()
+                
+                if attempt < max_retries - 1:  # No esperar en el último intento
+                    time.sleep(delay)
                     continue
                 else:
-                    st.error("❌ Límite de solicitudes excedido")
+                    st.error("❌ Demasiados intentos fallidos por rate limiting")
+                    st.info("💡 Espere unos minutos antes de intentar nuevamente")
                     return None, None
-            else:
-                st.error(f"❌ Error HTTP {respuesta.status_code}")
+            
+            elif response.status_code == 401:
+                st.error(f"❌ Credenciales inválidas (HTTP 401)")
+                st.info("💡 Verificar usuario y contraseña")
                 return None, None
-                
-        except requests.exceptions.Timeout:
-            st.warning(f"⏱️ Timeout en intento {attempt + 1}")
-            if attempt < max_attempts - 1:
-                time.sleep(2 ** attempt)
-                continue
+            
             else:
-                st.error("❌ Timeout persistente")
+                st.error(f"❌ Error en la solicitud de tokens: {response.status_code}")
+                st.error(response.text)
                 return None, None
                 
         except Exception as e:
-            st.error(f"❌ Error inesperado: {str(e)}")
-            if attempt < max_attempts - 1:
-                time.sleep(2 ** attempt)
+            st.error(f"❌ Error de conexión: {str(e)}")
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                st.info(f"⏳ Reintentando en {delay} segundos...")
+                time.sleep(delay)
                 continue
             else:
                 return None, None
     
-    st.error("❌ No se pudo establecer conexión después de múltiples intentos")
     return None, None
 
-def refrescar_token_iol(refresh_token):
-    """
-    Refresca el token de acceso usando el refresh token.
-    
-    Args:
-        refresh_token (str): Token de refresco
-        
-    Returns:
-        tuple: (access_token, refresh_token) o (None, None) si hay error
-    """
+def refrescar_token_iol(refresh_token, max_retries=3, base_delay=5):
+    """Refresca el token de acceso usando el refresh token con manejo de rate limiting"""
     token_url = 'https://api.invertironline.com/token'
     payload = {
         'refresh_token': refresh_token,
@@ -701,18 +677,48 @@ def refrescar_token_iol(refresh_token):
         'Content-Type': 'application/x-www-form-urlencoded'
     }
     
-    try:
-        response = requests.post(token_url, data=payload, headers=headers, timeout=30)
-        if response.status_code == 200:
-            tokens = response.json()
-            st.success("✅ Token refrescado exitosamente")
-            return tokens['access_token'], tokens['refresh_token']
-        else:
-            st.warning(f"⚠️ Error al refrescar token: {response.status_code}")
-            return None, None
-    except Exception as e:
-        st.warning(f"⚠️ Error de conexión al refrescar token: {str(e)}")
-        return None, None
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(token_url, data=payload, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                tokens = response.json()
+                return tokens['access_token'], tokens['refresh_token']
+            
+            elif response.status_code == 429:
+                # Rate limiting - esperar y reintentar
+                delay = base_delay * (2 ** attempt)
+                st.warning(f"⚠️ Rate limiting al refrescar token (intento {attempt + 1}/{max_retries})")
+                st.info(f"⏳ Esperando {delay} segundos...")
+                
+                # Registrar el error 429 en el session state
+                if 'st' in globals():
+                    if 'ultimo_error_429' not in st.session_state:
+                        st.session_state.ultimo_error_429 = time.time()
+                
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    continue
+                else:
+                    st.error("❌ Demasiados intentos fallidos por rate limiting")
+                    return None, None
+            
+            else:
+                st.error(f"❌ Error al refrescar token: {response.status_code}")
+                st.error(response.text)
+                return None, None
+                
+        except Exception as e:
+            st.error(f"❌ Error de conexión al refrescar: {str(e)}")
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                st.info(f"⏳ Reintentando en {delay} segundos...")
+                time.sleep(delay)
+                continue
+            else:
+                return None, None
+    
+    return None, None
 
 def obtener_serie_historica_iol_avanzada(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
     """
@@ -2845,18 +2851,29 @@ def main():
         - Método: POST con grant_type=password
         """)
         
-        try:
-            token_acceso, refresh_token = obtener_tokens_iol_automatico()
-            if token_acceso:
-                st.session_state.token_acceso = token_acceso
-                st.session_state.refresh_token = refresh_token
-                st.success("✅ Conexión automática a IOL exitosa!")
-            else:
-                st.warning("⚠️ No se pudo conectar automáticamente a IOL")
-                st.info("💡 Puede intentar con credenciales manuales o verificar la conectividad")
-        except Exception as e:
-            st.error(f"❌ Error en conexión automática: {str(e)}")
-            st.exception(e)
+        # Verificar si ya se está intentando conectar
+        if 'intentando_conexion' not in st.session_state:
+            st.session_state.intentando_conexion = False
+        
+        if not st.session_state.intentando_conexion:
+            st.session_state.intentando_conexion = True
+            
+            try:
+                token_acceso, refresh_token = obtener_tokens_iol_automatico()
+                if token_acceso:
+                    st.session_state.token_acceso = token_acceso
+                    st.session_state.refresh_token = refresh_token
+                    st.success("✅ Conexión automática a IOL exitosa!")
+                else:
+                    st.warning("⚠️ No se pudo conectar automáticamente a IOL")
+                    st.info("💡 Puede intentar con credenciales manuales o verificar la conectividad")
+            except Exception as e:
+                st.error(f"❌ Error en conexión automática: {str(e)}")
+                st.exception(e)
+            finally:
+                st.session_state.intentando_conexion = False
+        else:
+            st.info("⏳ Ya se está intentando conectar... espere un momento")
     
     # Barra lateral - Autenticación
     with st.sidebar:
@@ -2875,6 +2892,17 @@ def main():
                     st.rerun()
         else:
             st.error("❌ No conectado a IOL")
+            
+            # Mostrar información sobre rate limiting si es relevante
+            if 'ultimo_error_429' in st.session_state:
+                tiempo_transcurrido = time.time() - st.session_state.ultimo_error_429
+                if tiempo_transcurrido < 300:  # 5 minutos
+                    tiempo_restante = int(300 - tiempo_transcurrido)
+                    st.warning(f"⚠️ Rate limiting activo. Espere {tiempo_restante} segundos")
+                    st.info("💡 La API está limitando las solicitudes por exceso de intentos")
+                else:
+                    # Limpiar el estado después de 5 minutos
+                    del st.session_state.ultimo_error_429
             
             # Formulario manual de autenticación
             with st.expander("🔑 Autenticación Manual", expanded=True):
@@ -2921,9 +2949,14 @@ def main():
                             else:
                                 st.warning("⚠️ Complete todos los campos")
             
-            # Información de troubleshooting
-            with st.expander("🔧 Solución de Problemas"):
+            # Información de troubleshooting mejorada
+            with st.expander("🔧 Solución de Problemas", expanded=True):
                 st.markdown("""
+                **❌ Error 429 - Too Many Requests:**
+                - **Causa**: Demasiados intentos de autenticación en poco tiempo
+                - **Solución**: Esperar 5-10 minutos antes de intentar nuevamente
+                - **Prevención**: No hacer múltiples intentos rápidos
+                
                 **❌ Error 401 - No autorizado:**
                 - Verificar que el usuario y contraseña sean correctos
                 - Verificar que la cuenta no esté bloqueada
@@ -2951,6 +2984,13 @@ def main():
                             st.warning(f"⚠️ API responde con código: {response.status_code}")
                     except Exception as e:
                         st.error(f"❌ No se puede acceder a la API: {str(e)}")
+                
+                # Botón para limpiar estado de rate limiting
+                if 'ultimo_error_429' in st.session_state:
+                    if st.button("🔄 Resetear Rate Limiting", use_container_width=True):
+                        del st.session_state.ultimo_error_429
+                        st.success("✅ Estado de rate limiting reseteado")
+                        st.rerun()
     
     # Configuración de fechas y clientes (solo si está autenticado)
     if st.session_state.token_acceso:
