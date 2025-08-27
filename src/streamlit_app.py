@@ -520,6 +520,74 @@ def obtener_tokens(usuario, contraseña):
     st.error("❌ No se pudo establecer conexión después de múltiples intentos")
     return None, None
 
+def refrescar_token(refresh_token):
+    """
+    Refresca el token de acceso usando el refresh token
+    """
+    url_refresh = 'https://api.invertironline.com/token'
+    datos_refresh = {
+        'grant_type': 'refresh_token',
+        'refresh_token': refresh_token
+    }
+    
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    }
+    
+    try:
+        respuesta = requests.post(url_refresh, data=datos_refresh, headers=headers, timeout=30)
+        
+        if respuesta.status_code == 200:
+            respuesta_json = respuesta.json()
+            if 'access_token' in respuesta_json and 'refresh_token' in respuesta_json:
+                st.success("✅ Token refrescado exitosamente")
+                return respuesta_json['access_token'], respuesta_json['refresh_token']
+            else:
+                st.error("❌ Respuesta de refresh inválida")
+                return None, None
+        elif respuesta.status_code == 400:
+            st.error("❌ Error 400: Refresh token inválido")
+            return None, None
+        elif respuesta.status_code == 401:
+            st.error("❌ Error 401: Refresh token expirado")
+            return None, None
+        else:
+            st.error(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text[:200]}")
+            return None, None
+            
+    except Exception as e:
+        st.error(f"❌ Error al refrescar token: {str(e)}")
+        return None, None
+
+def verificar_y_refrescar_token(token_acceso, refresh_token):
+    """
+    Verifica si el token está válido y lo refresca si es necesario
+    """
+    if not token_acceso or not refresh_token:
+        return None, None
+    
+    # Probar el token con una llamada simple
+    url_test = 'https://api.invertironline.com/api/v2/estadocuenta'
+    headers = obtener_encabezado_autorizacion(token_acceso)
+    
+    try:
+        respuesta = requests.get(url_test, headers=headers, timeout=10)
+        if respuesta.status_code == 200:
+            return token_acceso, refresh_token  # Token válido
+        elif respuesta.status_code == 401:
+            st.warning("⚠️ Token expirado, intentando refrescar...")
+            nuevo_token, nuevo_refresh = refrescar_token(refresh_token)
+            if nuevo_token:
+                return nuevo_token, nuevo_refresh
+            else:
+                st.error("❌ No se pudo refrescar el token")
+                return None, None
+        else:
+            return token_acceso, refresh_token  # Otro error, mantener token actual
+    except Exception:
+        return token_acceso, refresh_token  # Error de conexión, mantener token actual
+
 def obtener_lista_clientes(token_portador):
     """
     Obtiene la lista de clientes del asesor
@@ -648,6 +716,131 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         return None
     except Exception as e:
         st.error(f'Error al obtener portafolio: {str(e)}')
+        return None
+
+def obtener_portafolio_eeuu(token_portador, id_cliente):
+    """
+    Obtiene el portafolio de Estados Unidos de un cliente específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        
+    Returns:
+        dict: Portafolio de EEUU del cliente o None en caso de error
+    """
+    url_portafolio = f'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    # Debug: mostrar información de la solicitud
+    st.info(f"🔍 Solicitando portafolio EEUU desde: {url_portafolio}")
+    st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
+    
+    try:
+        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=30)
+        
+        # Debug: mostrar respuesta completa
+        st.info(f"📡 Respuesta HTTP: {respuesta.status_code}")
+        st.info(f"📋 Headers de respuesta: {dict(respuesta.headers)}")
+        
+        if respuesta.status_code == 200:
+            try:
+                data = respuesta.json()
+                st.success(f"✅ Portafolio EEUU obtenido: {len(data.get('activos', []))} activos")
+                return data
+            except ValueError as e:
+                st.error(f"❌ Error al procesar JSON: {str(e)}")
+                st.info(f"📄 Contenido de respuesta: {respuesta.text[:500]}")
+                return None
+        elif respuesta.status_code == 401:
+            st.error("❌ Error 401: Token de autenticación inválido o expirado")
+            st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
+            return None
+        elif respuesta.status_code == 403:
+            st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
+            st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
+            return None
+        elif respuesta.status_code == 404:
+            st.warning(f"⚠️ No se encontró portafolio de EEUU para el cliente {id_cliente}")
+            st.info("💡 El cliente puede no tener activos en EEUU o la API puede no estar disponible")
+            return None
+        else:
+            st.error(f"❌ Error HTTP {respuesta.status_code} al obtener portafolio de EEUU")
+            st.info(f"📄 Respuesta del servidor: {respuesta.text[:500]}")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Timeout al obtener portafolio de EEUU")
+        st.info("💡 El servidor de IOL puede estar sobrecargado. Intente nuevamente en unos minutos.")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error("🔌 Error de conexión al obtener portafolio de EEUU")
+        st.info("💡 Verifique su conexión a internet y que no haya firewall bloqueando la conexión")
+        return None
+    except Exception as e:
+        st.error(f'❌ Error inesperado al obtener portafolio de EEUU: {str(e)}')
+        st.info("💡 Este error puede indicar un problema temporal del servidor")
+        return None
+
+def obtener_estado_cuenta_eeuu(token_portador):
+    """
+    Obtiene el estado de cuenta de Estados Unidos del usuario autenticado
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Estado de cuenta de EEUU o None en caso de error
+    """
+    url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    # Debug: mostrar información de la solicitud
+    st.info(f"🔍 Solicitando estado de cuenta EEUU desde: {url_estado_cuenta}")
+    st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
+    
+    try:
+        respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
+        
+        # Debug: mostrar respuesta completa
+        st.info(f"📡 Respuesta HTTP: {respuesta.status_code}")
+        st.info(f"📋 Headers de respuesta: {dict(respuesta.headers)}")
+        
+        if respuesta.status_code == 200:
+            try:
+                data = respuesta.json()
+                st.success(f"✅ Estado de cuenta EEUU obtenido: {len(data.get('cuentas', []))} cuentas")
+                return data
+            except ValueError as e:
+                st.error(f"❌ Error al procesar JSON: {str(e)}")
+                st.info(f"📄 Contenido de respuesta: {respuesta.text[:500]}")
+                return None
+        elif respuesta.status_code == 401:
+            st.error("❌ Error 401: Token de autenticación inválido o expirado")
+            st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
+            return None
+        elif respuesta.status_code == 403:
+            st.error("❌ Error 403: Acceso denegado al estado de cuenta de EEUU")
+            st.info("💡 Verifique que su cuenta tenga permisos para acceder a cuentas de EEUU")
+            return None
+        elif respuesta.status_code == 404:
+            st.warning("⚠️ No se encontró estado de cuenta de EEUU")
+            st.info("💡 Su cuenta puede no tener cuentas en EEUU o la API puede no estar disponible")
+            return None
+        else:
+            st.error(f"❌ Error HTTP {respuesta.status_code} al obtener estado de cuenta de EEUU")
+            st.info(f"📄 Respuesta del servidor: {respuesta.text[:500]}")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Timeout al obtener estado de cuenta de EEUU")
+        st.info("💡 El servidor de IOL puede estar sobrecargado. Intente nuevamente en unos minutos.")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error("🔌 Error de conexión al obtener estado de cuenta de EEUU")
+        st.info("💡 Verifique su conexión a internet y que no haya firewall bloqueando la conexión")
+        return None
+    except Exception as e:
+        st.error(f'❌ Error inesperado al obtener estado de cuenta de EEUU: {str(e)}')
+        st.info("💡 Este error puede indicar un problema temporal del servidor")
         return None
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
@@ -3073,8 +3266,11 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             print(f"\nProcesando activo: {simbolo} (Mercado: {mercado}, Tipo: {tipo_activo})")
             
             # Obtener la serie histórica
+            serie_historica = None
+            
+            # Intentar primero con IOL
             try:
-                df_historico = obtener_serie_historica_iol(
+                serie_historica = obtener_serie_historica_iol(
                     token_portador=token_portador,
                     mercado=mercado,
                     simbolo=simbolo,
@@ -3083,24 +3279,36 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                     ajustada="SinAjustar"
                 )
             except Exception as e:
-                print(f"Error al obtener datos históricos para {simbolo}: {str(e)}")
-                continue
+                print(f"Error al obtener datos históricos de IOL para {simbolo}: {str(e)}")
             
-            if df_historico is None:
+            # Si IOL falló, intentar con yfinance como fallback
+            if serie_historica is None or serie_historica.empty:
+                try:
+                    print(f"Intentando yfinance como fallback para {simbolo}")
+                    serie_historica = obtener_datos_alternativos_yfinance(
+                        simbolo, fecha_desde, fecha_hasta
+                    )
+                    if serie_historica is not None and not serie_historica.empty:
+                        print(f"✅ Datos obtenidos de yfinance para {simbolo}: {len(serie_historica)} puntos")
+                except Exception as e:
+                    print(f"Error al obtener datos de yfinance para {simbolo}: {str(e)}")
+            
+            if serie_historica is None:
                 print(f"No se obtuvieron datos para {simbolo} (None)")
                 continue
                 
-            if df_historico.empty:
+            if serie_historica.empty:
                 print(f"Datos vacíos para {simbolo}")
                 continue
             
-            # Asegurarse de que tenemos las columnas necesarias
-            if 'fecha' not in df_historico.columns or 'precio' not in df_historico.columns:
-                print(f"Faltan columnas necesarias en los datos de {simbolo}")
-                print(f"Columnas disponibles: {df_historico.columns.tolist()}")
-                continue
-                
+            # Convertir la serie a DataFrame con las columnas esperadas
+            df_historico = pd.DataFrame({
+                'fecha': serie_historica.index,
+                'precio': serie_historica.values
+            })
+            
             print(f"Datos obtenidos: {len(df_historico)} registros desde {df_historico['fecha'].min()} hasta {df_historico['fecha'].max()}")
+            print(f"Precios: min={df_historico['precio'].min():.2f}, max={df_historico['precio'].max():.2f}")
                 
             # Ordenar por fecha y limpiar duplicados
             df_historico = df_historico.sort_values('fecha')
@@ -3108,6 +3316,10 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
             
             # Calcular retornos diarios
             df_historico['retorno'] = df_historico['precio'].pct_change()
+            
+            print(f"Retornos calculados: {len(df_historico['retorno'].dropna())} válidos")
+            print(f"Retorno medio: {df_historico['retorno'].mean():.6f}")
+            print(f"Volatilidad: {df_historico['retorno'].std():.6f}")
             
             # Filtrar valores atípicos usando un enfoque más robusto
             if len(df_historico) > 5:  # Necesitamos suficientes puntos para el filtrado
@@ -3405,6 +3617,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 'Tipo': tipo,
                 'Cantidad': cantidad,
                 'Valuación': valuacion,
+                'mercado': titulo.get('mercado', 'BCBA'),  # Agregar mercado para cálculos
             })
             
             valor_total += valuacion
@@ -6866,17 +7079,20 @@ def mostrar_analisis_portafolio():
     @st.cache_data(ttl=300)  # Cache por 5 minutos
     def cargar_datos_cliente(token, cliente_id):
         """Carga y cachea los datos del cliente para evitar llamadas repetitivas"""
-        portafolio = obtener_portafolio(token, cliente_id)
-        estado_cuenta = obtener_estado_cuenta(token, cliente_id)
-        return portafolio, estado_cuenta
+        portafolio_ar = obtener_portafolio(token, cliente_id, 'Argentina')
+        portafolio_eeuu = obtener_portafolio_eeuu(token, cliente_id)
+        estado_cuenta_ar = obtener_estado_cuenta(token, cliente_id)
+        estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token)
+        return portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu
     
     # Cargar datos con cache
     with st.spinner("🔄 Cargando datos del cliente..."):
-        portafolio, estado_cuenta = cargar_datos_cliente(token_acceso, id_cliente)
+        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Resumen Portafolio", 
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🇦🇷 Portafolio Argentina", 
+        "🇺🇸 Portafolio EEUU",
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
@@ -6884,28 +7100,57 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
+        if portafolio_ar:
+            st.subheader("🇦🇷 Portafolio Argentina")
+            mostrar_resumen_portafolio(portafolio_ar, token_acceso)
         else:
-            st.warning("No se pudo obtener el portafolio del cliente")
+            st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
+        if portafolio_eeuu:
+            st.subheader("🇺🇸 Portafolio Estados Unidos")
+            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso)
         else:
-            st.warning("No se pudo obtener el estado de cuenta")
+            st.warning("No se pudo obtener el portafolio de EEUU")
     
     with tab3:
-        # Menú unificado de optimización y cobertura
-        if portafolio:
-            mostrar_menu_optimizacion_unificado(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
-        else:
-            st.warning("No se pudo obtener el portafolio para optimización")
+        # Estado de cuenta consolidado
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("🇦🇷 Estado de Cuenta Argentina")
+            if estado_cuenta_ar:
+                mostrar_estado_cuenta(estado_cuenta_ar)
+            else:
+                st.warning("No se pudo obtener el estado de cuenta de Argentina")
+        
+        with col2:
+            st.subheader("🇺🇸 Estado de Cuenta EEUU")
+            if estado_cuenta_eeuu:
+                mostrar_estado_cuenta(estado_cuenta_eeuu)
+            else:
+                st.warning("No se pudo obtener el estado de cuenta de EEUU")
     
     with tab4:
-        mostrar_analisis_tecnico(token_acceso, id_cliente)
+        # Menú unificado de optimización y cobertura
+        if portafolio_ar or portafolio_eeuu:
+            # Combinar portafolios si ambos están disponibles
+            portafolio_combinado = {}
+            if portafolio_ar:
+                portafolio_combinado.update(portafolio_ar.get('activos', []))
+            if portafolio_eeuu:
+                portafolio_combinado.update(portafolio_eeuu.get('activos', []))
+            
+            if portafolio_combinado:
+                mostrar_menu_optimizacion_unificado({'activos': portafolio_combinado}, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+            else:
+                st.warning("No se pudo combinar los portafolios para optimización")
+        else:
+            st.warning("No se pudo obtener ningún portafolio para optimización")
     
     with tab5:
+        mostrar_analisis_tecnico(token_acceso, id_cliente)
+    
+    with tab6:
         mostrar_cotizaciones_mercado(token_acceso)
 
 def main():
@@ -6983,6 +7228,24 @@ def main():
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
             
+            # Verificar y refrescar token si es necesario
+            if st.session_state.token_acceso and st.session_state.refresh_token:
+                nuevo_token, nuevo_refresh = verificar_y_refrescar_token(
+                    st.session_state.token_acceso, 
+                    st.session_state.refresh_token
+                )
+                if nuevo_token:
+                    st.session_state.token_acceso = nuevo_token
+                    st.session_state.refresh_token = nuevo_refresh
+                else:
+                    # Token no válido, limpiar sesión
+                    st.session_state.token_acceso = None
+                    st.session_state.refresh_token = None
+                    st.session_state.clientes = []
+                    st.session_state.cliente_seleccionado = None
+                    st.error("❌ Sesión expirada. Por favor, inicie sesión nuevamente.")
+                    st.rerun()
+            
             # Obtener lista de clientes
             if not st.session_state.clientes and st.session_state.token_acceso:
                 with st.spinner("Cargando clientes..."):
@@ -7020,6 +7283,18 @@ def main():
                         st.session_state.clientes = nuevos_clientes
                         st.success("✅ Lista actualizada")
                         st.rerun()
+                
+                # Botón para refrescar token manualmente
+                if st.button("🔄 Refrescar Token", use_container_width=True):
+                    with st.spinner("Refrescando token..."):
+                        nuevo_token, nuevo_refresh = refrescar_token(st.session_state.refresh_token)
+                        if nuevo_token:
+                            st.session_state.token_acceso = nuevo_token
+                            st.session_state.refresh_token = nuevo_refresh
+                            st.success("✅ Token refrescado")
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo refrescar el token")
             else:
                 st.warning("No se encontraron clientes")
 
@@ -7063,6 +7338,14 @@ def main():
                 <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
                 <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
                 <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>🇦🇷 Portafolio Argentina</h3>
+                        <p>Análisis completo de activos argentinos</p>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>🇺🇸 Portafolio EEUU</h3>
+                        <p>Gestión de activos internacionales</p>
+                    </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
                         <h3>📊 Análisis Completo</h3>
                         <p>Visualice todos sus activos en un solo lugar con detalle</p>
