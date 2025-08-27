@@ -3355,13 +3355,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 if precio_unitario > 0:
                     try:
                         cantidad_num = float(cantidad)
-                        # Corregir valuación para instrumentos que cotizan en porcentaje
-                        if (tipo == 'TitulosPublicos' or 
-                            tipo == 'Letras' or 
-                            'Letra' in descripcion or 
-                            simbolo.startswith('S') or 
+                                                # Corregir valuación para instrumentos que cotizan en porcentaje
+                        if (tipo == 'TitulosPublicos' or
+                            tipo == 'Letras' or
+                            'Letra' in descripcion or
+                            simbolo.startswith('S') or
                             simbolo.startswith('L') or
-                            precio_unitario > 1000):  # Precios muy altos suelen ser porcentajes
+                            (precio_unitario > 1000 and tipo not in ['ACCIONES', 'CEDEARS'])):  # Precios muy altos suelen ser porcentajes, pero no para acciones/CEDEARS
                             valuacion = (cantidad_num * precio_unitario) / 100.0
                         else:
                             valuacion = cantidad_num * precio_unitario
