@@ -4720,8 +4720,9 @@ def mostrar_resumen_consolidado(portafolio_argentina, portafolio_eeuu, token_por
                     saldo = float(cuenta['saldoDisponible'])
                     if saldo > 0:
                         saldo_dolares_eeuu += saldo
-    except:
-        pass
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo obtener saldo de EE.UU.: {str(e)}")
+        # Continuar con el resto de la funcionalidad
     
     # Calcular totales consolidados incluyendo saldos
     valor_total_consolidado = valor_total_argentina + valor_total_eeuu + saldo_pesos_argentina + saldo_dolares_argentina + saldo_dolares_eeuu
@@ -5887,11 +5888,7 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
             components.html(
                 tv_widget, 
                 height=680,
-                scrolling=False,
-                # Agregar sandbox para mayor seguridad
-                html_attrs={
-                    "sandbox": "allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                }
+                scrolling=False
             )
             
             # Información adicional para el usuario con opciones de solución
