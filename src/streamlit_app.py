@@ -215,7 +215,16 @@ def load_data(rics, argentina_tickers, token_acceso=None):
                     df = yf.download(symbol, period="1d", interval="1m")
                     
                     if not df.empty:
-                        data[ric] = df
+                        # Normalizar datos de yfinance para compatibilidad
+                        df_normalizado = df.copy()
+                        df_normalizado.index = pd.to_datetime(df_normalizado.index)
+                        
+                        # Asegurar que tenemos las columnas necesarias
+                        if 'Close' not in df_normalizado.columns:
+                            st.warning(f"⚠️ Datos de yfinance para {ric} no tienen columna Close")
+                            continue
+                        
+                        data[ric] = df_normalizado
                         st.success(f"✅ Datos descargados para {ric} desde yfinance")
                     else:
                         st.warning(f"⚠️ No se encontraron datos para {ric} (buscando {symbol})")
@@ -234,6 +243,15 @@ def load_data(rics, argentina_tickers, token_acceso=None):
         yf_count = len(data) - iol_count
         
         st.success(f"✅ Datos obtenidos: {iol_count} desde IOL, {yf_count} desde yfinance")
+        
+        # Mostrar información sobre la calidad de los datos
+        st.info(f"""
+        **📊 Resumen de datos obtenidos:**
+        - Total de activos: {len(data)}
+        - Desde IOL: {iol_count}
+        - Desde yfinance: {yf_count}
+        - Rango de fechas disponible: {min([len(data[ric]) for ric in data])} a {max([len(data[ric]) for ric in data])} registros por activo
+        """)
     
     return data
 
@@ -274,46 +292,72 @@ def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, inc
         
         st.success(f"✅ Datos obtenidos para {len(rics_with_data)} activos")
         
-        # Calcular retornos diarios
+        # Calcular retornos diarios y normalizar fechas
         returns_data = {}
+        fechas_comunes = None
+        
         for ric in rics_with_data:
             if ric in data and not data[ric].empty:
-                # Calcular retornos logarítmicos
-                prices = data[ric]['Close']
-                returns = np.log(prices / prices.shift(1)).dropna()
-                if len(returns) > 0:
-                    returns_data[ric] = returns
+                df_activo = data[ric]
+                
+                # Normalizar el índice de fechas
+                if hasattr(df_activo.index, 'name') and df_activo.index.name == 'fechaHora':
+                    # Datos de IOL - ya tienen índice de fecha
+                    df_normalizado = df_activo.copy()
+                else:
+                    # Datos de yfinance - convertir a fecha
+                    df_normalizado = df_activo.copy()
+                    df_normalizado.index = pd.to_datetime(df_normalizado.index)
+                
+                # Asegurar que tenemos columna Close
+                if 'Close' in df_normalizado.columns:
+                    # Calcular retornos logarítmicos
+                    returns = np.log(df_normalizado['Close'] / df_normalizado['Close'].shift(1)).dropna()
+                    if len(returns) > 0:
+                        returns_data[ric] = returns
+                        
+                        # Actualizar fechas comunes
+                        if fechas_comunes is None:
+                            fechas_comunes = returns.index
+                        else:
+                            fechas_comunes = fechas_comunes.intersection(returns.index)
         
         if len(returns_data) < 2:
             st.error("❌ No hay suficientes datos de retornos para el análisis")
             return None, None
         
-        # Crear DataFrame de retornos con índice común
-        # Encontrar el índice común más largo
-        common_dates = None
-        for ric, returns in returns_data.items():
-            if common_dates is None:
-                common_dates = returns.index
-            else:
-                common_dates = common_dates.intersection(returns.index)
-        
-        if len(common_dates) < 10:  # Necesitamos al menos 10 días de datos
+        if fechas_comunes is None or len(fechas_comunes) < 5:
             st.error("❌ No hay suficientes fechas comunes entre los activos")
             return None, None
         
+        st.info(f"ℹ️ Encontradas {len(fechas_comunes)} fechas comunes entre los activos")
+        
         # Crear DataFrame con fechas comunes
-        returns_df = pd.DataFrame(index=common_dates)
+        returns_df = pd.DataFrame(index=fechas_comunes)
+        
         for ric, returns in returns_data.items():
-            returns_df[ric] = returns.loc[common_dates]
+            # Filtrar por fechas comunes y rellenar valores faltantes
+            returns_filtrados = returns.loc[fechas_comunes]
+            returns_df[ric] = returns_filtrados
         
-        # Eliminar filas con NaN
-        returns_df = returns_df.dropna()
+        # Eliminar filas con demasiados NaN (más del 50% de activos sin datos)
+        threshold = len(returns_df.columns) * 0.5
+        returns_df = returns_df.dropna(thresh=threshold)
         
-        if len(returns_df) < 10:
+        if len(returns_df) < 5:
             st.error("❌ Después de limpiar datos, no hay suficientes observaciones")
             return None, None
         
-        st.success(f"✅ DataFrame de retornos creado con {len(returns_df)} observaciones")
+        st.success(f"✅ DataFrame de retornos creado con {len(returns_df)} observaciones válidas")
+        
+        # Mostrar información sobre la calidad de los datos
+        st.info(f"""
+        **📊 Calidad de los datos:**
+        - Activos con datos: {len(returns_df.columns)}
+        - Observaciones válidas: {len(returns_df)}
+        - Rango de fechas: {returns_df.index.min().strftime('%Y-%m-%d')} a {returns_df.index.max().strftime('%Y-%m-%d')}
+        - Porcentaje de datos completos: {(1 - returns_df.isnull().sum().sum() / (len(returns_df) * len(returns_df.columns))) * 100:.1f}%
+        """)
         
         # Calcular métricas de portafolio
         mean_returns = returns_df.mean() * 252  # Anualizar
@@ -1613,6 +1657,23 @@ def mostrar_menu_optimizacion(portafolio, token_acceso, fecha_desde, fecha_hasta
     # Botón de ejecución
     ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary", use_container_width=True)
     
+    # Botón de depuración
+    if st.button("🔍 Depurar Datos", help="Muestra información detallada sobre los datos obtenidos"):
+        with st.spinner("🔍 Analizando datos..."):
+            try:
+                # Obtener datos para depuración
+                argentina_tickers = {"INTC", "ETHA", "GOOGL", "ARKK", "GGAL", "YPF", "PAMP", "COME", "BYMA", "S10N5", "S30S5"}
+                data_debug = load_data(simbolos, argentina_tickers, token_acceso)
+                
+                if data_debug:
+                    mostrar_info_depuracion_datos(data_debug)
+                else:
+                    st.error("❌ No se pudieron obtener datos para depuración")
+                    
+            except Exception as e:
+                st.error(f"❌ Error en depuración: {str(e)}")
+                st.exception(e)
+    
     if ejecutar_optimizacion:
         with st.spinner("🔄 Ejecutando optimización..."):
             try:
@@ -2575,6 +2636,115 @@ def mostrar_info_depuracion_iol():
     3. **Manejo de errores**: Mensajes informativos para cada tipo de error
     4. **Datos simulados**: Estado de cuenta basado en el portafolio disponible
     """)
+
+def mostrar_info_depuracion_datos(data):
+    """Muestra información detallada de depuración sobre los datos obtenidos"""
+    st.markdown("### 🔍 Información de Depuración - Datos Obtenidos")
+    
+    if not data:
+        st.warning("⚠️ No hay datos disponibles para analizar")
+        return
+    
+    # Información general
+    st.info(f"**📊 Total de activos con datos: {len(data)}**")
+    
+    # Crear DataFrame de resumen
+    resumen_data = []
+    
+    for ric, df in data.items():
+        # Determinar fuente de datos
+        if hasattr(df.index, 'name') and df.index.name == 'fechaHora':
+            fuente = "IOL"
+            formato_fecha = "fechaHora"
+        else:
+            fuente = "yfinance"
+            formato_fecha = "datetime"
+        
+        # Información del DataFrame
+        info = {
+            'Símbolo': ric,
+            'Fuente': fuente,
+            'Formato Fecha': formato_fecha,
+            'Registros': len(df),
+            'Columnas': list(df.columns),
+            'Primera Fecha': str(df.index[0]) if len(df) > 0 else 'N/A',
+            'Última Fecha': str(df.index[-1]) if len(df) > 0 else 'N/A',
+            'Tiene Close': 'Close' in df.columns,
+            'Tiene Volume': 'Volume' in df.columns,
+            'Índice Tipo': str(type(df.index))
+        }
+        
+        resumen_data.append(info)
+    
+    # Mostrar tabla de resumen
+    df_resumen = pd.DataFrame(resumen_data)
+    st.dataframe(df_resumen, use_container_width=True)
+    
+    # Análisis de fechas comunes
+    st.markdown("#### 📅 Análisis de Fechas Comunes")
+    
+    fechas_por_activo = {}
+    for ric, df in data.items():
+        if len(df) > 0:
+            fechas_por_activo[ric] = set(df.index)
+    
+    if fechas_por_activo:
+        # Encontrar fechas comunes
+        fechas_comunes = set.intersection(*fechas_por_activo.values())
+        
+        st.info(f"""
+        **📊 Análisis de fechas:**
+        - Fechas comunes entre todos los activos: {len(fechas_comunes)}
+        - Rango de fechas común: {min(fechas_comunes) if fechas_comunes else 'N/A'} a {max(fechas_comunes) if fechas_comunes else 'N/A'}
+        """)
+        
+        # Mostrar fechas comunes
+        if fechas_comunes:
+            fechas_ordenadas = sorted(list(fechas_comunes))
+            st.success(f"✅ Fechas comunes encontradas: {len(fechas_ordenadas)}")
+            
+            # Mostrar primeras y últimas fechas
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Primeras fechas:**")
+                for fecha in fechas_ordenadas[:5]:
+                    st.text(fecha.strftime('%Y-%m-%d'))
+            
+            with col2:
+                st.markdown("**Últimas fechas:**")
+                for fecha in fechas_ordenadas[-5:]:
+                    st.text(fecha.strftime('%Y-%m-%d'))
+        else:
+            st.warning("⚠️ No hay fechas comunes entre todos los activos")
+    
+    # Recomendaciones
+    st.markdown("#### 💡 Recomendaciones")
+    
+    if len(fechas_por_activo) >= 2:
+        st.success("""
+        **✅ Datos suficientes para análisis:**
+        - Se pueden calcular retornos diarios
+        - Se puede proceder con la optimización de portafolio
+        """)
+    else:
+        st.error("""
+        **❌ Datos insuficientes:**
+        - Se necesitan al menos 2 activos con datos
+        - Verificar la conectividad a las APIs
+        """)
+    
+    # Información de debugging
+    st.markdown("#### 🐛 Información de Debugging")
+    
+    for ric, df in data.items():
+        with st.expander(f"🔍 Detalles de {ric}"):
+            st.write(f"**Tipo de índice:** {type(df.index)}")
+            st.write(f"**Nombre del índice:** {df.index.name}")
+            st.write(f"**Columnas disponibles:** {list(df.columns)}")
+            st.write(f"**Primeras 3 filas:**")
+            st.dataframe(df.head(3))
+            st.write(f"**Últimas 3 filas:**")
+            st.dataframe(df.tail(3))
 
 # ============================================================================
 # FUNCIÓN PRINCIPAL DE LA APLICACIÓN
