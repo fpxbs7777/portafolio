@@ -145,14 +145,15 @@ def aplicar_estilos_css():
 # FUNCIONES DE ANÁLISIS DE PORTAFOLIO AVANZADO
 # ============================================================================
 
-def load_data(rics, argentina_tickers):
+def load_data(rics, argentina_tickers, token_acceso=None):
     """
-    Descarga datos intradía para una lista de símbolos usando yfinance.
-
+    Descarga datos intradía para una lista de símbolos usando yfinance y/o IOL.
+    
     Args:
         rics (list): Lista de símbolos a descargar.
         argentina_tickers (set): Conjunto de tickers argentinos.
-
+        token_acceso (str, optional): Token de acceso para IOL.
+        
     Returns:
         dict: Diccionario con los datos descargados.
     """
@@ -161,17 +162,55 @@ def load_data(rics, argentina_tickers):
     total_rics = len(rics)
     
     for i, ric in enumerate(rics):
-        symbol = ric + ".BA" if ric in argentina_tickers else ric
         try:
             with st.spinner(f"Descargando datos para {ric}..."):
+                # Intentar primero con IOL si es un símbolo argentino y tenemos token
+                if ric in argentina_tickers and token_acceso:
+                    st.info(f"🔄 Intentando obtener datos de {ric} desde IOL...")
+                    try:
+                        # Intentar obtener serie histórica desde IOL
+                        fecha_hasta = date.today()
+                        fecha_desde = fecha_hasta - timedelta(days=30)
+                        
+                        df_iol = obtener_serie_historica_iol(
+                            token_acceso,
+                            'bMERVAL',  # Mercado por defecto para acciones argentinas
+                            ric,
+                            fecha_desde.strftime('%Y-%m-%d'),
+                            fecha_hasta.strftime('%Y-%m-%d'),
+                            'ajustada'
+                        )
+                        
+                        if not df_iol.empty and 'ultimoPrecio' in df_iol.columns:
+                            # Convertir datos de IOL al formato de yfinance
+                            df_converted = pd.DataFrame({
+                                'Open': df_iol['apertura'],
+                                'High': df_iol['maximo'],
+                                'Low': df_iol['minimo'],
+                                'Close': df_iol['ultimoPrecio'],
+                                'Volume': df_iol['volumenNominal']
+                            }, index=df_iol['fechaHora'])
+                            
+                            data[ric] = df_converted
+                            st.success(f"✅ Datos obtenidos desde IOL para {ric}")
+                            continue
+                        else:
+                            st.warning(f"⚠️ No se pudieron obtener datos de IOL para {ric}, intentando con yfinance...")
+                    except Exception as e:
+                        st.warning(f"⚠️ Error con IOL para {ric}: {str(e)}, intentando con yfinance...")
+                
+                # Si no se pudo con IOL o no es símbolo argentino, usar yfinance
+                symbol = ric + ".BA" if ric in argentina_tickers else ric
                 df = yf.download(symbol, period="1d", interval="1m")
+                
                 if not df.empty:
                     data[ric] = df
-                    st.success(f"✅ Datos descargados para {ric}")
+                    st.success(f"✅ Datos descargados para {ric} desde yfinance")
                 else:
                     st.warning(f"⚠️ No se encontraron datos para {ric} (buscando {symbol})")
+                    
         except Exception as e:
-            st.error(f"❌ Error al descargar datos para {ric} (buscando {symbol}): {e}")
+            st.error(f"❌ Error al descargar datos para {ric}: {e}")
         
         # Actualizar barra de progreso
         progress_bar.progress((i + 1) / total_rics)
@@ -179,7 +218,7 @@ def load_data(rics, argentina_tickers):
     progress_bar.empty()
     return data
 
-def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, include_min_variance=True):
+def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, include_min_variance=True, token_acceso=None):
     """
     Calcula la frontera eficiente usando análisis avanzado de portafolio.
     
@@ -188,6 +227,7 @@ def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, inc
         notional (float): Valor nominal del portafolio
         target_return (float, optional): Retorno objetivo
         include_min_variance (bool): Incluir portafolio de mínima varianza
+        token_acceso (str, optional): Token de acceso para IOL
         
     Returns:
         dict: Diccionario con portafolios optimizados
@@ -197,21 +237,21 @@ def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, inc
         num_assets = len(rics)
         if num_assets < 2:
             st.error("❌ Se necesitan al menos 2 activos para calcular la frontera eficiente")
-            return None
+            return None, None
         
-        # Descargar datos usando yfinance
-        argentina_tickers = {"INTC", "ETHA", "GOOGL", "ARKK", "GGAL", "YPF", "PAMP", "COME"}
-        data = load_data(rics, argentina_tickers)
+        # Descargar datos usando yfinance y/o IOL
+        argentina_tickers = {"INTC", "ETHA", "GOOGL", "ARKK", "GGAL", "YPF", "PAMP", "COME", "BYMA", "S10N5", "S30S5"}
+        data = load_data(rics, argentina_tickers, token_acceso)
         
         # Filtrar símbolos con datos disponibles
         rics_with_data = [ric for ric in rics if ric in data]
         if not rics_with_data:
             st.error("❌ No se descargó ningún dato. Revisa la lista de RICs o la conexión a Internet.")
-            return None
+            return None, None
         
         if len(rics_with_data) < 2:
             st.error("❌ Se necesitan al menos 2 activos con datos para el análisis")
-            return None
+            return None, None
         
         st.success(f"✅ Datos obtenidos para {len(rics_with_data)} activos")
         
@@ -227,10 +267,34 @@ def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, inc
         
         if len(returns_data) < 2:
             st.error("❌ No hay suficientes datos de retornos para el análisis")
-            return None
+            return None, None
         
-        # Crear DataFrame de retornos
-        returns_df = pd.DataFrame(returns_data)
+        # Crear DataFrame de retornos con índice común
+        # Encontrar el índice común más largo
+        common_dates = None
+        for ric, returns in returns_data.items():
+            if common_dates is None:
+                common_dates = returns.index
+            else:
+                common_dates = common_dates.intersection(returns.index)
+        
+        if len(common_dates) < 10:  # Necesitamos al menos 10 días de datos
+            st.error("❌ No hay suficientes fechas comunes entre los activos")
+            return None, None
+        
+        # Crear DataFrame con fechas comunes
+        returns_df = pd.DataFrame(index=common_dates)
+        for ric, returns in returns_data.items():
+            returns_df[ric] = returns.loc[common_dates]
+        
+        # Eliminar filas con NaN
+        returns_df = returns_df.dropna()
+        
+        if len(returns_df) < 10:
+            st.error("❌ Después de limpiar datos, no hay suficientes observaciones")
+            return None, None
+        
+        st.success(f"✅ DataFrame de retornos creado con {len(returns_df)} observaciones")
         
         # Calcular métricas de portafolio
         mean_returns = returns_df.mean() * 252  # Anualizar
@@ -265,7 +329,7 @@ def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, inc
             st.warning(f"⚠️ Error en portafolio de máximo Sharpe: {str(e)}")
         
         # 3. Portafolio de pesos iguales
-        equal_weights = np.ones(num_assets) / num_assets
+        equal_weights = np.ones(len(rics_with_data)) / len(rics_with_data)
         portfolios['equal-weight'] = {
             'weights': equal_weights,
             'return': np.sum(mean_returns * equal_weights),
@@ -286,10 +350,12 @@ def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, inc
             except Exception as e:
                 st.warning(f"⚠️ Error en portafolio con retorno objetivo: {str(e)}")
         
+        st.success(f"✅ {len(portfolios)} portafolios optimizados calculados exitosamente")
         return portfolios, returns_df
         
     except Exception as e:
         st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
+        st.exception(e)  # Mostrar el traceback completo para debugging
         return None, None
 
 def optimize_minimum_variance(cov_matrix):
@@ -521,6 +587,117 @@ def obtener_tokens(usuario, contraseña):
     return None, None
 
 # ============================================================================
+# FUNCIONES DE COTIZACIONES IOL
+# ============================================================================
+
+def obtener_cotizaciones_iol(token_portador, instrumento, pais):
+    """
+    Obtiene cotizaciones de un instrumento específico desde la API de IOL.
+    
+    Args:
+        token_portador (str): Token de acceso
+        instrumento (str): Tipo de instrumento (adrs, acciones, titulosPublicos, etc.)
+        pais (str): País del mercado (argentina, estados_unidos, etc.)
+        
+    Returns:
+        pd.DataFrame: DataFrame con las cotizaciones
+    """
+    url = f"https://api.invertironline.com/api/v2/Cotizaciones/{instrumento}/{pais}/Todos"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            if 'titulos' in data:
+                df = pd.DataFrame(data['titulos'])
+                st.success(f"✅ Cotizaciones obtenidas para {instrumento} en {pais}: {len(df)} instrumentos")
+                return df
+            else:
+                st.warning(f"⚠️ No se encontraron datos de títulos para {instrumento} en {pais}")
+                return pd.DataFrame()
+        else:
+            st.error(f"❌ Error HTTP {response.status_code} al obtener cotizaciones de {instrumento}")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"❌ Error al obtener cotizaciones de {instrumento}: {str(e)}")
+        return pd.DataFrame()
+
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
+    """
+    Obtiene serie histórica de cotizaciones desde la API de IOL.
+    
+    Args:
+        token_portador (str): Token de acceso
+        mercado (str): Mercado (bCBA, etc.)
+        simbolo (str): Símbolo del instrumento
+        fecha_desde (str): Fecha desde (YYYY-MM-DD)
+        fecha_hasta (str): Fecha hasta (YYYY-MM-DD)
+        ajustada (str): Tipo de ajuste
+        
+    Returns:
+        pd.DataFrame: DataFrame con la serie histórica
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data)
+                # Convertir fechaHora a datetime
+                if 'fechaHora' in df.columns:
+                    df['fechaHora'] = pd.to_datetime(df['fechaHora'])
+                st.success(f"✅ Serie histórica obtenida para {simbolo}: {len(df)} registros")
+                return df
+            else:
+                st.warning(f"⚠️ No se encontraron datos históricos para {simbolo}")
+                return pd.DataFrame()
+        else:
+            st.error(f"❌ Error HTTP {response.status_code} al obtener serie histórica de {simbolo}")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"❌ Error al obtener serie histórica de {simbolo}: {str(e)}")
+        return pd.DataFrame()
+
+# Funciones específicas para cada tipo de cotización
+def obtener_cotizaciones_adrs_iol(token_portador):
+    """Obtiene cotizaciones de ADRs desde IOL"""
+    return obtener_cotizaciones_iol(token_portador, 'adrs', 'estados_unidos')
+
+def obtener_cotizaciones_acciones_eeuu_iol(token_portador):
+    """Obtiene cotizaciones de acciones de EEUU desde IOL"""
+    return obtener_cotizaciones_iol(token_portador, 'acciones', 'estados_unidos')
+
+def obtener_cotizaciones_acciones_argentina_iol(token_portador):
+    """Obtiene cotizaciones de acciones argentinas desde IOL"""
+    return obtener_cotizaciones_iol(token_portador, 'acciones', 'argentina')
+
+def obtener_cotizaciones_titulos_publicos_iol(token_portador):
+    """Obtiene cotizaciones de títulos públicos desde IOL"""
+    return obtener_cotizaciones_iol(token_portador, 'titulosPublicos', 'argentina')
+
+def obtener_cotizaciones_obligaciones_negociables_iol(token_portador):
+    """Obtiene cotizaciones de obligaciones negociables desde IOL"""
+    return obtener_cotizaciones_iol(token_portador, 'obligacionesNegociables', 'argentina')
+
+def obtener_cotizaciones_cedears_iol(token_portador):
+    """Obtiene cotizaciones de CEDEARs desde IOL"""
+    return obtener_cotizaciones_iol(token_portador, 'cedears', 'argentina')
+
+def obtener_cotizaciones_cauciones_iol(token_portador):
+    """Obtiene cotizaciones de cauciones desde IOL"""
+    return obtener_cotizaciones_iol(token_portador, 'cauciones', 'argentina')
+
+# ============================================================================
 # FUNCIONES DE OBTENCIÓN DE DATOS IOL
 # ============================================================================
 
@@ -548,55 +725,141 @@ def obtener_lista_clientes(token_portador):
         return []
 
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
-    """Obtiene el portafolio de un cliente específico"""
-    url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
-    encabezados = obtener_encabezado_autorizacion(token_portador)
+    """Obtiene el portafolio de un cliente específico para Argentina y Estados Unidos"""
+    portafolios = {}
     
+    # Obtener portafolio de Argentina
     try:
-        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=30)
-        if respuesta.status_code == 200:
-            return respuesta.json()
+        if id_cliente:
+            url_portafolio_ar = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/Argentina'
         else:
-            st.error(f"Error HTTP {respuesta.status_code} al obtener portafolio")
-            return None
+            url_portafolio_ar = 'https://api.invertironline.com/api/v2/portafolio/Argentina'
+        
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        respuesta_ar = requests.get(url_portafolio_ar, headers=encabezados, timeout=30)
+        
+        if respuesta_ar.status_code == 200:
+            portafolios['argentina'] = respuesta_ar.json()
+            st.success("✅ Portafolio de Argentina obtenido")
+        else:
+            st.warning(f"⚠️ Error HTTP {respuesta_ar.status_code} al obtener portafolio de Argentina")
+            portafolios['argentina'] = None
     except Exception as e:
-        st.error(f'Error al obtener portafolio: {str(e)}')
-        return None
+        st.warning(f"⚠️ Error al obtener portafolio de Argentina: {str(e)}")
+        portafolios['argentina'] = None
+    
+    # Obtener portafolio de Estados Unidos
+    try:
+        if id_cliente:
+            url_portafolio_us = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
+        else:
+            url_portafolio_us = 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+        
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        respuesta_us = requests.get(url_portafolio_us, headers=encabezados, timeout=30)
+        
+        if respuesta_us.status_code == 200:
+            portafolios['estados_unidos'] = respuesta_us.json()
+            st.success("✅ Portafolio de Estados Unidos obtenido")
+        else:
+            st.warning(f"⚠️ Error HTTP {respuesta_us.status_code} al obtener portafolio de Estados Unidos")
+            portafolios['estados_unidos'] = None
+    except Exception as e:
+        st.warning(f"⚠️ Error al obtener portafolio de Estados Unidos: {str(e)}")
+        portafolios['estados_unidos'] = None
+    
+    return portafolios
 
 def obtener_estado_cuenta(token_portador, id_cliente=None):
-    """Obtiene el estado de cuenta del cliente"""
-    if id_cliente:
-        url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
-    else:
-        url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
+    """Obtiene el estado de cuenta del cliente para Argentina y Estados Unidos"""
+    estados_cuenta = {}
     
-    encabezados = obtener_encabezado_autorizacion(token_portador)
+    # Obtener estado de cuenta de Argentina
     try:
-        respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
-        if respuesta.status_code == 200:
-            return respuesta.json()
+        if id_cliente:
+            url_estado_cuenta_ar = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
         else:
-            st.error(f"Error HTTP {respuesta.status_code} al obtener estado de cuenta")
-            return None
+            url_estado_cuenta_ar = 'https://api.invertironline.com/api/v2/estadocuenta'
+        
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        respuesta_ar = requests.get(url_estado_cuenta_ar, headers=encabezados, timeout=30)
+        
+        if respuesta_ar.status_code == 200:
+            estados_cuenta['argentina'] = respuesta_ar.json()
+            st.success("✅ Estado de cuenta de Argentina obtenido")
+        else:
+            st.warning(f"⚠️ Error HTTP {respuesta_ar.status_code} al obtener estado de cuenta de Argentina")
+            estados_cuenta['argentina'] = None
     except Exception as e:
-        st.error(f'Error al obtener estado de cuenta: {str(e)}')
-        return None
+        st.warning(f"⚠️ Error al obtener estado de cuenta de Argentina: {str(e)}")
+        estados_cuenta['argentina'] = None
+    
+    # Obtener estado de cuenta de Estados Unidos
+    try:
+        if id_cliente:
+            url_estado_cuenta_us = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}/estados_Unidos'
+        else:
+            url_estado_cuenta_us = 'https://api.invertironline.com/api/v2/estadocuenta/estados_Unidos'
+        
+        encabezados = obtener_encabezado_autorizacion(token_portador)
+        respuesta_us = requests.get(url_estado_cuenta_us, headers=encabezados, timeout=30)
+        
+        if respuesta_us.status_code == 200:
+            estados_cuenta['estados_unidos'] = respuesta_us.json()
+            st.success("✅ Estado de cuenta de Estados Unidos obtenido")
+        else:
+            st.warning(f"⚠️ Error HTTP {respuesta_us.status_code} al obtener estado de cuenta de Estados Unidos")
+            estados_cuenta['estados_unidos'] = None
+    except Exception as e:
+        st.warning(f"⚠️ Error al obtener estado de cuenta de Estados Unidos: {str(e)}")
+        estados_cuenta['estados_unidos'] = None
+    
+    return estados_cuenta
 
 # ============================================================================
 # FUNCIONES DE ANÁLISIS DE PORTAFOLIO
 # ============================================================================
 
-def mostrar_resumen_portafolio(portafolio, token_acceso):
-    """Muestra un resumen visual del portafolio"""
+def mostrar_resumen_portafolio(portafolios, token_acceso):
+    """Muestra un resumen visual del portafolio para Argentina y Estados Unidos"""
     st.markdown("### 📊 Resumen del Portafolio")
     
+    if not portafolios:
+        st.warning("No hay datos de portafolio disponibles")
+        return
+    
+    # Crear tabs para cada país
+    tab1, tab2, tab3 = st.tabs(["🇦🇷 Argentina", "🇺🇸 Estados Unidos", "📊 Consolidado"])
+    
+    with tab1:
+        portafolio_ar = portafolios.get('argentina')
+        if portafolio_ar:
+            st.markdown("#### 🇦🇷 Portafolio - Argentina")
+            mostrar_resumen_portafolio_pais(portafolio_ar, "Argentina")
+        else:
+            st.warning("⚠️ No se pudieron obtener datos del portafolio de Argentina")
+    
+    with tab2:
+        portafolio_us = portafolios.get('estados_unidos')
+        if portafolio_us:
+            st.markdown("#### 🇺🇸 Portafolio - Estados Unidos")
+            mostrar_resumen_portafolio_pais(portafolio_us, "Estados Unidos")
+        else:
+            st.warning("⚠️ No se pudieron obtener datos del portafolio de Estados Unidos")
+    
+    with tab3:
+        st.markdown("#### 📊 Resumen Consolidado")
+        mostrar_resumen_consolidado(portafolios)
+
+def mostrar_resumen_portafolio_pais(portafolio, pais):
+    """Muestra resumen del portafolio de un país específico"""
     activos = portafolio.get('activos', [])
     if not activos:
-        st.warning("El portafolio está vacío")
+        st.warning(f"El portafolio de {pais} está vacío")
         return
     
     # Calcular métricas del portafolio
-    valor_total = sum(activo.get('valuacionActual', 0) for activo in activos)
+    valor_total = sum(activo.get('valorizado', activo.get('valuacionActual', 0)) for activo in activos)
     num_activos = len(activos)
     
     # Métricas principales
@@ -606,39 +869,40 @@ def mostrar_resumen_portafolio(portafolio, token_acceso):
         st.metric(
             "💰 Valor Total",
             f"${valor_total:,.2f}",
-            help="Valor total del portafolio"
+            help=f"Valor total del portafolio en {pais}"
         )
     
     with col2:
         st.metric(
             "📈 Número de Activos",
             num_activos,
-            help="Cantidad total de activos"
+            help=f"Cantidad total de activos en {pais}"
         )
     
     with col3:
         # Calcular distribución por tipo
         tipos_activo = {}
         for activo in activos:
-            tipo = activo.get('titulo', {}).get('tipoInstrumento', 'Desconocido')
+            titulo = activo.get('titulo', {})
+            tipo = titulo.get('tipo', titulo.get('tipoInstrumento', 'Desconocido'))
             tipos_activo[tipo] = tipos_activo.get(tipo, 0) + 1
         
         tipo_principal = max(tipos_activo.items(), key=lambda x: x[1])[0] if tipos_activo else "N/A"
         st.metric(
             "🎯 Tipo Principal",
             tipo_principal,
-            help="Tipo de instrumento más común"
+            help=f"Tipo de instrumento más común en {pais}"
         )
     
     with col4:
         # Calcular concentración
         if valor_total > 0:
-            valores = [activo.get('valuacionActual', 0) for activo in activos]
+            valores = [activo.get('valorizado', activo.get('valuacionActual', 0)) for activo in activos]
             concentracion = max(valores) / valor_total * 100
             st.metric(
                 "⚖️ Concentración Máx",
                 f"{concentracion:.1f}%",
-                help="Porcentaje del activo más concentrado"
+                help=f"Porcentaje del activo más concentrado en {pais}"
             )
     
     # Gráfico de distribución por tipo
@@ -646,8 +910,9 @@ def mostrar_resumen_portafolio(portafolio, token_acceso):
     
     tipos_data = {}
     for activo in activos:
-        tipo = activo.get('titulo', {}).get('tipoInstrumento', 'Desconocido')
-        valor = activo.get('valuacionActual', 0)
+        titulo = activo.get('titulo', {})
+        tipo = titulo.get('tipo', titulo.get('tipoInstrumento', 'Desconocido'))
+        valor = activo.get('valorizado', activo.get('valuacionActual', 0))
         tipos_data[tipo] = tipos_data.get(tipo, 0) + valor
     
     if tipos_data:
@@ -659,7 +924,7 @@ def mostrar_resumen_portafolio(portafolio, token_acceso):
         )])
         
         fig.update_layout(
-            title="Distribución del Portafolio por Tipo",
+            title=f"Distribución del Portafolio por Tipo - {pais}",
             showlegend=True,
             height=500
         )
@@ -671,7 +936,7 @@ def mostrar_resumen_portafolio(portafolio, token_acceso):
     
     if activos:
         # Ordenar por valor
-        activos_ordenados = sorted(activos, key=lambda x: x.get('valuacionActual', 0), reverse=True)
+        activos_ordenados = sorted(activos, key=lambda x: x.get('valorizado', x.get('valuacionActual', 0)), reverse=True)
         
         # Crear DataFrame para la tabla
         datos_tabla = []
@@ -679,72 +944,265 @@ def mostrar_resumen_portafolio(portafolio, token_acceso):
             titulo = activo.get('titulo', {})
             datos_tabla.append({
                 'Símbolo': titulo.get('simbolo', 'N/A'),
-                'Tipo': titulo.get('tipoInstrumento', 'N/A'),
+                'Tipo': titulo.get('tipo', titulo.get('tipoInstrumento', 'N/A')),
                 'Cantidad': activo.get('cantidad', 0),
-                'Valor Unitario': f"${activo.get('precioPromedio', 0):,.2f}",
-                'Valor Actual': f"${activo.get('valuacionActual', 0):,.2f}",
-                'Rendimiento': f"{activo.get('rendimiento', 0):.2f}%"
+                'Valor Unitario': f"${activo.get('ppc', activo.get('precioPromedio', 0)):,.2f}",
+                'Valor Actual': f"${activo.get('valorizado', activo.get('valuacionActual', 0)):,.2f}",
+                'Rendimiento': f"{activo.get('gananciaPorcentaje', activo.get('rendimiento', 0)):.2f}%"
             })
         
         df_activos = pd.DataFrame(datos_tabla)
         st.dataframe(df_activos, use_container_width=True, height=400)
 
-def mostrar_estado_cuenta(estado_cuenta):
-    """Muestra el estado de cuenta del cliente"""
-    st.markdown("### 💰 Estado de Cuenta")
+def mostrar_resumen_consolidado(portafolios):
+    """Muestra resumen consolidado de ambos portafolios"""
+    # Calcular totales por país
+    total_ar = 0
+    total_us = 0
+    num_activos_ar = 0
+    num_activos_us = 0
     
-    if not estado_cuenta:
-        st.warning("No hay datos de estado de cuenta disponibles")
-        return
+    if portafolios.get('argentina'):
+        activos_ar = portafolios['argentina'].get('activos', [])
+        total_ar = sum(activo.get('valorizado', activo.get('valuacionActual', 0)) for activo in activos_ar)
+        num_activos_ar = len(activos_ar)
     
-    # Extraer información relevante
-    saldos = estado_cuenta.get('saldos', {})
-    cuentas = estado_cuenta.get('cuentas', [])
+    if portafolios.get('estados_unidos'):
+        activos_us = portafolios['estados_unidos'].get('activos', [])
+        total_us = sum(activo.get('valorizado', activo.get('valuacionActual', 0)) for activo in activos_us)
+        num_activos_us = len(activos_us)
     
-    # Métricas principales
-    col1, col2, col3 = st.columns(3)
+    # Métricas consolidadas
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        saldo_disponible = saldos.get('disponible', 0)
         st.metric(
-            "💵 Saldo Disponible",
-            f"${saldo_disponible:,.2f}",
-            help="Saldo disponible para operaciones"
+            "🇦🇷 Total Argentina",
+            f"${total_ar:,.2f}",
+            help="Valor total del portafolio argentino"
         )
     
     with col2:
-        saldo_total = saldos.get('total', 0)
         st.metric(
-            "🏦 Saldo Total",
-            f"${saldo_total:,.2f}",
-            help="Saldo total de la cuenta"
+            "🇺🇸 Total Estados Unidos",
+            f"${total_us:,.2f}",
+            help="Valor total del portafolio estadounidense"
         )
     
     with col3:
-        if saldo_total > 0:
-            porcentaje_disponible = (saldo_disponible / saldo_total) * 100
-            st.metric(
-                "📊 % Disponible",
-                f"{porcentaje_disponible:.1f}%",
-                help="Porcentaje del saldo disponible"
-            )
+        total_consolidado = total_ar + (total_us * 1000)  # Convertir USD a ARS (aproximado)
+        st.metric(
+            "💱 Total Consolidado ARS",
+            f"${total_consolidado:,.2f}",
+            help="Valor total convertido a pesos argentinos"
+        )
     
-    # Información de cuentas
-    if cuentas:
-        st.markdown("#### 🏛️ Cuentas del Cliente")
+    with col4:
+        total_activos = num_activos_ar + num_activos_us
+        st.metric(
+            "📈 Total Activos",
+            total_activos,
+            help="Número total de activos en ambos portafolios"
+        )
+    
+    # Gráfico de distribución por país
+    if total_ar > 0 or total_us > 0:
+        st.markdown("#### 📊 Distribución por País")
         
-        datos_cuentas = []
-        for cuenta in cuentas:
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A'),
-                'Moneda': cuenta.get('moneda', 'N/A'),
-                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                'Estado': cuenta.get('estado', 'N/A')
-            })
+        fig = go.Figure(data=[go.Pie(
+            labels=['Argentina', 'Estados Unidos'],
+            values=[total_ar, total_us * 1000],  # Convertir USD a ARS para comparación
+            hole=0.4,
+            marker_colors=['#4CAF50', '#2196F3']
+        )])
         
-        df_cuentas = pd.DataFrame(datos_cuentas)
-        st.dataframe(df_cuentas, use_container_width=True)
+        fig.update_layout(
+            title="Distribución del Portafolio por País",
+            showlegend=True,
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Tabla comparativa
+    st.markdown("#### 📋 Comparativa de Portafolios")
+    
+    comparativa_data = [
+        {
+            'País': 'Argentina',
+            'Valor Total': f"${total_ar:,.2f}",
+            'Número de Activos': num_activos_ar,
+            'Valor Promedio por Activo': f"${total_ar/num_activos_ar:,.2f}" if num_activos_ar > 0 else "$0.00"
+        },
+        {
+            'País': 'Estados Unidos',
+            'Valor Total': f"${total_us:,.2f}",
+            'Número de Activos': num_activos_us,
+            'Valor Promedio por Activo': f"${total_us/num_activos_us:,.2f}" if num_activos_us > 0 else "$0.00"
+        }
+    ]
+    
+    df_comparativa = pd.DataFrame(comparativa_data)
+    st.dataframe(df_comparativa, use_container_width=True)
+
+def mostrar_estado_cuenta(estados_cuenta):
+    """Muestra el estado de cuenta del cliente para Argentina y Estados Unidos"""
+    st.markdown("### 💰 Estado de Cuenta")
+    
+    if not estados_cuenta:
+        st.warning("No hay datos de estado de cuenta disponibles")
+        return
+    
+    # Crear tabs para cada país
+    tab1, tab2 = st.tabs(["🇦🇷 Argentina", "🇺🇸 Estados Unidos"])
+    
+    with tab1:
+        estado_ar = estados_cuenta.get('argentina')
+        if estado_ar:
+            st.markdown("#### 🇦🇷 Estado de Cuenta - Argentina")
+            
+            # Extraer información relevante
+            saldos = estado_ar.get('saldos', {})
+            cuentas = estado_ar.get('cuentas', [])
+            
+            # Métricas principales
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                saldo_disponible = saldos.get('disponible', 0)
+                st.metric(
+                    "💵 Saldo Disponible",
+                    f"${saldo_disponible:,.2f}",
+                    help="Saldo disponible para operaciones"
+                )
+            
+            with col2:
+                saldo_total = saldos.get('total', 0)
+                st.metric(
+                    "🏦 Saldo Total",
+                    f"${saldo_total:,.2f}",
+                    help="Saldo total de la cuenta"
+                )
+            
+            with col3:
+                if saldo_total > 0:
+                    porcentaje_disponible = (saldo_disponible / saldo_total) * 100
+                    st.metric(
+                        "📊 % Disponible",
+                        f"{porcentaje_disponible:.1f}%",
+                        help="Porcentaje del saldo disponible"
+                    )
+            
+            # Información de cuentas
+            if cuentas:
+                st.markdown("#### 🏛️ Cuentas del Cliente - Argentina")
+                
+                datos_cuentas = []
+                for cuenta in cuentas:
+                    datos_cuentas.append({
+                        'Número': cuenta.get('numero', 'N/A'),
+                        'Tipo': cuenta.get('tipo', 'N/A'),
+                        'Moneda': cuenta.get('moneda', 'N/A'),
+                        'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                        'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                        'Comprometido': f"${cuenta.get('comprometido', 0):,.2f}",
+                        'Estado': cuenta.get('estado', 'N/A')
+                    })
+                
+                df_cuentas = pd.DataFrame(datos_cuentas)
+                st.dataframe(df_cuentas, use_container_width=True)
+        else:
+            st.warning("⚠️ No se pudieron obtener datos del estado de cuenta de Argentina")
+    
+    with tab2:
+        estado_us = estados_cuenta.get('estados_unidos')
+        if estado_us:
+            st.markdown("#### 🇺🇸 Estado de Cuenta - Estados Unidos")
+            
+            # Extraer información relevante
+            saldos = estado_us.get('saldos', {})
+            cuentas = estado_us.get('cuentas', [])
+            
+            # Métricas principales
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                saldo_disponible = saldos.get('disponible', 0)
+                st.metric(
+                    "💵 Saldo Disponible USD",
+                    f"${saldo_disponible:,.2f}",
+                    help="Saldo disponible en USD"
+                )
+            
+            with col2:
+                saldo_total = saldos.get('total', 0)
+                st.metric(
+                    "🏦 Saldo Total USD",
+                    f"${saldo_total:,.2f}",
+                    help="Saldo total en USD"
+                )
+            
+            with col3:
+                if saldo_total > 0:
+                    porcentaje_disponible = (saldo_disponible / saldo_total) * 100
+                    st.metric(
+                        "📊 % Disponible",
+                        f"{porcentaje_disponible:.1f}%",
+                        help="Porcentaje del saldo disponible"
+                    )
+            
+            # Información de cuentas
+            if cuentas:
+                st.markdown("#### 🏛️ Cuentas del Cliente - Estados Unidos")
+                
+                datos_cuentas = []
+                for cuenta in cuentas:
+                    datos_cuentas.append({
+                        'Número': cuenta.get('numero', 'N/A'),
+                        'Tipo': cuenta.get('tipo', 'N/A'),
+                        'Moneda': cuenta.get('moneda', 'N/A'),
+                        'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                        'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                        'Comprometido': f"${cuenta.get('comprometido', 0):,.2f}",
+                        'Estado': cuenta.get('estado', 'N/A')
+                    })
+                
+                df_cuentas = pd.DataFrame(datos_cuentas)
+                st.dataframe(df_cuentas, use_container_width=True)
+        else:
+            st.warning("⚠️ No se pudieron obtener datos del estado de cuenta de Estados Unidos")
+    
+    # Resumen consolidado
+    st.markdown("#### 📊 Resumen Consolidado")
+    
+    total_ar = estados_cuenta.get('argentina', {}).get('saldos', {}).get('total', 0) if estados_cuenta.get('argentina') else 0
+    total_us = estados_cuenta.get('estados_unidos', {}).get('saldos', {}).get('total', 0) if estados_cuenta.get('estados_unidos') else 0
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "🇦🇷 Total Argentina",
+            f"${total_ar:,.2f}",
+            help="Total en pesos argentinos"
+        )
+    
+    with col2:
+        st.metric(
+            "🇺🇸 Total Estados Unidos",
+            f"${total_us:,.2f}",
+            help="Total en dólares estadounidenses"
+        )
+    
+    with col3:
+        if total_ar > 0 or total_us > 0:
+            # Convertir a pesos (aproximado 1 USD = 1000 ARS)
+            total_ars_equivalente = total_ar + (total_us * 1000)
+            st.metric(
+                "💱 Total Equivalente ARS",
+                f"${total_ars_equivalente:,.2f}",
+                help="Total convertido a pesos argentinos (aproximado)"
+            )
 
 # ============================================================================
 # FUNCIONES DE OPTIMIZACIÓN DE PORTAFOLIO
@@ -837,7 +1295,7 @@ def mostrar_menu_optimizacion(portafolio, token_acceso, fecha_desde, fecha_hasta
                     st.info("📈 Ejecutando análisis avanzado de frontera eficiente...")
                     
                     portfolios, returns_df = calcular_frontera_eficiente_avanzada(
-                        simbolos, notional, target_return, include_min_variance
+                        simbolos, notional, target_return, include_min_variance, token_acceso
                     )
                     
                     if portfolios and returns_df is not None:
@@ -1241,30 +1699,180 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
 # ============================================================================
 
 def mostrar_cotizaciones_mercado(token_acceso):
-    """Muestra cotizaciones y datos de mercado"""
+    """Muestra cotizaciones y datos de mercado usando la API de IOL"""
     st.markdown("### 💱 Cotizaciones y Mercado")
     
-    # Cotización MEP
-    with st.expander("💰 Cotización MEP", expanded=True):
-        with st.form("mep_form"):
-            col1, col2, col3 = st.columns(3)
-            simbolo_mep = col1.text_input("Símbolo", value="AL30", help="Ej: AL30, GD30, etc.")
-            id_plazo_compra = col2.number_input("ID Plazo Compra", value=1, min_value=1)
-            id_plazo_venta = col3.number_input("ID Plazo Venta", value=1, min_value=1)
-            
-            if st.form_submit_button("🔍 Consultar MEP"):
-                if simbolo_mep:
-                    st.info("ℹ️ Función de cotización MEP en desarrollo")
-                else:
-                    st.warning("⚠️ Ingrese un símbolo válido")
+    # Tabs para diferentes tipos de cotizaciones
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Cotizaciones IOL", 
+        "📈 Series Históricas", 
+        "💰 Cotización MEP", 
+        "🏦 Tasas de Caución"
+    ])
     
-    # Tasas de Caución
-    with st.expander("🏦 Tasas de Caución", expanded=True):
-        st.info("ℹ️ Función de tasas de caución en desarrollo")
+    with tab1:
+        st.markdown("#### 📊 Cotizaciones en Tiempo Real")
+        
+        # Selección de tipo de instrumento
+        tipo_instrumento = st.selectbox(
+            "Tipo de Instrumento:",
+            options=[
+                ('adrs', 'estados_unidos', 'ADRs EEUU'),
+                ('acciones', 'estados_unidos', 'Acciones EEUU'),
+                ('acciones', 'argentina', 'Acciones Argentina'),
+                ('titulosPublicos', 'argentina', 'Títulos Públicos'),
+                ('obligacionesNegociables', 'argentina', 'Obligaciones Negociables'),
+                ('cedears', 'argentina', 'CEDEARs'),
+                ('cauciones', 'argentina', 'Cauciones')
+            ],
+            format_func=lambda x: x[2],
+            help="Seleccione el tipo de instrumento a consultar"
+        )
+        
+        if st.button("🔄 Obtener Cotizaciones", type="primary"):
+            with st.spinner("Obteniendo cotizaciones..."):
+                instrumento, pais, nombre = tipo_instrumento
+                df_cotizaciones = obtener_cotizaciones_iol(token_acceso, instrumento, pais)
+                
+                if not df_cotizaciones.empty:
+                    st.success(f"✅ {len(df_cotizaciones)} cotizaciones obtenidas")
+                    
+                    # Mostrar métricas principales
+                    if 'ultimoPrecio' in df_cotizaciones.columns:
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Precio Promedio", f"${df_cotizaciones['ultimoPrecio'].mean():.2f}")
+                        with col2:
+                            st.metric("Variación Promedio", f"{df_cotizaciones['variacion'].mean():.2f}%")
+                        with col3:
+                            st.metric("Volumen Total", f"{df_cotizaciones['volumenNominal'].sum():,.0f}")
+                    
+                    # Mostrar tabla de cotizaciones
+                    st.markdown("#### 📋 Cotizaciones Detalladas")
+                    st.dataframe(df_cotizaciones, use_container_width=True, height=400)
+                    
+                    # Gráfico de distribución de precios
+                    if 'ultimoPrecio' in df_cotizaciones.columns:
+                        fig = go.Figure(data=[go.Histogram(
+                            x=df_cotizaciones['ultimoPrecio'].dropna(),
+                            nbinsx=20,
+                            marker_color='#4CAF50'
+                        )])
+                        
+                        fig.update_layout(
+                            title='Distribución de Precios',
+                            xaxis_title='Precio',
+                            yaxis_title='Frecuencia',
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("⚠️ No se pudieron obtener cotizaciones")
+    
+    with tab2:
+        st.markdown("#### 📈 Series Históricas")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            mercado = st.selectbox(
+                "Mercado:",
+                options=['bCBA', 'bMERVAL', 'bROFEX'],
+                help="Seleccione el mercado"
+            )
+        with col2:
+            simbolo = st.text_input("Símbolo:", value="AL30", help="Ej: AL30, GD30, etc.")
+        with col3:
+            ajustada = st.selectbox(
+                "Ajuste:",
+                options=['ajustada', 'sinAjustar'],
+                help="Tipo de ajuste"
+            )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde = st.date_input("Fecha desde:", value=date.today() - timedelta(days=30))
+        with col2:
+            fecha_hasta = st.date_input("Fecha hasta:", value=date.today())
+        
+        if st.button("📊 Obtener Serie Histórica", type="primary"):
+            if simbolo:
+                with st.spinner("Obteniendo serie histórica..."):
+                    df_historico = obtener_serie_historica_iol(
+                        token_acceso, 
+                        mercado, 
+                        simbolo, 
+                        fecha_desde.strftime('%Y-%m-%d'),
+                        fecha_hasta.strftime('%Y-%m-%d'),
+                        ajustada
+                    )
+                    
+                    if not df_historico.empty:
+                        st.success(f"✅ Serie histórica obtenida para {simbolo}")
+                        
+                        # Mostrar métricas
+                        if 'ultimoPrecio' in df_historico.columns:
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Precio Actual", f"${df_historico['ultimoPrecio'].iloc[-1]:.2f}")
+                            with col2:
+                                st.metric("Variación", f"{df_historico['variacion'].iloc[-1]:.2f}%")
+                            with col3:
+                                st.metric("Máximo", f"${df_historico['maximo'].max():.2f}")
+                            with col4:
+                                st.metric("Mínimo", f"${df_historico['minimo'].min():.2f}")
+                        
+                        # Gráfico de precios
+                        if 'fechaHora' in df_historico.columns and 'ultimoPrecio' in df_historico.columns:
+                            fig = go.Figure()
+                            
+                            fig.add_trace(go.Scatter(
+                                x=df_historico['fechaHora'],
+                                y=df_historico['ultimoPrecio'],
+                                mode='lines+markers',
+                                name='Precio',
+                                line=dict(color='#4CAF50', width=2)
+                            ))
+                            
+                            fig.update_layout(
+                                title=f'Serie Histórica - {simbolo}',
+                                xaxis_title='Fecha',
+                                yaxis_title='Precio',
+                                height=500
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tabla de datos
+                        st.markdown("#### 📋 Datos Históricos")
+                        st.dataframe(df_historico, use_container_width=True, height=400)
+                    else:
+                        st.warning("⚠️ No se pudieron obtener datos históricos")
+            else:
+                st.warning("⚠️ Ingrese un símbolo válido")
+    
+    with tab3:
+        st.markdown("#### 💰 Cotización MEP")
+        st.info("ℹ️ Función de cotización MEP en desarrollo")
         
         # Placeholder para futura implementación
-        if st.button("🔄 Actualizar Tasas"):
+        if st.button("🔄 Actualizar MEP"):
             st.success("✅ Funcionalidad en desarrollo")
+    
+    with tab4:
+        st.markdown("#### 🏦 Tasas de Caución")
+        
+        if st.button("🔄 Obtener Tasas de Caución", type="primary"):
+            with st.spinner("Obteniendo tasas de caución..."):
+                df_cauciones = obtener_cotizaciones_cauciones_iol(token_acceso)
+                
+                if not df_cauciones.empty:
+                    st.success(f"✅ {len(df_cauciones)} tasas de caución obtenidas")
+                    
+                    # Mostrar tabla de cauciones
+                    st.dataframe(df_cauciones, use_container_width=True, height=400)
+                else:
+                    st.warning("⚠️ No se pudieron obtener tasas de caución")
 
 # ============================================================================
 # FUNCIONES DE MOVIMIENTOS DEL ASESOR
@@ -1536,8 +2144,8 @@ def mostrar_analisis_portafolio():
     
     # Cargar datos
     with st.spinner("🔄 Cargando datos del cliente..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
+        portafolios = obtener_portafolio(token_acceso, id_cliente)
+        estados_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
     
     # Crear tabs con iconos
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -1549,20 +2157,25 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
+        if portafolios:
+            mostrar_resumen_portafolio(portafolios, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio del cliente")
     
     with tab2:
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
+        if estados_cuenta:
+            mostrar_estado_cuenta(estados_cuenta)
         else:
             st.warning("No se pudo obtener el estado de cuenta")
     
     with tab3:
-        if portafolio:
-            mostrar_menu_optimizacion(portafolio, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+        if portafolios:
+            # Usar el portafolio de Argentina por defecto para optimización
+            portafolio_ar = portafolios.get('argentina')
+            if portafolio_ar:
+                mostrar_menu_optimizacion(portafolio_ar, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+            else:
+                st.warning("No se pudo obtener el portafolio de Argentina para optimización")
         else:
             st.warning("No se pudo obtener el portafolio para optimización")
     
