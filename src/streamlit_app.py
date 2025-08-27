@@ -2836,20 +2836,34 @@ def main():
     # Obtener tokens de IOL automáticamente
     if st.session_state.token_acceso is None:
         st.info("🔑 Configurando conexión automática a IOL...")
-        token_acceso, refresh_token = obtener_tokens_iol_automatico()
-        if token_acceso:
-            st.session_state.token_acceso = token_acceso
-            st.session_state.refresh_token = refresh_token
-            st.success("✅ Conexión automática a IOL exitosa!")
-        else:
-            st.warning("⚠️ No se pudo conectar automáticamente a IOL")
+        
+        # Mostrar información de depuración
+        st.info(f"""
+        **🔍 Información de depuración:**
+        - Usuario configurado: {IOL_USERNAME}
+        - URL de autenticación: https://api.invertironline.com/token
+        - Método: POST con grant_type=password
+        """)
+        
+        try:
+            token_acceso, refresh_token = obtener_tokens_iol_automatico()
+            if token_acceso:
+                st.session_state.token_acceso = token_acceso
+                st.session_state.refresh_token = refresh_token
+                st.success("✅ Conexión automática a IOL exitosa!")
+            else:
+                st.warning("⚠️ No se pudo conectar automáticamente a IOL")
+                st.info("💡 Puede intentar con credenciales manuales o verificar la conectividad")
+        except Exception as e:
+            st.error(f"❌ Error en conexión automática: {str(e)}")
+            st.exception(e)
     
     # Barra lateral - Autenticación
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
         
         if st.session_state.token_acceso:
-            st.success("✅ Conectado automáticamente a IOL")
+            st.success("✅ Conectado a IOL")
             st.info(f"Usuario: {IOL_USERNAME}")
             
             # Botón para refrescar tokens
@@ -2860,69 +2874,147 @@ def main():
                     st.success("✅ Tokens refrescados exitosamente!")
                     st.rerun()
         else:
-            st.error("❌ Error en la conexión automática")
-            st.info("Verificar credenciales en el código")
-            st.divider()
+            st.error("❌ No conectado a IOL")
             
-            # Configuración de fechas
-            st.subheader("📅 Configuración de Fechas")
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_desde = st.date_input(
-                    "Desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
-                )
-            with col2:
-                fecha_hasta = st.date_input(
-                    "Hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
+            # Formulario manual de autenticación
+            with st.expander("🔑 Autenticación Manual", expanded=True):
+                with st.form("login_manual"):
+                    st.subheader("Ingreso Manual a IOL")
+                    usuario_manual = st.text_input("Usuario", value=IOL_USERNAME, key="usuario_manual")
+                    contraseña_manual = st.text_input("Contraseña", type="password", value=IOL_PASSWORD, key="contraseña_manual")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.form_submit_button("🚀 Conectar", use_container_width=True):
+                            if usuario_manual and contraseña_manual:
+                                with st.spinner("Conectando manualmente..."):
+                                    try:
+                                        token_acceso, refresh_token = obtener_tokens_iol(usuario_manual, contraseña_manual)
+                                        if token_acceso:
+                                            st.session_state.token_acceso = token_acceso
+                                            st.session_state.refresh_token = refresh_token
+                                            st.success("✅ Conexión manual exitosa!")
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Error en la autenticación manual")
+                                    except Exception as e:
+                                        st.error(f"❌ Error de conexión: {str(e)}")
+                                        st.exception(e)
+                            else:
+                                st.warning("⚠️ Complete todos los campos")
+                    
+                    with col2:
+                        if st.form_submit_button("🧪 Probar Conexión", use_container_width=True):
+                            if usuario_manual and contraseña_manual:
+                                with st.spinner("Probando conexión..."):
+                                    try:
+                                        # Probar solo la conexión sin guardar tokens
+                                        test_token, test_refresh = obtener_tokens_iol(usuario_manual, contraseña_manual)
+                                        if test_token:
+                                            st.success("✅ Conexión de prueba exitosa!")
+                                            st.info("Ahora puede usar el botón 'Conectar' para autenticarse")
+                                        else:
+                                            st.error("❌ Conexión de prueba fallida")
+                                    except Exception as e:
+                                        st.error(f"❌ Error en prueba: {str(e)}")
+                                        st.exception(e)
+                            else:
+                                st.warning("⚠️ Complete todos los campos")
             
-            st.session_state.fecha_desde = fecha_desde
-            st.session_state.fecha_hasta = fecha_hasta
-            
-            # Obtener lista de clientes
-            if not st.session_state.clientes and st.session_state.token_acceso:
-                with st.spinner("Cargando clientes..."):
+            # Información de troubleshooting
+            with st.expander("🔧 Solución de Problemas"):
+                st.markdown("""
+                **❌ Error 401 - No autorizado:**
+                - Verificar que el usuario y contraseña sean correctos
+                - Verificar que la cuenta no esté bloqueada
+                - Verificar que la API de IOL esté funcionando
+                
+                **🌐 Problemas de conectividad:**
+                - Verificar conexión a Internet
+                - Verificar que no haya firewall bloqueando
+                - Verificar que la URL de IOL sea accesible
+                
+                **🔑 Problemas de credenciales:**
+                - Verificar que la cuenta esté activa
+                - Verificar que no haya expirado la contraseña
+                - Contactar soporte de IOL si persiste el problema
+                """)
+                
+                # Botón para probar conectividad básica
+                if st.button("🌐 Probar Conectividad", use_container_width=True):
+                    import requests
                     try:
-                        clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        if clientes:
-                            st.session_state.clientes = clientes
+                        response = requests.get("https://api.invertironline.com", timeout=10)
+                        if response.status_code == 200:
+                            st.success("✅ API de IOL accesible")
                         else:
-                            st.warning("No se encontraron clientes")
+                            st.warning(f"⚠️ API responde con código: {response.status_code}")
                     except Exception as e:
-                        st.error(f"Error al cargar clientes: {str(e)}")
+                        st.error(f"❌ No se puede acceder a la API: {str(e)}")
+    
+    # Configuración de fechas y clientes (solo si está autenticado)
+    if st.session_state.token_acceso:
+        st.divider()
+        
+        # Configuración de fechas
+        st.subheader("📅 Configuración de Fechas")
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_desde = st.date_input(
+                "Desde:",
+                value=st.session_state.fecha_desde,
+                max_value=date.today()
+            )
+        with col2:
+            fecha_hasta = st.date_input(
+                "Hasta:",
+                value=st.session_state.fecha_hasta,
+                max_value=date.today()
+            )
+        
+        st.session_state.fecha_desde = fecha_desde
+        st.session_state.fecha_hasta = fecha_hasta
+        
+        # Obtener lista de clientes
+        if not st.session_state.clientes and st.session_state.token_acceso:
+            with st.spinner("Cargando clientes..."):
+                try:
+                    clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    if clientes:
+                        st.session_state.clientes = clientes
+                    else:
+                        st.warning("No se encontraron clientes")
+                except Exception as e:
+                    st.error(f"Error al cargar clientes: {str(e)}")
+        
+        clientes = st.session_state.clientes
+        
+        if clientes:
+            st.subheader("👥 Selección de Cliente")
+            cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+            cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
             
-            clientes = st.session_state.clientes
+            cliente_seleccionado = st.selectbox(
+                "Seleccione un cliente:",
+                options=cliente_ids,
+                format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
+                label_visibility="collapsed"
+            )
             
-            if clientes:
-                st.subheader("👥 Selección de Cliente")
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed"
-                )
-                
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
-                
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
-                    with st.spinner("Actualizando..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista actualizada")
-                        st.rerun()
-            else:
-                st.warning("No se encontraron clientes")
-
+            st.session_state.cliente_seleccionado = next(
+                (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                None
+            )
+            
+            if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+                with st.spinner("Actualizando..."):
+                    nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
+                    st.session_state.clientes = nuevos_clientes
+                    st.success("✅ Lista actualizada")
+                    st.rerun()
+        else:
+            st.warning("No se encontraron clientes")
+    
     # Contenido principal
     try:
         if st.session_state.token_acceso:
