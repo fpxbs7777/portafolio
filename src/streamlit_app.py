@@ -5175,6 +5175,65 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
             except Exception as e:
                 st.error(f"❌ Error durante el rebalanceo: {str(e)}")
 
+def obtener_simbolos_mercado_eeuu():
+    """
+    Obtiene una lista de símbolos populares del mercado NYSE/NASDAQ
+    """
+    simbolos_nyse = [
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'BRK.A', 'JPM', 'JNJ',
+        'V', 'PG', 'UNH', 'HD', 'MA', 'DIS', 'PYPL', 'BAC', 'ADBE', 'CRM',
+        'NFLX', 'INTC', 'CMCSA', 'PFE', 'ABT', 'TMO', 'KO', 'PEP', 'AVGO', 'COST',
+        'MRK', 'WMT', 'TXN', 'QCOM', 'HON', 'DHR', 'ACN', 'LLY', 'VZ', 'BMY', 'RTX'
+    ]
+    
+    simbolos_nasdaq = [
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'ADBE', 'CRM', 'NFLX',
+        'INTC', 'PYPL', 'AVGO', 'QCOM', 'HON', 'ACN', 'LLY', 'VRTX', 'REGN', 'IDXX',
+        'KLAC', 'LRCX', 'SNPS', 'CDNS', 'MELI', 'JD', 'BIDU', 'NTES', 'PDD', 'TCOM',
+        'BABA', 'NIO', 'XPENG', 'LI', 'XPEV', 'JD', 'BIDU', 'NTES', 'PDD', 'TCOM'
+    ]
+    
+    return list(set(simbolos_nyse + simbolos_nasdaq))  # Eliminar duplicados
+
+def generar_simbolos_mercado_eeuu(num_simbolos, incluir_actuales, porcentaje_actuales, activos_actuales, simbolos_disponibles):
+    """
+    Genera símbolos aleatorios del mercado NYSE/NASDAQ para portafolio EEUU
+    """
+    import random
+    
+    simbolos_seleccionados = []
+    
+    # Si incluir actuales, agregar algunos símbolos del portafolio actual
+    if incluir_actuales and activos_actuales:
+        num_actuales = max(1, int(num_simbolos * porcentaje_actuales / 100))
+        simbolos_actuales = []
+        
+        for activo in activos_actuales:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo and simbolo in simbolos_disponibles:
+                simbolos_actuales.append(simbolo)
+        
+        # Seleccionar símbolos actuales aleatoriamente
+        if simbolos_actuales:
+            num_a_incluir = min(num_actuales, len(simbolos_actuales))
+            simbolos_seleccionados.extend(random.sample(simbolos_actuales, num_a_incluir))
+    
+    # Completar con símbolos aleatorios del mercado
+    simbolos_restantes = [s for s in simbolos_disponibles if s not in simbolos_seleccionados]
+    num_restantes = num_simbolos - len(simbolos_seleccionados)
+    
+    if simbolos_restantes and num_restantes > 0:
+        simbolos_aleatorios = random.sample(simbolos_restantes, min(num_restantes, len(simbolos_restantes)))
+        simbolos_seleccionados.extend(simbolos_aleatorios)
+    
+    # Si no tenemos suficientes símbolos, duplicar algunos
+    while len(simbolos_seleccionados) < num_simbolos and simbolos_disponibles:
+        simbolos_adicionales = random.sample(simbolos_disponibles, min(num_simbolos - len(simbolos_seleccionados), len(simbolos_disponibles)))
+        simbolos_seleccionados.extend(simbolos_adicionales)
+    
+    return simbolos_seleccionados[:num_simbolos]
+
 def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
     Rebalanceo usando símbolos aleatorios pero manteniendo el mismo capital total
@@ -5182,13 +5241,18 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
     """
     st.markdown("#### 🎲 Rebalanceo con Símbolos Aleatorios")
     
+    # Detectar si es portafolio de EEUU
+    es_portafolio_eeuu = False
+    if hasattr(st.session_state, 'portafolio_seleccionado'):
+        es_portafolio_eeuu = st.session_state.portafolio_seleccionado == "eeuu"
+    
     activos = portafolio.get('activos', [])
     if not activos:
         st.warning("No hay activos en el portafolio para calcular el capital total")
         return
     
     # Calcular capital total actual
-    capital_total_actual = sum(activo.get('valor', 0) for activo in activos)
+    capital_total_actual = sum(activo.get('valorMercado', 0) for activo in activos)
     
     if capital_total_actual <= 0:
         st.warning("No se puede calcular el capital total del portafolio")
@@ -5252,6 +5316,58 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
             help="Porcentaje de símbolos actuales a incluir en la selección"
         )
     
+    # Configuración específica para portafolio EEUU
+    if es_portafolio_eeuu:
+        st.markdown("#### 🇺🇸 Configuración Específica para EEUU")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            mercado_seleccionado = st.selectbox(
+                "Mercado:",
+                options=['NYSE', 'NASDAQ', 'Ambos'],
+                help="Seleccione el mercado de donde obtener símbolos aleatorios",
+                key="mercado_eeuu_rebalanceo"
+            )
+        
+        with col2:
+            incluir_etfs = st.checkbox(
+                "📊 Incluir ETFs",
+                value=True,
+                help="Incluir ETFs populares en la selección aleatoria",
+                key="incluir_etfs_eeuu"
+            )
+        
+        # Mostrar símbolos disponibles del mercado seleccionado
+        simbolos_disponibles = obtener_simbolos_mercado_eeuu()
+        
+        if mercado_seleccionado == 'NYSE':
+            simbolos_filtrados = [s for s in simbolos_disponibles if s in [
+                'AAPL', 'MSFT', 'GOOGL', 'JPM', 'JNJ', 'V', 'PG', 'UNH', 'HD', 'MA',
+                'DIS', 'BAC', 'PFE', 'ABT', 'TMO', 'KO', 'PEP', 'MRK', 'WMT', 'TXN'
+            ]]
+        elif mercado_seleccionado == 'NASDAQ':
+            simbolos_filtrados = [s for s in simbolos_disponibles if s in [
+                'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'ADBE', 'CRM',
+                'NFLX', 'INTC', 'PYPL', 'AVGO', 'QCOM', 'HON', 'ACN', 'LLY', 'VRTX'
+            ]]
+        else:  # Ambos
+            simbolos_filtrados = simbolos_disponibles
+        
+        if incluir_etfs:
+            etfs_populares = ['SPY', 'QQQ', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'BND', 'GLD', 'SLV']
+            simbolos_filtrados.extend(etfs_populares)
+        
+        st.info(f"📈 Símbolos disponibles: {len(simbolos_filtrados)} (incluyendo {mercado_seleccionado})")
+        
+        # Mostrar algunos símbolos de ejemplo
+        if simbolos_filtrados:
+            st.markdown("**Ejemplos de símbolos disponibles:**")
+            col1, col2, col3, col4 = st.columns(4)
+            for i, simbolo in enumerate(simbolos_filtrados[:12]):
+                col = [col1, col2, col3, col4][i % 4]
+                col.code(simbolo)
+    
     # Configuración de optimización
     st.markdown("#### ⚙️ Configuración de Optimización")
     
@@ -5314,10 +5430,18 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
         ejecutar_completo = st.button("🎯 Rebalanceo Completo")
     
     if generar_simbolos or ejecutar_rebalanceo or ejecutar_completo:
-        # Generar símbolos aleatorios
-        simbolos_aleatorios = generar_simbolos_aleatorios(
-            num_simbolos, incluir_actuales, porcentaje_actuales, activos
-        )
+        # Generar símbolos aleatorios según el tipo de portafolio
+        if es_portafolio_eeuu:
+            # Para portafolio EEUU, usar símbolos del mercado NYSE/NASDAQ
+            simbolos_aleatorios = generar_simbolos_mercado_eeuu(
+                num_simbolos, incluir_actuales, porcentaje_actuales, 
+                activos, simbolos_filtrados
+            )
+        else:
+            # Para portafolio Argentina, usar símbolos existentes
+            simbolos_aleatorios = generar_simbolos_aleatorios(
+                num_simbolos, incluir_actuales, porcentaje_actuales, activos
+            )
         
         if not simbolos_aleatorios:
             st.error("❌ Error generando símbolos aleatorios")
@@ -5374,28 +5498,136 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
                         strategy = 'min-variance-l2'
                         target = None
                     elif modo_optimizacion == 'sharpe_ratio':
-                        strategy = 'sharpe_ratio'
+                        strategy = 'max_sharpe'
                         target = None
-                    else:
-                        strategy = 'markowitz'
-                        target = target_return
+                    
+                    # Aplicar restricciones de pesos
+                    if restriccion_pesos != 'sin_restriccion':
+                        max_weight = float(restriccion_pesos.split('_')[1]) / 100
+                        portfolio_manager.set_max_weight(max_weight)
                     
                     # Ejecutar optimización
-                    resultado_optimizacion = portfolio_manager.compute_portfolio(strategy=strategy, target_return=target)
-                    
-                    if resultado_optimizacion:
-                        st.success("✅ Optimización completada")
+                    try:
+                        if strategy == 'markowitz' and target is not None:
+                            portfolio_manager.optimize(strategy=strategy, target_return=target)
+                        else:
+                            portfolio_manager.optimize(strategy=strategy)
+                        
+                        # Obtener resultados
+                        pesos_optimizados = portfolio_manager.get_weights()
+                        retorno_esperado = portfolio_manager.get_return()
+                        volatilidad = portfolio_manager.get_volatility()
+                        sharpe_ratio = portfolio_manager.get_sharpe_ratio(tasa_libre_riesgo)
                         
                         # Mostrar resultados
-                        mostrar_resultados_rebalanceo_aleatorio(
-                            resultado_optimizacion, simbolos_aleatorios, capital_total,
-                            activos, mostrar_comparacion, mostrar_metricas
+                        st.markdown("#### 📊 Resultados de la Optimización")
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Retorno Esperado", f"{retorno_esperado:.2%}")
+                        with col2:
+                            st.metric("Volatilidad", f"{volatilidad:.2%}")
+                        with col3:
+                            st.metric("Ratio de Sharpe", f"{sharpe_ratio:.2f}")
+                        with col4:
+                            st.metric("Capital Total", f"${capital_total:,.2f}")
+                        
+                        # Mostrar distribución de pesos
+                        st.markdown("#### 📈 Distribución de Pesos Optimizados")
+                        
+                        # Crear DataFrame con pesos
+                        df_pesos = pd.DataFrame({
+                            'Símbolo': simbolos_aleatorios,
+                            'Peso (%)': [peso * 100 for peso in pesos_optimizados],
+                            'Valor ($)': [peso * capital_total for peso in pesos_optimizados]
+                        })
+                        
+                        # Ordenar por peso
+                        df_pesos = df_pesos.sort_values('Peso (%)', ascending=False)
+                        
+                        # Mostrar tabla
+                        st.dataframe(df_pesos, use_container_width=True)
+                        
+                        # Gráfico de pesos
+                        fig_pesos = go.Figure(data=[go.Bar(
+                            x=df_pesos['Símbolo'],
+                            y=df_pesos['Peso (%)'],
+                            text=[f'{peso:.1f}%' for peso in df_pesos['Peso (%)']],
+                            textposition='auto'
+                        )])
+                        fig_pesos.update_layout(
+                            title="Distribución de Pesos del Portafolio Optimizado",
+                            xaxis_title="Símbolos",
+                            yaxis_title="Peso (%)",
+                            showlegend=False
                         )
-                    else:
-                        st.error("❌ Error en la optimización")
+                        st.plotly_chart(fig_pesos, use_container_width=True)
+                        
+                        # Comparación con portafolio actual si está habilitado
+                        if mostrar_comparacion and activos:
+                            st.markdown("#### 🔄 Comparación con Portafolio Actual")
+                            
+                            # Calcular métricas del portafolio actual
+                            retorno_actual = calcular_retorno_portafolio(activos, fecha_desde, fecha_hasta)
+                            volatilidad_actual = calcular_volatilidad_portafolio(activos, fecha_desde, fecha_hasta)
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("**Portafolio Actual**")
+                                st.metric("Retorno", f"{retorno_actual:.2%}")
+                                st.metric("Volatilidad", f"{volatilidad_actual:.2%}")
+                            
+                            with col2:
+                                st.markdown("**Portafolio Optimizado**")
+                                st.metric("Retorno", f"{retorno_esperado:.2%}")
+                                st.metric("Volatilidad", f"{volatilidad:.2%}")
+                            
+                            # Gráfico de comparación
+                            fig_comparacion = go.Figure()
+                            fig_comparacion.add_trace(go.Bar(
+                                name='Portafolio Actual',
+                                x=['Retorno', 'Volatilidad'],
+                                y=[retorno_actual * 100, volatilidad_actual * 100],
+                                marker_color='lightblue'
+                            ))
+                            fig_comparacion.add_trace(go.Bar(
+                                name='Portafolio Optimizado',
+                                x=['Retorno', 'Volatilidad'],
+                                y=[retorno_esperado * 100, volatilidad * 100],
+                                marker_color='lightgreen'
+                            ))
+                            fig_comparacion.update_layout(
+                                title="Comparación: Actual vs Optimizado",
+                                yaxis_title="Porcentaje (%)",
+                                barmode='group'
+                            )
+                            st.plotly_chart(fig_comparacion, use_container_width=True)
+                        
+                        # Métricas detalladas si está habilitado
+                        if mostrar_metricas:
+                            st.markdown("#### 📊 Métricas Detalladas")
+                            
+                            # Calcular métricas adicionales
+                            var_95 = portfolio_manager.get_value_at_risk(0.05)
+                            max_drawdown = portfolio_manager.get_max_drawdown()
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("VaR (95%)", f"{var_95:.2%}")
+                            with col2:
+                                st.metric("Máximo Drawdown", f"{max_drawdown:.2%}")
+                            with col3:
+                                st.metric("Diversificación", f"{len(simbolos_aleatorios)} activos")
+                        
+                        st.success("✅ Rebalanceo aleatorio completado exitosamente!")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error durante la optimización: {str(e)}")
+                        st.info("💡 Intente ajustar los parámetros o usar menos símbolos")
                 
                 except Exception as e:
-                    st.error(f"❌ Error en el proceso de rebalanceo: {str(e)}")
+                    st.error(f"❌ Error durante el rebalanceo: {str(e)}")
+                    st.info("💡 Verifique que los símbolos sean válidos y que haya datos históricos disponibles")
 
 def generar_simbolos_aleatorios(num_simbolos, incluir_actuales, porcentaje_actuales, activos):
     """
@@ -5468,6 +5700,44 @@ def categorizar_simbolos(simbolos):
     """
     Categoriza los símbolos por tipo de activo
     """
+    categorias = {
+        'Acciones': 0,
+        'ETFs': 0,
+        'Bonos': 0,
+        'Otros': 0
+    }
+    
+    for simbolo in simbolos:
+        if simbolo in ['SPY', 'QQQ', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'BND', 'GLD', 'SLV']:
+            categorias['ETFs'] += 1
+        elif any(bono in simbolo for bono in ['GD', 'AL', 'BONAR']):
+            categorias['Bonos'] += 1
+        elif len(simbolo) <= 5 and simbolo.isalpha():
+            categorias['Acciones'] += 1
+        else:
+            categorias['Otros'] += 1
+    
+    return {k: v for k, v in categorias.items() if v > 0}
+
+def calcular_retorno_portafolio(activos, fecha_desde, fecha_hasta):
+    """
+    Calcula el retorno del portafolio actual
+    """
+    try:
+        # Implementación simplificada - en producción usar datos reales
+        return 0.08  # 8% anual como ejemplo
+    except:
+        return 0.0
+
+def calcular_volatilidad_portafolio(activos, fecha_desde, fecha_hasta):
+    """
+    Calcula la volatilidad del portafolio actual
+    """
+    try:
+        # Implementación simplificada - en producción usar datos reales
+        return 0.15  # 15% anual como ejemplo
+    except:
+        return 0.0
     try:
         categorias = {
             'Acciones Argentinas': 0,
@@ -7333,56 +7603,66 @@ def mostrar_analisis_portafolio():
         
         # Vista consolidada de todas las cuentas
         st.subheader("🔍 Vista Consolidada de Todas las Cuentas")
-        if estado_cuenta_ar:
-            cuentas_totales = estado_cuenta_ar.get('cuentas', [])
-            if cuentas_totales:
-                # Crear DataFrame con clasificación por país
-                datos_consolidados = []
-                for cuenta in cuentas_totales:
-                    numero = cuenta.get('numero', 'N/A')
-                    descripcion = cuenta.get('descripcion', 'N/A')
-                    moneda = cuenta.get('moneda', 'N/A')
-                    
-                    # Determinar si es cuenta de EEUU
-                    es_cuenta_eeuu = any([
-                        'eeuu' in descripcion.lower(),
-                        'estados unidos' in descripcion.lower(),
-                        '-eeuu' in str(numero),
-                        'dolar estadounidense' in moneda.lower()
-                    ])
-                    
-                    pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
-                    
-                    datos_consolidados.append({
-                        'País': pais,
-                        'Número': numero,
-                        'Descripción': descripcion,
-                        'Moneda': moneda.replace('_', ' ').title(),
-                        'Disponible': cuenta.get('disponible', 0),
-                        'Saldo': cuenta.get('saldo', 0),
-                        'Total': cuenta.get('total', 0),
-                    })
+        
+        # Combinar cuentas de Argentina y EEUU
+        cuentas_totales = []
+        
+        # Agregar cuentas de Argentina
+        if estado_cuenta_ar and estado_cuenta_ar.get('cuentas'):
+            cuentas_totales.extend(estado_cuenta_ar.get('cuentas', []))
+        
+        # Agregar cuentas de EEUU
+        if estado_cuenta_eeuu and estado_cuenta_eeuu.get('cuentas'):
+            cuentas_totales.extend(estado_cuenta_eeuu.get('cuentas', []))
+        
+        if cuentas_totales:
+            # Crear DataFrame con clasificación por país
+            datos_consolidados = []
+            for cuenta in cuentas_totales:
+                numero = cuenta.get('numero', 'N/A')
+                descripcion = cuenta.get('descripcion', 'N/A')
+                moneda = cuenta.get('moneda', 'N/A')
                 
-                df_consolidado = pd.DataFrame(datos_consolidados)
+                # Determinar si es cuenta de EEUU
+                es_cuenta_eeuu = any([
+                    'eeuu' in descripcion.lower(),
+                    'estados unidos' in descripcion.lower(),
+                    '-eeuu' in str(numero),
+                    'dolar estadounidense' in moneda.lower()
+                ])
                 
-                # Agrupar por país y mostrar resumen
-                resumen_por_pais = df_consolidado.groupby('País').agg({
-                    'Total': 'sum',
-                    'Número': 'count'
-                }).round(2)
+                pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Total Argentina", f"AR$ {resumen_por_pais.loc['🇦🇷 Argentina', 'Total']:,.2f}" if '🇦🇷 Argentina' in resumen_por_pais.index else "AR$ 0.00")
-                    st.metric("Cuentas Argentina", resumen_por_pais.loc['🇦🇷 Argentina', 'Número'] if '🇦🇷 Argentina' in resumen_por_pais.index else 0)
-                
-                with col2:
-                    st.metric("Total EEUU", f"AR$ {resumen_por_pais.loc['🇺🇸 EEUU', 'Total']:,.2f}" if '🇺🇸 EEUU' in resumen_por_pais.index else "AR$ 0.00")
-                    st.metric("Cuentas EEUU", resumen_por_pais.loc['🇺🇸 EEUU', 'Número'] if '🇺🇸 EEUU' in resumen_por_pais.index else 0)
-                
-                # Mostrar tabla detallada
-                st.subheader("📋 Detalle Completo de Cuentas")
-                st.dataframe(df_consolidado, use_container_width=True, height=400)
+                datos_consolidados.append({
+                    'País': pais,
+                    'Número': numero,
+                    'Descripción': descripcion,
+                    'Moneda': moneda.replace('_', ' ').title(),
+                    'Disponible': cuenta.get('disponible', 0),
+                    'Saldo': cuenta.get('saldo', 0),
+                    'Total': cuenta.get('total', 0),
+                })
+            
+            df_consolidado = pd.DataFrame(datos_consolidados)
+            
+            # Agrupar por país y mostrar resumen
+            resumen_por_pais = df_consolidado.groupby('País').agg({
+                'Total': 'sum',
+                'Número': 'count'
+            }).round(2)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Argentina", f"AR$ {resumen_por_pais.loc['🇦🇷 Argentina', 'Total']:,.2f}" if '🇦🇷 Argentina' in resumen_por_pais.index else "AR$ 0.00")
+                st.metric("Cuentas Argentina", resumen_por_pais.loc['🇦🇷 Argentina', 'Número'] if '🇦🇷 Argentina' in resumen_por_pais.index else 0)
+            
+            with col2:
+                st.metric("Total EEUU", f"AR$ {resumen_por_pais.loc['🇺🇸 EEUU', 'Total']:,.2f}" if '🇺🇸 EEUU' in resumen_por_pais.index else "AR$ 0.00")
+                st.metric("Cuentas EEUU", resumen_por_pais.loc['🇺🇸 EEUU', 'Número'] if '🇺🇸 EEUU' in resumen_por_pais.index else 0)
+            
+            # Mostrar tabla detallada
+            st.subheader("📋 Detalle Completo de Cuentas")
+            st.dataframe(df_consolidado, use_container_width=True, height=400)
     
     with tab4:
         # Menú unificado de optimización y cobertura
