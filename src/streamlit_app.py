@@ -770,32 +770,11 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         return None
 
 def obtener_resumen_portafolio_eeuu(token_portador):
-import streamlit as st
-import requests
-import plotly.graph_objects as go
-import pandas as pd
-from plotly.subplots import make_subplots
-from datetime import date, timedelta, datetime
-import numpy as np
-import yfinance as yf
-import scipy.optimize as op
-from scipy import stats
-from scipy import optimize
-import random
-import warnings
-import streamlit.components.v1 as components
-import matplotlib.pyplot as plt
-import time
-
-warnings.filterwarnings('ignore')
-
-# Configuración de la página con tema oscuro profesional
-st.set_page_config(
-    page_title="IOL Portfolio Analyzer",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+    """
+    Obtiene el resumen del portafolio de Estados Unidos
+    """
+    # TODO: Implementar función
+    return None
 
 # Estilos CSS personalizados para tema oscuro
 st.markdown("""
