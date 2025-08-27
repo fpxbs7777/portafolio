@@ -7563,11 +7563,13 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                                 'fecha': datos_activo.index,
                                 'precio': datos_activo.values
                             })
+                            # Normalizar fechas: convertir a solo fecha (sin hora) para alinear con benchmarks
+                            datos_activo['fecha'] = pd.to_datetime(datos_activo['fecha']).dt.date
                             # Establecer la columna fecha como índice para poder alinear con benchmarks
                             datos_activo.set_index('fecha', inplace=True)
                             # Renombrar la columna de precio para que sea accesible
                             datos_activo.columns = ['precio']
-                            st.write(f"✅ {simbolo}: convertida Serie de IOL a DataFrame con fechas como índice")
+                            st.write(f"✅ {simbolo}: convertida Serie de IOL a DataFrame con fechas normalizadas (solo fecha)")
                         elif 'precio' in datos_activo.columns:
                             # Ya tiene la estructura correcta
                             st.write(f"✅ {simbolo}: usando columna 'precio'")
@@ -7601,6 +7603,8 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                                 'fecha': datos_yf.index,
                                 'precio': datos_yf['Close']
                             })
+                            # Normalizar fechas: convertir a solo fecha (sin hora) para alinear con benchmarks
+                            datos_activo['fecha'] = pd.to_datetime(datos_activo['fecha']).dt.date
                             # Establecer la columna fecha como índice para poder alinear con benchmarks
                             datos_activo.set_index('fecha', inplace=True)
                             st.info(f"📊 Usando datos de yfinance para {simbolo}")
@@ -7660,12 +7664,18 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                     # Mostrar rango de fechas del activo
                     st.write(f"📅 {simbolo}: fechas desde {datos_activo.index.min()} hasta {datos_activo.index.max()}")
                     
+                    # Debug: mostrar algunas fechas del activo y benchmark
+                    st.write(f"🔍 {simbolo}: primeras 5 fechas: {list(datos_activo.index[:5])}")
+                    st.write(f"🔍 {benchmark_ticker}: primeras 5 fechas: {list(benchmark_returns.index[:5])}")
+                    
                     # Alinear fechas
                     fechas_comunes = datos_activo.index.intersection(benchmark_returns.index)
                     st.write(f"🔍 {simbolo} vs {benchmark_ticker}: {len(fechas_comunes)} fechas comunes encontradas")
                     
                     if len(fechas_comunes) < 10:  # Reducido de 30 a 10 días para análisis
                         st.write(f"⚠️ {simbolo} vs {benchmark_ticker}: Insuficientes fechas comunes ({len(fechas_comunes)} < 10)")
+                        if len(fechas_comunes) > 0:
+                            st.write(f"🔍 Fechas comunes encontradas: {list(fechas_comunes[:5])}")
                         continue
                     
                     retornos_activo = datos_activo.loc[fechas_comunes, 'retorno']
