@@ -7642,16 +7642,31 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
             
             for benchmark_ticker, benchmark_data in datos_benchmarks.items():
                 try:
+                    st.write(f"🔍 Procesando benchmark {benchmark_ticker} para {simbolo}")
+                    
                     # Calcular retornos del benchmark
                     benchmark_returns = benchmark_data.pct_change().dropna()
+                    st.write(f"📊 {benchmark_ticker}: {len(benchmark_returns)} retornos calculados")
+                    
+                    # Mostrar rango de fechas del benchmark
+                    if not benchmark_returns.empty:
+                        st.write(f"📅 {benchmark_ticker}: fechas desde {benchmark_returns.index.min()} hasta {benchmark_returns.index.max()}")
+                    
+                    # Mostrar rango de fechas del activo
+                    st.write(f"📅 {simbolo}: fechas desde {datos_activo.index.min()} hasta {datos_activo.index.max()}")
                     
                     # Alinear fechas
                     fechas_comunes = datos_activo.index.intersection(benchmark_returns.index)
-                    if len(fechas_comunes) < 30:  # Mínimo 30 días para análisis
+                    st.write(f"🔍 {simbolo} vs {benchmark_ticker}: {len(fechas_comunes)} fechas comunes encontradas")
+                    
+                    if len(fechas_comunes) < 10:  # Reducido de 30 a 10 días para análisis
+                        st.write(f"⚠️ {simbolo} vs {benchmark_ticker}: Insuficientes fechas comunes ({len(fechas_comunes)} < 10)")
                         continue
                     
                     retornos_activo = datos_activo.loc[fechas_comunes, 'retorno']
                     retornos_benchmark = benchmark_returns.loc[fechas_comunes]
+                    
+                    st.write(f"✅ {simbolo} vs {benchmark_ticker}: {len(retornos_activo)} retornos alineados")
                     
                     # Calcular métricas
                     # Sharpe Ratio usando la tasa libre de riesgo ingresada por el usuario
@@ -7677,12 +7692,18 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                     metricas_activo[f'{benchmark_ticker}_Alpha'] = round(alpha, 4)
                     metricas_activo[f'{benchmark_ticker}_R2'] = round(r_squared, 4)
                     
+                    st.write(f"✅ {simbolo} vs {benchmark_ticker}: Sharpe={sharpe:.4f}, Beta={beta:.4f}, Alpha={alpha:.4f}, R²={r_squared:.4f}")
+                    
                 except Exception as e:
                     st.warning(f"⚠️ Error calculando métricas para {simbolo} vs {benchmark_ticker}: {str(e)}")
+                    st.write(f"📊 Detalles del error: {type(e).__name__}")
                     continue
             
+            # Contar cuántas métricas se calcularon
+            metricas_calculadas = sum(1 for key in metricas_activo.keys() if any(key.endswith(suffix) for suffix in ['_Sharpe', '_Beta', '_Alpha', '_R2']))
+            st.success(f"✅ {simbolo} - {metricas_calculadas} métricas calculadas")
+            
             resultados_metricas.append(metricas_activo)
-            st.success(f"✅ {simbolo} - Métricas calculadas")
             
         except Exception as e:
             st.error(f"❌ Error procesando {simbolo}: {str(e)}")
@@ -7691,6 +7712,15 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
     if not resultados_metricas:
         st.error("❌ No se pudieron calcular métricas para ningún activo")
         return None
+    
+    # Resumen de métricas calculadas
+    total_metricas = 0
+    for resultado in resultados_metricas:
+        metricas_por_activo = sum(1 for key in resultado.keys() if any(key.endswith(suffix) for suffix in ['_Sharpe', '_Beta', '_Alpha', '_R2']))
+        total_metricas += metricas_por_activo
+    
+    st.success(f"🎯 Total de métricas calculadas: {total_metricas}")
+    st.success(f"📊 Activos procesados: {len(resultados_metricas)}")
     
     # Crear DataFrame de resultados
     df_metricas = pd.DataFrame(resultados_metricas)
