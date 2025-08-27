@@ -25,20 +25,54 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados para tema oscuro
+# Estilos CSS personalizados para tema oscuro moderno
 st.markdown("""
 <style>
+    /* Importar fuentes modernas */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    /* Variables CSS para colores */
+    :root {
+        --primary-bg: #0f172a;
+        --secondary-bg: #1e293b;
+        --accent-bg: #334155;
+        --primary-text: #f8fafc;
+        --secondary-text: #cbd5e1;
+        --accent-color: #10b981;
+        --accent-hover: #059669;
+        --border-color: #475569;
+        --success-color: #10b981;
+        --warning-color: #f59e0b;
+        --error-color: #ef4444;
+        --info-color: #3b82f6;
+    }
+    
     /* Estilos generales dark theme */
     .stApp, 
     .stApp > div[data-testid="stAppViewContainer"],
     .stApp > div[data-testid="stAppViewContainer"] > div {
-        background-color: #0f172a !important;
-        color: #f8f9fa !important;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, var(--primary-bg) 0%, #1e1b4b 100%) !important;
+        color: var(--primary-text) !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        line-height: 1.6;
     }
     
+    /* Headers modernos con gradientes */
+    h1, h2, h3, h4, h5, h6 {
+        background: linear-gradient(135deg, var(--accent-color), #06b6d4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+    
+    h1 { font-size: 2.5rem; font-weight: 700; }
+    h2 { font-size: 2rem; font-weight: 600; }
+    h3 { font-size: 1.5rem; font-weight: 600; }
+    
     /* Asegurar que todo el texto sea claro */
-    body, p, div, span, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button,
+    body, p, div, span, label, input, select, textarea, button,
     .stSelectbox div[data-baseweb="select"] div,
     .stDateInput div[data-baseweb="input"] input,
     .stTextInput div[data-baseweb="input"] input,
@@ -69,45 +103,55 @@ st.markdown("""
     .st-br,
     .st-bs,
     .st-bt {
-        color: #f8f9fa !important;
+        color: var(--primary-text) !important;
     }
     
-    /* Asegurar que los enlaces sean visibles */
+    /* Enlaces modernos */
     a {
-        color: #4CAF50 !important;
+        color: var(--accent-color) !important;
         text-decoration: none;
+        transition: all 0.3s ease;
+        border-bottom: 1px solid transparent;
     }
     
     a:hover {
-        color: #45a049 !important;
-        text-decoration: underline;
+        color: var(--accent-hover) !important;
+        border-bottom-color: var(--accent-color);
     }
     
-    /* Mejorar la visibilidad de los placeholders */
+    /* Placeholders mejorados */
     ::placeholder {
-        color: #94a3b8 !important;
+        color: var(--secondary-text) !important;
         opacity: 1;
     }
     
-    /* Mejorar la visibilidad de los tooltips */
+    /* Tooltips modernos */
     .stTooltip {
-        background-color: #1e293b !important;
-        border: 1px solid #4CAF50 !important;
-        color: #f8f9fa !important;
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border: 1px solid var(--accent-color) !important;
+        color: var(--primary-text) !important;
+        border-radius: 12px !important;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.3) !important;
     }
     
-    /* Estilos para menús desplegables y listas */
-    /* Select principal */
+    /* Menús desplegables modernos */
     div[data-baseweb="select"],
     div[data-baseweb="select"] div,
     div[data-baseweb="select"] input,
     div[data-baseweb="select"] div[role="button"],
     div[data-baseweb="select"] div[role="listbox"],
-    div[data-baseweb="select"] div[role="combobox"],
-    div[data-baseweb="select"] div[data-baseweb="select"] {
-        background-color: #1e293b !important;
-        color: #f8f9fa !important;
-        border-color: #4CAF50 !important;
+    div[data-baseweb="select"] div[role="combobox"] {
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        color: var(--primary-text) !important;
+        border: 2px solid var(--border-color) !important;
+        border-radius: 12px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    div[data-baseweb="select"]:hover,
+    div[data-baseweb="select"] div[role="button"]:hover {
+        border-color: var(--accent-color) !important;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
     }
     
     /* Opciones del menú desplegable */
@@ -117,8 +161,6 @@ st.markdown("""
     div[role="option"],
     div[role="option"] > div,
     div[role="option"] > span,
-    div[role="listbox"] > div,
-    div[role="listbox"] > div > div,
     div[data-baseweb*="popover"] *,
     div[data-baseweb*="popover"] div,
     div[data-baseweb*="popover"] span,
@@ -130,21 +172,9 @@ st.markdown("""
     div[data-baseweb*="popover"] input,
     div[data-baseweb*="popover"] select,
     div[data-baseweb*="popover"] option {
-        background-color: #1e293b !important;
-        color: #f8f9fa !important;
-    }
-    
-    /* Asegurar que el texto dentro de los popovers sea visible */
-    div[data-baseweb*="popover"] {
-        background-color: #1e293b !important;
-        border: 1px solid #4CAF50 !important;
-    }
-    
-    /* Asegurar que el texto de las opciones sea visible */
-    div[role="option"] *,
-    div[role="option"] span,
-    div[role="option"] div {
-        color: #f8f9fa !important;
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        color: var(--primary-text) !important;
+        border-radius: 8px !important;
     }
     
     /* Efecto hover en opciones */
@@ -153,234 +183,235 @@ st.markdown("""
     div[role="option"]:hover > span,
     div[role="listbox"] > div:hover,
     div[role="listbox"] > div > div:hover {
-        background-color: #2d3748 !important;
+        background: linear-gradient(135deg, var(--accent-bg), var(--accent-color)) !important;
         color: #ffffff !important;
+        transform: translateX(5px) !important;
+        transition: all 0.3s ease !important;
     }
     
     /* Opción seleccionada */
     div[aria-selected="true"],
     div[aria-selected="true"] > div,
     div[aria-selected="true"] > span {
-        background-color: #4CAF50 !important;
+        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
         color: #ffffff !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
     }
     
-    /* Estilos para las listas de selección múltiple */
+    /* Listas de selección múltiple */
     .stMultiSelect [role="button"],
     .stMultiSelect [role="button"]:hover,
     .stMultiSelect [role="button"]:focus {
-        background-color: #1e293b !important;
-        color: #f8f9fa !important;
-        border-color: #4CAF50 !important;
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        color: var(--primary-text) !important;
+        border: 2px solid var(--border-color) !important;
+        border-radius: 12px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stMultiSelect [role="button"]:hover {
+        border-color: var(--accent-color) !important;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
     }
     
     .stMultiSelect [role="option"] {
-        background-color: #1e293b !important;
-        color: #f8f9fa !important;
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        color: var(--primary-text) !important;
+        border-radius: 8px !important;
     }
     
     .stMultiSelect [role="option"]:hover {
-        background-color: #2d3748 !important;
+        background: linear-gradient(135deg, var(--accent-bg), var(--accent-color)) !important;
+        transform: translateX(5px) !important;
+        transition: all 0.3s ease !important;
     }
     
-    /* Mejorar la visibilidad de los mensajes */
+    /* Alertas modernas */
     .stAlert {
-        background-color: rgba(30, 41, 59, 0.9) !important;
-        border-left: 4px solid #4CAF50 !important;
-        border-radius: 8px !important;
-        padding: 1rem !important;
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(51, 65, 85, 0.95)) !important;
+        border-left: 4px solid var(--accent-color) !important;
+        border-radius: 16px !important;
+        padding: 1.5rem !important;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
     }
     
-    /* Ajustes para gráficos */
+    /* Gráficos modernos */
     .stPlotlyChart {
-        background-color: #1e293b !important;
-        border-radius: 8px;
-        padding: 1rem;
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border-radius: 16px !important;
+        padding: 1.5rem !important;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
     }
     
-    /* Asegurar que los checkboxes y radio buttons sean visibles */
-    .stCheckbox > label,
-    .stRadio > label,
-    .stCheckbox > div,
-    .stRadio > div {
-        color: #f8f9fa !important;
-    }
-    
-    /* Estilos para las pestañas activas */
-    [data-baseweb="tab"] {
-        color: #f8f9fa !important;
-    }
-    
-    [data-baseweb="tab"]:hover {
-        background-color: #2d3748 !important;
-    }
-    
-    /* Estilos para los mensajes de error */
-    .stAlert.stAlert-warning {
-        border-left: 4px solid #ff9800 !important;
-    }
-    
-    .stAlert.stAlert-error {
-        border-left: 4px solid #f44336 !important;
-    }
-    
-    .stAlert.stAlert-success {
-        border-left: 4px solid #4CAF50 !important;
-    }
-    
-    .stAlert.stAlert-info {
-        border-left: 4px solid #2196F3 !important;
-    }
-    
-    /* Mejora de tarjetas y métricas */
-    .stMetric, 
-    .stMetric > div > div,
-    .stMetric > div > div > div {
-        background-color: #1e293b !important;
-        border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-        border-left: 4px solid #4CAF50;
-        color: #f8f9fa !important;
-    }
-    
-    .stMetric > div > div {
-        color: #94a3b8 !important;
-    }
-    
-    /* Mejora de pestañas */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 5px;
-        background-color: #0f172a;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        padding: 0 20px;
-        background-color: #1e293b;
-        border-radius: 8px !important;
-        font-weight: 500;
-        color: #e2e8f0;
-        transition: all 0.3s ease;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: #4CAF50 !important;
-        color: white !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #334155 !important;
-    }
-    
-    /* Mejora de inputs */
-    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox, .stTextArea {
-        background-color: #1e293b;
-        border-radius: 8px;
-        color: #e2e8f0;
-        border: 1px solid #334155;
-    }
-    
-    /* Estilos para las etiquetas de los inputs */
-    .stTextInput > label, .stNumberInput > label, 
-    .stDateInput > label, .stSelectbox > label,
-    .stTextArea > label {
-        color: #94a3b8 !important;
-    }
-    
-    /* Botones */
+    /* Botones modernos */
     .stButton > button {
-        border-radius: 8px;
-        font-weight: 500;
-        background-color: #4CAF50;
-        color: white;
-        border: none;
-        transition: all 0.2s;
+        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 12px !important;
+        padding: 0.75rem 1.5rem !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
     }
     
     .stButton > button:hover {
-        background-color: #45a049;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4) !important;
     }
     
-    /* Barra lateral */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f172a, #0c1424);
-        color: white;
+    /* Inputs modernos */
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input,
+    .stDateInput > div > div > input {
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border: 2px solid var(--border-color) !important;
+        border-radius: 12px !important;
+        color: var(--primary-text) !important;
+        padding: 0.75rem 1rem !important;
+        transition: all 0.3s ease !important;
     }
     
-    [data-testid="stSidebar"] .stRadio label,
-    [data-testid="stSidebar"] .stSelectbox label,
-    [data-testid="stSidebar"] .stTextInput label,
-    [data-testid="stSidebar"] .stNumberInput label {
-        color: #94a3b8 !important;
+    .stTextInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus,
+    .stDateInput > div > div > input:focus {
+        border-color: var(--accent-color) !important;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
+        outline: none !important;
     }
     
-    /* Títulos */
-    h1, h2, h3, h4, h5, h6 {
-        color: #4CAF50;
-        font-weight: 600;
+    /* Sliders modernos */
+    .stSlider > div > div > div > div {
+        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
     }
     
-    /* Tablas */
-    .dataframe {
-        background-color: #1e293b !important;
-        color: #e2e8f0 !important;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    /* Tabs modernos */
+    .stTabs > div > div > div > div > div > div {
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border-radius: 12px !important;
+        padding: 0.5rem !important;
     }
     
-    .dataframe th {
-        background-color: #334155 !important;
-        color: #e2e8f0 !important;
+    .stTabs > div > div > div > div > div > div > div {
+        background: transparent !important;
+        color: var(--secondary-text) !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease !important;
     }
     
-    .dataframe tr:nth-child(even) {
-        background-color: #1a2233 !important;
+    .stTabs > div > div > div > div > div > div > div[aria-selected="true"] {
+        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
+        color: white !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
     }
     
-    .dataframe tr:hover {
-        background-color: #2c3a58 !important;
+    /* Expanders modernos */
+    .streamlit-expanderHeader {
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--border-color) !important;
+        color: var(--primary-text) !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
     }
     
-    /* Progress bar */
-    .stProgress > div > div > div {
-        background-color: #4CAF50;
+    .streamlit-expanderHeader:hover {
+        border-color: var(--accent-color) !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;
+    }
+    
+    /* Dataframes modernos */
+    .stDataFrame {
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border-radius: 16px !important;
+        border: 1px solid var(--border-color) !important;
+        overflow: hidden !important;
+    }
+    
+    /* Métricas modernas */
+    .stMetric {
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border-radius: 16px !important;
+        padding: 1.5rem !important;
+        border: 1px solid var(--border-color) !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+    }
+    
+    /* Sidebar moderno */
+    .css-1d391kg {
+        background: linear-gradient(180deg, var(--primary-bg) 0%, #1e1b4b 100%) !important;
+        border-right: 1px solid var(--border-color) !important;
     }
     
     /* Scrollbar personalizada */
     ::-webkit-scrollbar {
         width: 8px;
-        height: 8px;
     }
     
     ::-webkit-scrollbar-track {
-        background: #0f172a;
+        background: var(--secondary-bg);
+        border-radius: 4px;
     }
     
     ::-webkit-scrollbar-thumb {
-        background: #4CAF50;
+        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
         border-radius: 4px;
     }
     
     ::-webkit-scrollbar-thumb:hover {
-        background: #45a049;
+        background: linear-gradient(135deg, var(--accent-hover), var(--accent-color));
     }
     
-    /* Efectos hover para tarjetas */
-    div[data-testid="stExpander"] {
-        background-color: #1e293b;
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 10px;
+    /* Animaciones y transiciones */
+    * {
         transition: all 0.3s ease;
     }
     
-    div[data-testid="stExpander"]:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    /* Efectos de hover para elementos interactivos */
+    .stButton > button:hover,
+    div[data-baseweb="select"]:hover,
+    .stMultiSelect [role="button"]:hover {
         transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
+    }
+    
+    /* Cards modernos */
+    .card {
+        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
+        border-radius: 16px !important;
+        padding: 1.5rem !important;
+        border: 1px solid var(--border-color) !important;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        margin: 1rem 0 !important;
+    }
+    
+    /* Badges modernos */
+    .badge {
+        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
+        color: white !important;
+        padding: 0.25rem 0.75rem !important;
+        border-radius: 20px !important;
+        font-size: 0.875rem !important;
+        font-weight: 500 !important;
+        display: inline-block !important;
+        margin: 0.25rem !important;
+    }
+    
+    /* Loading spinners modernos */
+    .stSpinner > div {
+        border: 3px solid var(--border-color) !important;
+        border-top: 3px solid var(--accent-color) !important;
+        border-radius: 50% !important;
+        animation: spin 1s linear infinite !important;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -390,6 +421,93 @@ def obtener_encabezado_autorizacion(token_portador):
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
+
+# Funciones de utilidad para UI moderna
+def create_modern_card(title, content, icon="📊", color="primary"):
+    """Crea una tarjeta moderna con diseño mejorado"""
+    colors = {
+        "primary": "linear-gradient(135deg, #10b981, #059669)",
+        "secondary": "linear-gradient(135deg, #3b82f6, #2563eb)",
+        "success": "linear-gradient(135deg, #10b981, #059669)",
+        "warning": "linear-gradient(135deg, #f59e0b, #d97706)",
+        "error": "linear-gradient(135deg, #ef4444, #dc2626)",
+        "info": "linear-gradient(135deg, #06b6d4, #0891b2)"
+    }
+    
+    st.markdown(f"""
+    <div class="card" style="border-left: 4px solid {colors[color].split(',')[0].split('(')[1]};">
+        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
+            <span style="font-size: 2rem; margin-right: 0.75rem;">{icon}</span>
+            <h3 style="margin: 0; background: {colors[color]}; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{title}</h3>
+        </div>
+        <div style="color: #cbd5e1; line-height: 1.6;">
+            {content}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def create_metric_card(label, value, delta=None, icon="📈", color="primary"):
+    """Crea una tarjeta de métrica moderna"""
+    colors = {
+        "primary": "#10b981",
+        "secondary": "#3b82f6",
+        "success": "#10b981",
+        "warning": "#f59e0b",
+        "error": "#ef4444",
+        "info": "#06b6d4"
+    }
+    
+    delta_html = ""
+    if delta is not None:
+        delta_color = "#10b981" if delta >= 0 else "#ef4444"
+        delta_icon = "↗️" if delta >= 0 else "↘️"
+        delta_html = f'<div style="color: {delta_color}; font-size: 0.875rem; margin-top: 0.5rem;">{delta_icon} {delta:+.1f}%</div>'
+    
+    st.markdown(f"""
+    <div class="card" style="text-align: center; padding: 1.5rem;">
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">{icon}</div>
+        <div style="font-size: 1.5rem; font-weight: 700; color: {colors[color]}; margin-bottom: 0.5rem;">{value}</div>
+        <div style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 0.5rem;">{label}</div>
+        {delta_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+def create_info_badge(text, color="primary"):
+    """Crea un badge informativo moderno"""
+    colors = {
+        "primary": "linear-gradient(135deg, #10b981, #059669)",
+        "secondary": "linear-gradient(135deg, #3b82f6, #2563eb)",
+        "success": "linear-gradient(135deg, #10b981, #059669)",
+        "warning": "linear-gradient(135deg, #f59e0b, #d97706)",
+        "error": "linear-gradient(135deg, #ef4444, #dc2626)",
+        "info": "linear-gradient(135deg, #06b6d4, #0891b2)"
+    }
+    
+    st.markdown(f"""
+    <span class="badge" style="background: {colors[color]} !important;">{text}</span>
+    """, unsafe_allow_html=True)
+
+def create_section_header(title, subtitle=None, icon="📊"):
+    """Crea un encabezado de sección moderno"""
+    subtitle_html = f'<p style="color: #94a3b8; margin-top: 0.5rem; font-size: 1rem;">{subtitle}</p>' if subtitle else ""
+    
+    st.markdown(f"""
+    <div style="margin: 2rem 0 1.5rem 0;">
+        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
+            <span style="font-size: 2rem; margin-right: 0.75rem;">{icon}</span>
+            <h2 style="margin: 0; background: linear-gradient(135deg, #10b981, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{title}</h2>
+        </div>
+        {subtitle_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+def create_navigation_tabs(tab_names, icons=None):
+    """Crea pestañas de navegación modernas"""
+    if icons is None:
+        icons = ["📊"] * len(tab_names)
+    
+    tab_labels = [f"{icon} {name}" for icon, name in zip(icons, tab_names)]
+    return st.tabs(tab_labels)
 
 def obtener_tokens(usuario, contraseña):
     """
@@ -7304,8 +7422,90 @@ def main():
     # Configurar cache para mejor rendimiento
     st.cache_data.clear()
     
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+    # Agregar CSS adicional para animaciones
+    st.markdown("""
+    <style>
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+        
+        .fade-in-up {
+            animation: fadeInUp 0.8s ease-out;
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        .hover-lift {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .hover-lift:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.3);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header moderno con gradiente
+    st.markdown("""
+    <div class="fade-in-up hover-lift" style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 20px;
+        padding: 40px;
+        margin: 20px 0;
+        text-align: center;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        border: 1px solid rgba(255,255,255,0.1);
+        backdrop-filter: blur(10px);
+    ">
+        <h1 style="
+            color: white;
+            font-size: 3rem;
+            font-weight: 700;
+            margin: 0;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            background: linear-gradient(135deg, #ffffff, #f0f0f0);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        ">📊 IOL Portfolio Analyzer</h1>
+        <p style="
+            color: rgba(255,255,255,0.9);
+            font-size: 1.2rem;
+            margin: 15px 0 0 0;
+            font-weight: 300;
+        ">Analizador Avanzado de Portafolios con Tecnología de Vanguardia</p>
+        <div style="
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        ">
+            <span class="badge pulse" style="background: rgba(255,255,255,0.2) !important; color: white !important; border: 1px solid rgba(255,255,255,0.3);">🚀 Optimización Avanzada</span>
+            <span class="badge pulse" style="background: rgba(255,255,255,0.2) !important; color: white !important; border: 1px solid rgba(255,255,255,0.3);">📈 Análisis Técnico</span>
+            <span class="badge pulse" style="background: rgba(255,255,255,0.2) !important; color: white !important; border: 1px solid rgba(255,255,255,0.3);">🛡️ Gestión de Riesgo</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
@@ -7323,13 +7523,36 @@ def main():
     
     # Barra lateral - Autenticación
     with st.sidebar:
-        st.header("🔐 Autenticación IOL")
+        # Header moderno de la sidebar
+        st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px 0;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        ">
+            <h3 style="color: white; margin: 0; font-size: 1.2rem;">🔐 Autenticación IOL</h3>
+        </div>
+        """, unsafe_allow_html=True)
         
         if st.session_state.token_acceso is None:
             with st.form("login_form"):
-                st.subheader("Ingreso a IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
+                st.markdown("""
+                <div style="
+                    background: linear-gradient(135deg, #1e293b, #334155);
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin: 15px 0;
+                    border: 1px solid #475569;
+                ">
+                    <h4 style="color: #10b981; margin-bottom: 15px;">Ingreso a IOL</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                usuario = st.text_input("Usuario", placeholder="su_usuario", key="login_usuario")
+                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña", key="login_password")
                 
                 if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
                     if usuario and contraseña:
@@ -7346,7 +7569,20 @@ def main():
                     else:
                         st.warning("⚠️ Complete todos los campos")
         else:
-            st.success("✅ Conectado a IOL")
+            st.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #10b981, #059669);
+                border-radius: 12px;
+                padding: 15px;
+                margin: 15px 0;
+                text-align: center;
+                color: white;
+                font-weight: 600;
+            ">
+                ✅ Conectado a IOL
+            </div>
+            """, unsafe_allow_html=True)
+            
             st.divider()
             
             st.subheader("Configuración de Fechas")
@@ -7440,93 +7676,278 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            st.sidebar.title("Menú Principal")
+            # Header del menú principal
+            st.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #1e293b, #334155);
+                border-radius: 15px;
+                padding: 20px;
+                margin: 20px 0;
+                border: 1px solid #475569;
+            ">
+                <h2 style="color: #10b981; margin: 0; display: flex; align-items: center;">
+                    <span style="margin-right: 10px;">🎯</span>
+                    Menú Principal
+                </h2>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Menú principal con mejor diseño
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"),
                 index=0,
+                key="main_menu"
             )
 
             # Mostrar la página seleccionada
             if opcion == "🏠 Inicio":
-                st.info("👆 Seleccione una opción del menú para comenzar")
+                # Dashboard de inicio moderno
+                st.markdown("""
+                <div style="
+                    background: linear-gradient(135deg, #1e293b, #334155);
+                    border-radius: 20px;
+                    padding: 30px;
+                    margin: 20px 0;
+                    border: 1px solid #475569;
+                    text-align: center;
+                ">
+                    <h2 style="color: #10b981; margin-bottom: 20px;">🚀 Bienvenido al Dashboard</h2>
+                    <p style="color: #cbd5e1; font-size: 1.1rem; margin-bottom: 25px;">
+                        Seleccione una opción del menú para comenzar a analizar sus portafolios
+                    </p>
+                    <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                        <div class="hover-lift" style="
+                            background: linear-gradient(135deg, #10b981, #059669);
+                            border-radius: 12px;
+                            padding: 20px;
+                            width: 200px;
+                            color: white;
+                            text-align: center;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                        ">
+                            <h4 style="margin: 0 0 10px 0; font-size: 2rem;">📊</h4>
+                            <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">Análisis de Portafolio</p>
+                        </div>
+                        <div class="hover-lift" style="
+                            background: linear-gradient(135deg, #3b82f6, #2563eb);
+                            border-radius: 12px;
+                            padding: 20px;
+                            width: 200px;
+                            color: white;
+                            text-align: center;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                        ">
+                            <h4 style="margin: 0 0 10px 0; font-size: 2rem;">💰</h4>
+                            <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">Tasas de Caución</p>
+                        </div>
+                        <div class="hover-lift" style="
+                            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+                            border-radius: 12px;
+                            padding: 20px;
+                            width: 200px;
+                            color: white;
+                            text-align: center;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                        ">
+                            <h4 style="margin: 0 0 10px 0; font-size: 2rem;">👨‍💼</h4>
+                            <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">Panel del Asesor</p>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
             elif opcion == "📊 Análisis de Portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
                 else:
-                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
+                    st.markdown("""
+                    <div style="
+                        background: linear-gradient(135deg, #f59e0b, #d97706);
+                        border-radius: 15px;
+                        padding: 25px;
+                        margin: 20px 0;
+                        text-align: center;
+                        color: white;
+                    ">
+                        <h3 style="margin: 0 0 15px 0;">👆 Seleccione un Cliente</h3>
+                        <p style="margin: 0; font-size: 1.1rem;">
+                            Para comenzar el análisis, seleccione un cliente en la barra lateral
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
+                    
+            elif opcion == "👨‍💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
+                
         else:
-            st.info("👆 Ingrese sus credenciales para comenzar")
-            
-            # Panel de bienvenida
+            # Panel de bienvenida moderno
             st.markdown("""
-            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
-                        border-radius: 15px; 
-                        padding: 40px; 
-                        color: white;
-                        text-align: center;
-                        margin: 30px 0;">
-                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
-                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
-                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>🇦🇷 Portafolio Argentina</h3>
-                        <p>Análisis completo de activos argentinos</p>
+            <div style="
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 25px;
+                padding: 50px;
+                color: white;
+                text-align: center;
+                margin: 40px 0;
+                box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+                border: 1px solid rgba(255,255,255,0.1);
+                backdrop-filter: blur(10px);
+            ">
+                <h1 style="
+                    color: white;
+                    margin-bottom: 25px;
+                    font-size: 2.5rem;
+                    font-weight: 700;
+                    text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                ">🚀 Bienvenido al Portfolio Analyzer</h1>
+                <p style="
+                    font-size: 1.3rem;
+                    margin-bottom: 35px;
+                    opacity: 0.95;
+                    line-height: 1.6;
+                ">Conecte su cuenta de IOL para comenzar a analizar sus portafolios con tecnología de vanguardia</p>
+                
+                <div style="
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                    gap: 25px;
+                    margin-top: 40px;
+                ">
+                    <div style="
+                        background: rgba(255,255,255,0.15);
+                        border-radius: 20px;
+                        padding: 30px;
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(255,255,255,0.2);
+                        transition: transform 0.3s ease;
+                    ">
+                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">🇦🇷 Portafolio Argentina</h3>
+                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
+                            Análisis completo de activos locales con métricas avanzadas de riesgo y retorno
+                        </p>
                     </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>🇺🇸 Portafolio EEUU</h3>
-                        <p>Gestión de activos internacionales</p>
+                    
+                    <div style="
+                        background: rgba(255,255,255,0.15);
+                        border-radius: 20px;
+                        padding: 30px;
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(255,255,255,0.2);
+                    ">
+                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">🇺🇸 Portafolio EEUU</h3>
+                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
+                            Gestión de activos internacionales con análisis de correlación y diversificación
+                        </p>
                     </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis Completo</h3>
-                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
+                    
+                    <div style="
+                        background: rgba(255,255,255,0.15);
+                        border-radius: 20px;
+                        padding: 30px;
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(255,255,255,0.2);
+                    ">
+                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">📈 Optimización Avanzada</h3>
+                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
+                            Algoritmos de optimización de portafolio basados en Markowitz y estrategias modernas
+                        </p>
                     </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
-                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
+                    
+                    <div style="
+                        background: rgba(255,255,255,0.15);
+                        border-radius: 20px;
+                        padding: 30px;
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(255,255,255,0.2);
+                    ">
+                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">🛡️ Gestión de Riesgo</h3>
+                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
+                            Análisis de VaR, stress testing y estrategias de cobertura personalizadas
+                        </p>
                     </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>⚖️ Gestión de Riesgo</h3>
-                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-                    </div>
+                </div>
+                
+                <div style="
+                    margin-top: 40px;
+                    padding: 25px;
+                    background: rgba(255,255,255,0.1);
+                    border-radius: 15px;
+                    border: 1px solid rgba(255,255,255,0.2);
+                ">
+                    <h3 style="margin: 0 0 15px 0; color: #fbbf24;">🔐 Inicie Sesión</h3>
+                    <p style="margin: 0; opacity: 0.9;">
+                        Use la barra lateral para conectarse a su cuenta de IOL y comenzar
+                    </p>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-            # Características
-            st.subheader("✨ Características Principales")
-            cols = st.columns(3)
-            with cols[0]:
-                st.markdown("""
-                **📊 Análisis Detallado**  
-                - Valuación completa de activos  
-                - Distribución por tipo de instrumento  
-                - Concentración del portafolio  
-                """)
-            with cols[1]:
-                st.markdown("""
-                **📈 Herramientas Profesionales**  
-                - Optimización de portafolio  
-                - Análisis técnico avanzado  
-                - Proyecciones de rendimiento  
-                """)
-            with cols[2]:
-                st.markdown("""
-                **💱 Datos de Mercado**  
-                - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
-                - Estado de cuenta consolidado  
-                """)
+            # Características principales
+            st.markdown("""
+            <div style="
+                background: linear-gradient(135deg, #1e293b, #334155);
+                border-radius: 20px;
+                padding: 30px;
+                margin: 30px 0;
+                border: 1px solid #475569;
+            ">
+                <h2 style="color: #10b981; text-align: center; margin-bottom: 30px;">✨ Características Principales</h2>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px;">
+                    <div style="
+                        background: rgba(16, 185, 129, 0.1);
+                        border-radius: 15px;
+                        padding: 25px;
+                        border: 1px solid rgba(16, 185, 129, 0.3);
+                    ">
+                        <h3 style="color: #10b981; margin-bottom: 15px;">📊 Análisis Detallado</h3>
+                        <ul style="color: #cbd5e1; margin: 0; padding-left: 20px;">
+                            <li>Valuación completa de activos</li>
+                            <li>Distribución por tipo de instrumento</li>
+                            <li>Concentración del portafolio</li>
+                        </ul>
+                    </div>
+                    <div style="
+                        background: rgba(59, 130, 246, 0.1);
+                        border-radius: 15px;
+                        padding: 25px;
+                        border: 1px solid rgba(59, 130, 246, 0.3);
+                    ">
+                        <h3 style="color: #3b82f6; margin-bottom: 15px;">📈 Herramientas Profesionales</h3>
+                        <ul style="color: #cbd5e1; margin: 0; padding-left: 20px;">
+                            <li>Optimización de portafolio</li>
+                            <li>Análisis técnico avanzado</li>
+                            <li>Proyecciones de rendimiento</li>
+                        </ul>
+                    </div>
+                    <div style="
+                        background: rgba(139, 92, 246, 0.1);
+                        border-radius: 15px;
+                        padding: 25px;
+                        border: 1px solid rgba(139, 92, 246, 0.3);
+                    ">
+                        <h3 style="color: #8b5cf6; margin-bottom: 15px;">💱 Datos de Mercado</h3>
+                        <ul style="color: #cbd5e1; margin: 0; padding-left: 20px;">
+                            <li>Cotizaciones MEP en tiempo real</li>
+                            <li>Tasas de caución actualizadas</li>
+                            <li>Estado de cuenta consolidado</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+        st.exception(e)
 
 if __name__ == "__main__":
     main() 
