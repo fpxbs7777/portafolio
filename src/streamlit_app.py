@@ -36,6 +36,51 @@ import json
 warnings.filterwarnings('ignore')
 
 # ============================================================================
+# CONFIGURACIÓN DE CREDENCIALES IOL
+# ============================================================================
+
+# Credenciales de IOL (configurar aquí)
+IOL_USERNAME = "boosandr97@gmail.com"
+IOL_PASSWORD = "Yacanto1997_"
+
+# Variables globales para tokens
+iol_bearer_token = None
+iol_refresh_token = None
+
+def obtener_tokens_iol_automatico():
+    """Obtiene tokens de IOL automáticamente usando las credenciales configuradas"""
+    global iol_bearer_token, iol_refresh_token
+    
+    if iol_bearer_token is None:
+        st.info("🔑 Obteniendo tokens de IOL...")
+        iol_bearer_token, iol_refresh_token = obtener_tokens_iol(IOL_USERNAME, IOL_PASSWORD)
+        
+        if iol_bearer_token:
+            st.success("✅ Tokens de IOL obtenidos exitosamente")
+        else:
+            st.error("❌ No se pudieron obtener los tokens de IOL")
+    
+    return iol_bearer_token, iol_refresh_token
+
+def refrescar_tokens_iol_si_es_necesario():
+    """Refresca los tokens de IOL si es necesario"""
+    global iol_bearer_token, iol_refresh_token
+    
+    if iol_refresh_token:
+        nuevo_bearer, nuevo_refresh = refrescar_token_iol(iol_refresh_token)
+        if nuevo_bearer:
+            iol_bearer_token = nuevo_bearer
+            iol_refresh_token = nuevo_refresh
+            st.success("✅ Tokens de IOL refrescados")
+            return True
+        else:
+            st.warning("⚠️ Error al refrescar tokens, intentando obtener nuevos...")
+            iol_bearer_token, iol_refresh_token = obtener_tokens_iol(IOL_USERNAME, IOL_PASSWORD)
+            return iol_bearer_token is not None
+    
+    return False
+
+# ============================================================================
 # CONFIGURACIÓN DE LA PÁGINA Y ESTILOS
 # ============================================================================
 
@@ -146,114 +191,102 @@ def aplicar_estilos_css():
 # FUNCIONES DE ANÁLISIS DE PORTAFOLIO AVANZADO
 # ============================================================================
 
-def load_data(rics, argentina_tickers, token_acceso=None):
-    """
-    Descarga datos intradía para una lista de símbolos usando yfinance y/o IOL.
+def load_data_mejorado(rics, argentina_tickers, token_acceso=None):
+    """Versión mejorada de load_data que prioriza IOL sobre yfinance"""
+    if not token_acceso:
+        st.warning("⚠️ No hay token de acceso, usando solo yfinance")
+        return load_data_yfinance(rics, argentina_tickers)
     
-    Args:
-        rics (list): Lista de símbolos a descargar.
-        argentina_tickers (set): Conjunto de tickers argentinos.
-        token_acceso (str, optional): Token de acceso para IOL.
-        
-    Returns:
-        dict: Diccionario con los datos descargados.
-    """
+    st.info("🔄 Obteniendo datos desde IOL (método directo)...")
+    
+    # Configurar fechas
+    fecha_hasta = date.today()
+    fecha_desde = fecha_hasta - timedelta(days=30)
+    
+    # Mercados a probar
+    mercados_argentina = ['BCBA', 'bMERVAL', 'bCBA', 'ROFEX']
+    mercados_eeuu = ['NYSE', 'NASDAQ']
+    
     data = {}
-    progress_bar = st.progress(0)
-    total_rics = len(rics)
+    rics_procesados = 0
     
-    # Si tenemos token de IOL, intentar obtener series históricas
-    if token_acceso:
-        st.info("🔄 Intentando obtener series históricas desde IOL...")
+    for ric in rics:
+        st.info(f"🔄 Procesando {ric}...")
         
-        # Configurar fechas para series históricas
-        fecha_hasta = date.today()
-        fecha_desde = fecha_hasta - timedelta(days=30)
+        # Determinar mercados a probar
+        if ric in argentina_tickers:
+            mercados_a_probar = mercados_argentina
+        else:
+            mercados_a_probar = mercados_eeuu
         
-        # Intentar obtener datos de IOL para cada símbolo
-        for i, ric in enumerate(rics):
-            try:
-                with st.spinner(f"Obteniendo datos de IOL para {ric}..."):
-                    # Intentar diferentes mercados
-                    mercados_a_probar = ['BCBA', 'bMERVAL', 'bCBA', 'ROFEX', 'NYSE', 'NASDAQ']
-                    
-                    for mercado in mercados_a_probar:
-                        serie_iol = obtener_serie_historica_iol_avanzada(
-                            ric, 
-                            mercado, 
-                            fecha_desde.strftime('%Y-%m-%d'),
-                            fecha_hasta.strftime('%Y-%m-%d'),
-                            'ajustada',
-                            token_acceso
-                        )
-                        
-                        if serie_iol:
-                            # Procesar y convertir datos de IOL
-                            df_iol = procesar_serie_historica_iol(serie_iol)
-                            if not df_iol.empty:
-                                data[ric] = df_iol
-                                st.success(f"✅ Datos obtenidos desde IOL para {ric} en {mercado}")
-                                break
-                    
-                    # Si no se pudo obtener de IOL, continuar con yfinance
-                    if ric not in data:
-                        st.info(f"ℹ️ No se pudieron obtener datos de IOL para {ric}, intentando con yfinance...")
-                        
-            except Exception as e:
-                st.warning(f"⚠️ Error con IOL para {ric}: {str(e)}, intentando con yfinance...")
+        # Intentar obtener datos de IOL
+        for mercado in mercados_a_probar:
+            serie = obtener_serie_historica_iol(
+                ric,
+                mercado,
+                fecha_desde.strftime('%Y-%m-%d'),
+                fecha_hasta.strftime('%Y-%m-%d'),
+                'ajustada',
+                token_acceso
+            )
             
-            # Actualizar barra de progreso
-            progress_bar.progress((i + 1) / total_rics)
-    
-    # Para símbolos que no se pudieron obtener de IOL, usar yfinance
-    for i, ric in enumerate(rics):
-        if ric not in data:  # Solo procesar si no se obtuvo de IOL
+            if serie and len(serie) > 0:
+                df = procesar_serie_historica_iol(serie)
+                if not df.empty:
+                    data[ric] = df
+                    st.success(f"✅ Datos obtenidos desde IOL para {ric} en {mercado}: {len(serie)} registros")
+                    break
+            else:
+                st.warning(f"⚠️ No hay datos para {ric} en {mercado}")
+        
+        # Si no se pudo obtener de IOL, usar yfinance como fallback
+        if ric not in data:
+            st.info(f"ℹ️ Fallback a yfinance para {ric}")
             try:
-                with st.spinner(f"Descargando datos de yfinance para {ric}..."):
-                    # Si no se pudo con IOL o no es símbolo argentino, usar yfinance
-                    symbol = ric + ".BA" if ric in argentina_tickers else ric
-                    df = yf.download(symbol, period="1d", interval="1m")
-                    
-                    if not df.empty:
-                        # Normalizar datos de yfinance para compatibilidad
-                        df_normalizado = df.copy()
-                        df_normalizado.index = pd.to_datetime(df_normalizado.index)
-                        
-                        # Asegurar que tenemos las columnas necesarias
-                        if 'Close' not in df_normalizado.columns:
-                            st.warning(f"⚠️ Datos de yfinance para {ric} no tienen columna Close")
-                            continue
-                        
-                        data[ric] = df_normalizado
-                        st.success(f"✅ Datos descargados para {ric} desde yfinance")
-                    else:
-                        st.warning(f"⚠️ No se encontraron datos para {ric} (buscando {symbol})")
-                        
+                symbol = ric + ".BA" if ric in argentina_tickers else ric
+                df = yf.download(symbol, period="1d", interval="1d")
+                if not df.empty:
+                    df_normalizado = df.copy()
+                    df_normalizado.index = pd.to_datetime(df_normalizado.index)
+                    data[ric] = df_normalizado
+                    st.success(f"✅ Datos descargados para {ric} desde yfinance")
+                else:
+                    st.warning(f"⚠️ No se encontraron datos para {ric} (buscando {symbol})")
             except Exception as e:
                 st.error(f"❌ Error al descargar datos para {ric}: {e}")
         
-        # Actualizar barra de progreso
-        progress_bar.progress((i + 1) / total_rics)
+        rics_procesados += 1
+        st.progress(rics_procesados / len(rics))
     
-    progress_bar.empty()
+    # Mostrar resumen
+    iol_count = sum(1 for ric in data if hasattr(data[ric].index, 'name') and data[ric].index.name == 'fechaHora')
+    yf_count = len(data) - iol_count
     
-    # Mostrar resumen de fuentes de datos
-    if data:
-        iol_count = sum(1 for ric in data if hasattr(data[ric].index, 'name') and data[ric].index.name == 'fechaHora')
-        yf_count = len(data) - iol_count
-        
-        st.success(f"✅ Datos obtenidos: {iol_count} desde IOL, {yf_count} desde yfinance")
-        
-        # Mostrar información sobre la calidad de los datos
-        st.info(f"""
-        **📊 Resumen de datos obtenidos:**
-        - Total de activos: {len(data)}
-        - Desde IOL: {iol_count}
-        - Desde yfinance: {yf_count}
-        - Rango de fechas disponible: {min([len(data[ric]) for ric in data])} a {max([len(data[ric]) for ric in data])} registros por activo
-        """)
+    st.success(f"✅ Datos obtenidos: {iol_count} desde IOL, {yf_count} desde yfinance")
     
     return data
+
+def load_data_yfinance(rics, argentina_tickers):
+    """Función original de yfinance como fallback"""
+    data = {}
+    for ric in rics:
+        try:
+            symbol = ric + ".BA" if ric in argentina_tickers else ric
+            df = yf.download(symbol, period="1d", interval="1d")
+            if not df.empty:
+                df_normalizado = df.copy()
+                df_normalizado.index = pd.to_datetime(df_normalizado.index)
+                data[ric] = df_normalizado
+                st.success(f"✅ Datos descargados para {ric} desde yfinance")
+            else:
+                st.warning(f"⚠️ No se encontraron datos para {ric} (buscando {symbol})")
+        except Exception as e:
+            st.error(f"❌ Error al descargar datos para {ric}: {e}")
+    return data
+
+def load_data(rics, argentina_tickers, token_acceso=None):
+    """Función principal que usa la versión mejorada"""
+    return load_data_mejorado(rics, argentina_tickers, token_acceso)
 
 def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, include_min_variance=True, token_acceso=None):
     """
@@ -887,47 +920,73 @@ def obtener_cotizaciones_iol(token_portador, instrumento, pais):
         st.error(f"❌ Error al obtener cotizaciones de {instrumento}: {str(e)}")
         return pd.DataFrame()
 
-def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="ajustada"):
-    """
-    Obtiene serie histórica de cotizaciones desde la API de IOL.
-    
-    Args:
-        token_portador (str): Token de acceso
-        mercado (str): Mercado (bCBA, etc.)
-        simbolo (str): Símbolo del instrumento
-        fecha_desde (str): Fecha desde (YYYY-MM-DD)
-        fecha_hasta (str): Fecha hasta (YYYY-MM-DD)
-        ajustada (str): Tipo de ajuste
-        
-    Returns:
-        pd.DataFrame: DataFrame con la serie histórica
-    """
-    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+def obtener_tokens_iol(username, password):
+    """Obtiene tokens de acceso para la API de IOL"""
+    token_url = 'https://api.invertironline.com/token'
+    payload = {
+        'username': username,
+        'password': password,
+        'grant_type': 'password'
+    }
     headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {token_portador}'
+        'Content-Type': 'application/x-www-form-urlencoded'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.post(token_url, data=payload, headers=headers)
         if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data)
-                # Convertir fechaHora a datetime
-                if 'fechaHora' in df.columns:
-                    df['fechaHora'] = pd.to_datetime(df['fechaHora'])
-                st.success(f"✅ Serie histórica obtenida para {simbolo}: {len(df)} registros")
-                return df
-            else:
-                st.warning(f"⚠️ No se encontraron datos históricos para {simbolo}")
-                return pd.DataFrame()
+            tokens = response.json()
+            return tokens['access_token'], tokens['refresh_token']
         else:
-            st.error(f"❌ Error HTTP {response.status_code} al obtener serie histórica de {simbolo}")
-            return pd.DataFrame()
+            st.error(f'❌ Error en la solicitud de tokens: {response.status_code}')
+            st.error(response.text)
+            return None, None
     except Exception as e:
-        st.error(f"❌ Error al obtener serie histórica de {simbolo}: {str(e)}")
-        return pd.DataFrame()
+        st.error(f'❌ Error de conexión: {str(e)}')
+        return None, None
+
+def refrescar_token_iol(refresh_token):
+    """Refresca el token de acceso usando el refresh token"""
+    token_url = 'https://api.invertironline.com/token'
+    payload = {
+        'refresh_token': refresh_token,
+        'grant_type': 'refresh_token'
+    }
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    
+    try:
+        response = requests.post(token_url, data=payload, headers=headers)
+        if response.status_code == 200:
+            tokens = response.json()
+            return tokens['access_token'], tokens['refresh_token']
+        else:
+            st.error(f'❌ Error al refrescar token: {response.status_code}')
+            st.error(response.text)
+            return None, None
+    except Exception as e:
+        st.error(f'❌ Error de conexión al refrescar: {str(e)}')
+        return None, None
+
+def obtener_serie_historica_iol(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """Obtiene serie histórica desde la API de IOL"""
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.warning(f"⚠️ Error HTTP {response.status_code} para {simbolo} en {mercado}")
+            return None
+    except Exception as e:
+        st.warning(f"⚠️ Error de conexión para {simbolo} en {mercado}: {str(e)}")
+        return None
 
 # Funciones específicas para cada tipo de cotización
 def obtener_cotizaciones_adrs_iol(token_portador):
@@ -2774,32 +2833,35 @@ def main():
     if 'fecha_hasta' not in st.session_state:
         st.session_state.fecha_hasta = date.today()
     
+    # Obtener tokens de IOL automáticamente
+    if st.session_state.token_acceso is None:
+        st.info("🔑 Configurando conexión automática a IOL...")
+        token_acceso, refresh_token = obtener_tokens_iol_automatico()
+        if token_acceso:
+            st.session_state.token_acceso = token_acceso
+            st.session_state.refresh_token = refresh_token
+            st.success("✅ Conexión automática a IOL exitosa!")
+        else:
+            st.warning("⚠️ No se pudo conectar automáticamente a IOL")
+    
     # Barra lateral - Autenticación
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
         
-        if st.session_state.token_acceso is None:
-            with st.form("login_form"):
-                st.subheader("Ingreso a IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-                
-                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
+        if st.session_state.token_acceso:
+            st.success("✅ Conectado automáticamente a IOL")
+            st.info(f"Usuario: {IOL_USERNAME}")
+            
+            # Botón para refrescar tokens
+            if st.button("🔄 Refrescar Tokens", use_container_width=True):
+                if refrescar_tokens_iol_si_es_necesario():
+                    st.session_state.token_acceso = iol_bearer_token
+                    st.session_state.refresh_token = iol_refresh_token
+                    st.success("✅ Tokens refrescados exitosamente!")
+                    st.rerun()
         else:
-            st.success("✅ Conectado a IOL")
+            st.error("❌ Error en la conexión automática")
+            st.info("Verificar credenciales en el código")
             st.divider()
             
             # Configuración de fechas
