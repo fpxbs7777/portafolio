@@ -4478,7 +4478,9 @@ def mostrar_resumen_portafolio_eeuu(portafolio_eeuu, token_portador):
                     try:
                         val = float(activo[campo])
                         if val > 0:
-                            valuacion = val
+                            # Convertir de centavos a pesos (dividir por 100)
+                            # Los valores de la API vienen en centavos
+                            valuacion = val / 100
                             break
                     except (ValueError, TypeError):
                         continue
@@ -4758,8 +4760,8 @@ def mostrar_resumen_consolidado(portafolio_argentina, portafolio_eeuu, token_por
     with col3:
         st.metric("🇺🇸 Saldo Dólares", f"USD {saldo_dolares_eeuu:,.2f}")
     
-    # Desglose por país
-    st.markdown("#### 📍 Desglose por País")
+    # Mostrar estado de cuenta para ambos países
+    st.markdown("#### 💰 Estado de Cuenta Consolidado")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -4768,26 +4770,17 @@ def mostrar_resumen_consolidado(portafolio_argentina, portafolio_eeuu, token_por
         st.metric("Saldo Pesos", f"AR$ {saldo_pesos_argentina:,.2f}")
         st.metric("Saldo Dólares", f"USD {saldo_dolares_argentina:,.2f}")
         st.metric("Total Argentina", f"${valor_total_argentina + saldo_pesos_argentina + saldo_dolares_argentina:,.2f}")
-        st.metric("Activos", len(activos_argentina))
-        st.metric("Símbolos", len(simbolos_argentina))
-        st.metric("Tipos", len(tipos_argentina))
     
     with col2:
         st.markdown("**🇺🇸 Estados Unidos**")
-        if portafolio_eeuu:
+        if portafolio_eeuu and 'portafolio' in portafolio_eeuu:
             st.metric("Valor Activos", f"${valor_total_eeuu:,.2f}")
             st.metric("Saldo Dólares", f"USD {saldo_dolares_eeuu:,.2f}")
             st.metric("Total EE.UU.", f"${valor_total_eeuu + saldo_dolares_eeuu:,.2f}")
-            st.metric("Activos", len(portafolio_eeuu['portafolio'].get('activos', [])))
-            st.metric("Símbolos", len(simbolos_eeuu))
-            st.metric("Tipos", len(tipos_eeuu))
         else:
-            st.metric("Valor Activos", "N/A")
+            st.metric("Valor Activos", "$0.00")
             st.metric("Saldo Dólares", f"USD {saldo_dolares_eeuu:,.2f}")
             st.metric("Total EE.UU.", f"USD {saldo_dolares_eeuu:,.2f}")
-            st.metric("Activos", "N/A")
-            st.metric("Símbolos", "N/A")
-            st.metric("Tipos", "N/A")
     
     # Gráfico de distribución por país incluyendo saldos
     if valor_total_consolidado > 0:
