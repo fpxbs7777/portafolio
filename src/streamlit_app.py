@@ -3977,7 +3977,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="general"):
                 tipo_grafico = st.selectbox(
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
-                    help="Seleccione el tipo de visualización para los valores de activos"
+                    help="Seleccione el tipo de visualización para los valores de activos",
+                    key=f"tipo_grafico_distribucion_{pais}"
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
