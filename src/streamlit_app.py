@@ -784,63 +784,82 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
 def obtener_estado_cuenta_eeuu(token_portador):
     """
     Obtiene el estado de cuenta de Estados Unidos del usuario autenticado
+    Filtra las cuentas que corresponden a EEUU del estado de cuenta general
     
     Args:
         token_portador (str): Token de autenticación
         
     Returns:
-        dict: Estado de cuenta de EEUU o None en caso de error
+        dict: Estado de cuenta filtrado solo para cuentas de EEUU o None en caso de error
     """
+    # Usar el mismo endpoint que el estado de cuenta general
     url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
     encabezados = obtener_encabezado_autorizacion(token_portador)
-    
-    # Debug: mostrar información de la solicitud
-    st.info(f"🔍 Solicitando estado de cuenta EEUU desde: {url_estado_cuenta}")
-    st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
     
     try:
         respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
         
-        # Debug: mostrar respuesta completa
-        st.info(f"📡 Respuesta HTTP: {respuesta.status_code}")
-        st.info(f"📋 Headers de respuesta: {dict(respuesta.headers)}")
-        
         if respuesta.status_code == 200:
             try:
                 data = respuesta.json()
-                st.success(f"✅ Estado de cuenta EEUU obtenido: {len(data.get('cuentas', []))} cuentas")
-                return data
+                
+                # Filtrar solo las cuentas de EEUU
+                cuentas_eeuu = []
+                for cuenta in data.get('cuentas', []):
+                    # Identificar cuentas de EEUU por el nombre o número
+                    nombre_cuenta = cuenta.get('descripcion', '').lower()
+                    numero_cuenta = str(cuenta.get('numero', ''))
+                    
+                    # Criterios para identificar cuentas de EEUU
+                    if any([
+                        'eeuu' in nombre_cuenta,
+                        'estados unidos' in nombre_cuenta,
+                        'united states' in nombre_cuenta,
+                        'us' in nombre_cuenta,
+                        '-eeuu' in numero_cuenta,
+                        'dolar estadounidense' in cuenta.get('moneda', '').lower()
+                    ]):
+                        cuentas_eeuu.append(cuenta)
+                
+                # Crear respuesta filtrada solo para EEUU
+                data_eeuu = {
+                    'cuentas': cuentas_eeuu,
+                    'totalEnPesos': sum(cuenta.get('total', 0) for cuenta in cuentas_eeuu),
+                    'filtrado': True,
+                    'total_cuentas_eeuu': len(cuentas_eeuu)
+                }
+                
+                if cuentas_eeuu:
+                    st.success(f"✅ Estado de cuenta EEUU filtrado: {len(cuentas_eeuu)} cuentas de EEUU")
+                else:
+                    st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+                
+                return data_eeuu
+                
             except ValueError as e:
                 st.error(f"❌ Error al procesar JSON: {str(e)}")
-                st.info(f"📄 Contenido de respuesta: {respuesta.text[:500]}")
                 return None
         elif respuesta.status_code == 401:
             st.error("❌ Error 401: Token de autenticación inválido o expirado")
             st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
             return None
         elif respuesta.status_code == 403:
-            st.error("❌ Error 403: Acceso denegado al estado de cuenta de EEUU")
-            st.info("💡 Verifique que su cuenta tenga permisos para acceder a cuentas de EEUU")
+            st.error("❌ Error 403: Acceso denegado al estado de cuenta")
             return None
         elif respuesta.status_code == 404:
-            st.warning("⚠️ No se encontró estado de cuenta de EEUU")
-            st.info("💡 Su cuenta puede no tener cuentas en EEUU o la API puede no estar disponible")
+            st.warning("⚠️ No se encontró estado de cuenta")
             return None
         else:
-            st.error(f"❌ Error HTTP {respuesta.status_code} al obtener estado de cuenta de EEUU")
-            st.info(f"📄 Respuesta del servidor: {respuesta.text[:500]}")
+            st.error(f"❌ Error HTTP {respuesta.status_code} al obtener estado de cuenta")
             return None
     except requests.exceptions.Timeout:
-        st.error("⏱️ Timeout al obtener estado de cuenta de EEUU")
-        st.info("💡 El servidor de IOL puede estar sobrecargado. Intente nuevamente en unos minutos.")
+        st.error("⏱️ Timeout al obtener estado de cuenta")
         return None
     except requests.exceptions.ConnectionError:
-        st.error("🔌 Error de conexión al obtener estado de cuenta de EEUU")
-        st.info("💡 Verifique su conexión a internet y que no haya firewall bloqueando la conexión")
+        st.error("🔌 Error de conexión al obtener estado de cuenta")
         return None
     except Exception as e:
-        st.error(f'❌ Error inesperado al obtener estado de cuenta de EEUU: {str(e)}')
-        st.info("💡 Este error puede indicar un problema temporal del servidor")
+        st.error(f'❌ Error inesperado al obtener estado de cuenta: {str(e)}')
         return None
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
@@ -4190,36 +4209,80 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     else:
         st.warning("No se encontraron activos en el portafolio")
 
-def mostrar_estado_cuenta(estado_cuenta):
-    st.markdown("### 💰 Estado de Cuenta")
+def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
+    """
+    Muestra el estado de cuenta, con soporte para cuentas filtradas de EEUU
+    
+    Args:
+        estado_cuenta (dict): Datos del estado de cuenta
+        es_eeuu (bool): Si es True, muestra información específica para cuentas de EEUU
+    """
+    if es_eeuu:
+        st.markdown("### 🇺🇸 Estado de Cuenta EEUU")
+    else:
+        st.markdown("### 💰 Estado de Cuenta")
     
     if not estado_cuenta:
         st.warning("No hay datos de estado de cuenta disponibles")
         return
     
-    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-    cuentas = estado_cuenta.get('cuentas', [])
-    
-    cols = st.columns(3)
-    cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
-    cols[1].metric("Número de Cuentas", len(cuentas))
-    
-    if cuentas:
-        st.subheader("📊 Detalle de Cuentas")
+    # Verificar si es un estado de cuenta filtrado de EEUU
+    if estado_cuenta.get('filtrado', False):
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        cuentas = estado_cuenta.get('cuentas', [])
+        total_cuentas_eeuu = estado_cuenta.get('total_cuentas_eeuu', 0)
         
-        datos_cuentas = []
-        for cuenta in cuentas:
-            datos_cuentas.append({
-                'Número': cuenta.get('numero', 'N/A'),
-                'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
-                'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
-                'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
-                'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
-                'Total': f"${cuenta.get('total', 0):,.2f}",
-            })
+        cols = st.columns(3)
+        cols[0].metric("Total EEUU en Pesos", f"AR$ {total_en_pesos:,.2f}")
+        cols[1].metric("Cuentas de EEUU", total_cuentas_eeuu)
+        cols[2].metric("Total General", f"AR$ {total_en_pesos:,.2f}")
         
-        df_cuentas = pd.DataFrame(datos_cuentas)
-        st.dataframe(df_cuentas, use_container_width=True, height=300)
+        if cuentas:
+            st.subheader("📊 Detalle de Cuentas de EEUU")
+            
+            datos_cuentas = []
+            for cuenta in cuentas:
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                    'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                    'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                    'Total': f"${cuenta.get('total', 0):,.2f}",
+                })
+            
+            df_cuentas = pd.DataFrame(datos_cuentas)
+            st.dataframe(df_cuentas, use_container_width=True, height=300)
+            
+            # Mostrar resumen específico para EEUU
+            st.info(f"💡 **Resumen EEUU**: {total_cuentas_eeuu} cuentas con saldo total de AR$ {total_en_pesos:,.2f}")
+        else:
+            st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+    else:
+        # Estado de cuenta general (no filtrado)
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        cuentas = estado_cuenta.get('cuentas', [])
+        
+        cols = st.columns(3)
+        cols[0].metric("Total en Pesos", f"AR$ {total_en_pesos:,.2f}")
+        cols[1].metric("Número de Cuentas", len(cuentas))
+        
+        if cuentas:
+            st.subheader("📊 Detalle de Cuentas")
+            
+            datos_cuentas = []
+            for cuenta in cuentas:
+                datos_cuentas.append({
+                    'Número': cuenta.get('numero', 'N/A'),
+                    'Tipo': cuenta.get('tipo', 'N/A').replace('_', ' ').title(),
+                    'Moneda': cuenta.get('moneda', 'N/A').replace('_', ' ').title(),
+                    'Disponible': f"${cuenta.get('disponible', 0):,.2f}",
+                    'Saldo': f"${cuenta.get('saldo', 0):,.2f}",
+                    'Total': f"${cuenta.get('total', 0):,.2f}",
+                })
+            
+            df_cuentas = pd.DataFrame(datos_cuentas)
+            st.dataframe(df_cuentas, use_container_width=True, height=300)
 
 def mostrar_cotizaciones_mercado(token_acceso):
     st.markdown("### 💱 Cotizaciones y Mercado")
@@ -7119,29 +7182,86 @@ def mostrar_analisis_portafolio():
         with col1:
             st.subheader("🇦🇷 Estado de Cuenta Argentina")
             if estado_cuenta_ar:
-                mostrar_estado_cuenta(estado_cuenta_ar)
+                mostrar_estado_cuenta(estado_cuenta_ar, es_eeuu=False)
             else:
                 st.warning("No se pudo obtener el estado de cuenta de Argentina")
         
         with col2:
             st.subheader("🇺🇸 Estado de Cuenta EEUU")
             if estado_cuenta_eeuu:
-                mostrar_estado_cuenta(estado_cuenta_eeuu)
+                mostrar_estado_cuenta(estado_cuenta_eeuu, es_eeuu=True)
             else:
                 st.warning("No se pudo obtener el estado de cuenta de EEUU")
+        
+        # Vista consolidada de todas las cuentas
+        st.subheader("🔍 Vista Consolidada de Todas las Cuentas")
+        if estado_cuenta_ar:
+            cuentas_totales = estado_cuenta_ar.get('cuentas', [])
+            if cuentas_totales:
+                # Crear DataFrame con clasificación por país
+                datos_consolidados = []
+                for cuenta in cuentas_totales:
+                    numero = cuenta.get('numero', 'N/A')
+                    descripcion = cuenta.get('descripcion', 'N/A')
+                    moneda = cuenta.get('moneda', 'N/A')
+                    
+                    # Determinar si es cuenta de EEUU
+                    es_cuenta_eeuu = any([
+                        'eeuu' in descripcion.lower(),
+                        'estados unidos' in descripcion.lower(),
+                        '-eeuu' in str(numero),
+                        'dolar estadounidense' in moneda.lower()
+                    ])
+                    
+                    pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
+                    
+                    datos_consolidados.append({
+                        'País': pais,
+                        'Número': numero,
+                        'Descripción': descripcion,
+                        'Moneda': moneda.replace('_', ' ').title(),
+                        'Disponible': cuenta.get('disponible', 0),
+                        'Saldo': cuenta.get('saldo', 0),
+                        'Total': cuenta.get('total', 0),
+                    })
+                
+                df_consolidado = pd.DataFrame(datos_consolidados)
+                
+                # Agrupar por país y mostrar resumen
+                resumen_por_pais = df_consolidado.groupby('País').agg({
+                    'Total': 'sum',
+                    'Número': 'count'
+                }).round(2)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Argentina", f"AR$ {resumen_por_pais.loc['🇦🇷 Argentina', 'Total']:,.2f}" if '🇦🇷 Argentina' in resumen_por_pais.index else "AR$ 0.00")
+                    st.metric("Cuentas Argentina", resumen_por_pais.loc['🇦🇷 Argentina', 'Número'] if '🇦🇷 Argentina' in resumen_por_pais.index else 0)
+                
+                with col2:
+                    st.metric("Total EEUU", f"AR$ {resumen_por_pais.loc['🇺🇸 EEUU', 'Total']:,.2f}" if '🇺🇸 EEUU' in resumen_por_pais.index else "AR$ 0.00")
+                    st.metric("Cuentas EEUU", resumen_por_pais.loc['🇺🇸 EEUU', 'Número'] if '🇺🇸 EEUU' in resumen_por_pais.index else 0)
+                
+                # Mostrar tabla detallada
+                st.subheader("📋 Detalle Completo de Cuentas")
+                st.dataframe(df_consolidado, use_container_width=True, height=400)
     
     with tab4:
         # Menú unificado de optimización y cobertura
         if portafolio_ar or portafolio_eeuu:
             # Combinar portafolios si ambos están disponibles
-            portafolio_combinado = {}
-            if portafolio_ar:
-                portafolio_combinado.update(portafolio_ar.get('activos', []))
-            if portafolio_eeuu:
-                portafolio_combinado.update(portafolio_eeuu.get('activos', []))
+            activos_combinados = []
             
-            if portafolio_combinado:
-                mostrar_menu_optimizacion_unificado({'activos': portafolio_combinado}, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+            if portafolio_ar and 'activos' in portafolio_ar:
+                activos_combinados.extend(portafolio_ar['activos'])
+            
+            if portafolio_eeuu and 'activos' in portafolio_eeuu:
+                activos_combinados.extend(portafolio_eeuu['activos'])
+            
+            if activos_combinados:
+                portafolio_combinado = {'activos': activos_combinados}
+                st.success(f"✅ Portafolio combinado: {len(activos_combinados)} activos totales")
+                mostrar_menu_optimizacion_unificado(portafolio_combinado, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
             else:
                 st.warning("No se pudo combinar los portafolios para optimización")
         else:
