@@ -697,6 +697,44 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         obtener_estado_cuenta._recursion_depth = 0
         return None
 
+def obtener_estado_cuenta_eeuu(token_portador):
+    """
+    Obtiene el estado de cuenta de Estados Unidos
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Estado de cuenta de EE.UU. o None en caso de error
+    """
+    url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta/estados_Unidos'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        elif respuesta.status_code == 401:
+            st.error("❌ Error de autenticación al obtener estado de cuenta de EE.UU.")
+            st.warning("💡 Verifique que su token sea válido y tenga permisos para EE.UU.")
+            return None
+        elif respuesta.status_code == 403:
+            st.error("❌ No tiene permisos para acceder al estado de cuenta de EE.UU.")
+            st.warning("💡 Contacte a su asesor para solicitar acceso")
+            return None
+        elif respuesta.status_code == 404:
+            st.warning("⚠️ No se encontró estado de cuenta de EE.UU.")
+            return None
+        else:
+            st.error(f"❌ Error HTTP {respuesta.status_code} al obtener estado de cuenta de EE.UU.")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("⏰ Timeout al obtener estado de cuenta de EE.UU.")
+        return None
+    except Exception as e:
+        st.error(f'❌ Error al obtener estado de cuenta de EE.UU.: {str(e)}')
+        return None
+
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     """
     Obtiene el portafolio de un cliente específico
@@ -729,6 +767,120 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
         return None
     except Exception as e:
         st.error(f'Error al obtener portafolio: {str(e)}')
+        return None
+
+def obtener_resumen_portafolio_eeuu(token_portador):
+    """
+    Obtiene un resumen del portafolio de Estados Unidos
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Resumen del portafolio de EE.UU. o None en caso de error
+    """
+    try:
+        # Obtener portafolio de EE.UU.
+        portafolio_eeuu = obtener_portafolio_eeuu(token_portador)
+        if not portafolio_eeuu:
+            return None
+        
+        # Obtener estado de cuenta de EE.UU.
+        estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token_portador)
+        
+        # Crear resumen
+        resumen = {
+            'portafolio': portafolio_eeuu,
+            'estado_cuenta': estado_cuenta_eeuu,
+            'pais': 'estados_Unidos',
+            'fecha_consulta': datetime.now().isoformat()
+        }
+        
+        return resumen
+        
+    except Exception as e:
+        st.error(f"❌ Error al obtener resumen del portafolio de EE.UU.: {str(e)}")
+        return None
+
+def obtener_portafolio_por_pais(token_portador, pais='Argentina', id_cliente=None):
+    """
+    Obtiene el portafolio por país, manejando tanto Argentina como EE.UU.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        pais (str): País del portafolio ('Argentina' o 'estados_Unidos')
+        id_cliente (str, optional): ID del cliente (requerido para Argentina)
+        
+    Returns:
+        dict: Portafolio del país especificado o None en caso de error
+    """
+    # Mapear nombres de países a los valores de la API
+    pais_mapping = {
+        'Argentina': 'Argentina',
+        'estados_Unidos': 'estados_Unidos',
+        'USA': 'estados_Unidos',
+        'US': 'estados_Unidos',
+        'United States': 'estados_Unidos',
+        'EEUU': 'estados_Unidos',
+        'EE.UU.': 'estados_Unidos'
+    }
+    
+    pais_api = pais_mapping.get(pais, pais)
+    
+    try:
+        if pais_api == 'estados_Unidos':
+            # Para EE.UU., usar el endpoint específico
+            return obtener_portafolio_eeuu(token_portador)
+        elif pais_api == 'Argentina':
+            # Para Argentina, usar el endpoint de asesores
+            if not id_cliente:
+                st.error("❌ ID de cliente requerido para portafolio argentino")
+                return None
+            return obtener_portafolio(token_portador, id_cliente, pais_api)
+        else:
+            st.error(f"❌ País no soportado: {pais}")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Error al obtener portafolio de {pais_api}: {str(e)}")
+        return None
+
+def obtener_portafolio_eeuu(token_portador):
+    """
+    Obtiene el portafolio de Estados Unidos usando el endpoint específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Portafolio de EE.UU. o None en caso de error
+    """
+    url_portafolio = 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=30)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        elif respuesta.status_code == 401:
+            st.error("❌ Error de autenticación al obtener portafolio de EE.UU.")
+            st.warning("💡 Verifique que su token sea válido y tenga permisos para el portafolio de EE.UU.")
+            return None
+        elif respuesta.status_code == 403:
+            st.error("❌ No tiene permisos para acceder al portafolio de EE.UU.")
+            st.warning("💡 Contacte a su asesor para solicitar acceso")
+            return None
+        elif respuesta.status_code == 404:
+            st.warning("⚠️ No se encontró portafolio de EE.UU.")
+            return None
+        else:
+            st.error(f"❌ Error HTTP {respuesta.status_code} al obtener portafolio de EE.UU.")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("⏰ Timeout al obtener portafolio de EE.UU.")
+        return None
+    except Exception as e:
+        st.error(f'❌ Error al obtener portafolio de EE.UU.: {str(e)}')
         return None
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
@@ -1277,12 +1429,18 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             # Detectar mercado más probable para el símbolo
             mercado_detectado = detectar_mercado_simbolo(simbolo, token_portador)
             
-            # Usar mercados correctos según la API de IOL
-            # Ordenar mercados por probabilidad de éxito para optimizar búsqueda
-            if mercado_detectado:
-                mercados = [mercado_detectado, 'bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+            # Para bonos argentinos (S10N5, S30S5, etc.), usar estrategia especial
+            if simbolo.startswith('S') and len(simbolo) >= 5 and simbolo[1:].isdigit():
+                # Es un bono argentino, usar mercados específicos
+                mercados = ['bCBA', 'rOFEX', 'FCI']
+                st.info(f"🔍 Detectado bono argentino {simbolo}, usando mercados especializados")
             else:
-                mercados = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+                # Usar mercados correctos según la API de IOL
+                # Ordenar mercados por probabilidad de éxito para optimizar búsqueda
+                if mercado_detectado:
+                    mercados = [mercado_detectado, 'bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+                else:
+                    mercados = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
             
             serie_obtenida = False
             
@@ -1393,32 +1551,75 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                 serie = df_precios[col]
                 st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
         
-        # Intentar diferentes estrategias de alineación
+        # Intentar diferentes estrategias de alineación para activos mixtos
         try:
-            # Estrategia 1: Forward fill y luego backward fill
+            st.info("🔄 Aplicando estrategias de alineación para activos mixtos...")
+            
+            # Estrategia 1: Forward fill y backward fill (mejor para activos con diferentes calendarios)
             df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
             
-            # Estrategia 2: Interpolar valores faltantes
-            df_precios_interpolated = df_precios.interpolate(method='time')
+            # Estrategia 2: Interpolación temporal (mejor para gaps pequeños)
+            df_precios_interpolated = df_precios.interpolate(method='time', limit_direction='both')
             
-            # Usar la estrategia que conserve más datos
-            if not df_precios_filled.dropna().empty:
-                df_precios = df_precios_filled.dropna()
-                st.info("✅ Usando estrategia forward/backward fill")
-            elif not df_precios_interpolated.dropna().empty:
-                df_precios = df_precios_interpolated.dropna()
-                st.info("✅ Usando estrategia de interpolación")
+            # Estrategia 3: Reindexar a fechas comunes y rellenar
+            # Crear índice de fechas unificado
+            all_dates = set()
+            for col in df_precios.columns:
+                all_dates.update(df_precios[col].index)
+            
+            if all_dates:
+                # Ordenar fechas y crear índice unificado
+                fechas_ordenadas = sorted(list(all_dates))
+                df_precios_unified = df_precios.reindex(fechas_ordenadas)
+                
+                # Aplicar forward fill y backward fill al DataFrame unificado
+                df_precios_unified = df_precios_unified.fillna(method='ffill').fillna(method='bfill')
+                
+                # Si hay fechas al inicio sin datos, usar el primer valor disponible
+                df_precios_unified = df_precios_unified.fillna(method='bfill')
+                
+                st.info(f"✅ Estrategia unificada: {len(fechas_ordenadas)} fechas únicas encontradas")
+                
+                # Usar la estrategia que conserve más datos
+                if not df_precios_unified.dropna().empty:
+                    df_precios = df_precios_unified.dropna()
+                    st.info("✅ Usando estrategia de fechas unificadas")
+                elif not df_precios_filled.dropna().empty:
+                    df_precios = df_precios_filled.dropna()
+                    st.info("✅ Usando estrategia forward/backward fill")
+                elif not df_precios_interpolated.dropna().empty:
+                    df_precios = df_precios_interpolated.dropna()
+                    st.info("✅ Usando estrategia de interpolación")
+                else:
+                    # Estrategia 4: Usar solo fechas con datos completos
+                    df_precios = df_precios.dropna()
+                    st.info("✅ Usando solo fechas con datos completos")
             else:
-                # Estrategia 3: Usar solo fechas con datos completos
-                df_precios = df_precios.dropna()
-                st.info("✅ Usando solo fechas con datos completos")
+                # Fallback a estrategias anteriores
+                if not df_precios_filled.dropna().empty:
+                    df_precios = df_precios_filled.dropna()
+                    st.info("✅ Usando estrategia forward/backward fill")
+                elif not df_precios_interpolated.dropna().empty:
+                    df_precios = df_precios_interpolated.dropna()
+                    st.info("✅ Usando estrategia de interpolación")
+                else:
+                    df_precios = df_precios.dropna()
+                    st.info("✅ Usando solo fechas con datos completos")
                 
         except Exception as e:
             st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
-            df_precios = df_precios.dropna()
+            # Intentar alineación básica como último recurso
+            try:
+                df_precios = df_precios.fillna(method='ffill').fillna(method='bfill').dropna()
+                st.info("✅ Usando alineación básica como fallback")
+            except:
+                df_precios = df_precios.dropna()
+                st.info("✅ Usando solo fechas con datos completos")
         
         if df_precios.empty:
             st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            st.warning("💡 Sugerencia: Los activos pueden tener calendarios de trading muy diferentes")
+            st.warning("💡 Intente con activos del mismo mercado o ajuste el rango de fechas")
             return None, None, None
         
         st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
@@ -3512,6 +3713,138 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
+def mostrar_resumen_portafolio_eeuu(portafolio_eeuu, token_portador):
+    """
+    Muestra el resumen del portafolio de Estados Unidos
+    """
+    st.markdown("### 🇺🇸 Resumen del Portafolio de Estados Unidos")
+    
+    if not portafolio_eeuu or 'portafolio' not in portafolio_eeuu:
+        st.warning("⚠️ No se pudo obtener el portafolio de EE.UU.")
+        return
+    
+    portafolio = portafolio_eeuu['portafolio']
+    estado_cuenta = portafolio_eeuu.get('estado_cuenta', {})
+    
+    activos = portafolio.get('activos', [])
+    datos_activos = []
+    valor_total = 0
+    
+    for activo in activos:
+        try:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            descripcion = titulo.get('descripcion', 'Sin descripción')
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            
+            # Para portafolio de EE.UU., usar campos específicos
+            campos_valuacion = [
+                'valorizado',
+                'valuacionDolar',
+                'valuacionActual',
+                'valorTotal',
+                'importe'
+            ]
+            
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Si no hay valuación directa, calcular por cantidad y precio
+            if valuacion == 0 and cantidad:
+                ultimo_precio = activo.get('ultimoPrecio', 0)
+                if ultimo_precio > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        valuacion = cantidad_num * ultimo_precio
+                    except (ValueError, TypeError):
+                        pass
+            
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+                'Último Precio': activo.get('ultimoPrecio', 'N/A'),
+                'Ganancia %': activo.get('gananciaPorcentaje', 'N/A'),
+                'Ganancia $': activo.get('gananciaDinero', 'N/A')
+            })
+            
+            valor_total += valuacion
+            
+        except Exception as e:
+            st.warning(f"⚠️ Error procesando activo: {str(e)}")
+            continue
+    
+    if datos_activos:
+        df_activos = pd.DataFrame(datos_activos)
+        
+        # Información General
+        cols = st.columns(4)
+        cols[0].metric("Total de Activos", len(datos_activos))
+        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
+        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
+        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        
+        # Mostrar estado de cuenta si está disponible
+        if estado_cuenta and 'cuentas' in estado_cuenta:
+            st.subheader("💳 Estado de Cuenta")
+            for cuenta in estado_cuenta['cuentas']:
+                if 'saldoDisponible' in cuenta:
+                    saldo = cuenta.get('saldoDisponible', 0)
+                    st.metric("Saldo Disponible", f"${saldo:,.2f}")
+        
+        # Tabla de activos
+        st.subheader("📋 Detalle de Activos")
+        st.dataframe(df_activos, use_container_width=True, height=400)
+        
+        # Gráficos
+        if len(datos_activos) > 1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
+                    tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
+                    fig_pie = go.Figure(data=[go.Pie(
+                        labels=tipo_stats['Tipo'],
+                        values=tipo_stats['Valuación'],
+                        textinfo='label+percent',
+                        hole=0.4,
+                        marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+                    )])
+                    fig_pie.update_layout(
+                        title="Distribución por Tipo",
+                        height=400
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with col2:
+                valores_activos = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
+                if valores_activos:
+                    fig_hist = go.Figure(data=[go.Histogram(
+                        x=valores_activos,
+                        nbinsx=min(20, len(valores_activos)),
+                        marker_color='#0d6efd'
+                    )])
+                    fig_hist.update_layout(
+                        title="Distribución de Valores",
+                        xaxis_title="Valor ($)",
+                        yaxis_title="Frecuencia",
+                        height=400
+                    )
+                    st.plotly_chart(fig_hist, use_container_width=True)
+    else:
+        st.info("ℹ️ No hay activos en el portafolio de EE.UU.")
+
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
@@ -5120,7 +5453,6 @@ def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, f
             options=[
                 "🔄 Rebalanceo con Composición Actual",
                 "🎲 Rebalanceo con Símbolos Aleatorios",
-                "📊 Optimización Básica",
                 "📈 Frontera Eficiente"
             ],
             help="Elija el tipo de rebalanceo que desea realizar"
@@ -5128,12 +5460,10 @@ def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, f
         
         if tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
             mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "📊 Optimización Básica":
-            mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta)
+
         elif tipo_rebalanceo == "📈 Frontera Eficiente":
             mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
-            mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
+
         elif tipo_rebalanceo == "🎲 Rebalanceo con Símbolos Aleatorios":
             mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta)
     
@@ -5270,8 +5600,8 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
     with col2:
         target_return = st.number_input(
             "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para optimización Markowitz"
+            min_value=0.0, max_value=None, value=0.08, step=0.01,
+            help="Solo aplica para optimización Markowitz (máximo ilimitado)"
         )
     
     with col3:
@@ -5330,14 +5660,126 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
         st.warning("No hay activos en el portafolio para calcular el capital total")
         return
     
-    # Calcular capital total actual
-    capital_total_actual = sum(activo.get('valor', 0) for activo in activos)
+    # Calcular capital total actual usando la misma lógica que el resumen del portafolio
+    capital_total_actual = 0
+    
+    for activo in activos:
+        try:
+            titulo = activo.get('titulo', {})
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            
+            # Campos de valuación en orden de prioridad
+            campos_valuacion = [
+                'valuacionEnMonedaOriginal',
+                'valuacionActual',
+                'valorNominalEnMonedaOriginal', 
+                'valorNominal',
+                'valuacionDolar',
+                'valuacion',
+                'valorActual',
+                'montoInvertido',
+                'valorMercado',
+                'valorTotal',
+                'importe'
+            ]
+            
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Si no hay valuación directa, calcular por cantidad y precio
+            if valuacion == 0 and cantidad:
+                campos_precio = [
+                    'precioPromedio',
+                    'precioCompra',
+                    'precioActual',
+                    'precio',
+                    'precioUnitario',
+                    'ultimoPrecio',
+                    'cotizacion'
+                ]
+                
+                precio_unitario = 0
+                for campo in campos_precio:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            precio = float(activo[campo])
+                            if precio > 0:
+                                precio_unitario = precio
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                if precio_unitario > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        if tipo == 'TitulosPublicos':
+                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                        else:
+                            valuacion = cantidad_num * precio_unitario
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Intentar obtener precio del título
+                if precio_unitario == 0:
+                    for campo in campos_precio:
+                        if campo in titulo and titulo[campo] is not None:
+                            try:
+                                precio = float(titulo[campo])
+                                if precio > 0:
+                                    precio_unitario = precio
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    if precio_unitario > 0:
+                        try:
+                            cantidad_num = float(cantidad)
+                            if tipo == 'TitulosPublicos':
+                                valuacion = (cantidad_num * precio_unitario) / 100.0
+                            else:
+                                valuacion = cantidad_num * precio_unitario
+                        except (ValueError, TypeError):
+                            pass
+            
+            capital_total_actual += valuacion
+            
+        except Exception as e:
+            st.warning(f"⚠️ Error procesando activo: {str(e)}")
+            continue
     
     if capital_total_actual <= 0:
-        st.warning("No se puede calcular el capital total del portafolio")
+        st.warning("No se puede calcular el capital total del portafolio. Verifique que los activos tengan valores válidos.")
         return
     
     st.info(f"💰 Capital total actual del portafolio: ${capital_total_actual:,.2f}")
+    
+    # Debug: Mostrar información de activos procesados
+    with st.expander("🔍 Debug: Información de Activos Procesados", expanded=False):
+        st.write("**Activos encontrados:**")
+        for i, activo in enumerate(activos):
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            
+            # Mostrar campos disponibles
+            campos_disponibles = []
+            for campo in ['valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominal', 'valuacion', 'valorActual', 'montoInvertido', 'valorMercado', 'valorTotal', 'importe']:
+                if campo in activo and activo[campo] is not None:
+                    campos_disponibles.append(f"{campo}: {activo[campo]}")
+            
+            st.write(f"**Activo {i+1}:** {simbolo}")
+            st.write(f"  - Cantidad: {cantidad}")
+            st.write(f"  - Campos disponibles: {', '.join(campos_disponibles) if campos_disponibles else 'Ninguno'}")
+            st.write("---")
     
     # Opción para incluir saldo disponible
     incluir_saldo_disponible = st.checkbox(
@@ -5414,8 +5856,8 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
     with col2:
         target_return = st.number_input(
             "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para optimización Markowitz"
+            min_value=0.0, max_value=None, value=0.08, step=0.01,
+            help="Solo aplica para optimización Markowitz (máximo ilimitado)"
         )
     
     with col3:
@@ -6606,8 +7048,8 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
     with col2:
         target_return = st.number_input(
             "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
-            help="Solo aplica para estrategia Markowitz"
+            min_value=0.0, max_value=None, value=0.08, step=0.01,
+            help="Solo aplica para estrategia Markowitz (máximo ilimitado)"
         )
     
     with col3:
@@ -6626,8 +7068,8 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                                        help="Muestra el portafolio actual en la frontera")
             mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
         with col3:
-            target_return_frontier = st.number_input("Retorno Objetivo Frontera", min_value=0.0, max_value=1.0, 
-                                                   value=0.08, step=0.01, help="Para optimización de frontera")
+            target_return_frontier = st.number_input("Retorno Objetivo Frontera", min_value=0.0, max_value=None, 
+                                                   value=0.08, step=0.01, help="Para optimización de frontera (máximo ilimitado)")
             auto_refresh = st.checkbox("Auto-refresh", value=True, help="Actualiza automáticamente con cambios")
     
     col1, col2, col3 = st.columns(3)
@@ -7358,7 +7800,8 @@ def mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hast
     with col1:
         target_return = st.number_input(
             "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=1.0, value=0.08, step=0.01
+            min_value=0.0, max_value=None, value=0.08, step=0.01,
+            help="Retorno objetivo para optimización (máximo ilimitado)"
         )
         num_puntos = st.slider("Número de Puntos", min_value=10, max_value=100, value=50)
     
