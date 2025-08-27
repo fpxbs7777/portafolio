@@ -117,6 +117,87 @@ st.markdown("""
     div[role="option"],
     div[role="option"] > div,
     div[role="option"] > span,
+    
+    /* Estilos para iframes y widgets externos */
+    iframe {
+        border: none !important;
+        border-radius: 8px !important;
+    }
+    
+    /* Mejorar la apariencia de los widgets de TradingView */
+    .tradingview-widget-container {
+        border-radius: 8px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Estilos específicos para el contenedor de TradingView */
+    div[id^="tradingview_"] {
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        background-color: #f4f7f9 !important;
+        border: 1px solid #e2e8f0 !important;
+    }
+    
+    /* Estilos para mensajes de carga y error */
+    .tradingview-loading {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        height: 100% !important;
+        background-color: #f4f7f9 !important;
+        color: #666 !important;
+        font-size: 16px !important;
+    }
+    
+    .tradingview-error {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        height: 100% !important;
+        color: #666 !important;
+        text-align: center !important;
+        padding: 20px !important;
+        background-color: #f8f9fa !important;
+        border: 1px solid #e9ecef !important;
+        border-radius: 8px !important;
+    }
+    
+    .tradingview-error h3 {
+        color: #dc3545 !important;
+        margin-bottom: 15px !important;
+    }
+    
+    .tradingview-error ul {
+        text-align: left !important;
+        max-width: 400px !important;
+        margin: 15px 0 !important;
+    }
+    
+    .tradingview-error li {
+        margin: 5px 0 !important;
+        color: #495057 !important;
+    }
+    
+    /* Estilos para mensajes de error */
+    .error-message {
+        background-color: #dc3545 !important;
+        color: white !important;
+        padding: 1rem !important;
+        border-radius: 8px !important;
+        text-align: center !important;
+        margin: 1rem 0 !important;
+    }
+    
+    /* Estilos para mensajes de información */
+    .info-message {
+        background-color: #17a2b8 !important;
+        color: white !important;
+        padding: 1rem !important;
+        border-radius: 8px !important;
+        text-align: center !important;
+        margin: 1rem 0 !important;
+    }
     div[role="listbox"] > div,
     div[role="listbox"] > div > div,
     div[data-baseweb*="popover"] *,
@@ -4073,55 +4154,396 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     if simbolo_seleccionado:
         st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
         
-        # Widget de TradingView
-        tv_widget = f"""
-        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-          "container_id": "tradingview_{simbolo_seleccionado}",
-          "width": "100%",
-          "height": 650,
-          "symbol": "{simbolo_seleccionado}",
-          "interval": "D",
-          "timezone": "America/Argentina/Buenos_Aires",
-          "theme": "light",
-          "style": "1",
-          "locale": "es",
-          "toolbar_bg": "#f4f7f9",
-          "enable_publishing": false,
-          "allow_symbol_change": true,
-          "hide_side_toolbar": false,
-          "studies": [
-            "MACD@tv-basicstudies",
-            "RSI@tv-basicstudies",
-            "StochasticRSI@tv-basicstudies",
-            "Volume@tv-basicstudies",
-            "Moving Average@tv-basicstudies"
-          ],
-          "drawings_access": {{
-            "type": "black",
-            "tools": [
-              {{"name": "Trend Line"}},
-              {{"name": "Horizontal Line"}},
-              {{"name": "Fibonacci Retracement"}},
-              {{"name": "Rectangle"}},
-              {{"name": "Text"}}
-            ]
-          }},
-          "enabled_features": [
-            "study_templates",
-            "header_indicators",
-            "header_compare",
-            "header_screenshot",
-            "header_fullscreen_button",
-            "header_settings",
-            "header_symbol_search"
-          ]
-        }});
-        </script>
-        """
-        components.html(tv_widget, height=680)
+        # Selección del tipo de gráfico con mejor información
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            tipo_grafico = st.selectbox(
+                "Seleccione el tipo de gráfico:",
+                ["TradingView (Recomendado)", "Plotly (Alternativo)"],
+                help="TradingView ofrece gráficos profesionales, Plotly es una alternativa local"
+            )
+        with col2:
+            if tipo_grafico == "TradingView (Recomendado)":
+                st.success("✅ TradingView seleccionado")
+            else:
+                st.info("📊 Plotly seleccionado")
+        
+        # Información sobre el estado de la conexión
+        if tipo_grafico == "TradingView (Recomendado)":
+            st.info("🌐 **TradingView:** Requiere conexión a internet. Puede tener problemas con bloqueadores de anuncios.")
+        else:
+            st.success("💻 **Plotly:** Funciona localmente, más estable y confiable.")
+        
+        if tipo_grafico == "TradingView (Recomendado)":
+            # Widget de TradingView completamente reescrito para evitar errores
+            tv_widget = f"""
+            <div id="tradingview_{simbolo_seleccionado}" style="height:650px;background:#f4f7f9;display:flex;align-items:center;justify-content:center;">
+                <div style="text-align:center;color:#666;">
+                    <p>Cargando gráfico de TradingView...</p>
+                </div>
+            </div>
+            
+            <script type="text/javascript">
+            // Configuración global para evitar errores
+            window.TV_WIDGET_CONFIG = {{
+                symbol: "{simbolo_seleccionado}",
+                container: "tradingview_{simbolo_seleccionado}",
+                interval: "D",
+                timezone: "America/Argentina/Buenos_Aires",
+                theme: "light",
+                style: "1",
+                locale: "es",
+                enable_publishing: false,
+                allow_symbol_change: true,
+                hide_side_toolbar: false,
+                studies: [
+                    "MACD@tv-basicstudies",
+                    "RSI@tv-basicstudies",
+                    "Volume@tv-basicstudies"
+                ],
+                enabled_features: [
+                    "study_templates",
+                    "header_indicators",
+                    "header_screenshot",
+                    "header_fullscreen_button",
+                    "header_settings"
+                ],
+                disabled_features: [
+                    "use_localstorage_for_settings",
+                    "header_symbol_search",
+                    "header_compare",
+                    "timeframes_toolbar",
+                    "volume_force_overlay",
+                    "create_volume_indicator_by_default"
+                ],
+                overrides: {{
+                    "mainSeriesProperties.candleStyle.upColor": "#26a69a",
+                    "mainSeriesProperties.candleStyle.downColor": "#ef5350",
+                    "mainSeriesProperties.candleStyle.wickUpColor": "#26a69a",
+                    "mainSeriesProperties.candleStyle.wickDownColor": "#ef5350"
+                }},
+                loading_screen: {{
+                    backgroundColor: "#f4f7f9",
+                    foregroundColor: "#333"
+                }}
+            }};
+            
+            // Sistema de logging para debugging
+            window.TV_LOGGER = {{
+                log: function(message) {{
+                    console.log('[TradingView]', message);
+                }},
+                error: function(message, error) {{
+                    console.error('[TradingView Error]', message, error);
+                }},
+                warn: function(message) {{
+                    console.warn('[TradingView Warning]', message);
+                }}
+            }};
+            
+            // Función para cargar TradingView de forma segura
+            function loadTradingView() {{
+                return new Promise((resolve, reject) => {{
+                    if (typeof TradingView !== 'undefined') {{
+                        resolve();
+                        return;
+                    }}
+                    
+                    const script = document.createElement('script');
+                    script.src = 'https://s3.tradingview.com/tv.js';
+                    script.onload = () => resolve();
+                    script.onerror = () => reject(new Error('Failed to load TradingView script'));
+                    document.head.appendChild(script);
+                }});
+            }}
+            
+            // Función para inicializar el widget
+            async function initTradingViewWidget() {{
+                try {{
+                    TV_LOGGER.log('Iniciando carga de TradingView...');
+                    
+                    // Timeout para evitar que se cuelgue indefinidamente
+                    const timeoutPromise = new Promise((_, reject) => {{
+                        setTimeout(() => reject(new Error('Timeout: TradingView tardó demasiado en cargar')), 15000);
+                    }});
+                    
+                    // Esperar a que TradingView se cargue con timeout
+                    await Promise.race([loadTradingView(), timeoutPromise]);
+                    
+                    // Esperar un poco más para asegurar que esté completamente cargado
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    if (typeof TradingView === 'undefined') {{
+                        throw new Error('TradingView no se cargó correctamente');
+                    }}
+                    
+                    TV_LOGGER.log('TradingView cargado, creando widget...');
+                    
+                    // Crear el widget con configuración mínima y manejo de errores
+                    const widget = new TradingView.widget({{
+                        container_id: TV_WIDGET_CONFIG.container,
+                        width: "100%",
+                        height: 650,
+                        symbol: TV_WIDGET_CONFIG.symbol,
+                        interval: TV_WIDGET_CONFIG.interval,
+                        timezone: TV_WIDGET_CONFIG.timezone,
+                        theme: TV_WIDGET_CONFIG.theme,
+                        style: TV_WIDGET_CONFIG.style,
+                        locale: TV_WIDGET_CONFIG.locale,
+                        enable_publishing: TV_WIDGET_CONFIG.enable_publishing,
+                        allow_symbol_change: TV_WIDGET_CONFIG.allow_symbol_change,
+                        hide_side_toolbar: TV_WIDGET_CONFIG.hide_side_toolbar,
+                        studies: TV_WIDGET_CONFIG.studies,
+                        enabled_features: TV_WIDGET_CONFIG.enabled_features,
+                        disabled_features: TV_WIDGET_CONFIG.disabled_features,
+                        overrides: TV_WIDGET_CONFIG.overrides,
+                        loading_screen: TV_WIDGET_CONFIG.loading_screen
+                    }});
+                    
+                    // Manejar eventos del widget
+                    widget.onChartReady(() => {{
+                        TV_LOGGER.log('Widget de TradingView cargado exitosamente');
+                        // Ocultar mensaje de carga
+                        const container = document.getElementById(TV_WIDGET_CONFIG.container);
+                        if (container) {{
+                            container.style.background = 'transparent';
+                        }}
+                    }});
+                    
+                    // Manejar errores del widget
+                    widget.onChartError((error) => {{
+                        TV_LOGGER.error('Error en el gráfico:', error);
+                        showFallbackMessage();
+                    }});
+                    
+                }} catch (error) {{
+                    TV_LOGGER.error('Error al inicializar TradingView:', error);
+                    showFallbackMessage();
+                }}
+            }}
+            
+            // Función para mostrar mensaje de respaldo
+            function showFallbackMessage() {{
+                const container = document.getElementById(TV_WIDGET_CONFIG.container);
+                if (container) {{
+                    container.innerHTML = `
+                        <div class="tradingview-error">
+                            <h3>⚠️ Error al cargar el gráfico</h3>
+                            <p>El gráfico de TradingView no pudo cargarse correctamente.</p>
+                            <p><strong>Posibles causas:</strong></p>
+                            <ul>
+                                <li>🔒 Bloqueador de anuncios activo</li>
+                                <li>🌐 Configuraciones de privacidad del navegador</li>
+                                <li>📡 Problemas de conectividad</li>
+                                <li>⚡ Scripts bloqueados por el navegador</li>
+                            </ul>
+                            <p><strong>💡 Soluciones recomendadas:</strong></p>
+                            <ul>
+                                <li>Desactive temporalmente el bloqueador de anuncios</li>
+                                <li>Use la opción "Plotly (Alternativo)" arriba</li>
+                                <li>Recargue la página completamente</li>
+                                <li>Intente en modo incógnito</li>
+                            </ul>
+                            <p style="margin-top:20px;padding:10px;background:#e3f2fd;border-radius:5px;color:#1976d2;">
+                                <strong>✅ Alternativa disponible:</strong> Use "Plotly (Alternativo)" para gráficos locales estables
+                            </p>
+                        </div>
+                    `;
+                }}
+            }}
+            
+            // Inicializar cuando la página esté lista
+            if (document.readyState === 'loading') {{
+                document.addEventListener('DOMContentLoaded', initTradingViewWidget);
+            }} else {{
+                // Pequeño retraso para asegurar que todo esté listo
+                setTimeout(initTradingViewWidget, 100);
+            }}
+            
+            // Manejador global de errores para debugging
+            window.addEventListener('error', function(event) {{
+                if (event.filename && event.filename.includes('tradingview')) {{
+                    TV_LOGGER.error('Error global de TradingView:', event.error || event.message);
+                }}
+            }});
+            
+            // Manejador para errores no capturados
+            window.addEventListener('unhandledrejection', function(event) {{
+                if (event.reason && event.reason.toString().includes('tradingview')) {{
+                    TV_LOGGER.error('Promesa rechazada de TradingView:', event.reason);
+                }}
+            }});
+            </script>
+            """
+            
+            # Configuración mejorada para el componente HTML
+            components.html(
+                tv_widget, 
+                height=680,
+                scrolling=False
+            )
+            
+            # Información adicional para el usuario con opciones de solución
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.info("💡 **Nota**: Si el gráfico no se carga correctamente, puede ser debido a bloqueadores de anuncios o configuraciones de privacidad del navegador.")
+            with col2:
+                if st.button("🔄 Reintentar TradingView", help="Intenta cargar el gráfico de TradingView nuevamente"):
+                    st.rerun()
+            
+            # Opciones adicionales de solución
+            with st.expander("🔧 Soluciones para problemas de TradingView"):
+                st.markdown("""
+                **Si el gráfico no se carga, pruebe estas soluciones:**
+                
+                1. **Desactivar bloqueador de anuncios** temporalmente para este sitio
+                2. **Usar modo incógnito** del navegador
+                3. **Cambiar a Plotly** usando el selector de arriba
+                4. **Recargar la página** completamente
+                5. **Verificar conexión a internet**
+                
+                **Alternativas recomendadas:**
+                - Use la opción "Plotly (Alternativo)" para gráficos locales
+                - Los gráficos de Plotly funcionan sin conexión externa
+                """)
+            
+        else:
+            # Gráfico alternativo con Plotly mejorado
+            st.success("📊 Mostrando gráfico con Plotly (carga local)")
+            
+            # Mostrar información sobre el gráfico local
+            st.info("✅ **Ventajas del gráfico Plotly:** Carga local, sin dependencias externas, más estable")
+            
+            try:
+                with st.spinner("Obteniendo datos históricos..."):
+                    # Obtener datos históricos para el símbolo seleccionado
+                    ticker = yf.Ticker(simbolo_seleccionado)
+                    hist = ticker.history(period="1y")
+                
+                if not hist.empty and len(hist) > 0:
+                    # Crear gráfico de velas con Plotly mejorado
+                    fig = make_subplots(
+                        rows=3, cols=1,
+                        shared_xaxes=True,
+                        vertical_spacing=0.05,
+                        subplot_titles=(f'Precio de {simbolo_seleccionado}', 'Volumen', 'RSI (14)'),
+                        row_heights=[0.6, 0.2, 0.2]
+                    )
+                    
+                    # Gráfico de velas con colores mejorados
+                    fig.add_trace(go.Candlestick(
+                        x=hist.index,
+                        open=hist['Open'],
+                        high=hist['High'],
+                        low=hist['Low'],
+                        close=hist['Close'],
+                        name='Precio',
+                        increasing_line_color='#26a69a',
+                        decreasing_line_color='#ef5350'
+                    ), row=1, col=1)
+                    
+                    # Volumen con colores basados en el precio
+                    colors = ['#26a69a' if close >= open else '#ef5350' 
+                             for close, open in zip(hist['Close'], hist['Open'])]
+                    
+                    fig.add_trace(go.Bar(
+                        x=hist.index,
+                        y=hist['Volume'],
+                        name='Volumen',
+                        marker_color=colors,
+                        opacity=0.7
+                    ), row=2, col=1)
+                    
+                    # RSI mejorado
+                    delta = hist['Close'].diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / loss
+                    rsi = 100 - (100 / (1 + rs))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=hist.index,
+                        y=rsi,
+                        name='RSI (14)',
+                        line=dict(color='#9c27b0', width=2),
+                        fill='tonexty',
+                        fillcolor='rgba(156, 39, 176, 0.1)'
+                    ), row=3, col=1)
+                    
+                    # Líneas de referencia RSI con mejor diseño
+                    fig.add_hline(y=70, line_dash="dash", line_color="#f44336", 
+                                line_width=1, row=3, col=1, annotation_text="Sobrecompra (70)")
+                    fig.add_hline(y=30, line_dash="dash", line_color="#4caf50", 
+                                line_width=1, row=3, col=1, annotation_text="Sobreventa (30)")
+                    fig.add_hline(y=50, line_dash="dot", line_color="#9e9e9e", 
+                                line_width=0.5, row=3, col=1)
+                    
+                    # Layout mejorado
+                    fig.update_layout(
+                        title=dict(
+                            text=f'Análisis Técnico: {simbolo_seleccionado}',
+                            x=0.5,
+                            font=dict(size=20, color='#333')
+                        ),
+                        xaxis_rangeslider_visible=False,
+                        height=700,
+                        template='plotly_white',
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        ),
+                        margin=dict(l=50, r=50, t=80, b=50)
+                    )
+                    
+                    # Actualizar ejes para mejor legibilidad
+                    fig.update_xaxes(title_text="Fecha", row=3, col=1)
+                    fig.update_yaxes(title_text="Precio ($)", row=1, col=1)
+                    fig.update_yaxes(title_text="Volumen", row=2, col=1)
+                    fig.update_yaxes(title_text="RSI", row=3, col=1)
+                    
+                    # Mostrar estadísticas básicas
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Precio Actual", f"${hist['Close'].iloc[-1]:.2f}")
+                    with col2:
+                        st.metric("Cambio 1D", f"${hist['Close'].iloc[-1] - hist['Close'].iloc[-2]:.2f}")
+                    with col3:
+                        st.metric("RSI Actual", f"{rsi.iloc[-1]:.1f}")
+                    with col4:
+                        st.metric("Volumen Promedio", f"{hist['Volume'].mean():,.0f}")
+                    
+                    # Mostrar el gráfico
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Información adicional sobre el análisis
+                    with st.expander("📈 Información del Análisis Técnico"):
+                        st.markdown(f"""
+                        **Datos del gráfico:**
+                        - **Período:** 1 año
+                        - **Símbolo:** {simbolo_seleccionado}
+                        - **Última actualización:** {hist.index[-1].strftime('%d/%m/%Y')}
+                        
+                        **Indicadores incluidos:**
+                        - **Gráfico de velas:** Muestra apertura, máximo, mínimo y cierre
+                        - **Volumen:** Indica la actividad de trading
+                        - **RSI (14):** Oscilador de momentum (sobrecompra >70, sobreventa <30)
+                        
+                        **Interpretación:**
+                        - RSI > 70: Posible sobrecompra (considerar venta)
+                        - RSI < 30: Posible sobreventa (considerar compra)
+                        - RSI = 50: Nivel neutral
+                        """)
+                        
+                else:
+                    st.warning("⚠️ No se pudieron obtener datos para este símbolo. Verifique que el símbolo sea válido.")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al crear gráfico alternativo: {str(e)}")
+                st.info("💡 **Sugerencia:** Verifique su conexión a internet o intente con otro símbolo.")
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
