@@ -7558,12 +7558,16 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                     if datos_activo is not None and not datos_activo.empty:
                         # Convertir Serie a DataFrame si es necesario
                         if isinstance(datos_activo, pd.Series):
-                            # IOL retorna una Serie, convertir a DataFrame
+                            # IOL retorna una Serie, convertir a DataFrame manteniendo las fechas reales
                             datos_activo = pd.DataFrame({
                                 'fecha': datos_activo.index,
                                 'precio': datos_activo.values
                             })
-                            st.write(f"✅ {simbolo}: convertida Serie de IOL a DataFrame")
+                            # Establecer la columna fecha como índice para poder alinear con benchmarks
+                            datos_activo.set_index('fecha', inplace=True)
+                            # Renombrar la columna de precio para que sea accesible
+                            datos_activo.columns = ['precio']
+                            st.write(f"✅ {simbolo}: convertida Serie de IOL a DataFrame con fechas como índice")
                         elif 'precio' in datos_activo.columns:
                             # Ya tiene la estructura correcta
                             st.write(f"✅ {simbolo}: usando columna 'precio'")
@@ -7597,7 +7601,8 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                                 'fecha': datos_yf.index,
                                 'precio': datos_yf['Close']
                             })
-                            datos_activo = datos_activo.reset_index(drop=True)
+                            # Establecer la columna fecha como índice para poder alinear con benchmarks
+                            datos_activo.set_index('fecha', inplace=True)
                             st.info(f"📊 Usando datos de yfinance para {simbolo}")
                         else:
                             st.warning(f"⚠️ No hay datos de yfinance para {simbolo}")
