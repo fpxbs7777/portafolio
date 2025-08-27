@@ -1,4 +1,4 @@
-MIGRAR TODO A JS EN UN UNICO HTML Y CORRIGE LOS PROBLEMAS DE CORS import streamlit as st
+import streamlit as st
 import requests
 import plotly.graph_objects as go
 import pandas as pd
