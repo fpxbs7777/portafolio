@@ -729,29 +729,45 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
     Returns:
         dict: Portafolio de EEUU del cliente o None en caso de error
     """
-    url_portafolio = f'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+    # Intentar primero con el endpoint de Asesores (mismo que Argentina)
+    url_portafolio_asesores = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     
-    # Debug: mostrar información de la solicitud
-    st.info(f"🔍 Solicitando portafolio EEUU desde: {url_portafolio}")
+    st.info(f"🔍 Intentando obtener portafolio EEUU del cliente {id_cliente}")
     st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
     
     try:
-        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=30)
-        
-        # Debug: mostrar respuesta completa
-        st.info(f"📡 Respuesta HTTP: {respuesta.status_code}")
-        st.info(f"📋 Headers de respuesta: {dict(respuesta.headers)}")
+        # Primer intento: endpoint de Asesores
+        respuesta = requests.get(url_portafolio_asesores, headers=encabezados, timeout=30)
         
         if respuesta.status_code == 200:
-            try:
-                data = respuesta.json()
-                st.success(f"✅ Portafolio EEUU obtenido: {len(data.get('activos', []))} activos")
-                return data
-            except ValueError as e:
-                st.error(f"❌ Error al procesar JSON: {str(e)}")
-                st.info(f"📄 Contenido de respuesta: {respuesta.text[:500]}")
+            data = respuesta.json()
+            st.success(f"✅ Portafolio EEUU obtenido vía Asesores: {len(data.get('activos', []))} activos")
+            return data
+        elif respuesta.status_code == 404:
+            st.info("ℹ️ No se encontró portafolio EEUU vía Asesores, intentando endpoint directo...")
+            
+            # Segundo intento: endpoint directo
+            url_portafolio_directo = f'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+            respuesta_directo = requests.get(url_portafolio_directo, headers=encabezados, timeout=30)
+            
+            if respuesta_directo.status_code == 200:
+                data_directo = respuesta_directo.json()
+                st.success(f"✅ Portafolio EEUU obtenido vía endpoint directo: {len(data_directo.get('activos', []))} activos")
+                return data_directo
+            elif respuesta_directo.status_code == 401:
+                st.error("❌ Error 401: Token de autenticación inválido o expirado")
+                st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
                 return None
+            elif respuesta_directo.status_code == 403:
+                st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
+                st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
+                return None
+            else:
+                st.error(f"❌ Error HTTP {respuesta_directo.status_code} en endpoint directo")
+                st.info(f"📄 Respuesta: {respuesta_directo.text[:500]}")
+                return None
+                
         elif respuesta.status_code == 401:
             st.error("❌ Error 401: Token de autenticación inválido o expirado")
             st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
@@ -760,25 +776,19 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
             st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
             st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
             return None
-        elif respuesta.status_code == 404:
-            st.warning(f"⚠️ No se encontró portafolio de EEUU para el cliente {id_cliente}")
-            st.info("💡 El cliente puede no tener activos en EEUU o la API puede no estar disponible")
-            return None
         else:
-            st.error(f"❌ Error HTTP {respuesta.status_code} al obtener portafolio de EEUU")
-            st.info(f"📄 Respuesta del servidor: {respuesta.text[:500]}")
+            st.error(f"❌ Error HTTP {respuesta.status_code} en endpoint de Asesores")
+            st.info(f"📄 Respuesta: {respuesta.text[:500]}")
             return None
+            
     except requests.exceptions.Timeout:
         st.error("⏱️ Timeout al obtener portafolio de EEUU")
-        st.info("💡 El servidor de IOL puede estar sobrecargado. Intente nuevamente en unos minutos.")
         return None
     except requests.exceptions.ConnectionError:
         st.error("🔌 Error de conexión al obtener portafolio de EEUU")
-        st.info("💡 Verifique su conexión a internet y que no haya firewall bloqueando la conexión")
         return None
     except Exception as e:
         st.error(f'❌ Error inesperado al obtener portafolio de EEUU: {str(e)}')
-        st.info("💡 Este error puede indicar un problema temporal del servidor")
         return None
 
 def obtener_estado_cuenta_eeuu(token_portador):
