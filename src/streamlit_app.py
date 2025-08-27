@@ -7412,6 +7412,14 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
     if fecha_hasta is None:
         fecha_hasta = datetime.now().strftime('%Y-%m-%d')
     
+    # Convertir fechas a datetime para yfinance
+    try:
+        fecha_desde_dt = pd.to_datetime(fecha_desde)
+        fecha_hasta_dt = pd.to_datetime(fecha_hasta)
+    except Exception as e:
+        st.error(f"❌ Error en el formato de fechas: {str(e)}")
+        return None
+    
     st.markdown("#### 📊 Métricas Individuales de Activos")
     st.info(f"📅 Período de análisis: {fecha_desde} a {fecha_hasta}")
     
@@ -7466,21 +7474,44 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
         # Dólar MEP (AL30/AL30D)
         mep_data = obtener_serie_historica_iol(token_acceso, 'AL30', 'AL30D', fecha_desde, fecha_hasta)
         if mep_data is not None and not mep_data.empty:
-            datos_benchmarks['DOLAR_MEP'] = mep_data['precio']
-            st.success("✅ Dólar MEP (AL30/AL30D)")
+            # Verificar la estructura de datos
+            if isinstance(mep_data, pd.Series):
+                # IOL retorna una Serie, usar directamente
+                datos_benchmarks['DOLAR_MEP'] = mep_data
+                st.success("✅ Dólar MEP (AL30/AL30D) - Serie de IOL")
+            elif 'precio' in mep_data.columns:
+                datos_benchmarks['DOLAR_MEP'] = mep_data['precio']
+                st.success("✅ Dólar MEP (AL30/AL30D)")
+            elif 'cierre' in mep_data.columns:
+                datos_benchmarks['DOLAR_MEP'] = mep_data['cierre']
+                st.success("✅ Dólar MEP (AL30/AL30D) - usando columna 'cierre'")
+            else:
+                st.warning(f"⚠️ Estructura inesperada para Dólar MEP. Columnas: {list(mep_data.columns)}")
         else:
             st.warning("⚠️ No se obtuvieron datos de Dólar MEP")
         
         # Dólar CCL (AL30/AL30C)
         ccl_data = obtener_serie_historica_iol(token_acceso, 'AL30', 'AL30C', fecha_desde, fecha_hasta)
         if ccl_data is not None and not ccl_data.empty:
-            datos_benchmarks['DOLAR_CCL'] = ccl_data['precio']
-            st.success("✅ Dólar CCL (AL30/AL30C)")
+            # Verificar la estructura de datos
+            if isinstance(ccl_data, pd.Series):
+                # IOL retorna una Serie, usar directamente
+                datos_benchmarks['DOLAR_CCL'] = ccl_data
+                st.success("✅ Dólar CCL (AL30/AL30C) - Serie de IOL")
+            elif 'precio' in ccl_data.columns:
+                datos_benchmarks['DOLAR_CCL'] = ccl_data['precio']
+                st.success("✅ Dólar CCL (AL30/AL30C)")
+            elif 'cierre' in ccl_data.columns:
+                datos_benchmarks['DOLAR_CCL'] = ccl_data['cierre']
+                st.success("✅ Dólar CCL (AL30/AL30C) - usando columna 'cierre'")
+            else:
+                st.warning(f"⚠️ Estructura inesperada para Dólar CCL. Columnas: {list(ccl_data.columns)}")
         else:
             st.warning("⚠️ No se obtuvieron datos de Dólar CCL")
             
     except Exception as e:
         st.warning(f"⚠️ Error obteniendo datos de dólares: {str(e)}")
+        st.write(f"📊 Detalles del error: {type(e).__name__}")
     
     if not datos_benchmarks:
         st.error("❌ No se pudieron obtener datos de ningún benchmark")
@@ -7504,7 +7535,55 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
             
             # Intentar obtener datos desde IOL primero
             if 'mercado' in titulo:
-                datos_activo = obtener_serie_historica_iol(token_acceso, titulo['mercado'], simbolo, fecha_desde, fecha_hasta)
+                try:
+                    st.write(f"🔍 Intentando obtener datos de IOL para {simbolo} desde mercado {titulo['mercado']}")
+                    st.write(f"📅 Fechas: desde {fecha_desde} hasta {fecha_hasta}")
+                    datos_activo = obtener_serie_historica_iol(token_acceso, titulo['mercado'], simbolo, fecha_desde, fecha_hasta)
+                    
+                    # Debug: mostrar qué retornó la función
+                    if datos_activo is not None:
+                        st.write(f"📊 IOL retornó datos para {simbolo}: tipo={type(datos_activo)}, vacío={datos_activo.empty if hasattr(datos_activo, 'empty') else 'N/A'}")
+                        if isinstance(datos_activo, pd.Series):
+                            st.write(f"📊 Serie de IOL: {len(datos_activo)} registros, índice: {type(datos_activo.index)}")
+                            if not datos_activo.empty:
+                                st.write(f"📊 Primeros valores: {datos_activo.head()}")
+                        elif hasattr(datos_activo, 'columns'):
+                            st.write(f"📊 DataFrame de IOL: columnas={list(datos_activo.columns)}")
+                            if not datos_activo.empty:
+                                st.write(f"📊 Primeras filas: {datos_activo.head()}")
+                    else:
+                        st.write(f"📊 IOL no retornó datos para {simbolo}")
+                    
+                    # Verificar la estructura de datos retornada por IOL
+                    if datos_activo is not None and not datos_activo.empty:
+                        # Convertir Serie a DataFrame si es necesario
+                        if isinstance(datos_activo, pd.Series):
+                            # IOL retorna una Serie, convertir a DataFrame
+                            datos_activo = pd.DataFrame({
+                                'fecha': datos_activo.index,
+                                'precio': datos_activo.values
+                            })
+                            st.write(f"✅ {simbolo}: convertida Serie de IOL a DataFrame")
+                        elif 'precio' in datos_activo.columns:
+                            # Ya tiene la estructura correcta
+                            st.write(f"✅ {simbolo}: usando columna 'precio'")
+                        elif 'cierre' in datos_activo.columns:
+                            datos_activo = datos_activo.rename(columns={'cierre': 'precio'})
+                            st.write(f"✅ {simbolo}: renombrando 'cierre' a 'precio'")
+                        elif 'valor' in datos_activo.columns:
+                            datos_activo = datos_activo.rename(columns={'valor': 'precio'})
+                            st.write(f"✅ {simbolo}: renombrando 'valor' a 'precio'")
+                        elif len(datos_activo.columns) >= 2:
+                            # Asumir que la segunda columna es el precio
+                            datos_activo = datos_activo.rename(columns={datos_activo.columns[1]: 'precio'})
+                            st.write(f"✅ {simbolo}: renombrando '{datos_activo.columns[1]}' a 'precio'")
+                        else:
+                            st.warning(f"⚠️ Estructura de datos inesperada para {simbolo} desde IOL")
+                            datos_activo = None
+                except Exception as e:
+                    st.warning(f"⚠️ Error obteniendo datos de IOL para {simbolo}: {str(e)}")
+                    st.write(f"📊 Tipo de error: {type(e).__name__}")
+                    datos_activo = None
             
             # Si no hay datos de IOL, usar yfinance como fallback
             if datos_activo is None or datos_activo.empty:
@@ -7512,13 +7591,18 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                     # Mapear símbolos de IOL a yfinance
                     ticker_yf = mapear_simbolo_a_yfinance(simbolo)
                     if ticker_yf:
-                        datos_yf = yf.download(ticker_yf, start=fecha_desde, end=fecha_hasta, progress=False)
+                        datos_yf = yf.download(ticker_yf, start=fecha_desde_dt, end=fecha_hasta_dt, progress=False)
                         if not datos_yf.empty:
                             datos_activo = pd.DataFrame({
                                 'fecha': datos_yf.index,
                                 'precio': datos_yf['Close']
                             })
                             datos_activo = datos_activo.reset_index(drop=True)
+                            st.info(f"📊 Usando datos de yfinance para {simbolo}")
+                        else:
+                            st.warning(f"⚠️ No hay datos de yfinance para {simbolo}")
+                    else:
+                        st.warning(f"⚠️ No hay mapeo de yfinance para {simbolo}")
                 except Exception as e:
                     st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}: {str(e)}")
                     continue
@@ -7527,8 +7611,26 @@ def calcular_metricas_individuales_activos(portafolio, token_acceso, fecha_desde
                 st.warning(f"⚠️ No hay datos históricos para {simbolo}")
                 continue
             
+            # Verificar que tenemos la columna 'precio'
+            if 'precio' not in datos_activo.columns:
+                st.error(f"❌ Estructura de datos incorrecta para {simbolo}. Columnas disponibles: {list(datos_activo.columns)}")
+                st.write(f"📊 Primeras filas de datos: {datos_activo.head()}")
+                continue
+            
+            # Mostrar información de debug
+            st.write(f"📊 Datos obtenidos para {simbolo}: {len(datos_activo)} registros, columnas: {list(datos_activo.columns)}")
+            st.write(f"📊 Tipos de datos: {datos_activo.dtypes}")
+            st.write(f"📊 Primeras filas de precio: {datos_activo['precio'].head()}")
+            st.write(f"📊 Últimas filas de precio: {datos_activo['precio'].tail()}")
+            
             # Calcular retornos del activo
-            datos_activo['retorno'] = datos_activo['precio'].pct_change().dropna()
+            try:
+                datos_activo['retorno'] = datos_activo['precio'].pct_change().dropna()
+                st.write(f"📊 Retornos calculados para {simbolo}: {len(datos_activo['retorno'])} registros válidos")
+            except Exception as e:
+                st.error(f"❌ Error calculando retornos para {simbolo}: {str(e)}")
+                st.write(f"📊 Datos de precio: {datos_activo['precio'].head()}")
+                continue
             
             # Calcular métricas para cada benchmark
             metricas_activo = {
