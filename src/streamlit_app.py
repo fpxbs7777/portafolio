@@ -3532,7 +3532,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador):
+def mostrar_resumen_portafolio(portafolio, token_portador, pais="general"):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -3797,7 +3797,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 "📈 Mostrar Histograma de Retornos por Activo", 
                 value=False,
                 help="Muestra histogramas de retornos históricos para cada activo del portafolio",
-                key="mostrar_histograma_retornos_analisis"
+                key=f"mostrar_histograma_retornos_analisis_{pais}"
             )
             
             col1, col2 = st.columns(2)
@@ -7184,14 +7184,14 @@ def mostrar_analisis_portafolio():
     with tab1:
         if portafolio_ar:
             st.subheader("🇦🇷 Portafolio Argentina")
-            mostrar_resumen_portafolio(portafolio_ar, token_acceso)
+            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "argentina")
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
         if portafolio_eeuu:
             st.subheader("🇺🇸 Portafolio Estados Unidos")
-            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso)
+            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu")
         else:
             st.warning("No se pudo obtener el portafolio de EEUU")
     
