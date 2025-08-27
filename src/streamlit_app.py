@@ -30,6 +30,7 @@ import matplotlib.pyplot as plt
 import time
 import importlib
 import random
+import json
 
 # Configuración de warnings
 warnings.filterwarnings('ignore')
@@ -161,61 +162,79 @@ def load_data(rics, argentina_tickers, token_acceso=None):
     progress_bar = st.progress(0)
     total_rics = len(rics)
     
-    for i, ric in enumerate(rics):
-        try:
-            with st.spinner(f"Descargando datos para {ric}..."):
-                # Intentar primero con IOL si es un símbolo argentino y tenemos token
-                if ric in argentina_tickers and token_acceso:
-                    st.info(f"🔄 Intentando obtener datos de {ric} desde IOL...")
-                    try:
-                        # Intentar obtener serie histórica desde IOL
-                        fecha_hasta = date.today()
-                        fecha_desde = fecha_hasta - timedelta(days=30)
-                        
-                        df_iol = obtener_serie_historica_iol(
-                            token_acceso,
-                            'bMERVAL',  # Mercado por defecto para acciones argentinas
-                            ric,
+    # Si tenemos token de IOL, intentar obtener series históricas
+    if token_acceso:
+        st.info("🔄 Intentando obtener series históricas desde IOL...")
+        
+        # Configurar fechas para series históricas
+        fecha_hasta = date.today()
+        fecha_desde = fecha_hasta - timedelta(days=30)
+        
+        # Intentar obtener datos de IOL para cada símbolo
+        for i, ric in enumerate(rics):
+            try:
+                with st.spinner(f"Obteniendo datos de IOL para {ric}..."):
+                    # Intentar diferentes mercados
+                    mercados_a_probar = ['BCBA', 'bMERVAL', 'bCBA', 'ROFEX', 'NYSE', 'NASDAQ']
+                    
+                    for mercado in mercados_a_probar:
+                        serie_iol = obtener_serie_historica_iol_avanzada(
+                            ric, 
+                            mercado, 
                             fecha_desde.strftime('%Y-%m-%d'),
                             fecha_hasta.strftime('%Y-%m-%d'),
-                            'ajustada'
+                            'ajustada',
+                            token_acceso
                         )
                         
-                        if not df_iol.empty and 'ultimoPrecio' in df_iol.columns:
-                            # Convertir datos de IOL al formato de yfinance
-                            df_converted = pd.DataFrame({
-                                'Open': df_iol['apertura'],
-                                'High': df_iol['maximo'],
-                                'Low': df_iol['minimo'],
-                                'Close': df_iol['ultimoPrecio'],
-                                'Volume': df_iol['volumenNominal']
-                            }, index=df_iol['fechaHora'])
-                            
-                            data[ric] = df_converted
-                            st.success(f"✅ Datos obtenidos desde IOL para {ric}")
-                            continue
-                        else:
-                            st.warning(f"⚠️ No se pudieron obtener datos de IOL para {ric}, intentando con yfinance...")
-                    except Exception as e:
-                        st.warning(f"⚠️ Error con IOL para {ric}: {str(e)}, intentando con yfinance...")
-                
-                # Si no se pudo con IOL o no es símbolo argentino, usar yfinance
-                symbol = ric + ".BA" if ric in argentina_tickers else ric
-                df = yf.download(symbol, period="1d", interval="1m")
-                
-                if not df.empty:
-                    data[ric] = df
-                    st.success(f"✅ Datos descargados para {ric} desde yfinance")
-                else:
-                    st.warning(f"⚠️ No se encontraron datos para {ric} (buscando {symbol})")
+                        if serie_iol:
+                            # Procesar y convertir datos de IOL
+                            df_iol = procesar_serie_historica_iol(serie_iol)
+                            if not df_iol.empty:
+                                data[ric] = df_iol
+                                st.success(f"✅ Datos obtenidos desde IOL para {ric} en {mercado}")
+                                break
                     
-        except Exception as e:
-            st.error(f"❌ Error al descargar datos para {ric}: {e}")
+                    # Si no se pudo obtener de IOL, continuar con yfinance
+                    if ric not in data:
+                        st.info(f"ℹ️ No se pudieron obtener datos de IOL para {ric}, intentando con yfinance...")
+                        
+            except Exception as e:
+                st.warning(f"⚠️ Error con IOL para {ric}: {str(e)}, intentando con yfinance...")
+            
+            # Actualizar barra de progreso
+            progress_bar.progress((i + 1) / total_rics)
+    
+    # Para símbolos que no se pudieron obtener de IOL, usar yfinance
+    for i, ric in enumerate(rics):
+        if ric not in data:  # Solo procesar si no se obtuvo de IOL
+            try:
+                with st.spinner(f"Descargando datos de yfinance para {ric}..."):
+                    # Si no se pudo con IOL o no es símbolo argentino, usar yfinance
+                    symbol = ric + ".BA" if ric in argentina_tickers else ric
+                    df = yf.download(symbol, period="1d", interval="1m")
+                    
+                    if not df.empty:
+                        data[ric] = df
+                        st.success(f"✅ Datos descargados para {ric} desde yfinance")
+                    else:
+                        st.warning(f"⚠️ No se encontraron datos para {ric} (buscando {symbol})")
+                        
+            except Exception as e:
+                st.error(f"❌ Error al descargar datos para {ric}: {e}")
         
         # Actualizar barra de progreso
         progress_bar.progress((i + 1) / total_rics)
     
     progress_bar.empty()
+    
+    # Mostrar resumen de fuentes de datos
+    if data:
+        iol_count = sum(1 for ric in data if hasattr(data[ric].index, 'name') and data[ric].index.name == 'fechaHora')
+        yf_count = len(data) - iol_count
+        
+        st.success(f"✅ Datos obtenidos: {iol_count} desde IOL, {yf_count} desde yfinance")
+    
     return data
 
 def calcular_frontera_eficiente_avanzada(rics, notional, target_return=None, include_min_variance=True, token_acceso=None):
@@ -586,6 +605,204 @@ def obtener_tokens(usuario, contraseña):
     st.error("❌ No se pudo establecer conexión después de múltiples intentos")
     return None, None
 
+def refrescar_token_iol(refresh_token):
+    """
+    Refresca el token de acceso usando el refresh token.
+    
+    Args:
+        refresh_token (str): Token de refresco
+        
+    Returns:
+        tuple: (access_token, refresh_token) o (None, None) si hay error
+    """
+    token_url = 'https://api.invertironline.com/token'
+    payload = {
+        'refresh_token': refresh_token,
+        'grant_type': 'refresh_token'
+    }
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    
+    try:
+        response = requests.post(token_url, data=payload, headers=headers, timeout=30)
+        if response.status_code == 200:
+            tokens = response.json()
+            st.success("✅ Token refrescado exitosamente")
+            return tokens['access_token'], tokens['refresh_token']
+        else:
+            st.warning(f"⚠️ Error al refrescar token: {response.status_code}")
+            return None, None
+    except Exception as e:
+        st.warning(f"⚠️ Error de conexión al refrescar token: {str(e)}")
+        return None, None
+
+def obtener_serie_historica_iol_avanzada(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Obtiene serie histórica de un activo específico desde la API de IOL.
+    
+    Args:
+        simbolo (str): Símbolo del activo
+        mercado (str): Mercado (BCBA, NYSE, NASDAQ, ROFEX, etc.)
+        fecha_desde (str): Fecha desde (YYYY-MM-DD)
+        fecha_hasta (str): Fecha hasta (YYYY-MM-DD)
+        ajustada (str): Tipo de ajuste (ajustada, sinAjustar, SinAjustar)
+        bearer_token (str): Token de acceso
+        
+    Returns:
+        dict: Datos de la serie histórica o None si hay error
+    """
+    url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                st.success(f"✅ Serie histórica obtenida para {simbolo} en {mercado}: {len(data)} registros")
+                return data
+            else:
+                st.warning(f"⚠️ No hay datos históricos para {simbolo} en {mercado}")
+                return None
+        else:
+            st.warning(f"⚠️ Error HTTP {response.status_code} para {simbolo} en {mercado}")
+            return None
+    except Exception as e:
+        st.error(f"❌ Error al obtener serie histórica de {simbolo} en {mercado}: {str(e)}")
+        return None
+
+def obtener_series_historicas_portafolio(portafolios, bearer_token, fecha_desde, fecha_hasta, ajustada="ajustada"):
+    """
+    Obtiene series históricas para todos los activos del portafolio.
+    
+    Args:
+        portafolios (dict): Diccionario con portafolios de Argentina y Estados Unidos
+        bearer_token (str): Token de acceso de IOL
+        fecha_desde (str): Fecha desde (YYYY-MM-DD)
+        fecha_hasta (str): Fecha hasta (YYYY-MM-DD)
+        ajustada (str): Tipo de ajuste
+        
+    Returns:
+        dict: Diccionario con series históricas por activo
+    """
+    series_historicas = {}
+    
+    # Procesar portafolio de Argentina
+    if portafolios.get('argentina'):
+        activos_ar = portafolios['argentina'].get('activos', [])
+        st.info(f"🔄 Obteniendo series históricas para {len(activos_ar)} activos argentinos...")
+        
+        for activo in activos_ar:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            mercado = titulo.get('mercado', 'BCBA')
+            
+            if simbolo:
+                # Intentar diferentes mercados para activos argentinos
+                mercados_ar = ['BCBA', 'bMERVAL', 'bCBA', 'ROFEX']
+                
+                for mercado_ar in mercados_ar:
+                    serie = obtener_serie_historica_iol_avanzada(
+                        simbolo, mercado_ar, fecha_desde, fecha_hasta, ajustada, bearer_token
+                    )
+                    if serie:
+                        series_historicas[f"{simbolo}_{mercado_ar}"] = {
+                            'datos': serie,
+                            'mercado': mercado_ar,
+                            'pais': 'Argentina',
+                            'activo': activo
+                        }
+                        break
+                
+                if not any(f"{simbolo}_{m}" in series_historicas for m in mercados_ar):
+                    st.warning(f"⚠️ No se pudo obtener serie histórica para {simbolo} en ningún mercado argentino")
+    
+    # Procesar portafolio de Estados Unidos
+    if portafolios.get('estados_unidos'):
+        activos_us = portafolios['estados_unidos'].get('activos', [])
+        st.info(f"🔄 Obteniendo series históricas para {len(activos_us)} activos estadounidenses...")
+        
+        for activo in activos_us:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            mercado = titulo.get('mercado', 'NYSE')
+            
+            if simbolo:
+                # Intentar diferentes mercados para activos estadounidenses
+                mercados_us = ['NYSE', 'NASDAQ', 'AMEX']
+                
+                for mercado_us in mercados_us:
+                    serie = obtener_serie_historica_iol_avanzada(
+                        simbolo, mercado_us, fecha_desde, fecha_hasta, ajustada, bearer_token
+                    )
+                    if serie:
+                        series_historicas[f"{simbolo}_{mercado_us}"] = {
+                            'datos': serie,
+                            'mercado': mercado_us,
+                            'pais': 'Estados Unidos',
+                            'activo': activo
+                        }
+                        break
+                
+                if not any(f"{simbolo}_{m}" in series_historicas for m in mercados_us):
+                    st.warning(f"⚠️ No se pudo obtener serie histórica para {simbolo} en ningún mercado estadounidense")
+    
+    st.success(f"✅ Series históricas obtenidas para {len(series_historicas)} activos")
+    return series_historicas
+
+def procesar_serie_historica_iol(serie_data):
+    """
+    Procesa los datos de serie histórica de IOL y los convierte a DataFrame.
+    
+    Args:
+        serie_data (list): Lista de datos de la serie histórica
+        
+    Returns:
+        pd.DataFrame: DataFrame procesado con datos de precios
+    """
+    if not serie_data or not isinstance(serie_data, list):
+        return pd.DataFrame()
+    
+    try:
+        df = pd.DataFrame(serie_data)
+        
+        # Convertir fechaHora a datetime
+        if 'fechaHora' in df.columns:
+            df['fechaHora'] = pd.to_datetime(df['fechaHora'])
+            df.set_index('fechaHora', inplace=True)
+        
+        # Renombrar columnas para compatibilidad
+        columnas_mapeo = {
+            'ultimoPrecio': 'Close',
+            'apertura': 'Open',
+            'maximo': 'High',
+            'minimo': 'Low',
+            'volumenNominal': 'Volume',
+            'precioPromedio': 'VWAP',
+            'montoOperado': 'Amount'
+        }
+        
+        df = df.rename(columns=columnas_mapeo)
+        
+        # Asegurar que las columnas numéricas sean float
+        columnas_numericas = ['Open', 'High', 'Low', 'Close', 'Volume', 'VWAP', 'Amount']
+        for col in columnas_numericas:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Ordenar por fecha
+        df.sort_index(inplace=True)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ Error procesando serie histórica: {str(e)}")
+        return pd.DataFrame()
+
 # ============================================================================
 # FUNCIONES DE COTIZACIONES IOL
 # ============================================================================
@@ -794,24 +1011,107 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         st.warning(f"⚠️ Error al obtener estado de cuenta de Argentina: {str(e)}")
         estados_cuenta['argentina'] = None
     
-    # Obtener estado de cuenta de Estados Unidos
+    # Obtener estado de cuenta de Estados Unidos - Intentar múltiples endpoints
     try:
-        if id_cliente:
-            url_estado_cuenta_us = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}/estados_Unidos'
-        else:
-            url_estado_cuenta_us = 'https://api.invertironline.com/api/v2/estadocuenta/estados_Unidos'
-        
         encabezados = obtener_encabezado_autorizacion(token_portador)
-        respuesta_us = requests.get(url_estado_cuenta_us, headers=encabezados, timeout=30)
         
-        if respuesta_us.status_code == 200:
-            estados_cuenta['estados_unidos'] = respuesta_us.json()
-            st.success("✅ Estado de cuenta de Estados Unidos obtenido")
+        # Intentar diferentes endpoints para Estados Unidos
+        endpoints_us = []
+        
+        if id_cliente:
+            endpoints_us = [
+                f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}/estados_Unidos',
+                f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}/Estados_Unidos',
+                f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}/US',
+                f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}/usa'
+            ]
         else:
-            st.warning(f"⚠️ Error HTTP {respuesta_us.status_code} al obtener estado de cuenta de Estados Unidos")
-            estados_cuenta['estados_unidos'] = None
+            endpoints_us = [
+                'https://api.invertironline.com/api/v2/estadocuenta/estados_Unidos',
+                'https://api.invertironline.com/api/v2/estadocuenta/Estados_Unidos',
+                'https://api.invertironline.com/api/v2/estadocuenta/US',
+                'https://api.invertironline.com/api/v2/estadocuenta/usa',
+                'https://api.invertironline.com/api/v2/estadocuenta/estados_unidos'
+            ]
+        
+        estado_us_obtenido = False
+        
+        for i, endpoint in enumerate(endpoints_us):
+            try:
+                st.info(f"🔄 Intentando endpoint {i+1}/{len(endpoints_us)} para Estados Unidos...")
+                respuesta_us = requests.get(endpoint, headers=encabezados, timeout=15)
+                
+                if respuesta_us.status_code == 200:
+                    estados_cuenta['estados_unidos'] = respuesta_us.json()
+                    st.success(f"✅ Estado de cuenta de Estados Unidos obtenido desde endpoint {i+1}")
+                    estado_us_obtenido = True
+                    break
+                elif respuesta_us.status_code == 401:
+                    st.warning(f"⚠️ Endpoint {i+1} requiere autorización adicional")
+                    continue
+                elif respuesta_us.status_code == 404:
+                    st.info(f"ℹ️ Endpoint {i+1} no encontrado, probando siguiente...")
+                    continue
+                else:
+                    st.info(f"ℹ️ Endpoint {i+1} retornó código {respuesta_us.status_code}")
+                    continue
+                    
+            except Exception as e:
+                st.info(f"ℹ️ Error en endpoint {i+1}: {str(e)}")
+                continue
+        
+        if not estado_us_obtenido:
+            # Si no se pudo obtener, crear un estado de cuenta simulado basado en el portafolio
+            st.info("ℹ️ Creando estado de cuenta simulado para Estados Unidos basado en el portafolio...")
+            
+            try:
+                # Intentar obtener el portafolio de Estados Unidos
+                if id_cliente:
+                    url_portafolio_us = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
+                else:
+                    url_portafolio_us = 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+                
+                respuesta_portafolio_us = requests.get(url_portafolio_us, headers=encabezados, timeout=15)
+                
+                if respuesta_portafolio_us.status_code == 200:
+                    portafolio_us = respuesta_portafolio_us.json()
+                    activos_us = portafolio_us.get('activos', [])
+                    
+                    # Calcular saldos basados en el portafolio
+                    total_valorizado = sum(activo.get('valorizado', 0) for activo in activos_us)
+                    
+                    # Crear estado de cuenta simulado
+                    estados_cuenta['estados_unidos'] = {
+                        'saldos': {
+                            'disponible': total_valorizado * 0.1,  # 10% disponible
+                            'total': total_valorizado,
+                            'comprometido': total_valorizado * 0.9  # 90% comprometido
+                        },
+                        'cuentas': [
+                            {
+                                'numero': 'US001',
+                                'tipo': 'inversion_Estados_Unidos_Dolares',
+                                'moneda': 'dolar_Estadounidense',
+                                'saldo': total_valorizado,
+                                'disponible': total_valorizado * 0.1,
+                                'comprometido': total_valorizado * 0.9,
+                                'estado': 'operable'
+                            }
+                        ],
+                        'simulado': True  # Marcar como simulado
+                    }
+                    
+                    st.success("✅ Estado de cuenta simulado creado para Estados Unidos")
+                else:
+                    st.warning("⚠️ No se pudo obtener portafolio de Estados Unidos para crear estado simulado")
+                    estados_cuenta['estados_unidos'] = None
+                    
+            except Exception as e:
+                st.warning(f"⚠️ Error al crear estado de cuenta simulado: {str(e)}")
+                estados_cuenta['estados_unidos'] = None
+                
     except Exception as e:
-        st.warning(f"⚠️ Error al obtener estado de cuenta de Estados Unidos: {str(e)}")
+        st.warning(f"⚠️ Error general al obtener estado de cuenta de Estados Unidos: {str(e)}")
         estados_cuenta['estados_unidos'] = None
     
     return estados_cuenta
@@ -1117,6 +1417,12 @@ def mostrar_estado_cuenta(estados_cuenta):
     with tab2:
         estado_us = estados_cuenta.get('estados_unidos')
         if estado_us:
+            # Verificar si es simulado
+            es_simulado = estado_us.get('simulado', False)
+            
+            if es_simulado:
+                st.info("ℹ️ **Nota**: Los datos de Estados Unidos son simulados basados en el portafolio disponible")
+            
             st.markdown("#### 🇺🇸 Estado de Cuenta - Estados Unidos")
             
             # Extraer información relevante
@@ -1169,8 +1475,28 @@ def mostrar_estado_cuenta(estados_cuenta):
                 
                 df_cuentas = pd.DataFrame(datos_cuentas)
                 st.dataframe(df_cuentas, use_container_width=True)
+                
+                if es_simulado:
+                    st.info("""
+                    **📝 Información sobre datos simulados:**
+                    - Los saldos se calculan basándose en el valor de los activos del portafolio
+                    - Se asume que el 10% está disponible y el 90% comprometido en activos
+                    - Esta es una estimación aproximada para fines informativos
+                    """)
         else:
             st.warning("⚠️ No se pudieron obtener datos del estado de cuenta de Estados Unidos")
+            
+            # Mostrar información de ayuda
+            st.info("""
+            **💡 Posibles razones por las que no se pueden obtener datos de Estados Unidos:**
+            
+            1. **Permisos de API**: La cuenta puede no tener acceso a datos de Estados Unidos
+            2. **Configuración de cuenta**: La cuenta puede estar configurada solo para Argentina
+            3. **Endpoints diferentes**: IOL puede usar endpoints específicos para cuentas internacionales
+            4. **Autenticación**: Puede requerir autenticación adicional para cuentas extranjeras
+            
+            **🔄 Solución**: La aplicación intentará crear un estado de cuenta simulado basado en el portafolio disponible.
+            """)
     
     # Resumen consolidado
     st.markdown("#### 📊 Resumen Consolidado")
@@ -1694,6 +2020,290 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
         
         components.html(tv_widget, height=680)
 
+def mostrar_series_historicas_iol(token_acceso, id_cliente):
+    """Muestra las series históricas de los activos del portafolio obtenidas de IOL"""
+    st.markdown("### 📈 Series Históricas IOL")
+    
+    if not token_acceso:
+        st.warning("⚠️ No hay token de acceso disponible")
+        return
+    
+    # Configuración de fechas
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        fecha_desde = st.date_input(
+            "Fecha desde:",
+            value=date.today() - timedelta(days=30),
+            max_value=date.today()
+        )
+    
+    with col2:
+        fecha_hasta = st.date_input(
+            "Fecha hasta:",
+            value=date.today(),
+            max_value=date.today()
+        )
+    
+    with col3:
+        ajustada = st.selectbox(
+            "Tipo de ajuste:",
+            options=['ajustada', 'sinAjustar', 'SinAjustar'],
+            help="Tipo de ajuste para los datos históricos"
+        )
+    
+    # Botón para obtener series históricas
+    if st.button("🔄 Obtener Series Históricas IOL", type="primary", use_container_width=True):
+        with st.spinner("🔄 Obteniendo series históricas desde IOL..."):
+            try:
+                # Obtener portafolios
+                portafolios = obtener_portafolio(token_acceso, id_cliente)
+                
+                if portafolios:
+                    # Obtener series históricas
+                    series_historicas = obtener_series_historicas_portafolio(
+                        portafolios,
+                        token_acceso,
+                        fecha_desde.strftime('%Y-%m-%d'),
+                        fecha_hasta.strftime('%Y-%m-%d'),
+                        ajustada
+                    )
+                    
+                    if series_historicas:
+                        st.success(f"✅ Series históricas obtenidas para {len(series_historicas)} activos")
+                        
+                        # Mostrar resumen
+                        mostrar_resumen_series_historicas(series_historicas)
+                        
+                        # Mostrar gráficos
+                        mostrar_graficos_series_historicas(series_historicas)
+                        
+                        # Mostrar datos tabulares
+                        mostrar_datos_series_historicas(series_historicas)
+                        
+                    else:
+                        st.warning("⚠️ No se pudieron obtener series históricas de ningún activo")
+                else:
+                    st.error("❌ No se pudieron obtener los portafolios")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al obtener series históricas: {str(e)}")
+                st.exception(e)
+
+def mostrar_resumen_series_historicas(series_historicas):
+    """Muestra un resumen de las series históricas obtenidas"""
+    st.markdown("#### 📊 Resumen de Series Históricas")
+    
+    # Crear DataFrame de resumen
+    resumen_data = []
+    
+    for key, serie_info in series_historicas.items():
+        simbolo = key.split('_')[0]
+        mercado = serie_info['mercado']
+        pais = serie_info['pais']
+        datos = serie_info['datos']
+        
+        if datos and len(datos) > 0:
+            # Calcular métricas básicas
+            precios = [item.get('ultimoPrecio', 0) for item in datos if item.get('ultimoPrecio')]
+            if precios:
+                precio_actual = precios[-1]
+                precio_inicial = precios[0]
+                variacion = ((precio_actual - precio_inicial) / precio_inicial * 100) if precio_inicial > 0 else 0
+                
+                resumen_data.append({
+                    'Símbolo': simbolo,
+                    'Mercado': mercado,
+                    'País': pais,
+                    'Registros': len(datos),
+                    'Precio Inicial': f"${precio_inicial:.2f}",
+                    'Precio Actual': f"${precio_actual:.2f}",
+                    'Variación %': f"{variacion:.2f}%",
+                    'Estado': '✅ Activo'
+                })
+            else:
+                resumen_data.append({
+                    'Símbolo': simbolo,
+                    'Mercado': mercado,
+                    'País': pais,
+                    'Registros': len(datos),
+                    'Precio Inicial': 'N/A',
+                    'Precio Actual': 'N/A',
+                    'Variación %': 'N/A',
+                    'Estado': '⚠️ Sin precios'
+                })
+    
+    if resumen_data:
+        df_resumen = pd.DataFrame(resumen_data)
+        st.dataframe(df_resumen, use_container_width=True)
+        
+        # Métricas agregadas
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            total_activos = len(resumen_data)
+            st.metric("Total Activos", total_activos)
+        
+        with col2:
+            activos_activos = sum(1 for item in resumen_data if item['Estado'] == '✅ Activo')
+            st.metric("Activos con Datos", activos_activos)
+        
+        with col3:
+            total_registros = sum(item['Registros'] for item in resumen_data)
+            st.metric("Total Registros", total_registros)
+    else:
+        st.warning("⚠️ No hay datos de series históricas para mostrar")
+
+def mostrar_graficos_series_historicas(series_historicas):
+    """Muestra gráficos de las series históricas"""
+    st.markdown("#### 📈 Gráficos de Series Históricas")
+    
+    # Seleccionar activo para graficar
+    activos_disponibles = list(series_historicas.keys())
+    
+    if not activos_disponibles:
+        st.warning("⚠️ No hay activos disponibles para graficar")
+        return
+    
+    activo_seleccionado = st.selectbox(
+        "Seleccione un activo para graficar:",
+        options=activos_disponibles,
+        format_func=lambda x: f"{x.split('_')[0]} ({x.split('_')[1]})",
+        help="Seleccione el activo que desea visualizar"
+    )
+    
+    if activo_seleccionado:
+        serie_info = series_historicas[activo_seleccionado]
+        datos = serie_info['datos']
+        simbolo = activo_seleccionado.split('_')[0]
+        mercado = serie_info['mercado']
+        
+        if datos and len(datos) > 0:
+            # Crear DataFrame para el gráfico
+            df_grafico = procesar_serie_historica_iol(datos)
+            
+            if not df_grafico.empty:
+                # Gráfico de precios
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_grafico.index,
+                    y=df_grafico['Close'],
+                    mode='lines+markers',
+                    name='Precio de Cierre',
+                    line=dict(color='#4CAF50', width=2)
+                ))
+                
+                if 'Volume' in df_grafico.columns:
+                    # Gráfico de volumen en subplot
+                    fig = make_subplots(
+                        rows=2, cols=1,
+                        shared_xaxes=True,
+                        vertical_spacing=0.03,
+                        subplot_titles=(f'Precio - {simbolo} ({mercado})', 'Volumen'),
+                        row_width=[0.7, 0.3]
+                    )
+                    
+                    fig.add_trace(go.Scatter(
+                        x=df_grafico.index,
+                        y=df_grafico['Close'],
+                        mode='lines+markers',
+                        name='Precio de Cierre',
+                        line=dict(color='#4CAF50', width=2)
+                    ), row=1, col=1)
+                    
+                    fig.add_trace(go.Bar(
+                        x=df_grafico.index,
+                        y=df_grafico['Volume'],
+                        name='Volumen',
+                        marker_color='#2196F3'
+                    ), row=2, col=1)
+                
+                fig.update_layout(
+                    title=f'Serie Histórica - {simbolo} ({mercado})',
+                    xaxis_title='Fecha',
+                    yaxis_title='Precio',
+                    height=600,
+                    showlegend=True
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Métricas del activo
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    precio_actual = df_grafico['Close'].iloc[-1]
+                    st.metric("Precio Actual", f"${precio_actual:.2f}")
+                
+                with col2:
+                    precio_inicial = df_grafico['Close'].iloc[0]
+                    st.metric("Precio Inicial", f"${precio_inicial:.2f}")
+                
+                with col3:
+                    variacion = ((precio_actual - precio_inicial) / precio_inicial * 100) if precio_inicial > 0 else 0
+                    st.metric("Variación %", f"{variacion:.2f}%")
+                
+                with col4:
+                    volatilidad = df_grafico['Close'].pct_change().std() * 100
+                    st.metric("Volatilidad %", f"{volatilidad:.2f}%")
+            else:
+                st.warning("⚠️ No se pudieron procesar los datos para el gráfico")
+        else:
+            st.warning("⚠️ No hay datos disponibles para el activo seleccionado")
+
+def mostrar_datos_series_historicas(series_historicas):
+    """Muestra los datos tabulares de las series históricas"""
+    st.markdown("#### 📋 Datos de Series Históricas")
+    
+    # Seleccionar activo para mostrar datos
+    activos_disponibles = list(series_historicas.keys())
+    
+    if not activos_disponibles:
+        st.warning("⚠️ No hay activos disponibles para mostrar datos")
+        return
+    
+    activo_seleccionado = st.selectbox(
+        "Seleccione un activo para mostrar datos:",
+        options=activos_disponibles,
+        format_func=lambda x: f"{x.split('_')[0]} ({x.split('_')[1]})",
+        key="datos_activo",
+        help="Seleccione el activo cuyos datos desea ver"
+    )
+    
+    if activo_seleccionado:
+        serie_info = series_historicas[activo_seleccionado]
+        datos = serie_info['datos']
+        simbolo = activo_seleccionado.split('_')[0]
+        
+        if datos and len(datos) > 0:
+            # Crear DataFrame para mostrar
+            df_datos = pd.DataFrame(datos)
+            
+            # Convertir fechaHora a datetime
+            if 'fechaHora' in df_datos.columns:
+                df_datos['fechaHora'] = pd.to_datetime(df_datos['fechaHora'])
+                df_datos = df_datos.sort_values('fechaHora', ascending=False)
+            
+            # Mostrar datos
+            st.info(f"📊 Datos para {simbolo}: {len(df_datos)} registros")
+            
+            # Mostrar últimas filas
+            st.markdown("**Últimos registros:**")
+            st.dataframe(df_datos.head(20), use_container_width=True)
+            
+            # Opción para descargar datos
+            if st.button("💾 Descargar Datos CSV", key=f"download_{simbolo}"):
+                csv = df_datos.to_csv(index=False)
+                st.download_button(
+                    label="📥 Descargar CSV",
+                    data=csv,
+                    file_name=f"serie_historica_{simbolo}_{date.today()}.csv",
+                    mime="text/csv"
+                )
+        else:
+            st.warning("⚠️ No hay datos disponibles para el activo seleccionado")
+
 # ============================================================================
 # FUNCIONES DE COTIZACIONES Y MERCADO
 # ============================================================================
@@ -1920,6 +2530,51 @@ def mostrar_movimientos_asesor():
     if buscar and clientes_seleccionados:
         st.info("ℹ️ Función de búsqueda de movimientos en desarrollo")
         st.success("✅ Funcionalidad en desarrollo")
+
+def mostrar_info_depuracion_iol():
+    """Muestra información de depuración sobre los endpoints de IOL"""
+    st.markdown("### 🔍 Información de Depuración - Endpoints IOL")
+    
+    st.info("""
+    **📋 Endpoints probados para Estados Unidos:**
+    
+    **Para Asesores (con ID de cliente):**
+    - `/api/v2/Asesores/EstadoDeCuenta/{id}/estados_Unidos`
+    - `/api/v2/Asesores/EstadoDeCuenta/{id}/Estados_Unidos`
+    - `/api/v2/Asesores/EstadoDeCuenta/{id}/US`
+    - `/api/v2/Asesores/EstadoDeCuenta/{id}/usa`
+    
+    **Para Usuarios (sin ID de cliente):**
+    - `/api/v2/estadocuenta/estados_Unidos`
+    - `/api/v2/estadocuenta/Estados_Unidos`
+    - `/api/v2/estadocuenta/US`
+    - `/api/v2/estadocuenta/usa`
+    - `/api/v2/estadocuenta/estados_unidos`
+    
+    **📊 Endpoints de Portafolio:**
+    - `/api/v2/portafolio/Argentina`
+    - `/api/v2/portafolio/estados_Unidos`
+    - `/api/v2/Asesores/Portafolio/{id}/Argentina`
+    - `/api/v2/Asesores/Portafolio/{id}/estados_Unidos`
+    """)
+    
+    st.warning("""
+    **⚠️ Problemas comunes:**
+    
+    1. **Error 401 (Unauthorized)**: Token expirado o sin permisos suficientes
+    2. **Error 404 (Not Found)**: Endpoint no existe o formato incorrecto
+    3. **Error 403 (Forbidden)**: La cuenta no tiene acceso a datos de Estados Unidos
+    4. **Timeout**: La API puede estar lenta o sobrecargada
+    """)
+    
+    st.success("""
+    **✅ Soluciones implementadas:**
+    
+    1. **Múltiples intentos**: Se prueban diferentes variaciones de endpoints
+    2. **Fallback inteligente**: Si no se pueden obtener datos, se crean simulados
+    3. **Manejo de errores**: Mensajes informativos para cada tipo de error
+    4. **Datos simulados**: Estado de cuenta basado en el portafolio disponible
+    """)
 
 # ============================================================================
 # FUNCIÓN PRINCIPAL DE LA APLICACIÓN
@@ -2148,11 +2803,12 @@ def mostrar_analisis_portafolio():
         estados_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
+        "📈 Series Históricas IOL",
         "💱 Cotizaciones"
     ])
 
@@ -2183,6 +2839,9 @@ def mostrar_analisis_portafolio():
         mostrar_analisis_tecnico(token_acceso, id_cliente)
     
     with tab5:
+        mostrar_series_historicas_iol(token_acceso, id_cliente)
+    
+    with tab6:
         mostrar_cotizaciones_mercado(token_acceso)
 
 # ============================================================================
