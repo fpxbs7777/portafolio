@@ -7295,8 +7295,7 @@ def main():
     # Configurar cache para mejor rendimiento
     st.cache_data.clear()
     
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+
     
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
@@ -7456,66 +7455,6 @@ def main():
                 st.info("👆 Seleccione una opción del menú para comenzar")
         else:
             st.info("👆 Ingrese sus credenciales para comenzar")
-            
-            # Panel de bienvenida
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
-                        border-radius: 15px; 
-                        padding: 40px; 
-                        color: white;
-                        text-align: center;
-                        margin: 30px 0;">
-                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
-                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
-                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>🇦🇷 Portafolio Argentina</h3>
-                        <p>Análisis completo de activos argentinos</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>🇺🇸 Portafolio EEUU</h3>
-                        <p>Gestión de activos internacionales</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis Completo</h3>
-                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
-                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>⚖️ Gestión de Riesgo</h3>
-                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Características
-            st.subheader("✨ Características Principales")
-            cols = st.columns(3)
-            with cols[0]:
-                st.markdown("""
-                **📊 Análisis Detallado**  
-                - Valuación completa de activos  
-                - Distribución por tipo de instrumento  
-                - Concentración del portafolio  
-                """)
-            with cols[1]:
-                st.markdown("""
-                **📈 Herramientas Profesionales**  
-                - Optimización de portafolio  
-                - Análisis técnico avanzado  
-                - Proyecciones de rendimiento  
-                """)
-            with cols[2]:
-                st.markdown("""
-                **💱 Datos de Mercado**  
-                - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
-                - Estado de cuenta consolidado  
-                """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
