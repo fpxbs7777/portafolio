@@ -7680,6 +7680,11 @@ def mostrar_analisis_portafolio():
             # Debug: mostrar cuentas que se van a procesar
             st.info(f"🔍 Procesando {len(cuentas_totales)} cuentas para clasificación")
             
+            # Debug: mostrar origen de las cuentas
+            st.info("📊 Origen de datos:")
+            st.info(f"   - Estado cuenta Argentina: {len(estado_cuenta_ar.get('cuentas', [])) if estado_cuenta_ar else 0} cuentas")
+            st.info(f"   - Estado cuenta EEUU: {len(estado_cuenta_eeuu.get('cuentas', [])) if estado_cuenta_eeuu else 0} cuentas")
+            
             # Crear DataFrame con clasificación por país
             datos_consolidados = []
             for cuenta in cuentas_totales:
@@ -7702,6 +7707,7 @@ def mostrar_analisis_portafolio():
                 # Debug: mostrar clasificación
                 if es_cuenta_eeuu:
                     st.info(f"🔍 Cuenta EEUU detectada: {numero} - {moneda}")
+                    st.info(f"   Disponible: {cuenta.get('disponible', 0)}, Saldo: {cuenta.get('saldo', 0)}, Total: {cuenta.get('total', 0)}")
                 
                 datos_consolidados.append({
                     'País': pais,
@@ -7743,6 +7749,36 @@ def mostrar_analisis_portafolio():
                 for i, cuenta in enumerate(cuentas_totales):
                     with st.expander(f"Cuenta {i+1}: {cuenta.get('numero', 'N/A')}", expanded=False):
                         st.json(cuenta)
+            
+            # Botón para verificar inconsistencias
+            if st.button("🔍 Verificar Inconsistencias", key="verificar_inconsistencias"):
+                st.markdown("#### 🔍 Verificación de Inconsistencias")
+                
+                # Verificar si hay diferencias entre estado de cuenta y portafolio
+                if portafolio_eeuu and 'activos' in portafolio_eeuu:
+                    st.info("📊 Comparando estado de cuenta vs portafolio EEUU:")
+                    
+                    # Obtener total del portafolio
+                    total_portafolio = sum(activo.get('valorizado', 0) for activo in portafolio_eeuu['activos'])
+                    st.info(f"   - Total Portafolio EEUU: ${total_portafolio:,.2f}")
+                    
+                    # Obtener total del estado de cuenta
+                    total_estado_cuenta = sum(cuenta.get('total', 0) for cuenta in cuentas_totales if any([
+                        'eeuu' in str(cuenta.get('numero', '')).lower(),
+                        '-eeuu' in str(cuenta.get('numero', '')),
+                        'dolar estadounidense' in cuenta.get('moneda', '').lower()
+                    ]))
+                    st.info(f"   - Total Estado Cuenta EEUU: ${total_estado_cuenta:,.2f}")
+                    
+                    # Calcular diferencia
+                    diferencia = abs(total_portafolio - total_estado_cuenta)
+                    if diferencia > 0.01:  # Tolerancia de 1 centavo
+                        st.warning(f"⚠️ Diferencia detectada: ${diferencia:,.2f}")
+                        st.info("💡 Esto puede indicar que los datos se obtuvieron en momentos diferentes")
+                    else:
+                        st.success("✅ Los totales coinciden")
+                else:
+                    st.warning("⚠️ No hay portafolio EEUU disponible para comparar")
     
     with tab4:
         # Menú unificado de optimización y cobertura
