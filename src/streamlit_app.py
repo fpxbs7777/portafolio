@@ -25,54 +25,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados para tema oscuro moderno
+# Estilos CSS personalizados para tema oscuro
 st.markdown("""
 <style>
-    /* Importar fuentes modernas */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    /* Variables CSS para colores */
-    :root {
-        --primary-bg: #0f172a;
-        --secondary-bg: #1e293b;
-        --accent-bg: #334155;
-        --primary-text: #f8fafc;
-        --secondary-text: #cbd5e1;
-        --accent-color: #10b981;
-        --accent-hover: #059669;
-        --border-color: #475569;
-        --success-color: #10b981;
-        --warning-color: #f59e0b;
-        --error-color: #ef4444;
-        --info-color: #3b82f6;
-    }
-    
     /* Estilos generales dark theme */
     .stApp, 
     .stApp > div[data-testid="stAppViewContainer"],
     .stApp > div[data-testid="stAppViewContainer"] > div {
-        background: linear-gradient(135deg, var(--primary-bg) 0%, #1e1b4b 100%) !important;
-        color: var(--primary-text) !important;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-        line-height: 1.6;
+        background-color: #0f172a !important;
+        color: #f8f9fa !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
-    
-    /* Headers modernos con gradientes */
-    h1, h2, h3, h4, h5, h6 {
-        background: linear-gradient(135deg, var(--accent-color), #06b6d4);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        font-weight: 600;
-        margin-bottom: 1rem;
-    }
-    
-    h1 { font-size: 2.5rem; font-weight: 700; }
-    h2 { font-size: 2rem; font-weight: 600; }
-    h3 { font-size: 1.5rem; font-weight: 600; }
     
     /* Asegurar que todo el texto sea claro */
-    body, p, div, span, label, input, select, textarea, button,
+    body, p, div, span, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button,
     .stSelectbox div[data-baseweb="select"] div,
     .stDateInput div[data-baseweb="input"] input,
     .stTextInput div[data-baseweb="input"] input,
@@ -103,55 +69,45 @@ st.markdown("""
     .st-br,
     .st-bs,
     .st-bt {
-        color: var(--primary-text) !important;
+        color: #f8f9fa !important;
     }
     
-    /* Enlaces modernos */
+    /* Asegurar que los enlaces sean visibles */
     a {
-        color: var(--accent-color) !important;
+        color: #4CAF50 !important;
         text-decoration: none;
-        transition: all 0.3s ease;
-        border-bottom: 1px solid transparent;
     }
     
     a:hover {
-        color: var(--accent-hover) !important;
-        border-bottom-color: var(--accent-color);
+        color: #45a049 !important;
+        text-decoration: underline;
     }
     
-    /* Placeholders mejorados */
+    /* Mejorar la visibilidad de los placeholders */
     ::placeholder {
-        color: var(--secondary-text) !important;
+        color: #94a3b8 !important;
         opacity: 1;
     }
     
-    /* Tooltips modernos */
+    /* Mejorar la visibilidad de los tooltips */
     .stTooltip {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border: 1px solid var(--accent-color) !important;
-        color: var(--primary-text) !important;
-        border-radius: 12px !important;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.3) !important;
+        background-color: #1e293b !important;
+        border: 1px solid #4CAF50 !important;
+        color: #f8f9fa !important;
     }
     
-    /* Menús desplegables modernos */
+    /* Estilos para menús desplegables y listas */
+    /* Select principal */
     div[data-baseweb="select"],
     div[data-baseweb="select"] div,
     div[data-baseweb="select"] input,
     div[data-baseweb="select"] div[role="button"],
     div[data-baseweb="select"] div[role="listbox"],
-    div[data-baseweb="select"] div[role="combobox"] {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        color: var(--primary-text) !important;
-        border: 2px solid var(--border-color) !important;
-        border-radius: 12px !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    div[data-baseweb="select"]:hover,
-    div[data-baseweb="select"] div[role="button"]:hover {
-        border-color: var(--accent-color) !important;
-        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
+    div[data-baseweb="select"] div[role="combobox"],
+    div[data-baseweb="select"] div[data-baseweb="select"] {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+        border-color: #4CAF50 !important;
     }
     
     /* Opciones del menú desplegable */
@@ -161,6 +117,8 @@ st.markdown("""
     div[role="option"],
     div[role="option"] > div,
     div[role="option"] > span,
+    div[role="listbox"] > div,
+    div[role="listbox"] > div > div,
     div[data-baseweb*="popover"] *,
     div[data-baseweb*="popover"] div,
     div[data-baseweb*="popover"] span,
@@ -172,9 +130,21 @@ st.markdown("""
     div[data-baseweb*="popover"] input,
     div[data-baseweb*="popover"] select,
     div[data-baseweb*="popover"] option {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        color: var(--primary-text) !important;
-        border-radius: 8px !important;
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+    }
+    
+    /* Asegurar que el texto dentro de los popovers sea visible */
+    div[data-baseweb*="popover"] {
+        background-color: #1e293b !important;
+        border: 1px solid #4CAF50 !important;
+    }
+    
+    /* Asegurar que el texto de las opciones sea visible */
+    div[role="option"] *,
+    div[role="option"] span,
+    div[role="option"] div {
+        color: #f8f9fa !important;
     }
     
     /* Efecto hover en opciones */
@@ -183,235 +153,234 @@ st.markdown("""
     div[role="option"]:hover > span,
     div[role="listbox"] > div:hover,
     div[role="listbox"] > div > div:hover {
-        background: linear-gradient(135deg, var(--accent-bg), var(--accent-color)) !important;
+        background-color: #2d3748 !important;
         color: #ffffff !important;
-        transform: translateX(5px) !important;
-        transition: all 0.3s ease !important;
     }
     
     /* Opción seleccionada */
     div[aria-selected="true"],
     div[aria-selected="true"] > div,
     div[aria-selected="true"] > span {
-        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
+        background-color: #4CAF50 !important;
         color: #ffffff !important;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
     }
     
-    /* Listas de selección múltiple */
+    /* Estilos para las listas de selección múltiple */
     .stMultiSelect [role="button"],
     .stMultiSelect [role="button"]:hover,
     .stMultiSelect [role="button"]:focus {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        color: var(--primary-text) !important;
-        border: 2px solid var(--border-color) !important;
-        border-radius: 12px !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stMultiSelect [role="button"]:hover {
-        border-color: var(--accent-color) !important;
-        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+        border-color: #4CAF50 !important;
     }
     
     .stMultiSelect [role="option"] {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        color: var(--primary-text) !important;
-        border-radius: 8px !important;
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
     }
     
     .stMultiSelect [role="option"]:hover {
-        background: linear-gradient(135deg, var(--accent-bg), var(--accent-color)) !important;
-        transform: translateX(5px) !important;
-        transition: all 0.3s ease !important;
+        background-color: #2d3748 !important;
     }
     
-    /* Alertas modernas */
+    /* Mejorar la visibilidad de los mensajes */
     .stAlert {
-        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(51, 65, 85, 0.95)) !important;
-        border-left: 4px solid var(--accent-color) !important;
-        border-radius: 16px !important;
-        padding: 1.5rem !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
-        backdrop-filter: blur(10px) !important;
-        border: 1px solid rgba(255,255,255,0.1) !important;
+        background-color: rgba(30, 41, 59, 0.9) !important;
+        border-left: 4px solid #4CAF50 !important;
+        border-radius: 8px !important;
+        padding: 1rem !important;
     }
     
-    /* Gráficos modernos */
+    /* Ajustes para gráficos */
     .stPlotlyChart {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border-radius: 16px !important;
-        padding: 1.5rem !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
-        border: 1px solid rgba(255,255,255,0.1) !important;
+        background-color: #1e293b !important;
+        border-radius: 8px;
+        padding: 1rem;
     }
     
-    /* Botones modernos */
-    .stButton > button {
-        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
+    /* Asegurar que los checkboxes y radio buttons sean visibles */
+    .stCheckbox > label,
+    .stRadio > label,
+    .stCheckbox > div,
+    .stRadio > div {
+        color: #f8f9fa !important;
+    }
+    
+    /* Estilos para las pestañas activas */
+    [data-baseweb="tab"] {
+        color: #f8f9fa !important;
+    }
+    
+    [data-baseweb="tab"]:hover {
+        background-color: #2d3748 !important;
+    }
+    
+    /* Estilos para los mensajes de error */
+    .stAlert.stAlert-warning {
+        border-left: 4px solid #ff9800 !important;
+    }
+    
+    .stAlert.stAlert-error {
+        border-left: 4px solid #f44336 !important;
+    }
+    
+    .stAlert.stAlert-success {
+        border-left: 4px solid #4CAF50 !important;
+    }
+    
+    .stAlert.stAlert-info {
+        border-left: 4px solid #2196F3 !important;
+    }
+    
+    /* Mejora de tarjetas y métricas */
+    .stMetric, 
+    .stMetric > div > div,
+    .stMetric > div > div > div {
+        background-color: #1e293b !important;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        border-left: 4px solid #4CAF50;
+        color: #f8f9fa !important;
+    }
+    
+    .stMetric > div > div {
+        color: #94a3b8 !important;
+    }
+    
+    /* Mejora de pestañas */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 5px;
+        background-color: #0f172a;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        padding: 0 20px;
+        background-color: #1e293b;
+        border-radius: 8px !important;
+        font-weight: 500;
+        color: #e2e8f0;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #4CAF50 !important;
         color: white !important;
-        border: none !important;
-        border-radius: 12px !important;
-        padding: 0.75rem 1.5rem !important;
-        font-weight: 600 !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #334155 !important;
+    }
+    
+    /* Mejora de inputs */
+    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox, .stTextArea {
+        background-color: #1e293b;
+        border-radius: 8px;
+        color: #e2e8f0;
+        border: 1px solid #334155;
+    }
+    
+    /* Estilos para las etiquetas de los inputs */
+    .stTextInput > label, .stNumberInput > label, 
+    .stDateInput > label, .stSelectbox > label,
+    .stTextArea > label {
+        color: #94a3b8 !important;
+    }
+    
+    /* Botones */
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 500;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        transition: all 0.2s;
     }
     
     .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4) !important;
+        background-color: #45a049;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
     }
     
-    /* Inputs modernos */
-    .stTextInput > div > div > input,
-    .stNumberInput > div > div > input,
-    .stDateInput > div > div > input {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border: 2px solid var(--border-color) !important;
-        border-radius: 12px !important;
-        color: var(--primary-text) !important;
-        padding: 0.75rem 1rem !important;
-        transition: all 0.3s ease !important;
+    /* Barra lateral */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f172a, #0c1424);
+        color: white;
     }
     
-    .stTextInput > div > div > input:focus,
-    .stNumberInput > div > div > input:focus,
-    .stDateInput > div > div > input:focus {
-        border-color: var(--accent-color) !important;
-        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
-        outline: none !important;
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stTextInput label,
+    [data-testid="stSidebar"] .stNumberInput label {
+        color: #94a3b8 !important;
     }
     
-    /* Sliders modernos */
-    .stSlider > div > div > div > div {
-        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
+    /* Títulos */
+    h1, h2, h3, h4, h5, h6 {
+        color: #4CAF50;
+        font-weight: 600;
     }
     
-    /* Tabs modernos */
-    .stTabs > div > div > div > div > div > div {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border-radius: 12px !important;
-        padding: 0.5rem !important;
+    /* Tablas */
+    .dataframe {
+        background-color: #1e293b !important;
+        color: #e2e8f0 !important;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
     }
     
-    .stTabs > div > div > div > div > div > div > div {
-        background: transparent !important;
-        color: var(--secondary-text) !important;
-        border-radius: 8px !important;
-        transition: all 0.3s ease !important;
+    .dataframe th {
+        background-color: #334155 !important;
+        color: #e2e8f0 !important;
     }
     
-    .stTabs > div > div > div > div > div > div > div[aria-selected="true"] {
-        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
-        color: white !important;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+    .dataframe tr:nth-child(even) {
+        background-color: #1a2233 !important;
     }
     
-    /* Expanders modernos */
-    .streamlit-expanderHeader {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border-radius: 12px !important;
-        border: 1px solid var(--border-color) !important;
-        color: var(--primary-text) !important;
-        font-weight: 600 !important;
-        transition: all 0.3s ease !important;
+    .dataframe tr:hover {
+        background-color: #2c3a58 !important;
     }
     
-    .streamlit-expanderHeader:hover {
-        border-color: var(--accent-color) !important;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;
-    }
-    
-    /* Dataframes modernos */
-    .stDataFrame {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border-radius: 16px !important;
-        border: 1px solid var(--border-color) !important;
-        overflow: hidden !important;
-    }
-    
-    /* Métricas modernas */
-    .stMetric {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border-radius: 16px !important;
-        padding: 1.5rem !important;
-        border: 1px solid var(--border-color) !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
-    }
-    
-    /* Sidebar moderno */
-    .css-1d391kg {
-        background: linear-gradient(180deg, var(--primary-bg) 0%, #1e1b4b 100%) !important;
-        border-right: 1px solid var(--border-color) !important;
+    /* Progress bar */
+    .stProgress > div > div > div {
+        background-color: #4CAF50;
     }
     
     /* Scrollbar personalizada */
     ::-webkit-scrollbar {
         width: 8px;
+        height: 8px;
     }
     
     ::-webkit-scrollbar-track {
-        background: var(--secondary-bg);
-        border-radius: 4px;
+        background: #0f172a;
     }
     
     ::-webkit-scrollbar-thumb {
-        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
+        background: #4CAF50;
         border-radius: 4px;
     }
     
     ::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(135deg, var(--accent-hover), var(--accent-color));
+        background: #45a049;
     }
     
-    /* Animaciones y transiciones */
-    * {
+    /* Efectos hover para tarjetas */
+    div[data-testid="stExpander"] {
+        background-color: #1e293b;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
         transition: all 0.3s ease;
     }
     
-    /* Efectos de hover para elementos interactivos */
-    .stButton > button:hover,
-    div[data-baseweb="select"]:hover,
-    .stMultiSelect [role="button"]:hover {
+    div[data-testid="stExpander"]:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
-    }
-    
-    /* Cards modernos */
-    .card {
-        background: linear-gradient(135deg, var(--secondary-bg), var(--accent-bg)) !important;
-        border-radius: 16px !important;
-        padding: 1.5rem !important;
-        border: 1px solid var(--border-color) !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
-        backdrop-filter: blur(10px) !important;
-        margin: 1rem 0 !important;
-    }
-    
-    /* Badges modernos */
-    .badge {
-        background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)) !important;
-        color: white !important;
-        padding: 0.25rem 0.75rem !important;
-        border-radius: 20px !important;
-        font-size: 0.875rem !important;
-        font-weight: 500 !important;
-        display: inline-block !important;
-        margin: 0.25rem !important;
-    }
-    
-    /* Loading spinners modernos */
-    .stSpinner > div {
-        border: 3px solid var(--border-color) !important;
-        border-top: 3px solid var(--accent-color) !important;
-        border-radius: 50% !important;
-        animation: spin 1s linear infinite !important;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -421,93 +390,6 @@ def obtener_encabezado_autorizacion(token_portador):
         'Authorization': f'Bearer {token_portador}',
         'Content-Type': 'application/json'
     }
-
-# Funciones de utilidad para UI moderna
-def create_modern_card(title, content, icon="📊", color="primary"):
-    """Crea una tarjeta moderna con diseño mejorado"""
-    colors = {
-        "primary": "linear-gradient(135deg, #10b981, #059669)",
-        "secondary": "linear-gradient(135deg, #3b82f6, #2563eb)",
-        "success": "linear-gradient(135deg, #10b981, #059669)",
-        "warning": "linear-gradient(135deg, #f59e0b, #d97706)",
-        "error": "linear-gradient(135deg, #ef4444, #dc2626)",
-        "info": "linear-gradient(135deg, #06b6d4, #0891b2)"
-    }
-    
-    st.markdown(f"""
-    <div class="card" style="border-left: 4px solid {colors[color].split(',')[0].split('(')[1]};">
-        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
-            <span style="font-size: 2rem; margin-right: 0.75rem;">{icon}</span>
-            <h3 style="margin: 0; background: {colors[color]}; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{title}</h3>
-        </div>
-        <div style="color: #cbd5e1; line-height: 1.6;">
-            {content}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-def create_metric_card(label, value, delta=None, icon="📈", color="primary"):
-    """Crea una tarjeta de métrica moderna"""
-    colors = {
-        "primary": "#10b981",
-        "secondary": "#3b82f6",
-        "success": "#10b981",
-        "warning": "#f59e0b",
-        "error": "#ef4444",
-        "info": "#06b6d4"
-    }
-    
-    delta_html = ""
-    if delta is not None:
-        delta_color = "#10b981" if delta >= 0 else "#ef4444"
-        delta_icon = "↗️" if delta >= 0 else "↘️"
-        delta_html = f'<div style="color: {delta_color}; font-size: 0.875rem; margin-top: 0.5rem;">{delta_icon} {delta:+.1f}%</div>'
-    
-    st.markdown(f"""
-    <div class="card" style="text-align: center; padding: 1.5rem;">
-        <div style="font-size: 2rem; margin-bottom: 0.5rem;">{icon}</div>
-        <div style="font-size: 1.5rem; font-weight: 700; color: {colors[color]}; margin-bottom: 0.5rem;">{value}</div>
-        <div style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 0.5rem;">{label}</div>
-        {delta_html}
-    </div>
-    """, unsafe_allow_html=True)
-
-def create_info_badge(text, color="primary"):
-    """Crea un badge informativo moderno"""
-    colors = {
-        "primary": "linear-gradient(135deg, #10b981, #059669)",
-        "secondary": "linear-gradient(135deg, #3b82f6, #2563eb)",
-        "success": "linear-gradient(135deg, #10b981, #059669)",
-        "warning": "linear-gradient(135deg, #f59e0b, #d97706)",
-        "error": "linear-gradient(135deg, #ef4444, #dc2626)",
-        "info": "linear-gradient(135deg, #06b6d4, #0891b2)"
-    }
-    
-    st.markdown(f"""
-    <span class="badge" style="background: {colors[color]} !important;">{text}</span>
-    """, unsafe_allow_html=True)
-
-def create_section_header(title, subtitle=None, icon="📊"):
-    """Crea un encabezado de sección moderno"""
-    subtitle_html = f'<p style="color: #94a3b8; margin-top: 0.5rem; font-size: 1rem;">{subtitle}</p>' if subtitle else ""
-    
-    st.markdown(f"""
-    <div style="margin: 2rem 0 1.5rem 0;">
-        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
-            <span style="font-size: 2rem; margin-right: 0.75rem;">{icon}</span>
-            <h2 style="margin: 0; background: linear-gradient(135deg, #10b981, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{title}</h2>
-        </div>
-        {subtitle_html}
-    </div>
-    """, unsafe_allow_html=True)
-
-def create_navigation_tabs(tab_names, icons=None):
-    """Crea pestañas de navegación modernas"""
-    if icons is None:
-        icons = ["📊"] * len(tab_names)
-    
-    tab_labels = [f"{icon} {name}" for icon, name in zip(icons, tab_names)]
-    return st.tabs(tab_labels)
 
 def obtener_tokens(usuario, contraseña):
     """
@@ -934,73 +816,20 @@ def obtener_estado_cuenta_eeuu(token_portador):
                 # Filtrar solo las cuentas de EEUU
                 cuentas_eeuu = []
                 for cuenta in data.get('cuentas', []):
-                    # Identificar cuentas de EEUU por múltiples criterios
+                    # Identificar cuentas de EEUU por el nombre o número
+                    nombre_cuenta = cuenta.get('descripcion', '').lower()
                     numero_cuenta = str(cuenta.get('numero', ''))
-                    moneda = cuenta.get('moneda', '').lower()
-                    tipo = cuenta.get('tipo', '').lower()
                     
                     # Criterios para identificar cuentas de EEUU
-                    es_cuenta_eeuu = any([
-                        # Por número de cuenta (formato específico de IOL)
+                    if any([
+                        'eeuu' in nombre_cuenta,
+                        'estados unidos' in nombre_cuenta,
+                        'united states' in nombre_cuenta,
+                        'us' in nombre_cuenta,
                         '-eeuu' in numero_cuenta,
-                        'eeuu' in numero_cuenta,
-                        'us' in numero_cuenta,
-                        
-                        # Por moneda (dólar estadounidense)
-                        'dolar estadounidense' in moneda,
-                        'usd' in moneda,
-                        'dollar' in moneda,
-                        
-                        # Por tipo de cuenta
-                        'inversion_estados_unidos' in tipo,
-                        'inversion_eeuu' in tipo,
-                        'estados_unidos' in tipo,
-                        
-                        # Por descripción si existe
-                        'eeuu' in cuenta.get('descripcion', '').lower(),
-                        'estados unidos' in cuenta.get('descripcion', '').lower(),
-                        'united states' in cuenta.get('descripcion', '').lower()
-                    ])
-                    
-                    if es_cuenta_eeuu:
+                        'dolar estadounidense' in cuenta.get('moneda', '').lower()
+                    ]):
                         cuentas_eeuu.append(cuenta)
-                        st.info(f"🔍 Cuenta EEUU identificada: {numero_cuenta} - {moneda}")
-                
-                # Si no se encontraron cuentas EEUU, intentar obtener información del portafolio
-                if not cuentas_eeuu:
-                    st.info("🔍 Intentando obtener información adicional del portafolio EEUU...")
-                    
-                    # Obtener portafolio EEUU para verificar si hay activos
-                    try:
-                        url_portafolio = 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
-                        respuesta_portafolio = requests.get(url_portafolio, headers=encabezados, timeout=30)
-                        
-                        if respuesta_portafolio.status_code == 200:
-                            portafolio_data = respuesta_portafolio.json()
-                            if portafolio_data.get('activos'):
-                                st.success(f"✅ Portafolio EEUU encontrado con {len(portafolio_data['activos'])} activos")
-                                
-                                # Crear cuenta EEUU sintética basada en el portafolio
-                                cuenta_sintetica = {
-                                    'numero': 'EEUU-SINTETICA',
-                                    'tipo': 'inversion_estados_unidos',
-                                    'moneda': 'dolar_estadounidense',
-                                    'disponible': 0,
-                                    'comprometido': 0,
-                                    'saldo': 0,
-                                    'titulosValorizados': sum(activo.get('valorizado', 0) for activo in portafolio_data['activos']),
-                                    'total': sum(activo.get('valorizado', 0) for activo in portafolio_data['activos']),
-                                    'descripcion': 'Cuenta EEUU (sintética basada en portafolio)'
-                                }
-                                
-                                cuentas_eeuu.append(cuenta_sintetica)
-                                st.info("✅ Cuenta EEUU sintética creada basada en el portafolio")
-                            else:
-                                st.warning("⚠️ Portafolio EEUU vacío")
-                        else:
-                            st.warning(f"⚠️ No se pudo obtener portafolio EEUU: {respuesta_portafolio.status_code}")
-                    except Exception as e:
-                        st.warning(f"⚠️ Error obteniendo portafolio EEUU: {str(e)}")
                 
                 # Crear respuesta filtrada solo para EEUU
                 data_eeuu = {
@@ -1013,15 +842,7 @@ def obtener_estado_cuenta_eeuu(token_portador):
                 if cuentas_eeuu:
                     st.success(f"✅ Estado de cuenta EEUU filtrado: {len(cuentas_eeuu)} cuentas de EEUU")
                 else:
-                    st.warning("⚠️ No se encontraron cuentas específicas de EEUU")
-                    
-                    # Debug: mostrar todas las cuentas para identificar el problema
-                    st.markdown("#### 🔍 Debug: Todas las cuentas disponibles")
-                    st.info("Mostrando todas las cuentas para identificar por qué no se detectan las de EEUU")
-                    
-                    for i, cuenta in enumerate(data.get('cuentas', [])):
-                        with st.expander(f"Cuenta {i+1}: {cuenta.get('numero', 'N/A')}", expanded=False):
-                            st.json(cuenta)
+                    st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
                 
                 return data_eeuu
                 
@@ -2511,8 +2332,7 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
         
         usar_tasa_manual = st.checkbox(
             "Usar Tasa Libre de Riesgo Manual",
-            help="Marcar para usar tasa personalizada en lugar de la del benchmark",
-            key="usar_tasa_manual_avanzada"
+            help="Marcar para usar tasa personalizada en lugar de la del benchmark"
         )
     
     # Configuración de estrategias
@@ -2537,8 +2357,8 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
         )
     
     with col3:
-        mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="mostrar_histogramas_avanzada")
-        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True, key="mostrar_frontera_avanzada")
+        mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
+        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True)
     
     # Botón de ejecución
     ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Avanzada", type="primary")
@@ -3711,7 +3531,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador, pais="general"):
+def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -3975,8 +3795,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="general"):
             mostrar_histograma_retornos = st.checkbox(
                 "📈 Mostrar Histograma de Retornos por Activo", 
                 value=False,
-                help="Muestra histogramas de retornos históricos para cada activo del portafolio",
-                key=f"mostrar_histograma_retornos_analisis_{pais}"
+                help="Muestra histogramas de retornos históricos para cada activo del portafolio"
             )
             
             col1, col2 = st.columns(2)
@@ -4038,8 +3857,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, pais="general"):
                 tipo_grafico = st.selectbox(
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
-                    help="Seleccione el tipo de visualización para los valores de activos",
-                    key=f"tipo_grafico_distribucion_{pais}"
+                    help="Seleccione el tipo de visualización para los valores de activos"
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
@@ -5014,162 +4832,6 @@ class PortfolioManager:
             st.error(f"❌ Error en cálculo de métricas del portafolio: {str(e)}")
             return {'return': 0, 'volatility': 0, 'sharpe': 0}
 
-def mostrar_menu_optimizacion_separado(portafolio, token_acceso, fecha_desde, fecha_hasta, tipo_portafolio):
-    """
-    Menú de optimización para portafolios separados (Argentina o EEUU)
-    """
-    pais_nombre = "Argentina" if tipo_portafolio == "argentina" else "EEUU"
-    bandera = "🇦🇷" if tipo_portafolio == "argentina" else "🇺🇸"
-    
-    st.markdown(f"### {bandera} Optimización de Portafolio {pais_nombre}")
-    
-    # Información del portafolio
-    activos = portafolio.get('activos', [])
-    total_portafolio = sum(activo.get('valorMercado', 0) for activo in activos)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Activos", len(activos))
-    with col2:
-        st.metric("Valor Total", f"AR$ {total_portafolio:,.2f}")
-    with col3:
-        st.metric("Tipo", "Separado")
-    
-    # Selección de categoría principal
-    categoria = st.selectbox(
-        "Seleccione la categoría:",
-        options=[
-            "🔄 Rebalanceo",
-            "📈 Optimizaciones"
-        ],
-        help="Elija la categoría de análisis que desea realizar"
-    )
-    
-    if categoria == "🔄 Rebalanceo":
-        # Submenú de Rebalanceo
-        tipo_rebalanceo = st.selectbox(
-            "Seleccione el tipo de rebalanceo:",
-            options=[
-                "🔄 Rebalanceo con Composición Actual",
-                "🎲 Rebalanceo con Símbolos Aleatorios",
-                "📊 Optimización Básica",
-                "📈 Frontera Eficiente"
-            ],
-            help="Elija el tipo de rebalanceo que desea realizar"
-        )
-        
-        if tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
-            mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "🎲 Rebalanceo con Símbolos Aleatorios":
-            mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "📊 Optimización Básica":
-            mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "📈 Frontera Eficiente":
-            mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta)
-    
-    elif categoria == "📈 Optimizaciones":
-        # Submenú de Optimizaciones
-        tipo_optimizacion = st.selectbox(
-            "Seleccione el tipo de optimización:",
-            options=[
-                "🎲 Optimización Aleatoria",
-                "🚀 Optimización Avanzada",
-                "🛡️ Análisis de Cobertura"
-            ],
-            help="Elija el tipo de optimización que desea realizar"
-        )
-        
-        if tipo_optimizacion == "🎲 Optimización Aleatoria":
-            mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_optimizacion == "🚀 Optimización Avanzada":
-            mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_optimizacion == "🛡️ Análisis de Cobertura":
-            mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
-
-def mostrar_menu_optimizacion_consolidado(portafolio, token_acceso, fecha_desde, fecha_hasta):
-    """
-    Menú de optimización para portafolio consolidado (Argentina + EEUU)
-    """
-    st.markdown("### 🌍 Optimización de Portafolio Consolidado")
-    
-    # Información del portafolio consolidado
-    activos = portafolio.get('activos', [])
-    total_portafolio = sum(activo.get('valorMercado', 0) for activo in activos)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Activos Totales", len(activos))
-    with col2:
-        st.metric("Valor Total", f"AR$ {total_portafolio:,.2f}")
-    with col3:
-        st.metric("Tipo", "Consolidado")
-    
-    # Selección de categoría principal
-    categoria = st.selectbox(
-        "Seleccione la categoría:",
-        options=[
-            "🔄 Rebalanceo",
-            "📈 Optimizaciones",
-            "🌍 Análisis Global"
-        ],
-        help="Elija la categoría de análisis que desea realizar"
-    )
-    
-    if categoria == "🔄 Rebalanceo":
-        # Submenú de Rebalanceo
-        tipo_rebalanceo = st.selectbox(
-            "Seleccione el tipo de rebalanceo:",
-            options=[
-                "🔄 Rebalanceo con Composición Actual",
-                "🎲 Rebalanceo con Símbolos Aleatorios",
-                "📊 Optimización Básica",
-                "📈 Frontera Eficiente"
-            ],
-            help="Elija el tipo de rebalanceo que desea realizar"
-        )
-        
-        if tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
-            mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "🎲 Rebalanceo con Símbolos Aleatorios":
-            mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "📊 Optimización Básica":
-            mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_rebalanceo == "📈 Frontera Eficiente":
-            mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta)
-    
-    elif categoria == "📈 Optimizaciones":
-        # Submenú de Optimizaciones
-        tipo_optimizacion = st.selectbox(
-            "Seleccione el tipo de optimización:",
-            options=[
-                "🎲 Optimización Aleatoria",
-                "🚀 Optimización Avanzada",
-                "🛡️ Análisis de Cobertura"
-            ],
-            help="Elija el tipo de optimización que desea realizar"
-        )
-        
-        if tipo_optimizacion == "🎲 Optimización Aleatoria":
-            mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_optimizacion == "🚀 Optimización Avanzada":
-            mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta)
-        elif tipo_optimizacion == "🛡️ Análisis de Cobertura":
-            mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
-    
-    elif categoria == "🌍 Análisis Global":
-        st.markdown("#### 🌍 Análisis Global del Portafolio Consolidado")
-        st.info("Análisis de correlación y diversificación entre mercados")
-        
-        # Análisis de correlación entre Argentina y EEUU
-        if len(activos) > 1:
-            st.success("✅ Análisis de correlación disponible")
-            if st.button("📊 Calcular Correlación", key="calcular_correlacion"):
-                st.info("🔄 Calculando correlación entre mercados...")
-                # Aquí iría la lógica de cálculo de correlación
-                st.success("✅ Correlación calculada")
-        else:
-            st.warning("⚠️ Se necesitan al menos 2 activos para análisis de correlación")
-
 def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
     Menú unificado organizado en dos categorías: Rebalanceo y Optimizaciones
@@ -5319,8 +4981,7 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         usar_benchmark = st.checkbox(
             "Usar Benchmark como Tasa Libre de Riesgo",
             value=True,
-            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones",
-            key="usar_benchmark_tasa_libre_rebalanceo"
+            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones"
         )
     
     # Configuración de optimización
@@ -5349,7 +5010,7 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         )
     
     with col3:
-        mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True, key="mostrar_comparacion_rebalanceo")
+        mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
     
     # Botón de ejecución
     col1, col2 = st.columns(2)
@@ -5392,65 +5053,6 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
             except Exception as e:
                 st.error(f"❌ Error durante el rebalanceo: {str(e)}")
 
-def obtener_simbolos_mercado_eeuu():
-    """
-    Obtiene una lista de símbolos populares del mercado NYSE/NASDAQ
-    """
-    simbolos_nyse = [
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'BRK.A', 'JPM', 'JNJ',
-        'V', 'PG', 'UNH', 'HD', 'MA', 'DIS', 'PYPL', 'BAC', 'ADBE', 'CRM',
-        'NFLX', 'INTC', 'CMCSA', 'PFE', 'ABT', 'TMO', 'KO', 'PEP', 'AVGO', 'COST',
-        'MRK', 'WMT', 'TXN', 'QCOM', 'HON', 'DHR', 'ACN', 'LLY', 'VZ', 'BMY', 'RTX'
-    ]
-    
-    simbolos_nasdaq = [
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'ADBE', 'CRM', 'NFLX',
-        'INTC', 'PYPL', 'AVGO', 'QCOM', 'HON', 'ACN', 'LLY', 'VRTX', 'REGN', 'IDXX',
-        'KLAC', 'LRCX', 'SNPS', 'CDNS', 'MELI', 'JD', 'BIDU', 'NTES', 'PDD', 'TCOM',
-        'BABA', 'NIO', 'XPENG', 'LI', 'XPEV', 'JD', 'BIDU', 'NTES', 'PDD', 'TCOM'
-    ]
-    
-    return list(set(simbolos_nyse + simbolos_nasdaq))  # Eliminar duplicados
-
-def generar_simbolos_mercado_eeuu(num_simbolos, incluir_actuales, porcentaje_actuales, activos_actuales, simbolos_disponibles):
-    """
-    Genera símbolos aleatorios del mercado NYSE/NASDAQ para portafolio EEUU
-    """
-    import random
-    
-    simbolos_seleccionados = []
-    
-    # Si incluir actuales, agregar algunos símbolos del portafolio actual
-    if incluir_actuales and activos_actuales:
-        num_actuales = max(1, int(num_simbolos * porcentaje_actuales / 100))
-        simbolos_actuales = []
-        
-        for activo in activos_actuales:
-            titulo = activo.get('titulo', {})
-            simbolo = titulo.get('simbolo', '')
-            if simbolo and simbolo in simbolos_disponibles:
-                simbolos_actuales.append(simbolo)
-        
-        # Seleccionar símbolos actuales aleatoriamente
-        if simbolos_actuales:
-            num_a_incluir = min(num_actuales, len(simbolos_actuales))
-            simbolos_seleccionados.extend(random.sample(simbolos_actuales, num_a_incluir))
-    
-    # Completar con símbolos aleatorios del mercado
-    simbolos_restantes = [s for s in simbolos_disponibles if s not in simbolos_seleccionados]
-    num_restantes = num_simbolos - len(simbolos_seleccionados)
-    
-    if simbolos_restantes and num_restantes > 0:
-        simbolos_aleatorios = random.sample(simbolos_restantes, min(num_restantes, len(simbolos_restantes)))
-        simbolos_seleccionados.extend(simbolos_aleatorios)
-    
-    # Si no tenemos suficientes símbolos, duplicar algunos
-    while len(simbolos_seleccionados) < num_simbolos and simbolos_disponibles:
-        simbolos_adicionales = random.sample(simbolos_disponibles, min(num_simbolos - len(simbolos_seleccionados), len(simbolos_disponibles)))
-        simbolos_seleccionados.extend(simbolos_adicionales)
-    
-    return simbolos_seleccionados[:num_simbolos]
-
 def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
     Rebalanceo usando símbolos aleatorios pero manteniendo el mismo capital total
@@ -5458,18 +5060,13 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
     """
     st.markdown("#### 🎲 Rebalanceo con Símbolos Aleatorios")
     
-    # Detectar si es portafolio de EEUU
-    es_portafolio_eeuu = False
-    if hasattr(st.session_state, 'portafolio_seleccionado'):
-        es_portafolio_eeuu = st.session_state.portafolio_seleccionado == "eeuu"
-    
     activos = portafolio.get('activos', [])
     if not activos:
         st.warning("No hay activos en el portafolio para calcular el capital total")
         return
     
     # Calcular capital total actual
-    capital_total_actual = sum(activo.get('valorMercado', 0) for activo in activos)
+    capital_total_actual = sum(activo.get('valor', 0) for activo in activos)
     
     if capital_total_actual <= 0:
         st.warning("No se puede calcular el capital total del portafolio")
@@ -5481,8 +5078,7 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
     incluir_saldo_disponible = st.checkbox(
         "💳 Incluir saldo disponible del estado de cuenta",
         value=False,
-        help="Si está marcado, se incluirá el saldo disponible en el capital total",
-        key="incluir_saldo_disponible_rebalanceo_aleatorio"
+        help="Si está marcado, se incluirá el saldo disponible en el capital total"
     )
     
     capital_disponible = 0
@@ -5522,8 +5118,7 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
         incluir_actuales = st.checkbox(
             "🔄 Incluir símbolos actuales",
             value=True,
-            help="Incluir algunos símbolos del portafolio actual en la selección aleatoria",
-            key="incluir_actuales_rebalanceo_aleatorio"
+            help="Incluir algunos símbolos del portafolio actual en la selección aleatoria"
         )
     
     with col3:
@@ -5532,58 +5127,6 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
             min_value=0, max_value=100, value=30,
             help="Porcentaje de símbolos actuales a incluir en la selección"
         )
-    
-    # Configuración específica para portafolio EEUU
-    if es_portafolio_eeuu:
-        st.markdown("#### 🇺🇸 Configuración Específica para EEUU")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            mercado_seleccionado = st.selectbox(
-                "Mercado:",
-                options=['NYSE', 'NASDAQ', 'Ambos'],
-                help="Seleccione el mercado de donde obtener símbolos aleatorios",
-                key="mercado_eeuu_rebalanceo"
-            )
-        
-        with col2:
-            incluir_etfs = st.checkbox(
-                "📊 Incluir ETFs",
-                value=True,
-                help="Incluir ETFs populares en la selección aleatoria",
-                key="incluir_etfs_eeuu"
-            )
-        
-        # Mostrar símbolos disponibles del mercado seleccionado
-        simbolos_disponibles = obtener_simbolos_mercado_eeuu()
-        
-        if mercado_seleccionado == 'NYSE':
-            simbolos_filtrados = [s for s in simbolos_disponibles if s in [
-                'AAPL', 'MSFT', 'GOOGL', 'JPM', 'JNJ', 'V', 'PG', 'UNH', 'HD', 'MA',
-                'DIS', 'BAC', 'PFE', 'ABT', 'TMO', 'KO', 'PEP', 'MRK', 'WMT', 'TXN'
-            ]]
-        elif mercado_seleccionado == 'NASDAQ':
-            simbolos_filtrados = [s for s in simbolos_disponibles if s in [
-                'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'ADBE', 'CRM',
-                'NFLX', 'INTC', 'PYPL', 'AVGO', 'QCOM', 'HON', 'ACN', 'LLY', 'VRTX'
-            ]]
-        else:  # Ambos
-            simbolos_filtrados = simbolos_disponibles
-        
-        if incluir_etfs:
-            etfs_populares = ['SPY', 'QQQ', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'BND', 'GLD', 'SLV']
-            simbolos_filtrados.extend(etfs_populares)
-        
-        st.info(f"📈 Símbolos disponibles: {len(simbolos_filtrados)} (incluyendo {mercado_seleccionado})")
-        
-        # Mostrar algunos símbolos de ejemplo
-        if simbolos_filtrados:
-            st.markdown("**Ejemplos de símbolos disponibles:**")
-            col1, col2, col3, col4 = st.columns(4)
-            for i, simbolo in enumerate(simbolos_filtrados[:12]):
-                col = [col1, col2, col3, col4][i % 4]
-                col.code(simbolo)
     
     # Configuración de optimización
     st.markdown("#### ⚙️ Configuración de Optimización")
@@ -5633,9 +5176,9 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
                 help="Para cálculo del ratio de Sharpe"
             )
         with col2:
-            mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True, key="mostrar_comparacion_rebalanceo_aleatorio")
+            mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
         with col3:
-            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="mostrar_metricas_rebalanceo_aleatorio")
+            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
     
     # Botón de ejecución
     col1, col2, col3 = st.columns(3)
@@ -5647,18 +5190,10 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
         ejecutar_completo = st.button("🎯 Rebalanceo Completo")
     
     if generar_simbolos or ejecutar_rebalanceo or ejecutar_completo:
-        # Generar símbolos aleatorios según el tipo de portafolio
-        if es_portafolio_eeuu:
-            # Para portafolio EEUU, usar símbolos del mercado NYSE/NASDAQ
-            simbolos_aleatorios = generar_simbolos_mercado_eeuu(
-                num_simbolos, incluir_actuales, porcentaje_actuales, 
-                activos, simbolos_filtrados
-            )
-        else:
-            # Para portafolio Argentina, usar símbolos existentes
-            simbolos_aleatorios = generar_simbolos_aleatorios(
-                num_simbolos, incluir_actuales, porcentaje_actuales, activos
-            )
+        # Generar símbolos aleatorios
+        simbolos_aleatorios = generar_simbolos_aleatorios(
+            num_simbolos, incluir_actuales, porcentaje_actuales, activos
+        )
         
         if not simbolos_aleatorios:
             st.error("❌ Error generando símbolos aleatorios")
@@ -5715,136 +5250,28 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
                         strategy = 'min-variance-l2'
                         target = None
                     elif modo_optimizacion == 'sharpe_ratio':
-                        strategy = 'max_sharpe'
+                        strategy = 'sharpe_ratio'
                         target = None
-                    
-                    # Aplicar restricciones de pesos
-                    if restriccion_pesos != 'sin_restriccion':
-                        max_weight = float(restriccion_pesos.split('_')[1]) / 100
-                        portfolio_manager.set_max_weight(max_weight)
+                    else:
+                        strategy = 'markowitz'
+                        target = target_return
                     
                     # Ejecutar optimización
-                    try:
-                        if strategy == 'markowitz' and target is not None:
-                            portfolio_manager.optimize(strategy=strategy, target_return=target)
-                        else:
-                            portfolio_manager.optimize(strategy=strategy)
-                        
-                        # Obtener resultados
-                        pesos_optimizados = portfolio_manager.get_weights()
-                        retorno_esperado = portfolio_manager.get_return()
-                        volatilidad = portfolio_manager.get_volatility()
-                        sharpe_ratio = portfolio_manager.get_sharpe_ratio(tasa_libre_riesgo)
+                    resultado_optimizacion = portfolio_manager.compute_portfolio(strategy=strategy, target_return=target)
+                    
+                    if resultado_optimizacion:
+                        st.success("✅ Optimización completada")
                         
                         # Mostrar resultados
-                        st.markdown("#### 📊 Resultados de la Optimización")
-                        
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Retorno Esperado", f"{retorno_esperado:.2%}")
-                        with col2:
-                            st.metric("Volatilidad", f"{volatilidad:.2%}")
-                        with col3:
-                            st.metric("Ratio de Sharpe", f"{sharpe_ratio:.2f}")
-                        with col4:
-                            st.metric("Capital Total", f"${capital_total:,.2f}")
-                        
-                        # Mostrar distribución de pesos
-                        st.markdown("#### 📈 Distribución de Pesos Optimizados")
-                        
-                        # Crear DataFrame con pesos
-                        df_pesos = pd.DataFrame({
-                            'Símbolo': simbolos_aleatorios,
-                            'Peso (%)': [peso * 100 for peso in pesos_optimizados],
-                            'Valor ($)': [peso * capital_total for peso in pesos_optimizados]
-                        })
-                        
-                        # Ordenar por peso
-                        df_pesos = df_pesos.sort_values('Peso (%)', ascending=False)
-                        
-                        # Mostrar tabla
-                        st.dataframe(df_pesos, use_container_width=True)
-                        
-                        # Gráfico de pesos
-                        fig_pesos = go.Figure(data=[go.Bar(
-                            x=df_pesos['Símbolo'],
-                            y=df_pesos['Peso (%)'],
-                            text=[f'{peso:.1f}%' for peso in df_pesos['Peso (%)']],
-                            textposition='auto'
-                        )])
-                        fig_pesos.update_layout(
-                            title="Distribución de Pesos del Portafolio Optimizado",
-                            xaxis_title="Símbolos",
-                            yaxis_title="Peso (%)",
-                            showlegend=False
+                        mostrar_resultados_rebalanceo_aleatorio(
+                            resultado_optimizacion, simbolos_aleatorios, capital_total,
+                            activos, mostrar_comparacion, mostrar_metricas
                         )
-                        st.plotly_chart(fig_pesos, use_container_width=True)
-                        
-                        # Comparación con portafolio actual si está habilitado
-                        if mostrar_comparacion and activos:
-                            st.markdown("#### 🔄 Comparación con Portafolio Actual")
-                            
-                            # Calcular métricas del portafolio actual
-                            retorno_actual = calcular_retorno_portafolio(activos, fecha_desde, fecha_hasta)
-                            volatilidad_actual = calcular_volatilidad_portafolio(activos, fecha_desde, fecha_hasta)
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.markdown("**Portafolio Actual**")
-                                st.metric("Retorno", f"{retorno_actual:.2%}")
-                                st.metric("Volatilidad", f"{volatilidad_actual:.2%}")
-                            
-                            with col2:
-                                st.markdown("**Portafolio Optimizado**")
-                                st.metric("Retorno", f"{retorno_esperado:.2%}")
-                                st.metric("Volatilidad", f"{volatilidad:.2%}")
-                            
-                            # Gráfico de comparación
-                            fig_comparacion = go.Figure()
-                            fig_comparacion.add_trace(go.Bar(
-                                name='Portafolio Actual',
-                                x=['Retorno', 'Volatilidad'],
-                                y=[retorno_actual * 100, volatilidad_actual * 100],
-                                marker_color='lightblue'
-                            ))
-                            fig_comparacion.add_trace(go.Bar(
-                                name='Portafolio Optimizado',
-                                x=['Retorno', 'Volatilidad'],
-                                y=[retorno_esperado * 100, volatilidad * 100],
-                                marker_color='lightgreen'
-                            ))
-                            fig_comparacion.update_layout(
-                                title="Comparación: Actual vs Optimizado",
-                                yaxis_title="Porcentaje (%)",
-                                barmode='group'
-                            )
-                            st.plotly_chart(fig_comparacion, use_container_width=True)
-                        
-                        # Métricas detalladas si está habilitado
-                        if mostrar_metricas:
-                            st.markdown("#### 📊 Métricas Detalladas")
-                            
-                            # Calcular métricas adicionales
-                            var_95 = portfolio_manager.get_value_at_risk(0.05)
-                            max_drawdown = portfolio_manager.get_max_drawdown()
-                            
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("VaR (95%)", f"{var_95:.2%}")
-                            with col2:
-                                st.metric("Máximo Drawdown", f"{max_drawdown:.2%}")
-                            with col3:
-                                st.metric("Diversificación", f"{len(simbolos_aleatorios)} activos")
-                        
-                        st.success("✅ Rebalanceo aleatorio completado exitosamente!")
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error durante la optimización: {str(e)}")
-                        st.info("💡 Intente ajustar los parámetros o usar menos símbolos")
+                    else:
+                        st.error("❌ Error en la optimización")
                 
                 except Exception as e:
-                    st.error(f"❌ Error durante el rebalanceo: {str(e)}")
-                    st.info("💡 Verifique que los símbolos sean válidos y que haya datos históricos disponibles")
+                    st.error(f"❌ Error en el proceso de rebalanceo: {str(e)}")
 
 def generar_simbolos_aleatorios(num_simbolos, incluir_actuales, porcentaje_actuales, activos):
     """
@@ -5917,44 +5344,6 @@ def categorizar_simbolos(simbolos):
     """
     Categoriza los símbolos por tipo de activo
     """
-    categorias = {
-        'Acciones': 0,
-        'ETFs': 0,
-        'Bonos': 0,
-        'Otros': 0
-    }
-    
-    for simbolo in simbolos:
-        if simbolo in ['SPY', 'QQQ', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'BND', 'GLD', 'SLV']:
-            categorias['ETFs'] += 1
-        elif any(bono in simbolo for bono in ['GD', 'AL', 'BONAR']):
-            categorias['Bonos'] += 1
-        elif len(simbolo) <= 5 and simbolo.isalpha():
-            categorias['Acciones'] += 1
-        else:
-            categorias['Otros'] += 1
-    
-    return {k: v for k, v in categorias.items() if v > 0}
-
-def calcular_retorno_portafolio(activos, fecha_desde, fecha_hasta):
-    """
-    Calcula el retorno del portafolio actual
-    """
-    try:
-        # Implementación simplificada - en producción usar datos reales
-        return 0.08  # 8% anual como ejemplo
-    except:
-        return 0.0
-
-def calcular_volatilidad_portafolio(activos, fecha_desde, fecha_hasta):
-    """
-    Calcula la volatilidad del portafolio actual
-    """
-    try:
-        # Implementación simplificada - en producción usar datos reales
-        return 0.15  # 15% anual como ejemplo
-    except:
-        return 0.0
     try:
         categorias = {
             'Acciones Argentinas': 0,
@@ -6227,8 +5616,7 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
         usar_portafolio_actual = st.checkbox(
             "🔄 Usar portafolio actual como benchmark",
             value=False,
-            help="Si está marcado, se usará el portafolio actual como benchmark",
-            key="usar_portafolio_actual_optimizacion_aleatoria"
+            help="Si está marcado, se usará el portafolio actual como benchmark"
         )
     
     with col3:
@@ -6279,9 +5667,9 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
                 }[x]
             )
         with col2:
-            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="mostrar_histogramas_optimizacion_aleatoria")
+            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
         with col3:
-            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False, key="mostrar_frontera_optimizacion_aleatoria")
+            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False)
     
     # Botones de ejecución
     col1, col2, col3 = st.columns(3)
@@ -6929,8 +6317,7 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
         usar_benchmark = st.checkbox(
             "Usar Benchmark como Tasa Libre de Riesgo",
             value=True,
-            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones",
-            key="usar_benchmark_tasa_libre_optimizacion"
+            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones"
         )
     
     # Configuración de optimización
@@ -6959,26 +6346,24 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
         )
     
     with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier_optimizacion")
+        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
     
     # Configuración avanzada de frontera eficiente
     with st.expander("⚙️ Configuración Avanzada de Frontera Eficiente", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
             calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, 
-                                       help="Calcula automáticamente todas las estrategias disponibles",
-                                       key="calcular_todos_optimizacion")
+                                       help="Calcula automáticamente todas las estrategias disponibles")
             num_puntos = st.slider("Número de Puntos en Frontera", min_value=10, max_value=100, value=50,
                                  help="Más puntos = frontera más suave pero más lento")
         with col2:
             incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True,
-                                       help="Muestra el portafolio actual en la frontera",
-                                       key="incluir_actual_optimizacion")
-            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="mostrar_metricas_optimizacion")
+                                       help="Muestra el portafolio actual en la frontera")
+            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
         with col3:
             target_return_frontier = st.number_input("Retorno Objetivo Frontera", min_value=0.0, max_value=1.0, 
                                                    value=0.08, step=0.01, help="Para optimización de frontera")
-            auto_refresh = st.checkbox("Auto-refresh", value=True, help="Actualiza automáticamente con cambios", key="auto_refresh_optimizacion")
+            auto_refresh = st.checkbox("Auto-refresh", value=True, help="Actualiza automáticamente con cambios")
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -7525,9 +6910,9 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                         with col1:
                             zoom_level = st.slider("Zoom", min_value=0.5, max_value=3.0, value=1.0, step=0.1)
                         with col2:
-                            mostrar_grid = st.checkbox("Mostrar Grid", value=True, key="mostrar_grid_frontier")
+                            mostrar_grid = st.checkbox("Mostrar Grid", value=True)
                         with col3:
-                            mostrar_leyenda = st.checkbox("Mostrar Leyenda", value=True, key="mostrar_leyenda_frontier")
+                            mostrar_leyenda = st.checkbox("Mostrar Leyenda", value=True)
                         
                         # Aplicar configuraciones al gráfico
                         if fig:
@@ -7713,12 +7098,12 @@ def mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hast
         num_puntos = st.slider("Número de Puntos", min_value=10, max_value=100, value=50)
     
     with col2:
-        incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True, key="incluir_actual_frontier")
-        mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="mostrar_metricas_frontier")
+        incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True)
+        mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
     
     with col3:
-        calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, key="calcular_todos_frontier")
-        auto_refresh = st.checkbox("Auto-refresh", value=True, key="auto_refresh_frontier")
+        calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True)
+        auto_refresh = st.checkbox("Auto-refresh", value=True)
     
     ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", use_container_width=True)
     
@@ -7790,14 +7175,14 @@ def mostrar_analisis_portafolio():
     with tab1:
         if portafolio_ar:
             st.subheader("🇦🇷 Portafolio Argentina")
-            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "argentina")
+            mostrar_resumen_portafolio(portafolio_ar, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
         if portafolio_eeuu:
             st.subheader("🇺🇸 Portafolio Estados Unidos")
-            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu")
+            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio de EEUU")
     
@@ -7820,279 +7205,75 @@ def mostrar_analisis_portafolio():
         
         # Vista consolidada de todas las cuentas
         st.subheader("🔍 Vista Consolidada de Todas las Cuentas")
-        
-        # Combinar cuentas de Argentina y EEUU
-        cuentas_totales = []
-        
-        # Agregar cuentas de Argentina
-        if estado_cuenta_ar and estado_cuenta_ar.get('cuentas'):
-            cuentas_totales.extend(estado_cuenta_ar.get('cuentas', []))
-        
-        # Agregar cuentas de EEUU
-        if estado_cuenta_eeuu and estado_cuenta_eeuu.get('cuentas'):
-            cuentas_totales.extend(estado_cuenta_eeuu.get('cuentas', []))
-        
-        if cuentas_totales:
-            # Debug: mostrar cuentas que se van a procesar
-            st.info(f"🔍 Procesando {len(cuentas_totales)} cuentas para clasificación")
-            
-            # Debug: mostrar origen de las cuentas
-            st.info("📊 Origen de datos:")
-            st.info(f"   - Estado cuenta Argentina: {len(estado_cuenta_ar.get('cuentas', [])) if estado_cuenta_ar else 0} cuentas")
-            st.info(f"   - Estado cuenta EEUU: {len(estado_cuenta_eeuu.get('cuentas', [])) if estado_cuenta_eeuu else 0} cuentas")
-            
-            # Crear DataFrame con clasificación por país
-            datos_consolidados = []
-            for cuenta in cuentas_totales:
-                numero = cuenta.get('numero', 'N/A')
-                descripcion = cuenta.get('descripcion', 'N/A')
-                moneda = cuenta.get('moneda', 'N/A')
-                
-                # Determinar si es cuenta de EEUU
-                es_cuenta_eeuu = any([
-                    'eeuu' in str(numero).lower(),
-                    '-eeuu' in str(numero),
-                    'dolar estadounidense' in moneda.lower(),
-                    'dolar estadounidense' in moneda.lower(),
-                    'eeuu' in descripcion.lower(),
-                    'estados unidos' in descripcion.lower()
-                ])
-                
-                pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
-                
-                # Debug: mostrar clasificación
-                if es_cuenta_eeuu:
-                    st.info(f"🔍 Cuenta EEUU detectada: {numero} - {moneda}")
-                    st.info(f"   Disponible: {cuenta.get('disponible', 0)}, Saldo: {cuenta.get('saldo', 0)}, Total: {cuenta.get('total', 0)}")
-                
-                datos_consolidados.append({
-                    'País': pais,
-                    'Número': numero,
-                    'Descripción': descripcion,
-                    'Moneda': moneda.replace('_', ' ').title(),
-                    'Disponible': cuenta.get('disponible', 0),
-                    'Saldo': cuenta.get('saldo', 0),
-                    'Total': cuenta.get('total', 0),
-                })
-            
-            df_consolidado = pd.DataFrame(datos_consolidados)
-            
-            # Agrupar por país y mostrar resumen
-            resumen_por_pais = df_consolidado.groupby('País').agg({
-                'Total': 'sum',
-                'Número': 'count'
-            }).round(2)
-            
-            # Debug: mostrar resumen de clasificación
-            st.info(f"📊 Resumen de clasificación: {resumen_por_pais.to_dict()}")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Total Argentina", f"AR$ {resumen_por_pais.loc['🇦🇷 Argentina', 'Total']:,.2f}" if '🇦🇷 Argentina' in resumen_por_pais.index else "AR$ 0.00")
-                st.metric("Cuentas Argentina", resumen_por_pais.loc['🇦🇷 Argentina', 'Número'] if '🇦🇷 Argentina' in resumen_por_pais.index else 0)
-            
-            with col2:
-                st.metric("Total EEUU", f"AR$ {resumen_por_pais.loc['🇺🇸 EEUU', 'Total']:,.2f}" if '🇺🇸 EEUU' in resumen_por_pais.index else "AR$ 0.00")
-                st.metric("Cuentas EEUU", resumen_por_pais.loc['🇺🇸 EEUU', 'Número'] if '🇺🇸 EEUU' in resumen_por_pais.index else 0)
-            
-            # Mostrar tabla detallada
-            st.subheader("📋 Detalle Completo de Cuentas")
-            st.dataframe(df_consolidado, use_container_width=True, height=400)
-            
-            # Botón de debug para mostrar todas las cuentas
-            if st.button("🔍 Debug: Mostrar Todas las Cuentas", key="debug_cuentas"):
-                st.markdown("#### 🔍 Debug: Cuentas Originales")
-                for i, cuenta in enumerate(cuentas_totales):
-                    with st.expander(f"Cuenta {i+1}: {cuenta.get('numero', 'N/A')}", expanded=False):
-                        st.json(cuenta)
-            
-            # Botón para verificar inconsistencias
-            if st.button("🔍 Verificar Inconsistencias", key="verificar_inconsistencias"):
-                st.markdown("#### 🔍 Verificación de Inconsistencias")
-                
-                # Verificar si hay diferencias entre estado de cuenta y portafolio
-                if portafolio_eeuu and 'activos' in portafolio_eeuu:
-                    st.info("📊 Comparando estado de cuenta vs portafolio EEUU:")
+        if estado_cuenta_ar:
+            cuentas_totales = estado_cuenta_ar.get('cuentas', [])
+            if cuentas_totales:
+                # Crear DataFrame con clasificación por país
+                datos_consolidados = []
+                for cuenta in cuentas_totales:
+                    numero = cuenta.get('numero', 'N/A')
+                    descripcion = cuenta.get('descripcion', 'N/A')
+                    moneda = cuenta.get('moneda', 'N/A')
                     
-                    # Obtener total del portafolio
-                    total_portafolio = sum(activo.get('valorizado', 0) for activo in portafolio_eeuu['activos'])
-                    st.info(f"   - Total Portafolio EEUU: ${total_portafolio:,.2f}")
+                    # Determinar si es cuenta de EEUU
+                    es_cuenta_eeuu = any([
+                        'eeuu' in descripcion.lower(),
+                        'estados unidos' in descripcion.lower(),
+                        '-eeuu' in str(numero),
+                        'dolar estadounidense' in moneda.lower()
+                    ])
                     
-                    # Obtener total del estado de cuenta
-                    total_estado_cuenta = sum(cuenta.get('total', 0) for cuenta in cuentas_totales if any([
-                        'eeuu' in str(cuenta.get('numero', '')).lower(),
-                        '-eeuu' in str(cuenta.get('numero', '')),
-                        'dolar estadounidense' in cuenta.get('moneda', '').lower()
-                    ]))
-                    st.info(f"   - Total Estado Cuenta EEUU: ${total_estado_cuenta:,.2f}")
+                    pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
                     
-                    # Calcular diferencia
-                    diferencia = abs(total_portafolio - total_estado_cuenta)
-                    if diferencia > 0.01:  # Tolerancia de 1 centavo
-                        st.warning(f"⚠️ Diferencia detectada: ${diferencia:,.2f}")
-                        st.info("💡 Esto puede indicar que los datos se obtuvieron en momentos diferentes")
-                        
-                        # Análisis detallado de la diferencia
-                        st.markdown("#### 📊 Análisis de la Diferencia")
-                        
-                        if total_estado_cuenta > total_portafolio:
-                            st.info(f"💰 El estado de cuenta es ${diferencia:,.2f} mayor que el portafolio")
-                            st.info("💡 Esto sugiere que hay saldo disponible en las cuentas EEUU")
-                            
-                            # Calcular saldo disponible
-                            saldo_disponible_eeuu = sum(cuenta.get('disponible', 0) for cuenta in cuentas_totales if any([
-                                'eeuu' in str(cuenta.get('numero', '')).lower(),
-                                '-eeuu' in str(cuenta.get('numero', '')),
-                                'dolar estadounidense' in cuenta.get('moneda', '').lower()
-                            ]))
-                            
-                            st.success(f"💵 Saldo disponible en cuentas EEUU: ${saldo_disponible_eeuu:,.2f}")
-                            
-                            # Verificar si la diferencia coincide con el saldo disponible
-                            if abs(diferencia - saldo_disponible_eeuu) < 0.01:
-                                st.success("✅ La diferencia coincide con el saldo disponible")
-                                st.info("💡 Los datos son consistentes: Portafolio + Saldo = Estado de Cuenta")
-                            else:
-                                st.warning("⚠️ La diferencia no coincide exactamente con el saldo disponible")
-                                st.info("💡 Puede haber otros factores como comisiones o transacciones pendientes")
-                        
-                        else:
-                            st.info(f"📉 El portafolio es ${diferencia:,.2f} mayor que el estado de cuenta")
-                            st.info("💡 Esto puede indicar que hay activos no reflejados en el estado de cuenta")
-                        
-                        # Recomendación
-                        st.markdown("#### 💡 Recomendación")
-                        st.info("Para obtener datos más consistentes:")
-                        st.info("1. 🔄 Refrescar ambos datos simultáneamente")
-                        st.info("2. 📊 Usar el valor más reciente para cálculos")
-                        st.info("3. ⚠️ Considerar la diferencia como saldo disponible")
-                        
-                        # Resumen consolidado
-                        st.markdown("#### 📊 Resumen Consolidado EEUU")
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric("Portafolio Valorizado", f"${total_portafolio:,.2f}")
-                        
-                        with col2:
-                            st.metric("Saldo Disponible", f"${diferencia:,.2f}")
-                        
-                        with col3:
-                            st.metric("Total Consolidado", f"${total_estado_cuenta:,.2f}")
-                        
-                        # Explicación
-                        st.info("💡 **Explicación de la diferencia:**")
-                        st.info(f"   • Portafolio EEUU: ${total_portafolio:,.2f} (activos valorizados)")
-                        st.info(f"   • Saldo disponible: ${diferencia:,.2f} (efectivo en cuentas)")
-                        st.info(f"   • Total consolidado: ${total_estado_cuenta:,.2f} (portafolio + saldo)")
-                        
-                        st.success("✅ Los datos son consistentes: Portafolio + Saldo = Estado de Cuenta")
-                        
-                    else:
-                        st.success("✅ Los totales coinciden")
-                else:
-                    st.warning("⚠️ No hay portafolio EEUU disponible para comparar")
+                    datos_consolidados.append({
+                        'País': pais,
+                        'Número': numero,
+                        'Descripción': descripcion,
+                        'Moneda': moneda.replace('_', ' ').title(),
+                        'Disponible': cuenta.get('disponible', 0),
+                        'Saldo': cuenta.get('saldo', 0),
+                        'Total': cuenta.get('total', 0),
+                    })
+                
+                df_consolidado = pd.DataFrame(datos_consolidados)
+                
+                # Agrupar por país y mostrar resumen
+                resumen_por_pais = df_consolidado.groupby('País').agg({
+                    'Total': 'sum',
+                    'Número': 'count'
+                }).round(2)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Argentina", f"AR$ {resumen_por_pais.loc['🇦🇷 Argentina', 'Total']:,.2f}" if '🇦🇷 Argentina' in resumen_por_pais.index else "AR$ 0.00")
+                    st.metric("Cuentas Argentina", resumen_por_pais.loc['🇦🇷 Argentina', 'Número'] if '🇦🇷 Argentina' in resumen_por_pais.index else 0)
+                
+                with col2:
+                    st.metric("Total EEUU", f"AR$ {resumen_por_pais.loc['🇺🇸 EEUU', 'Total']:,.2f}" if '🇺🇸 EEUU' in resumen_por_pais.index else "AR$ 0.00")
+                    st.metric("Cuentas EEUU", resumen_por_pais.loc['🇺🇸 EEUU', 'Número'] if '🇺🇸 EEUU' in resumen_por_pais.index else 0)
+                
+                # Mostrar tabla detallada
+                st.subheader("📋 Detalle Completo de Cuentas")
+                st.dataframe(df_consolidado, use_container_width=True, height=400)
     
     with tab4:
         # Menú unificado de optimización y cobertura
-        st.markdown("### 🎯 Optimización y Cobertura")
-        
-        # Selección de portafolio para optimizar
-        st.markdown("#### 📊 Selección de Portafolio a Optimizar")
-        
         if portafolio_ar or portafolio_eeuu:
-            # Mostrar opciones disponibles
-            col1, col2, col3 = st.columns(3)
+            # Combinar portafolios si ambos están disponibles
+            activos_combinados = []
             
-            with col1:
-                if portafolio_ar and 'activos' in portafolio_ar:
-                    st.success(f"🇦🇷 Portafolio Argentina")
-                    st.metric("Activos", len(portafolio_ar['activos']))
-                    st.metric("Valor Total", f"AR$ {sum(activo.get('valorMercado', 0) for activo in portafolio_ar['activos']):,.2f}")
-                    
-                    if st.button("🎯 Optimizar Solo Argentina", key="opt_ar_solo", type="primary"):
-                        st.session_state.portafolio_seleccionado = "argentina"
-                        st.session_state.portafolio_data = portafolio_ar
-                        st.session_state.tipo_optimizacion = "separado"
-                        st.rerun()
-                else:
-                    st.warning("🇦🇷 No disponible")
+            if portafolio_ar and 'activos' in portafolio_ar:
+                activos_combinados.extend(portafolio_ar['activos'])
             
-            with col2:
-                if portafolio_eeuu and 'activos' in portafolio_eeuu:
-                    st.success(f"🇺🇸 Portafolio EEUU")
-                    st.metric("Activos", len(portafolio_eeuu['activos']))
-                    st.metric("Valor Total", f"AR$ {sum(activo.get('valorMercado', 0) for activo in portafolio_eeuu['activos']):,.2f}")
-                    
-                    if st.button("🎯 Optimizar Solo EEUU", key="opt_eeuu_solo", type="primary"):
-                        st.session_state.portafolio_seleccionado = "eeuu"
-                        st.session_state.portafolio_data = portafolio_eeuu
-                        st.session_state.tipo_optimizacion = "separado"
-                        st.rerun()
-                else:
-                    st.warning("🇺🇸 No disponible")
+            if portafolio_eeuu and 'activos' in portafolio_eeuu:
+                activos_combinados.extend(portafolio_eeuu['activos'])
             
-            with col3:
-                if portafolio_ar and portafolio_eeuu:
-                    activos_combinados = []
-                    if 'activos' in portafolio_ar:
-                        activos_combinados.extend(portafolio_ar['activos'])
-                    if 'activos' in portafolio_eeuu:
-                        activos_combinados.extend(portafolio_eeuu['activos'])
-                    
-                    st.success(f"🔗 Portafolio Consolidado")
-                    st.metric("Activos Totales", len(activos_combinados))
-                    st.metric("Valor Total", f"AR$ {sum(activo.get('valorMercado', 0) for activo in activos_combinados):,.2f}")
-                    
-                    if st.button("🎯 Optimizar Consolidado", key="opt_consolidado", type="primary"):
-                        st.session_state.portafolio_seleccionado = "consolidado"
-                        st.session_state.portafolio_data = {'activos': activos_combinados}
-                        st.session_state.tipo_optimizacion = "consolidado"
-                        st.rerun()
-                else:
-                    st.warning("🔗 No disponible")
-            
-            # Mostrar menú de optimización si hay un portafolio seleccionado
-            if hasattr(st.session_state, 'portafolio_seleccionado') and st.session_state.portafolio_seleccionado:
-                st.markdown("---")
-                st.markdown(f"#### 🎯 **Optimizando: {st.session_state.portafolio_seleccionado.upper()}**")
-                
-                # Información del portafolio seleccionado
-                portafolio_actual = st.session_state.portafolio_data
-                tipo_opt = st.session_state.tipo_optimizacion
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.info(f"📊 **Tipo:** {'Separado' if tipo_opt == 'separado' else 'Consolidado'}")
-                with col2:
-                    st.info(f"🌍 **País:** {'🇦🇷 Argentina' if st.session_state.portafolio_seleccionado == 'argentina' else '🇺🇸 EEUU' if st.session_state.portafolio_seleccionado == 'eeuu' else '🌍 Consolidado'}")
-                with col3:
-                    st.info(f"📈 **Activos:** {len(portafolio_actual.get('activos', []))}")
-                
-                # Botón para cambiar de portafolio
-                if st.button("🔄 Cambiar Portafolio", key="cambiar_portafolio"):
-                    del st.session_state.portafolio_seleccionado
-                    del st.session_state.portafolio_data
-                    if hasattr(st.session_state, 'tipo_optimizacion'):
-                        del st.session_state.tipo_optimizacion
-                    st.rerun()
-                
-                # Mostrar menú de optimización específico según el tipo
-                if tipo_opt == "separado":
-                    mostrar_menu_optimizacion_separado(
-                        portafolio_actual, 
-                        token_acceso, 
-                        st.session_state.fecha_desde, 
-                        st.session_state.fecha_hasta,
-                        st.session_state.portafolio_seleccionado
-                    )
-                else:
-                    mostrar_menu_optimizacion_consolidado(
-                        portafolio_actual, 
-                        token_acceso, 
-                        st.session_state.fecha_desde, 
-                        st.session_state.fecha_hasta
-                    )
+            if activos_combinados:
+                portafolio_combinado = {'activos': activos_combinados}
+                st.success(f"✅ Portafolio combinado: {len(activos_combinados)} activos totales")
+                mostrar_menu_optimizacion_unificado(portafolio_combinado, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+            else:
+                st.warning("No se pudo combinar los portafolios para optimización")
         else:
             st.warning("No se pudo obtener ningún portafolio para optimización")
     
@@ -8114,90 +7295,8 @@ def main():
     # Configurar cache para mejor rendimiento
     st.cache_data.clear()
     
-    # Agregar CSS adicional para animaciones
-    st.markdown("""
-    <style>
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.7;
-            }
-        }
-        
-        .fade-in-up {
-            animation: fadeInUp 0.8s ease-out;
-        }
-        
-        .pulse {
-            animation: pulse 2s infinite;
-        }
-        
-        .hover-lift {
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-        
-        .hover-lift:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 15px 30px rgba(0,0,0,0.3);
-        }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Header moderno con gradiente
-    st.markdown("""
-    <div class="fade-in-up hover-lift" style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 20px;
-        padding: 40px;
-        margin: 20px 0;
-        text-align: center;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-        border: 1px solid rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-    ">
-        <h1 style="
-            color: white;
-            font-size: 3rem;
-            font-weight: 700;
-            margin: 0;
-            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            background: linear-gradient(135deg, #ffffff, #f0f0f0);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        ">📊 IOL Portfolio Analyzer</h1>
-        <p style="
-            color: rgba(255,255,255,0.9);
-            font-size: 1.2rem;
-            margin: 15px 0 0 0;
-            font-weight: 300;
-        ">Analizador Avanzado de Portafolios con Tecnología de Vanguardia</p>
-        <div style="
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-top: 20px;
-            flex-wrap: wrap;
-        ">
-            <span class="badge pulse" style="background: rgba(255,255,255,0.2) !important; color: white !important; border: 1px solid rgba(255,255,255,0.3);">🚀 Optimización Avanzada</span>
-            <span class="badge pulse" style="background: rgba(255,255,255,0.2) !important; color: white !important; border: 1px solid rgba(255,255,255,0.3);">📈 Análisis Técnico</span>
-            <span class="badge pulse" style="background: rgba(255,255,255,0.2) !important; color: white !important; border: 1px solid rgba(255,255,255,0.3);">🛡️ Gestión de Riesgo</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.title("📊 IOL Portfolio Analyzer")
+    st.markdown("### Analizador Avanzado de Portafolios IOL")
     
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
@@ -8215,36 +7314,13 @@ def main():
     
     # Barra lateral - Autenticación
     with st.sidebar:
-        # Header moderno de la sidebar
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 10px 0;
-            text-align: center;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-        ">
-            <h3 style="color: white; margin: 0; font-size: 1.2rem;">🔐 Autenticación IOL</h3>
-        </div>
-        """, unsafe_allow_html=True)
+        st.header("🔐 Autenticación IOL")
         
         if st.session_state.token_acceso is None:
             with st.form("login_form"):
-                st.markdown("""
-                <div style="
-                    background: linear-gradient(135deg, #1e293b, #334155);
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin: 15px 0;
-                    border: 1px solid #475569;
-                ">
-                    <h4 style="color: #10b981; margin-bottom: 15px;">Ingreso a IOL</h4>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                usuario = st.text_input("Usuario", placeholder="su_usuario", key="login_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña", key="login_password")
+                st.subheader("Ingreso a IOL")
+                usuario = st.text_input("Usuario", placeholder="su_usuario")
+                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
                 
                 if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
                     if usuario and contraseña:
@@ -8261,68 +7337,23 @@ def main():
                     else:
                         st.warning("⚠️ Complete todos los campos")
         else:
-            st.markdown("""
-            <div style="
-                background: linear-gradient(135deg, #10b981, #059669);
-                border-radius: 12px;
-                padding: 15px;
-                margin: 15px 0;
-                text-align: center;
-                color: white;
-                font-weight: 600;
-            ">
-                ✅ Conectado a IOL
-            </div>
-            """, unsafe_allow_html=True)
-            
+            st.success("✅ Conectado a IOL")
             st.divider()
             
             st.subheader("Configuración de Fechas")
             col1, col2 = st.columns(2)
             with col1:
-                horizonte = st.selectbox(
-                    "Horizonte:",
-                    options=[
-                        "Corto Plazo (1-3 meses)",
-                        "Mediano Plazo (3-12 meses)", 
-                        "Largo Plazo (1-5 años)",
-                        "Muy Largo Plazo (5+ años)",
-                        "Personalizado"
-                    ],
-                    index=1,  # Mediano plazo por defecto
-                    help="Seleccione el horizonte de inversión para optimizaciones"
+                fecha_desde = st.date_input(
+                    "Desde:",
+                    value=st.session_state.fecha_desde,
+                    max_value=date.today()
                 )
-            
             with col2:
-                if horizonte == "Personalizado":
-                    meses = st.number_input(
-                        "Meses:",
-                        min_value=1,
-                        max_value=120,
-                        value=12,
-                        help="Número de meses para el horizonte personalizado"
-                    )
-                    fecha_desde = date.today() - timedelta(days=meses*30)
-                    fecha_hasta = date.today()
-                else:
-                    # Calcular fechas automáticamente según horizonte
-                    if horizonte == "Corto Plazo (1-3 meses)":
-                        fecha_desde = date.today() - timedelta(days=90)
-                        fecha_hasta = date.today()
-                    elif horizonte == "Mediano Plazo (3-12 meses)":
-                        fecha_desde = date.today() - timedelta(days=365)
-                        fecha_hasta = date.today()
-                    elif horizonte == "Largo Plazo (1-5 años)":
-                        fecha_desde = date.today() - timedelta(days=1825)
-                        fecha_hasta = date.today()
-                    elif horizonte == "Muy Largo Plazo (5+ años)":
-                        fecha_desde = date.today() - timedelta(days=3650)
-                        fecha_hasta = date.today()
-                    else:
-                        fecha_desde = date.today() - timedelta(days=365)
-                        fecha_hasta = date.today()
-                
-                st.info(f"📅 Período: {fecha_desde.strftime('%Y/%m/%d')} - {fecha_hasta.strftime('%Y/%m/%d')}")
+                fecha_hasta = st.date_input(
+                    "Hasta:",
+                    value=st.session_state.fecha_hasta,
+                    max_value=date.today()
+                )
             
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
@@ -8400,278 +7431,93 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            # Header del menú principal
-            st.markdown("""
-            <div style="
-                background: linear-gradient(135deg, #1e293b, #334155);
-                border-radius: 15px;
-                padding: 20px;
-                margin: 20px 0;
-                border: 1px solid #475569;
-            ">
-                <h2 style="color: #10b981; margin: 0; display: flex; align-items: center;">
-                    <span style="margin-right: 10px;">🎯</span>
-                    Menú Principal
-                </h2>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Menú principal con mejor diseño
+            st.sidebar.title("Menú Principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨‍💼 Panel del Asesor"),
+                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
                 index=0,
-                key="main_menu"
             )
 
             # Mostrar la página seleccionada
             if opcion == "🏠 Inicio":
-                # Dashboard de inicio moderno
-                st.markdown("""
-                <div style="
-                    background: linear-gradient(135deg, #1e293b, #334155);
-                    border-radius: 20px;
-                    padding: 30px;
-                    margin: 20px 0;
-                    border: 1px solid #475569;
-                    text-align: center;
-                ">
-                    <h2 style="color: #10b981; margin-bottom: 20px;">🚀 Bienvenido al Dashboard</h2>
-                    <p style="color: #cbd5e1; font-size: 1.1rem; margin-bottom: 25px;">
-                        Seleccione una opción del menú para comenzar a analizar sus portafolios
-                    </p>
-                    <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-                        <div class="hover-lift" style="
-                            background: linear-gradient(135deg, #10b981, #059669);
-                            border-radius: 12px;
-                            padding: 20px;
-                            width: 200px;
-                            color: white;
-                            text-align: center;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                        ">
-                            <h4 style="margin: 0 0 10px 0; font-size: 2rem;">📊</h4>
-                            <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">Análisis de Portafolio</p>
-                        </div>
-                        <div class="hover-lift" style="
-                            background: linear-gradient(135deg, #3b82f6, #2563eb);
-                            border-radius: 12px;
-                            padding: 20px;
-                            width: 200px;
-                            color: white;
-                            text-align: center;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                        ">
-                            <h4 style="margin: 0 0 10px 0; font-size: 2rem;">💰</h4>
-                            <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">Tasas de Caución</p>
-                        </div>
-                        <div class="hover-lift" style="
-                            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-                            border-radius: 12px;
-                            padding: 20px;
-                            width: 200px;
-                            color: white;
-                            text-align: center;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                        ">
-                            <h4 style="margin: 0 0 10px 0; font-size: 2rem;">👨‍💼</h4>
-                            <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">Panel del Asesor</p>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
+                st.info("👆 Seleccione una opción del menú para comenzar")
             elif opcion == "📊 Análisis de Portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
                 else:
-                    st.markdown("""
-                    <div style="
-                        background: linear-gradient(135deg, #f59e0b, #d97706);
-                        border-radius: 15px;
-                        padding: 25px;
-                        margin: 20px 0;
-                        text-align: center;
-                        color: white;
-                    ">
-                        <h3 style="margin: 0 0 15px 0;">👆 Seleccione un Cliente</h3>
-                        <p style="margin: 0; font-size: 1.1rem;">
-                            Para comenzar el análisis, seleccione un cliente en la barra lateral
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
+                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "💰 Tasas de Caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para ver las tasas de caución")
-                    
-            elif opcion == "👨‍💼 Panel del Asesor":
+            elif opcion == "👨\u200d💼 Panel del Asesor":
                 mostrar_movimientos_asesor()
-                
+                st.info("👆 Seleccione una opción del menú para comenzar")
         else:
-            # Panel de bienvenida moderno
+            st.info("👆 Ingrese sus credenciales para comenzar")
+            
+            # Panel de bienvenida
             st.markdown("""
-            <div style="
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border-radius: 25px;
-                padding: 50px;
-                color: white;
-                text-align: center;
-                margin: 40px 0;
-                box-shadow: 0 25px 50px rgba(0,0,0,0.3);
-                border: 1px solid rgba(255,255,255,0.1);
-                backdrop-filter: blur(10px);
-            ">
-                <h1 style="
-                    color: white;
-                    margin-bottom: 25px;
-                    font-size: 2.5rem;
-                    font-weight: 700;
-                    text-shadow: 0 4px 8px rgba(0,0,0,0.3);
-                ">🚀 Bienvenido al Portfolio Analyzer</h1>
-                <p style="
-                    font-size: 1.3rem;
-                    margin-bottom: 35px;
-                    opacity: 0.95;
-                    line-height: 1.6;
-                ">Conecte su cuenta de IOL para comenzar a analizar sus portafolios con tecnología de vanguardia</p>
-                
-                <div style="
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                    gap: 25px;
-                    margin-top: 40px;
-                ">
-                    <div style="
-                        background: rgba(255,255,255,0.15);
-                        border-radius: 20px;
-                        padding: 30px;
-                        backdrop-filter: blur(10px);
-                        border: 1px solid rgba(255,255,255,0.2);
-                        transition: transform 0.3s ease;
-                    ">
-                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">🇦🇷 Portafolio Argentina</h3>
-                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
-                            Análisis completo de activos locales con métricas avanzadas de riesgo y retorno
-                        </p>
+            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
+                        border-radius: 15px; 
+                        padding: 40px; 
+                        color: white;
+                        text-align: center;
+                        margin: 30px 0;">
+                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
+                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
+                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>🇦🇷 Portafolio Argentina</h3>
+                        <p>Análisis completo de activos argentinos</p>
                     </div>
-                    
-                    <div style="
-                        background: rgba(255,255,255,0.15);
-                        border-radius: 20px;
-                        padding: 30px;
-                        backdrop-filter: blur(10px);
-                        border: 1px solid rgba(255,255,255,0.2);
-                    ">
-                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">🇺🇸 Portafolio EEUU</h3>
-                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
-                            Gestión de activos internacionales con análisis de correlación y diversificación
-                        </p>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>🇺🇸 Portafolio EEUU</h3>
+                        <p>Gestión de activos internacionales</p>
                     </div>
-                    
-                    <div style="
-                        background: rgba(255,255,255,0.15);
-                        border-radius: 20px;
-                        padding: 30px;
-                        backdrop-filter: blur(10px);
-                        border: 1px solid rgba(255,255,255,0.2);
-                    ">
-                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">📈 Optimización Avanzada</h3>
-                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
-                            Algoritmos de optimización de portafolio basados en Markowitz y estrategias modernas
-                        </p>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>📊 Análisis Completo</h3>
+                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
                     </div>
-                    
-                    <div style="
-                        background: rgba(255,255,255,0.15);
-                        border-radius: 20px;
-                        padding: 30px;
-                        backdrop-filter: blur(10px);
-                        border: 1px solid rgba(255,255,255,0.2);
-                    ">
-                        <h3 style="margin: 0 0 15px 0; font-size: 1.5rem;">🛡️ Gestión de Riesgo</h3>
-                        <p style="margin: 0; opacity: 0.9; line-height: 1.5;">
-                            Análisis de VaR, stress testing y estrategias de cobertura personalizadas
-                        </p>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>📈 Gráficos Interactivos</h3>
+                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
                     </div>
-                </div>
-                
-                <div style="
-                    margin-top: 40px;
-                    padding: 25px;
-                    background: rgba(255,255,255,0.1);
-                    border-radius: 15px;
-                    border: 1px solid rgba(255,255,255,0.2);
-                ">
-                    <h3 style="margin: 0 0 15px 0; color: #fbbf24;">🔐 Inicie Sesión</h3>
-                    <p style="margin: 0; opacity: 0.9;">
-                        Use la barra lateral para conectarse a su cuenta de IOL y comenzar
-                    </p>
+                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
+                        <h3>⚖️ Gestión de Riesgo</h3>
+                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
+                    </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-            # Características principales
-            st.markdown("""
-            <div style="
-                background: linear-gradient(135deg, #1e293b, #334155);
-                border-radius: 20px;
-                padding: 30px;
-                margin: 30px 0;
-                border: 1px solid #475569;
-            ">
-                <h2 style="color: #10b981; text-align: center; margin-bottom: 30px;">✨ Características Principales</h2>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px;">
-                    <div style="
-                        background: rgba(16, 185, 129, 0.1);
-                        border-radius: 15px;
-                        padding: 25px;
-                        border: 1px solid rgba(16, 185, 129, 0.3);
-                    ">
-                        <h3 style="color: #10b981; margin-bottom: 15px;">📊 Análisis Detallado</h3>
-                        <ul style="color: #cbd5e1; margin: 0; padding-left: 20px;">
-                            <li>Valuación completa de activos</li>
-                            <li>Distribución por tipo de instrumento</li>
-                            <li>Concentración del portafolio</li>
-                        </ul>
-                    </div>
-                    <div style="
-                        background: rgba(59, 130, 246, 0.1);
-                        border-radius: 15px;
-                        padding: 25px;
-                        border: 1px solid rgba(59, 130, 246, 0.3);
-                    ">
-                        <h3 style="color: #3b82f6; margin-bottom: 15px;">📈 Herramientas Profesionales</h3>
-                        <ul style="color: #cbd5e1; margin: 0; padding-left: 20px;">
-                            <li>Optimización de portafolio</li>
-                            <li>Análisis técnico avanzado</li>
-                            <li>Proyecciones de rendimiento</li>
-                        </ul>
-                    </div>
-                    <div style="
-                        background: rgba(139, 92, 246, 0.1);
-                        border-radius: 15px;
-                        padding: 25px;
-                        border: 1px solid rgba(139, 92, 246, 0.3);
-                    ">
-                        <h3 style="color: #8b5cf6; margin-bottom: 15px;">💱 Datos de Mercado</h3>
-                        <ul style="color: #cbd5e1; margin: 0; padding-left: 20px;">
-                            <li>Cotizaciones MEP en tiempo real</li>
-                            <li>Tasas de caución actualizadas</li>
-                            <li>Estado de cuenta consolidado</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Características
+            st.subheader("✨ Características Principales")
+            cols = st.columns(3)
+            with cols[0]:
+                st.markdown("""
+                **📊 Análisis Detallado**  
+                - Valuación completa de activos  
+                - Distribución por tipo de instrumento  
+                - Concentración del portafolio  
+                """)
+            with cols[1]:
+                st.markdown("""
+                **📈 Herramientas Profesionales**  
+                - Optimización de portafolio  
+                - Análisis técnico avanzado  
+                - Proyecciones de rendimiento  
+                """)
+            with cols[2]:
+                st.markdown("""
+                **💱 Datos de Mercado**  
+                - Cotizaciones MEP en tiempo real  
+                - Tasas de caución actualizadas  
+                - Estado de cuenta consolidado  
+                """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
-        st.exception(e)
 
 if __name__ == "__main__":
     main() 
