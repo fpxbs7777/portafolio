@@ -3123,7 +3123,7 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
         mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True, key="mostrar_frontera_avanzada")
     
     # Botón de ejecución
-    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Avanzada", type="primary")
+    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Avanzada", type="primary", key="optimizacion_avanzada_btn")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización avanzada..."):
@@ -5160,7 +5160,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
         st.info("🔍 Esta sección reconstruye la composición del portafolio a lo largo del tiempo basándose en operaciones reales")
         
         # Botón para reconstruir composición histórica
-        if st.button("🔄 Reconstruir Composición Histórica", use_container_width=True):
+        if st.button("🔄 Reconstruir Composición Histórica", use_container_width=True, key=f"reconstruir_composicion_{portfolio_id}"):
             with st.spinner("🔄 Reconstruyendo composición histórica del portafolio..."):
                 try:
                     # Obtener símbolos del portafolio
@@ -5237,7 +5237,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
         st.info("🔍 Esta sección calcula estadísticas reales de retornos y riesgos indexando las series históricas a las operaciones reales")
         
         # Botón para calcular métricas basadas en operaciones
-        if st.button("📈 Calcular Métricas Reales del Portafolio", use_container_width=True):
+        if st.button("📈 Calcular Métricas Reales del Portafolio", use_container_width=True, key=f"calcular_metricas_{portfolio_id}"):
             with st.spinner("🔄 Calculando métricas reales del portafolio..."):
                 try:
                     # Obtener símbolos del portafolio
@@ -5467,7 +5467,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         st.error("❌ No se pudo obtener la cotización MEP")
     
     with st.expander("🏦 Tasas de Caución", expanded=True):
-        if st.button("🔄 Actualizar Tasas"):
+        if st.button("🔄 Actualizar Tasas", key="actualizar_tasas_btn"):
             with st.spinner("Consultando tasas de caución..."):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
             
@@ -6249,9 +6249,9 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
     # Botón de ejecución
     col1, col2 = st.columns(2)
     with col1:
-        ejecutar_rebalanceo = st.button("🚀 Ejecutar Rebalanceo")
+        ejecutar_rebalanceo = st.button("🚀 Ejecutar Rebalanceo", key="rebalanceo_btn_1")
     with col2:
-        ejecutar_completo = st.button("🎯 Rebalanceo Completo")
+        ejecutar_completo = st.button("🎯 Rebalanceo Completo", key="rebalanceo_completo_btn_1")
     
     if ejecutar_rebalanceo or ejecutar_completo:
         with st.spinner("🔄 Ejecutando rebalanceo..."):
@@ -6421,11 +6421,11 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
     # Botón de ejecución
     col1, col2, col3 = st.columns(3)
     with col1:
-        generar_simbolos = st.button("🎲 Generar Símbolos Aleatorios")
+        generar_simbolos = st.button("🎲 Generar Símbolos Aleatorios", key="generar_simbolos_btn")
     with col2:
-        ejecutar_rebalanceo = st.button("🚀 Ejecutar Rebalanceo")
+        ejecutar_rebalanceo = st.button("🚀 Ejecutar Rebalanceo", key="rebalanceo_btn_2")
     with col3:
-        ejecutar_completo = st.button("🎯 Rebalanceo Completo")
+        ejecutar_completo = st.button("🎯 Rebalanceo Completo", key="rebalanceo_completo_btn_2")
     
     if generar_simbolos or ejecutar_rebalanceo or ejecutar_completo:
         # Generar símbolos aleatorios
@@ -6915,11 +6915,11 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
     # Botones de ejecución
     col1, col2, col3 = st.columns(3)
     with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Aleatoria")
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Aleatoria", key="optimizacion_aleatoria_btn")
     with col2:
-        ejecutar_iterativo = st.button("🔄 Optimización Iterativa")
+        ejecutar_iterativo = st.button("🔄 Optimización Iterativa", key="optimizacion_iterativa_btn")
     with col3:
-        ejecutar_completo = st.button("🎯 Optimización Completa")
+        ejecutar_completo = st.button("🎯 Optimización Completa", key="optimizacion_completa_btn")
     
     if ejecutar_optimizacion or ejecutar_iterativo or ejecutar_completo:
         # Ejecutar optimización aleatoria
@@ -7614,12 +7614,13 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización")
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", key="optimizacion_unificada_btn")
     with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", key="frontera_eficiente_btn")
     with col3:
         ejecutar_completo = st.button("🎯 Optimización Completa", 
-                                    help="Ejecuta optimización + frontera eficiente + todos los portafolios")
+                                    help="Ejecuta optimización + frontera eficiente + todos los portafolios",
+                                    key="optimizacion_completa_unificada_btn")
     
     # Función para ejecutar optimización individual
     def ejecutar_optimizacion_individual(manager_inst, estrategia, target_return):
@@ -8352,7 +8353,7 @@ def mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hast
         calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, key="calcular_todos_avanzada")
         auto_refresh = st.checkbox("Auto-refresh", value=True, key="auto_refresh_avanzada")
     
-    ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", use_container_width=True)
+    ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", use_container_width=True, key="frontera_eficiente_btn_2")
     
     if ejecutar_frontier:
         with st.spinner("🔄 Calculando frontera eficiente..."):
@@ -8432,7 +8433,7 @@ def mostrar_analisis_portafolio():
     # Botón para refrescar datos
     col1, col2 = st.columns([3, 1])
     with col2:
-        if st.button("🔄 Refrescar Datos", use_container_width=True):
+        if st.button("🔄 Refrescar Datos", use_container_width=True, key="refrescar_datos_btn"):
             # Limpiar cache y recargar
             del st.session_state[cache_key]
             st.rerun()
@@ -8725,11 +8726,11 @@ def main():
                     st.success(f"✅ Cliente actual: {nombre_cliente}")
                     
                     # Botón para cambiar de cliente
-                    if st.button("🔄 Cambiar Cliente", use_container_width=True):
+                    if st.button("🔄 Cambiar Cliente", use_container_width=True, key="cambiar_cliente_btn"):
                         st.session_state.cliente_seleccionado = None
                         st.rerun()
                 
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+                if st.button("🔄 Actualizar lista de clientes", use_container_width=True, key="actualizar_lista_clientes_btn"):
                     with st.spinner("Actualizando..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
                         st.session_state.clientes = nuevos_clientes
@@ -8737,7 +8738,7 @@ def main():
                         st.rerun()
                 
                 # Botón para refrescar token manualmente
-                if st.button("🔄 Refrescar Token", use_container_width=True):
+                if st.button("🔄 Refrescar Token", use_container_width=True, key="refrescar_token_btn"):
                     with st.spinner("Refrescando token..."):
                         nuevo_token, nuevo_refresh = refrescar_token(st.session_state.refresh_token)
                         if nuevo_token:
