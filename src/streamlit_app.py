@@ -8340,8 +8340,7 @@ def main():
     # Configurar cache para mejor rendimiento
     st.cache_data.clear()
     
-    st.title("📊 IOL Portfolio Analyzer")
-    st.markdown("### Analizador Avanzado de Portafolios IOL")
+
     
     # Inicializar session state
     if 'token_acceso' not in st.session_state:
@@ -8357,30 +8356,26 @@ def main():
     if 'fecha_hasta' not in st.session_state:
         st.session_state.fecha_hasta = date.today()
     
+    # Autenticación automática con credenciales hardcodeadas
+    if st.session_state.token_acceso is None:
+        with st.spinner("Conectando automáticamente a IOL..."):
+            try:
+                token_acceso, refresh_token = obtener_tokens("boosandr97@gmail.com", "Chule48936_")
+                if token_acceso:
+                    st.session_state.token_acceso = token_acceso
+                    st.session_state.refresh_token = refresh_token
+                    st.success("✅ Conexión automática exitosa!")
+                else:
+                    st.error("❌ Error en la autenticación automática")
+            except Exception as e:
+                st.error(f"❌ Error en la conexión automática: {str(e)}")
+    
     # Barra lateral - Autenticación
     with st.sidebar:
-        st.header("🔐 Autenticación IOL")
+        st.header("🔐 Estado de Conexión")
         
         if st.session_state.token_acceso is None:
-            with st.form("login_form"):
-                st.subheader("Ingreso a IOL")
-                usuario = st.text_input("Usuario", placeholder="su_usuario")
-                contraseña = st.text_input("Contraseña", type="password", placeholder="su_contraseña")
-                
-                if st.form_submit_button("🚀 Conectar a IOL", use_container_width=True):
-                    if usuario and contraseña:
-                        with st.spinner("Conectando..."):
-                            token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
-                            
-                            if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error en la autenticación")
-                    else:
-                        st.warning("⚠️ Complete todos los campos")
+            st.info("🔄 Conectando automáticamente...")
         else:
             st.success("✅ Conectado a IOL")
             st.divider()
@@ -8435,24 +8430,20 @@ def main():
             
             clientes = st.session_state.clientes
             
+            # Selección automática del primer cliente si no hay uno seleccionado
+            if clientes and not st.session_state.cliente_seleccionado:
+                st.session_state.cliente_seleccionado = clientes[0]
+                st.success(f"✅ Cliente seleccionado automáticamente: {clientes[0].get('apellidoYNombre', 'Cliente')}")
+            
             if clientes:
-                st.subheader("Selección de Cliente")
-                cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
-                cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', 'Cliente')) for c in clientes]
-                
-                cliente_seleccionado = st.selectbox(
-                    "Seleccione un cliente:",
-                    options=cliente_ids,
-                    format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed",
-                    key="cliente_seleccionado_principal",
-                    on_change=lambda: limpiar_cache_cliente_anterior()
-                )
-                
-                st.session_state.cliente_seleccionado = next(
-                    (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
-                    None
-                )
+                st.subheader("Cliente Seleccionado")
+                if st.session_state.cliente_seleccionado:
+                    cliente_actual = st.session_state.cliente_seleccionado
+                    st.success(f"✅ {cliente_actual.get('apellidoYNombre', 'Cliente')}")
+                    
+                    # Permitir cambiar de cliente si hay más de uno
+                    if len(clientes) > 1:
+                        st.info("💡 Para cambiar de cliente, use el botón de actualizar abajo")
                 
                 if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
                     with st.spinner("Actualizando..."):
@@ -8525,67 +8516,8 @@ def main():
                 mostrar_movimientos_asesor()
                 st.info("👆 Seleccione una opción del menú para comenzar")
         else:
-            st.info("👆 Ingrese sus credenciales para comenzar")
-            
-            # Panel de bienvenida
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); 
-                        border-radius: 15px; 
-                        padding: 40px; 
-                        color: white;
-                        text-align: center;
-                        margin: 30px 0;">
-                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
-                <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
-                <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>🇦🇷 Portafolio Argentina</h3>
-                        <p>Análisis completo de activos argentinos</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>🇺🇸 Portafolio EEUU</h3>
-                        <p>Gestión de activos internacionales</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis Completo</h3>
-                        <p>Visualice todos sus activos en un solo lugar con detalle</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
-                        <p>Comprenda su portafolio con visualizaciones avanzadas</p>
-                    </div>
-                    <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>⚖️ Gestión de Riesgo</h3>
-                        <p>Identifique concentraciones y optimice su perfil de riesgo</p>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Características
-            st.subheader("✨ Características Principales")
-            cols = st.columns(3)
-            with cols[0]:
-                st.markdown("""
-                **📊 Análisis Detallado**  
-                - Valuación completa de activos  
-                - Distribución por tipo de instrumento  
-                - Concentración del portafolio  
-                """)
-            with cols[1]:
-                st.markdown("""
-                **📈 Herramientas Profesionales**  
-                - Optimización de portafolio  
-                - Análisis técnico avanzado  
-                - Proyecciones de rendimiento  
-                """)
-            with cols[2]:
-                st.markdown("""
-                **💱 Datos de Mercado**  
-                - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
-                - Estado de cuenta consolidado  
-                """)
+            st.info("🔄 Conectando automáticamente...")
+
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
