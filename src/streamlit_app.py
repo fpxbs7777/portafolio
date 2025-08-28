@@ -8430,13 +8430,7 @@ def main():
             
             clientes = st.session_state.clientes
             
-            # Debug: mostrar información de clientes
-            if clientes:
-                st.info(f"📋 Se encontraron {len(clientes)} cliente(s)")
-                for i, cliente in enumerate(clientes):
-                    nombre = cliente.get('apellidoYNombre', cliente.get('nombre', f'Cliente {i+1}'))
-                    numero = cliente.get('numeroCliente', cliente.get('id', 'N/A'))
-                    st.write(f"  • {nombre} (ID: {numero})")
+
             
             # Selección automática del primer cliente si no hay uno seleccionado
             if clientes and not st.session_state.cliente_seleccionado:
@@ -8473,9 +8467,7 @@ def main():
                 if st.session_state.cliente_seleccionado:
                     cliente_actual = st.session_state.cliente_seleccionado
                     nombre_cliente = cliente_actual.get('apellidoYNombre', cliente_actual.get('nombre', 'Cliente'))
-                    numero_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id', 'N/A'))
                     st.success(f"✅ Cliente actual: {nombre_cliente}")
-                    st.info(f"📊 ID: {numero_cliente}")
                     
                     # Botón para cambiar de cliente
                     if st.button("🔄 Cambiar Cliente", use_container_width=True):
@@ -8501,28 +8493,7 @@ def main():
                         else:
                             st.error("❌ No se pudo refrescar el token")
             
-                # Indicadores de rendimiento
-                st.divider()
-                st.subheader("⚡ Rendimiento")
-                
-                # Mostrar estadísticas del caché
-                if st.button("📊 Ver Estadísticas de Caché", use_container_width=True):
-                    cache_stats = {
-                        'Total entradas': len([k for k in st.session_state.keys() if 'cache' in k or 'data' in k]),
-                        'Cliente actual': st.session_state.get('cliente_seleccionado', {}).get('apellidoYNombre', 'N/A'),
-                        'Datos cacheados': 'Sí' if any('cliente_data_' in k for k in st.session_state.keys()) else 'No'
-                    }
-                    
-                    for key, value in cache_stats.items():
-                        st.metric(key, value)
-                
-                # Botón para limpiar todo el caché
-                if st.button("🗑️ Limpiar Todo el Caché", use_container_width=True):
-                    keys_to_remove = [k for k in st.session_state.keys() if 'cache' in k or 'data' in k]
-                    for key in keys_to_remove:
-                        del st.session_state[key]
-                    st.success("✅ Caché limpiado")
-                    st.rerun()
+
             else:
                 st.warning("No se encontraron clientes")
 
