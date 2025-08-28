@@ -8430,20 +8430,57 @@ def main():
             
             clientes = st.session_state.clientes
             
+            # Debug: mostrar información de clientes
+            if clientes:
+                st.info(f"📋 Se encontraron {len(clientes)} cliente(s)")
+                for i, cliente in enumerate(clientes):
+                    nombre = cliente.get('apellidoYNombre', cliente.get('nombre', f'Cliente {i+1}'))
+                    numero = cliente.get('numeroCliente', cliente.get('id', 'N/A'))
+                    st.write(f"  • {nombre} (ID: {numero})")
+            
             # Selección automática del primer cliente si no hay uno seleccionado
             if clientes and not st.session_state.cliente_seleccionado:
                 st.session_state.cliente_seleccionado = clientes[0]
-                st.success(f"✅ Cliente seleccionado automáticamente: {clientes[0].get('apellidoYNombre', 'Cliente')}")
+                nombre_cliente = clientes[0].get('apellidoYNombre', clientes[0].get('nombre', 'Cliente'))
+                st.success(f"✅ Cliente seleccionado automáticamente: {nombre_cliente}")
             
             if clientes:
-                st.subheader("Cliente Seleccionado")
+                st.subheader("Selección de Cliente")
+                
+                # Selector de cliente
+                if len(clientes) > 1:
+                    cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
+                    cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', f'Cliente {i+1}')) for i, c in enumerate(clientes)]
+                    
+                    cliente_seleccionado = st.selectbox(
+                        "Seleccione un cliente:",
+                        options=cliente_ids,
+                        format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
+                        index=0,
+                        key="cliente_seleccionado_selector"
+                    )
+                    
+                    # Actualizar cliente seleccionado
+                    nuevo_cliente = next(
+                        (c for c in clientes if c.get('numeroCliente', c.get('id')) == cliente_seleccionado),
+                        None
+                    )
+                    if nuevo_cliente != st.session_state.cliente_seleccionado:
+                        st.session_state.cliente_seleccionado = nuevo_cliente
+                        st.rerun()
+                
+                # Mostrar cliente actual
                 if st.session_state.cliente_seleccionado:
                     cliente_actual = st.session_state.cliente_seleccionado
-                    st.success(f"✅ {cliente_actual.get('apellidoYNombre', 'Cliente')}")
+                    nombre_cliente = cliente_actual.get('apellidoYNombre', cliente_actual.get('nombre', 'Cliente'))
+                    numero_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id', 'N/A'))
+                    st.success(f"✅ Cliente actual: {nombre_cliente}")
+                    st.info(f"📊 ID: {numero_cliente}")
                     
-                    # Permitir cambiar de cliente si hay más de uno
-                    if len(clientes) > 1:
-                        st.info("💡 Para cambiar de cliente, use el botón de actualizar abajo")
+                    # Botón para cambiar de cliente
+                    if st.button("🔄 Cambiar Cliente", use_container_width=True):
+                        st.session_state.cliente_seleccionado = None
+                        st.rerun()
                 
                 if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
                     with st.spinner("Actualizando..."):
