@@ -1716,9 +1716,9 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
         'Content-Type': 'application/json'
     }
     
-    # Parámetros para filtrar operaciones
+    # Parámetros para filtrar operaciones - incluir TODAS las operaciones
     params = {
-        'filtro.estado': 'terminadas',
+        'filtro.estado': 'todas',  # Cambiar de 'terminadas' a 'todas' para ver compras y ventas
         'filtro.fechaDesde': fecha_desde,
         'filtro.fechaHasta': fecha_hasta,
         'filtro.pais': 'argentina'
@@ -1814,9 +1814,37 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
         else:
             st.warning(f"⚠️ {simbolo}: No se encontraron operaciones")
     
-    st.info(f"📊 Total de operaciones encontradas: {len(todas_operaciones)}")
-    
-    # Mostrar todas las operaciones disponibles para diagnóstico
+            st.info(f"📊 Total de operaciones encontradas: {len(todas_operaciones)}")
+        
+        # Resumen claro de operaciones por activo
+        st.markdown("#### 📊 Resumen de Operaciones por Activo")
+        resumen_operaciones = []
+        for simbolo in portafolio_dict.keys():
+            operaciones_activo = [op for op in todas_operaciones if op.get('simbolo_original') == simbolo]
+            if operaciones_activo:
+                compras = [op for op in operaciones_activo if op.get('tipo', '').lower() == 'compra']
+                ventas = [op for op in operaciones_activo if op.get('tipo', '').lower() == 'venta']
+                resumen_operaciones.append({
+                    'Activo': simbolo,
+                    'Total Operaciones': len(operaciones_activo),
+                    'Compras': len(compras),
+                    'Ventas': len(ventas),
+                    'Estado': '✅ Con Operaciones'
+                })
+            else:
+                resumen_operaciones.append({
+                    'Activo': simbolo,
+                    'Total Operaciones': 0,
+                    'Compras': 0,
+                    'Ventas': 0,
+                    'Estado': '❌ Sin Operaciones'
+                })
+        
+        if resumen_operaciones:
+            df_resumen = pd.DataFrame(resumen_operaciones)
+            st.dataframe(df_resumen, use_container_width=True, height=200)
+        
+        # Mostrar todas las operaciones disponibles para diagnóstico
     if len(todas_operaciones) < len(portafolio_dict):
         st.warning("⚠️ Algunos activos no tienen operaciones. Mostrando operaciones disponibles...")
         try:
@@ -5511,6 +5539,17 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
         st.subheader("📊 Métricas del Portafolio (Basadas en Operaciones Reales)")
         st.info("🔍 Esta sección calcula estadísticas reales de retornos y riesgos indexando las series históricas a las operaciones reales")
         
+        # Mostrar resumen de operaciones encontradas
+        if 'composicion_historica' in locals() and composicion_historica:
+            total_operaciones = sum(len(pos.get('operaciones', [])) for pos in composicion_historica.values())
+            activos_con_operaciones = sum(1 for pos in composicion_historica.values() if pos.get('operaciones'))
+            
+            st.info(f"📊 Resumen de Operaciones: {total_operaciones} operaciones en {activos_con_operaciones} activos")
+            
+            if activos_con_operaciones < len(portafolio.get('activos', [])):
+                st.warning(f"⚠️ Solo {activos_con_operaciones} de {len(portafolio.get('activos', []))} activos tienen operaciones históricas")
+                st.info("💡 Esto puede deberse a: símbolos diferentes, operaciones en otro estado, o problemas de sincronización de la API")
+        
         # Botón para calcular métricas basadas en operaciones
         if st.button("📈 Calcular Métricas Reales del Portafolio", use_container_width=True, key=f"calcular_metricas_{portfolio_id}"):
             with st.spinner("🔄 Calculando métricas reales del portafolio..."):
@@ -8981,11 +9020,15 @@ def main():
                     cliente_ids = [c.get('numeroCliente', c.get('id')) for c in clientes]
                     cliente_nombres = [c.get('apellidoYNombre', c.get('nombre', f'Cliente {i+1}')) for i, c in enumerate(clientes)]
                     
+                    # Encontrar el índice del cliente actualmente seleccionado
+                    cliente_actual_id = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id')) if st.session_state.cliente_seleccionado else None
+                    index_actual = cliente_ids.index(cliente_actual_id) if cliente_actual_id in cliente_ids else 0
+                    
                     cliente_seleccionado = st.selectbox(
                         "Seleccione un cliente:",
                         options=cliente_ids,
                         format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                        index=0,
+                        index=index_actual,
                         key="cliente_seleccionado_selector"
                     )
                     
