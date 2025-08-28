@@ -1733,12 +1733,24 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
         print(f"📡 Respuesta de API para {simbolo}: {response.status_code}")
         if response.status_code == 200:
             operaciones = response.json()
-            # Filtrar solo las operaciones del símbolo específico
-            operaciones_activo = [
-                op for op in operaciones 
-                if op.get('simbolo') == simbolo
-            ]
-            print(f"✅ Operaciones obtenidas para {simbolo}: {len(operaciones_activo)} operaciones")
+            print(f"📊 Total operaciones obtenidas de API: {len(operaciones)}")
+            
+            # Filtrar operaciones del símbolo específico (más flexible)
+            operaciones_activo = []
+            for op in operaciones:
+                simbolo_op = op.get('simbolo', '').upper()
+                simbolo_buscar = simbolo.upper()
+                
+                # Buscar coincidencias exactas o similares
+                if (simbolo_op == simbolo_buscar or 
+                    simbolo_op.startswith(simbolo_buscar) or 
+                    simbolo_buscar.startswith(simbolo_op) or
+                    simbolo_op in simbolo_buscar or
+                    simbolo_buscar in simbolo_op):
+                    operaciones_activo.append(op)
+                    print(f"✅ Operación encontrada: {op.get('tipo', 'N/A')} {op.get('cantidad', 0)} {simbolo_op} a ${op.get('precioOperado', op.get('precio', 0))}")
+            
+            print(f"✅ Operaciones filtradas para {simbolo}: {len(operaciones_activo)} operaciones")
             return operaciones_activo
         elif response.status_code == 401:
             print(f"❌ Error de autenticación (401) al obtener operaciones para {simbolo}")
@@ -1785,16 +1797,59 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
         # Si ya es un diccionario por símbolo
         portafolio_dict = portafolio_actual
     
-    # Obtener todas las operaciones de todos los activos
-    todas_operaciones = []
-    
-    for simbolo in portafolio_dict.keys():
-        operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta)
-        for op in operaciones:
-            op['simbolo_original'] = simbolo
-            todas_operaciones.append(op)
-    
-    # Ordenar operaciones por fecha
+            # Obtener todas las operaciones de todos los activos
+        todas_operaciones = []
+        
+        st.info(f"🔍 Buscando operaciones para {len(portafolio_dict)} activos...")
+        
+        for simbolo in portafolio_dict.keys():
+            st.info(f"📊 Buscando operaciones para {simbolo}...")
+            operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta)
+            
+            if operaciones:
+                st.success(f"✅ {simbolo}: {len(operaciones)} operaciones encontradas")
+                for op in operaciones:
+                    op['simbolo_original'] = simbolo
+                    todas_operaciones.append(op)
+            else:
+                st.warning(f"⚠️ {simbolo}: No se encontraron operaciones")
+        
+                st.info(f"📊 Total de operaciones encontradas: {len(todas_operaciones)}")
+        
+        # Mostrar todas las operaciones disponibles para diagnóstico
+        if len(todas_operaciones) < len(portafolio_dict):
+            st.warning("⚠️ Algunos activos no tienen operaciones. Mostrando operaciones disponibles...")
+            try:
+                # Obtener todas las operaciones sin filtrar por símbolo
+                url = "https://api.invertironline.com/api/v2/operaciones"
+                headers = {
+                    'Authorization': f'Bearer {token_portador}',
+                    'Content-Type': 'application/json'
+                }
+                params = {
+                    'filtro.estado': 'terminadas',
+                    'filtro.fechaDesde': fecha_desde,
+                    'filtro.fechaHasta': fecha_hasta,
+                    'filtro.pais': 'argentina'
+                }
+                
+                response = requests.get(url, headers=headers, params=params)
+                if response.status_code == 200:
+                    todas_operaciones_api = response.json()
+                    st.info(f"📊 Total operaciones en API: {len(todas_operaciones_api)}")
+                    
+                    # Mostrar símbolos únicos disponibles
+                    simbolos_disponibles = list(set(op.get('simbolo', 'N/A') for op in todas_operaciones_api))
+                    simbolos_disponibles.sort()
+                    st.info(f"🔍 Símbolos con operaciones disponibles: {', '.join(simbolos_disponibles[:20])}")
+                    
+                    if len(simbolos_disponibles) > 20:
+                        st.info(f"... y {len(simbolos_disponibles) - 20} símbolos más")
+                        
+            except Exception as e:
+                st.error(f"❌ Error obteniendo operaciones completas: {str(e)}")
+        
+        # Ordenar operaciones por fecha
     todas_operaciones.sort(key=lambda x: x.get('fechaOperada', x.get('fechaOrden', '1900-01-01')))
     
     # Reconstruir composición día a día
