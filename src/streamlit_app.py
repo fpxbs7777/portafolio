@@ -3797,7 +3797,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 "📈 Mostrar Histograma de Retornos por Activo", 
                 value=False,
                 help="Muestra histogramas de retornos históricos para cada activo del portafolio",
-                key="mostrar_histograma_retornos_estadisticas"
+                key="mostrar_histograma_retornos_estadisticas_detalladas"
             )
             
             col1, col2 = st.columns(2)
