@@ -1864,7 +1864,7 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
             if posiciones_actuales[simbolo]['cantidad'] > 0
         }
     
-    return composicion_por_fecha, posiciones_actuales
+    return posiciones_actuales
 
 def calcular_retorno_real_activo(simbolo, posiciones_actuales, precios_historicos):
     """
@@ -5204,20 +5204,22 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                             for simbolo, posicion in composicion_historica.items():
                                 if posicion['operaciones']:
                                     # Calcular retorno basado en operaciones
+                                    # Obtener precios históricos para el cálculo
+                                    precios_historicos = obtener_serie_historica_iol(token_portador, simbolo, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+                                    
                                     retorno_info = calcular_retorno_real_activo(
                                         simbolo, 
                                         posicion, 
-                                        st.session_state.fecha_desde, 
-                                        st.session_state.fecha_hasta
+                                        precios_historicos
                                     )
                                     
                                     detalles_activos.append({
                                         'Símbolo': simbolo,
                                         'Cantidad Actual': posicion['cantidad'],
                                         'Operaciones': len(posicion['operaciones']),
-                                        'Inversión Total': f"${posicion['inversion_total']:,.2f}",
-                                        'Retorno (%)': f"{retorno_info.get('retorno_porcentaje', 0):.2f}%" if retorno_info else "N/A",
-                                        'Retorno ($)': f"${retorno_info.get('retorno_dolares', 0):,.2f}" if retorno_info else "N/A"
+                                        'Inversión Total': f"${sum(op['cantidad'] * op['precio'] for op in posicion['operaciones'] if op['tipo'] == 'compra'):,.2f}",
+                                        'Retorno (%)': f"{retorno_info.get('retorno_total', 0)*100:.2f}%" if retorno_info else "N/A",
+                                        'Retorno ($)': f"${retorno_info.get('retorno_total', 0)*sum(op['cantidad'] * op['precio'] for op in posicion['operaciones'] if op['tipo'] == 'compra'):,.2f}" if retorno_info else "N/A"
                                     })
                             
                             if detalles_activos:
