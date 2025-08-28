@@ -7677,6 +7677,9 @@ def mostrar_analisis_portafolio():
             cuentas_totales.extend(estado_cuenta_eeuu.get('cuentas', []))
         
         if cuentas_totales:
+            # Debug: mostrar cuentas que se van a procesar
+            st.info(f"🔍 Procesando {len(cuentas_totales)} cuentas para clasificación")
+            
             # Crear DataFrame con clasificación por país
             datos_consolidados = []
             for cuenta in cuentas_totales:
@@ -7686,13 +7689,19 @@ def mostrar_analisis_portafolio():
                 
                 # Determinar si es cuenta de EEUU
                 es_cuenta_eeuu = any([
-                    'eeuu' in descripcion.lower(),
-                    'estados unidos' in descripcion.lower(),
+                    'eeuu' in str(numero).lower(),
                     '-eeuu' in str(numero),
-                    'dolar estadounidense' in moneda.lower()
+                    'dolar estadounidense' in moneda.lower(),
+                    'dolar estadounidense' in moneda.lower(),
+                    'eeuu' in descripcion.lower(),
+                    'estados unidos' in descripcion.lower()
                 ])
                 
                 pais = "🇺🇸 EEUU" if es_cuenta_eeuu else "🇦🇷 Argentina"
+                
+                # Debug: mostrar clasificación
+                if es_cuenta_eeuu:
+                    st.info(f"🔍 Cuenta EEUU detectada: {numero} - {moneda}")
                 
                 datos_consolidados.append({
                     'País': pais,
@@ -7712,6 +7721,9 @@ def mostrar_analisis_portafolio():
                 'Número': 'count'
             }).round(2)
             
+            # Debug: mostrar resumen de clasificación
+            st.info(f"📊 Resumen de clasificación: {resumen_por_pais.to_dict()}")
+            
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Total Argentina", f"AR$ {resumen_por_pais.loc['🇦🇷 Argentina', 'Total']:,.2f}" if '🇦🇷 Argentina' in resumen_por_pais.index else "AR$ 0.00")
@@ -7724,6 +7736,13 @@ def mostrar_analisis_portafolio():
             # Mostrar tabla detallada
             st.subheader("📋 Detalle Completo de Cuentas")
             st.dataframe(df_consolidado, use_container_width=True, height=400)
+            
+            # Botón de debug para mostrar todas las cuentas
+            if st.button("🔍 Debug: Mostrar Todas las Cuentas", key="debug_cuentas"):
+                st.markdown("#### 🔍 Debug: Cuentas Originales")
+                for i, cuenta in enumerate(cuentas_totales):
+                    with st.expander(f"Cuenta {i+1}: {cuenta.get('numero', 'N/A')}", expanded=False):
+                        st.json(cuenta)
     
     with tab4:
         # Menú unificado de optimización y cobertura
