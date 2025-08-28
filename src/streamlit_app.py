@@ -4400,6 +4400,7 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
         retorno_total_portafolio = 0
         flujo_total_compras = 0
         flujo_total_ventas = 0
+        activos_con_operaciones = 0
         
         st.info(f"🔍 Procesando {len(simbolos_portafolio)} símbolos del portafolio")
         
@@ -4427,6 +4428,7 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
                             valor_total_portafolio += valor_actual
                             flujo_total_compras += retorno_info['flujo_compras']
                             flujo_total_ventas += retorno_info['flujo_ventas']
+                            activos_con_operaciones += 1
                             
                             # Calcular retorno ponderado
                             peso_activo = valor_actual / valor_total_portafolio if valor_total_portafolio > 0 else 0
@@ -4460,6 +4462,29 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
         
         # Calcular métricas agregadas del portafolio
         st.info(f"💰 Valor total del portafolio: ${valor_total_portafolio:,.2f}")
+        
+        # Si no hay valor total calculado, usar el portafolio actual
+        if valor_total_portafolio <= 0 or activos_con_operaciones == 0:
+            st.warning("⚠️ No se pudo calcular valor total desde operaciones, usando portafolio actual")
+            # Calcular valor total desde el portafolio actual
+            for activo in portafolio.get('activos', []):
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', '')
+                cantidad = activo.get('cantidad', 0)
+                
+                # Intentar obtener precio actual
+                if simbolo and cantidad > 0:
+                    try:
+                        mercado = 'BCBA' if simbolo not in ['GOOGL', 'MELI'] else 'NYSE'
+                        precio_actual = obtener_precio_actual(token_portador, mercado, simbolo)
+                        if precio_actual:
+                            valor_activo = cantidad * precio_actual
+                            valor_total_portafolio += valor_activo
+                            st.info(f"💵 {simbolo}: {cantidad} × ${precio_actual:,.2f} = ${valor_activo:,.2f}")
+                    except:
+                        continue
+        
+        st.info(f"💰 Valor total final del portafolio: ${valor_total_portafolio:,.2f}")
         
         if valor_total_portafolio > 0:
             # Retorno total del portafolio
@@ -4510,11 +4535,89 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
                         'total_operaciones': sum(len(composicion_historica[s]['operaciones']) for s in simbolos_portafolio if s in composicion_historica)
                     }
         
+        # Si no hay suficientes operaciones, calcular métricas básicas
+        if activos_con_operaciones < 2:
+            st.warning(f"⚠️ Solo {activos_con_operaciones} activo(s) con operaciones. Calculando métricas básicas...")
+            
+            # Calcular métricas básicas del portafolio actual
+            metricas_basicas = calcular_metricas_basicas_portafolio(portafolio, token_portador)
+            if metricas_basicas:
+                return metricas_basicas
+        
         return None
         
     except Exception as e:
         print(f"Error al calcular métricas del portafolio: {str(e)}")
         st.error(f"❌ Error detallado: {str(e)}")
+        return None
+
+def calcular_metricas_basicas_portafolio(portafolio, token_portador):
+    """
+    Calcula métricas básicas del portafolio cuando no hay suficientes operaciones históricas.
+    
+    Args:
+        portafolio (dict): Portafolio actual
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        dict: Métricas básicas del portafolio
+    """
+    try:
+        activos = portafolio.get('activos', [])
+        if not activos:
+            return None
+        
+        # Calcular valor total y composición básica
+        valor_total = 0
+        activos_detalle = []
+        
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            cantidad = activo.get('cantidad', 0)
+            tipo = titulo.get('tipo', 'N/A')
+            
+            if simbolo and cantidad > 0:
+                # Intentar obtener precio actual
+                try:
+                    mercado = 'BCBA' if simbolo not in ['GOOGL', 'MELI', 'AAPL', 'MSFT'] else 'NYSE'
+                    precio_actual = obtener_precio_actual(token_portador, mercado, simbolo)
+                    
+                    if precio_actual:
+                        valor_activo = cantidad * precio_actual
+                        valor_total += valor_activo
+                        
+                        activos_detalle.append({
+                            'Símbolo': simbolo,
+                            'Cantidad': cantidad,
+                            'Valor Actual': f"${valor_activo:,.2f}",
+                            'Peso (%)': f"{(valor_activo/valor_total)*100:.2f}%" if valor_total > 0 else "0%",
+                            'Tipo': tipo,
+                            'Precio Actual': f"${precio_actual:,.2f}"
+                        })
+                except:
+                    continue
+        
+        if valor_total > 0:
+            return {
+                'retorno_total_portafolio': 0.0,  # No hay operaciones para calcular retorno
+                'retorno_anualizado_portafolio': 0.0,
+                'volatilidad_anual_portafolio': 0.0,
+                'ratio_sharpe': 0.0,
+                'var_95': 0.0,
+                'cvar_95': 0.0,
+                'max_drawdown': 0.0,
+                'activos_detalle': activos_detalle,
+                'evolucion_portafolio': {},
+                'total_operaciones': 0,
+                'valor_total_portafolio': valor_total,
+                'es_metricas_basicas': True
+            }
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error al calcular métricas básicas: {str(e)}")
         return None
 
 # --- Funciones de Visualización ---
@@ -5295,7 +5398,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                             )
                             
                             if metricas_reales:
-                                st.success("✅ Métricas reales del portafolio calculadas exitosamente")
+                                if metricas_reales.get('es_metricas_basicas', False):
+                                    st.warning("⚠️ Métricas básicas calculadas (operaciones insuficientes para análisis completo)")
+                                else:
+                                    st.success("✅ Métricas reales del portafolio calculadas exitosamente")
                                 
                                 # Mostrar métricas principales
                                 st.markdown("#### 📊 Métricas Principales del Portafolio")
