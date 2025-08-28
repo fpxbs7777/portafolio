@@ -17,14 +17,6 @@ import time
 
 warnings.filterwarnings('ignore')
 
-# Configuración de la página con tema oscuro profesional
-st.set_page_config(
-    page_title="IOL Portfolio Analyzer",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 # Estilos CSS personalizados para tema oscuro
 st.markdown("""
 <style>
@@ -8481,30 +8473,30 @@ def main():
                         else:
                             st.error("❌ No se pudo refrescar el token")
             
-            # Indicadores de rendimiento
-            st.divider()
-            st.subheader("⚡ Rendimiento")
-            
-            # Mostrar estadísticas del caché
-            if st.button("📊 Ver Estadísticas de Caché", use_container_width=True):
-                cache_stats = {
-                    'Total entradas': len([k for k in st.session_state.keys() if 'cache' in k or 'data' in k]),
-                    'Cliente actual': st.session_state.get('cliente_seleccionado', {}).get('apellidoYNombre', 'N/A'),
-                    'Datos cacheados': 'Sí' if any('cliente_data_' in k for k in st.session_state.keys()) else 'No'
-                }
+                # Indicadores de rendimiento
+                st.divider()
+                st.subheader("⚡ Rendimiento")
                 
-                for key, value in cache_stats.items():
-                    st.metric(key, value)
-            
-            # Botón para limpiar todo el caché
-            if st.button("🗑️ Limpiar Todo el Caché", use_container_width=True):
-                keys_to_remove = [k for k in st.session_state.keys() if 'cache' in k or 'data' in k]
-                for key in keys_to_remove:
-                    del st.session_state[key]
-                st.success("✅ Caché limpiado")
-                st.rerun()
-        else:
-            st.warning("No se encontraron clientes")
+                # Mostrar estadísticas del caché
+                if st.button("📊 Ver Estadísticas de Caché", use_container_width=True):
+                    cache_stats = {
+                        'Total entradas': len([k for k in st.session_state.keys() if 'cache' in k or 'data' in k]),
+                        'Cliente actual': st.session_state.get('cliente_seleccionado', {}).get('apellidoYNombre', 'N/A'),
+                        'Datos cacheados': 'Sí' if any('cliente_data_' in k for k in st.session_state.keys()) else 'No'
+                    }
+                    
+                    for key, value in cache_stats.items():
+                        st.metric(key, value)
+                
+                # Botón para limpiar todo el caché
+                if st.button("🗑️ Limpiar Todo el Caché", use_container_width=True):
+                    keys_to_remove = [k for k in st.session_state.keys() if 'cache' in k or 'data' in k]
+                    for key in keys_to_remove:
+                        del st.session_state[key]
+                    st.success("✅ Caché limpiado")
+                    st.rerun()
+            else:
+                st.warning("No se encontraron clientes")
 
     # Contenido principal
     try:
@@ -8597,5 +8589,6 @@ def main():
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
+
 if __name__ == "__main__":
-    main() 
+    main()
