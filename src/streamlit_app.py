@@ -934,20 +934,73 @@ def obtener_estado_cuenta_eeuu(token_portador):
                 # Filtrar solo las cuentas de EEUU
                 cuentas_eeuu = []
                 for cuenta in data.get('cuentas', []):
-                    # Identificar cuentas de EEUU por el nombre o número
-                    nombre_cuenta = cuenta.get('descripcion', '').lower()
+                    # Identificar cuentas de EEUU por múltiples criterios
                     numero_cuenta = str(cuenta.get('numero', ''))
+                    moneda = cuenta.get('moneda', '').lower()
+                    tipo = cuenta.get('tipo', '').lower()
                     
                     # Criterios para identificar cuentas de EEUU
-                    if any([
-                        'eeuu' in nombre_cuenta,
-                        'estados unidos' in nombre_cuenta,
-                        'united states' in nombre_cuenta,
-                        'us' in nombre_cuenta,
+                    es_cuenta_eeuu = any([
+                        # Por número de cuenta (formato específico de IOL)
                         '-eeuu' in numero_cuenta,
-                        'dolar estadounidense' in cuenta.get('moneda', '').lower()
-                    ]):
+                        'eeuu' in numero_cuenta,
+                        'us' in numero_cuenta,
+                        
+                        # Por moneda (dólar estadounidense)
+                        'dolar estadounidense' in moneda,
+                        'usd' in moneda,
+                        'dollar' in moneda,
+                        
+                        # Por tipo de cuenta
+                        'inversion_estados_unidos' in tipo,
+                        'inversion_eeuu' in tipo,
+                        'estados_unidos' in tipo,
+                        
+                        # Por descripción si existe
+                        'eeuu' in cuenta.get('descripcion', '').lower(),
+                        'estados unidos' in cuenta.get('descripcion', '').lower(),
+                        'united states' in cuenta.get('descripcion', '').lower()
+                    ])
+                    
+                    if es_cuenta_eeuu:
                         cuentas_eeuu.append(cuenta)
+                        st.info(f"🔍 Cuenta EEUU identificada: {numero_cuenta} - {moneda}")
+                
+                # Si no se encontraron cuentas EEUU, intentar obtener información del portafolio
+                if not cuentas_eeuu:
+                    st.info("🔍 Intentando obtener información adicional del portafolio EEUU...")
+                    
+                    # Obtener portafolio EEUU para verificar si hay activos
+                    try:
+                        url_portafolio = 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+                        respuesta_portafolio = requests.get(url_portafolio, headers=encabezados, timeout=30)
+                        
+                        if respuesta_portafolio.status_code == 200:
+                            portafolio_data = respuesta_portafolio.json()
+                            if portafolio_data.get('activos'):
+                                st.success(f"✅ Portafolio EEUU encontrado con {len(portafolio_data['activos'])} activos")
+                                
+                                # Crear cuenta EEUU sintética basada en el portafolio
+                                cuenta_sintetica = {
+                                    'numero': 'EEUU-SINTETICA',
+                                    'tipo': 'inversion_estados_unidos',
+                                    'moneda': 'dolar_estadounidense',
+                                    'disponible': 0,
+                                    'comprometido': 0,
+                                    'saldo': 0,
+                                    'titulosValorizados': sum(activo.get('valorizado', 0) for activo in portafolio_data['activos']),
+                                    'total': sum(activo.get('valorizado', 0) for activo in portafolio_data['activos']),
+                                    'descripcion': 'Cuenta EEUU (sintética basada en portafolio)'
+                                }
+                                
+                                cuentas_eeuu.append(cuenta_sintetica)
+                                st.info("✅ Cuenta EEUU sintética creada basada en el portafolio")
+                            else:
+                                st.warning("⚠️ Portafolio EEUU vacío")
+                        else:
+                            st.warning(f"⚠️ No se pudo obtener portafolio EEUU: {respuesta_portafolio.status_code}")
+                    except Exception as e:
+                        st.warning(f"⚠️ Error obteniendo portafolio EEUU: {str(e)}")
                 
                 # Crear respuesta filtrada solo para EEUU
                 data_eeuu = {
@@ -960,7 +1013,15 @@ def obtener_estado_cuenta_eeuu(token_portador):
                 if cuentas_eeuu:
                     st.success(f"✅ Estado de cuenta EEUU filtrado: {len(cuentas_eeuu)} cuentas de EEUU")
                 else:
-                    st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+                    st.warning("⚠️ No se encontraron cuentas específicas de EEUU")
+                    
+                    # Debug: mostrar todas las cuentas para identificar el problema
+                    st.markdown("#### 🔍 Debug: Todas las cuentas disponibles")
+                    st.info("Mostrando todas las cuentas para identificar por qué no se detectan las de EEUU")
+                    
+                    for i, cuenta in enumerate(data.get('cuentas', [])):
+                        with st.expander(f"Cuenta {i+1}: {cuenta.get('numero', 'N/A')}", expanded=False):
+                            st.json(cuenta)
                 
                 return data_eeuu
                 
