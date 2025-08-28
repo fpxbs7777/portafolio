@@ -5205,7 +5205,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                                 if posicion['operaciones']:
                                     # Calcular retorno basado en operaciones
                                     # Obtener precios históricos para el cálculo
-                                    precios_historicos = obtener_serie_historica_iol(token_portador, simbolo, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+                                    precios_historicos = obtener_serie_historica_iol(token_portador, "Merval", simbolo, st.session_state.fecha_desde, st.session_state.fecha_hasta)
                                     
                                     retorno_info = calcular_retorno_real_activo(
                                         simbolo, 
