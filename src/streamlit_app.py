@@ -1385,6 +1385,273 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
     except Exception:
         return None
 
+def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_hasta=None):
+    """
+    Obtiene todas las operaciones de un activo específico desde la API de IOL.
+    
+    Args:
+        token_portador (str): Token de autorización
+        simbolo (str): Símbolo del activo
+        fecha_desde (str): Fecha desde (YYYY-MM-DD), por defecto 2 años atrás
+        fecha_hasta (str): Fecha hasta (YYYY-MM-DD), por defecto hoy
+        
+    Returns:
+        list: Lista de operaciones del activo
+    """
+    if fecha_desde is None:
+        fecha_desde = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+    if fecha_hasta is None:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    # Parámetros para filtrar operaciones
+    params = {
+        'filtro.estado': 'terminadas',
+        'filtro.fechaDesde': fecha_desde,
+        'filtro.fechaHasta': fecha_hasta,
+        'filtro.pais': 'argentina'
+    }
+    
+    try:
+        url = "https://api.invertironline.com/api/v2/operaciones"
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            operaciones = response.json()
+            # Filtrar solo las operaciones del símbolo específico
+            operaciones_activo = [
+                op for op in operaciones 
+                if op.get('simbolo') == simbolo
+            ]
+            return operaciones_activo
+        else:
+            print(f"Error al obtener operaciones: {response.status_code} - {response.text}")
+            return []
+            
+    except Exception as e:
+        print(f"Error al obtener operaciones para {simbolo}: {str(e)}")
+        return []
+
+def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_desde=None, fecha_hasta=None):
+    """
+    Reconstruye la composición del portafolio a lo largo del tiempo basándose en todas las operaciones.
+    
+    Args:
+        token_portador (str): Token de autorización
+        portafolio_actual (dict): Portafolio actual con estructura {'activos': [...]}
+        fecha_desde (str): Fecha desde para reconstruir
+        fecha_hasta (str): Fecha hasta para reconstruir
+        
+    Returns:
+        dict: Composición del portafolio por fecha
+    """
+    if fecha_desde is None:
+        fecha_desde = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+    if fecha_hasta is None:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    
+    # Convertir portafolio a formato de diccionario por símbolo
+    portafolio_dict = {}
+    if 'activos' in portafolio_actual:
+        for activo in portafolio_actual['activos']:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                portafolio_dict[simbolo] = activo
+    else:
+        # Si ya es un diccionario por símbolo
+        portafolio_dict = portafolio_actual
+    
+    # Obtener todas las operaciones de todos los activos
+    todas_operaciones = []
+    
+    for simbolo in portafolio_dict.keys():
+        operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta)
+        for op in operaciones:
+            op['simbolo_original'] = simbolo
+            todas_operaciones.append(op)
+    
+    # Ordenar operaciones por fecha
+    todas_operaciones.sort(key=lambda x: x.get('fechaOperada', x.get('fechaOrden', '1900-01-01')))
+    
+    # Reconstruir composición día a día
+    composicion_por_fecha = {}
+    posiciones_actuales = {}
+    
+    # Inicializar con el portafolio actual
+    for simbolo, activo in portafolio_dict.items():
+        # Obtener cantidad del activo
+        cantidad = activo.get('cantidad', 0)
+        if not cantidad:
+            # Intentar otros campos de cantidad
+            cantidad = activo.get('Cantidad', activo.get('cantidadNominal', 0))
+        
+        posiciones_actuales[simbolo] = {
+            'cantidad': cantidad,
+            'precio_compra': 0,
+            'fecha_compra': None,
+            'operaciones': []
+        }
+    
+    # Procesar operaciones en orden cronológico
+    for op in todas_operaciones:
+        simbolo = op.get('simbolo_original')
+        tipo = op.get('tipo', '').lower()
+        fecha = op.get('fechaOperada') or op.get('fechaOrden')
+        cantidad = op.get('cantidadOperada', op.get('cantidad', 0))
+        precio = op.get('precioOperado', op.get('precio', 0))
+        
+        if not fecha or simbolo not in posiciones_actuales:
+            continue
+            
+        # Convertir fecha a string para usar como clave
+        try:
+            fecha_dt = datetime.fromisoformat(fecha.replace('Z', '+00:00'))
+            fecha_str = fecha_dt.strftime('%Y-%m-%d')
+        except:
+            continue
+        
+        # Actualizar posiciones
+        if tipo == 'compra':
+            posiciones_actuales[simbolo]['cantidad'] += cantidad
+            # Calcular precio promedio de compra
+            cantidad_anterior = posiciones_actuales[simbolo]['cantidad'] - cantidad
+            precio_anterior = posiciones_actuales[simbolo]['precio_compra']
+            
+            if cantidad_anterior > 0:
+                precio_promedio = ((precio_anterior * cantidad_anterior) + (precio * cantidad)) / posiciones_actuales[simbolo]['cantidad']
+            else:
+                precio_promedio = precio
+                
+            posiciones_actuales[simbolo]['precio_compra'] = precio_promedio
+            posiciones_actuales[simbolo]['fecha_compra'] = fecha_str
+            
+        elif tipo == 'venta':
+            posiciones_actuales[simbolo]['cantidad'] -= cantidad
+            if posiciones_actuales[simbolo]['cantidad'] <= 0:
+                posiciones_actuales[simbolo]['cantidad'] = 0
+                posiciones_actuales[simbolo]['precio_compra'] = 0
+                posiciones_actuales[simbolo]['fecha_compra'] = None
+        
+        # Registrar operación
+        posiciones_actuales[simbolo]['operaciones'].append({
+            'fecha': fecha_str,
+            'tipo': tipo,
+            'cantidad': cantidad,
+            'precio': precio
+        })
+        
+        # Guardar composición para esta fecha
+        composicion_por_fecha[fecha_str] = {
+            simbolo: {
+                'cantidad': posiciones_actuales[simbolo]['cantidad'],
+                'precio_compra': posiciones_actuales[simbolo]['precio_compra'],
+                'fecha_compra': posiciones_actuales[simbolo]['fecha_compra']
+            }
+            for simbolo in posiciones_actuales.keys()
+            if posiciones_actuales[simbolo]['cantidad'] > 0
+        }
+    
+    return composicion_por_fecha, posiciones_actuales
+
+def calcular_retorno_real_activo(simbolo, posiciones_actuales, precios_historicos):
+    """
+    Calcula el retorno real de un activo basándose en su historial de operaciones.
+    
+    Args:
+        simbolo (str): Símbolo del activo
+        posiciones_actuales (dict): Posiciones actuales del activo
+        precios_historicos (pd.Series): Precios históricos del activo
+        
+    Returns:
+        dict: Métricas de retorno real
+    """
+    if simbolo not in posiciones_actuales:
+        return None
+        
+    posicion = posiciones_actuales[simbolo]
+    
+    if not posicion['operaciones'] or posicion['cantidad'] <= 0:
+        return None
+    
+    # Obtener precio actual
+    if precios_historicos is None or precios_historicos.empty:
+        return None
+        
+    precio_actual = precios_historicos.iloc[-1]
+    
+    # Calcular retorno basado en operaciones
+    operaciones = posicion['operaciones']
+    
+    # Separar compras y ventas
+    compras = [op for op in operaciones if op['tipo'] == 'compra']
+    ventas = [op for op in operaciones if op['tipo'] == 'venta']
+    
+    # Calcular flujo de caja
+    flujo_compras = sum(op['cantidad'] * op['precio'] for op in compras)
+    flujo_ventas = sum(op['cantidad'] * op['precio'] for op in ventas)
+    
+    # Valor actual de la posición
+    valor_actual = posicion['cantidad'] * precio_actual
+    
+    # Calcular retorno total (incluyendo ventas realizadas)
+    if flujo_compras > 0:
+        retorno_total = ((valor_actual + flujo_ventas - flujo_compras) / flujo_compras) - 1
+    else:
+        retorno_total = 0
+    
+    # Calcular retorno anualizado basado en la primera compra
+    if compras:
+        primera_compra = min(compras, key=lambda x: x['fecha'])
+        ultima_operacion = max(operaciones, key=lambda x: x['fecha'])
+        
+        try:
+            fecha_inicio = datetime.strptime(primera_compra['fecha'], '%Y-%m-%d')
+            fecha_fin = datetime.strptime(ultima_operacion['fecha'], '%Y-%m-%d')
+            dias_transcurridos = (fecha_fin - fecha_inicio).days
+            
+            if dias_transcurridos > 0:
+                retorno_anualizado = ((1 + retorno_total) ** (365 / dias_transcurridos)) - 1
+            else:
+                retorno_anualizado = retorno_total
+        except:
+            retorno_anualizado = retorno_total
+    else:
+        retorno_anualizado = retorno_total
+    
+    # Calcular volatilidad desde la primera compra
+    if compras and precios_historicos is not None:
+        primera_compra = min(compras, key=lambda x: x['fecha'])
+        try:
+            fecha_inicio = datetime.strptime(primera_compra['fecha'], '%Y-%m-%d')
+            precios_desde_compra = precios_historicos[precios_historicos.index >= fecha_inicio]
+            
+            if len(precios_desde_compra) > 1:
+                retornos_diarios = precios_desde_compra.pct_change().dropna()
+                volatilidad_anualizada = retornos_diarios.std() * np.sqrt(252)
+            else:
+                volatilidad_anualizada = 0
+        except:
+            volatilidad_anualizada = 0
+    else:
+        volatilidad_anualizada = 0
+    
+    return {
+        'retorno_total': retorno_total,
+        'retorno_anualizado': retorno_anualizado,
+        'volatilidad_anualizada': volatilidad_anualizada,
+        'flujo_compras': flujo_compras,
+        'flujo_ventas': flujo_ventas,
+        'valor_actual': valor_actual,
+        'cantidad_actual': posicion['cantidad'],
+        'precio_compra_promedio': posicion['precio_compra'],
+        'fecha_primera_compra': posicion['fecha_compra']
+    }
+
 def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
     """
     Obtiene datos históricos para optimización de portafolio con manejo mejorado de errores.
@@ -2266,6 +2533,191 @@ def optimize_portfolio(returns, risk_free_rate=0.0, target_return=None):
     except Exception as e:
         st.error(f"❌ Error en optimización: {str(e)}. Usando pesos iguales.")
         return np.array([1/n_assets] * n_assets)
+
+def mostrar_resumen_operaciones_reales(portafolio, token_portador, portfolio_id=""):
+    """
+    Muestra un resumen de las operaciones reales de compra/venta del portafolio.
+    """
+    st.markdown("### 📊 Resumen de Operaciones Reales")
+    
+    try:
+        # Obtener fechas para el análisis
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+        fecha_desde = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+        
+        with st.spinner("🔄 Analizando operaciones reales del portafolio..."):
+            # Reconstruir composición del portafolio
+            composicion_por_fecha, posiciones_actuales = reconstruir_composicion_portafolio(
+                token_portador, portafolio, fecha_desde, fecha_hasta
+            )
+        
+        if not posiciones_actuales:
+            st.warning("⚠️ No se encontraron operaciones para analizar")
+            return
+        
+        # Mostrar resumen general
+        total_operaciones = sum(len(pos['operaciones']) for pos in posiciones_actuales.values())
+        activos_con_operaciones = sum(1 for pos in posiciones_actuales.values() if pos['operaciones'])
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("📈 Total Operaciones", f"{total_operaciones}")
+        
+        with col2:
+            st.metric("🏢 Activos con Operaciones", f"{activos_con_operaciones}")
+        
+        with col3:
+            st.metric("📅 Período Analizado", f"{(datetime.now() - datetime.strptime(fecha_desde, '%Y-%m-%d')).days} días")
+        
+        # Mostrar detalles por activo
+        st.markdown("#### 📋 Detalle por Activo")
+        
+        for simbolo, posicion in posiciones_actuales.items():
+            if not posicion['operaciones']:
+                continue
+                
+            with st.expander(f"🔍 {simbolo} - {len(posicion['operaciones'])} operaciones"):
+                # Resumen de operaciones
+                compras = [op for op in posicion['operaciones'] if op['tipo'] == 'compra']
+                ventas = [op for op in posicion['operaciones'] if op['tipo'] == 'venta']
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("💰 Compras", f"{len(compras)}")
+                
+                with col2:
+                    st.metric("💸 Ventas", f"{len(ventas)}")
+                
+                with col3:
+                    st.metric("📊 Cantidad Actual", f"{posicion['cantidad']}")
+                
+                with col4:
+                    if posicion['precio_compra'] > 0:
+                        st.metric("💵 Precio Promedio", f"${posicion['precio_compra']:.2f}")
+                    else:
+                        st.metric("💵 Precio Promedio", "N/A")
+                
+                # Tabla de operaciones
+                if posicion['operaciones']:
+                    df_operaciones = pd.DataFrame(posicion['operaciones'])
+                    df_operaciones['fecha'] = pd.to_datetime(df_operaciones['fecha'])
+                    df_operaciones = df_operaciones.sort_values('fecha', ascending=False)
+                    
+                    # Formatear columnas
+                    df_operaciones['precio'] = df_operaciones['precio'].apply(lambda x: f"${x:,.2f}")
+                    df_operaciones['cantidad'] = df_operaciones['cantidad'].apply(lambda x: f"{x:,.0f}")
+                    
+                    st.dataframe(
+                        df_operaciones[['fecha', 'tipo', 'cantidad', 'precio']],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                
+                # Calcular retorno real si hay datos históricos
+                if st.button(f"📈 Calcular Retorno Real - {simbolo}", key=f"calc_retorno_{simbolo}"):
+                    try:
+                        # Obtener datos históricos para el cálculo
+                        # Buscar el activo en el portafolio
+                        mercado = 'BCBA'  # Por defecto
+                        if 'activos' in portafolio:
+                            for activo in portafolio['activos']:
+                                if activo.get('titulo', {}).get('simbolo') == simbolo:
+                                    mercado = activo.get('titulo', {}).get('mercado', 'BCBA')
+                                    break
+                        
+                        serie_historica = obtener_serie_historica_iol(
+                            token_portador, mercado, simbolo, fecha_desde, fecha_hasta
+                        )
+                        
+                        if serie_historica is not None and not serie_historica.empty:
+                            retorno_real = calcular_retorno_real_activo(simbolo, posiciones_actuales, serie_historica)
+                            
+                            if retorno_real:
+                                st.success("✅ Retorno Real Calculado")
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.metric(
+                                        "📊 Retorno Total", 
+                                        f"{retorno_real['retorno_total']*100:.2f}%",
+                                        help="Retorno desde la primera compra hasta hoy"
+                                    )
+                                    
+                                    st.metric(
+                                        "📈 Retorno Anualizado", 
+                                        f"{retorno_real['retorno_anualizado']*100:.2f}%",
+                                        help="Retorno anualizado basado en el tiempo transcurrido"
+                                    )
+                                
+                                with col2:
+                                    st.metric(
+                                        "💵 Flujo Compras", 
+                                        f"${retorno_real['flujo_compras']:,.2f}",
+                                        help="Total invertido en compras"
+                                    )
+                                    
+                                    st.metric(
+                                        "💸 Flujo Ventas", 
+                                        f"${retorno_real['flujo_ventas']:,.2f}",
+                                        help="Total obtenido en ventas"
+                                    )
+                                
+                                # Información adicional
+                                st.info(f"📅 **Primera Compra:** {retorno_real['fecha_primera_compra']}")
+                                st.info(f"💰 **Valor Actual:** ${retorno_real['valor_actual']:,.2f}")
+                                st.info(f"📊 **Volatilidad Anualizada:** {retorno_real['volatilidad_anualizada']*100:.2f}%")
+                                
+                            else:
+                                st.warning("⚠️ No se pudo calcular el retorno real")
+                        else:
+                            st.warning("⚠️ No se pudieron obtener datos históricos para el cálculo")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error al calcular retorno real: {str(e)}")
+        
+        # Mostrar evolución temporal del portafolio
+        if len(composicion_por_fecha) > 1:
+            st.markdown("#### 📈 Evolución Temporal del Portafolio")
+            
+            # Crear DataFrame de evolución
+            fechas = sorted(composicion_por_fecha.keys())
+            df_evolucion = pd.DataFrame(index=fechas)
+            
+            for simbolo in posiciones_actuales.keys():
+                df_evolucion[simbolo] = [
+                    composicion_por_fecha[fecha].get(simbolo, {}).get('cantidad', 0)
+                    for fecha in fechas
+                ]
+            
+            # Gráfico de evolución
+            fig = go.Figure()
+            
+            for simbolo in df_evolucion.columns:
+                if df_evolucion[simbolo].sum() > 0:  # Solo mostrar activos con operaciones
+                    fig.add_trace(go.Scatter(
+                        x=df_evolucion.index,
+                        y=df_evolucion[simbolo],
+                        mode='lines+markers',
+                        name=simbolo,
+                        line=dict(width=2)
+                    ))
+            
+            fig.update_layout(
+                title="Evolución de Cantidades por Activo",
+                xaxis_title="Fecha",
+                yaxis_title="Cantidad",
+                hovermode='x unified',
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+    except Exception as e:
+        st.error(f"❌ Error al analizar operaciones: {str(e)}")
+        st.info("💡 Asegúrate de que el token de acceso sea válido y tengas permisos para ver operaciones")
 
 # --- Menú de Optimizaciones Avanzadas ---
 def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde, fecha_hasta):
@@ -3269,6 +3721,30 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     fecha_hasta = datetime.now().strftime('%Y-%m-%d')
     fecha_desde = (datetime.now() - timedelta(days=dias_historial*1.5)).strftime('%Y-%m-%d')
     
+    # RECONSTRUIR COMPOSICIÓN DEL PORTAFOLIO BASÁNDOSE EN OPERACIONES REALES
+    print("🔄 Reconstruyendo composición del portafolio basándose en operaciones reales...")
+    try:
+        composicion_por_fecha, posiciones_actuales = reconstruir_composicion_portafolio(
+            token_portador, portafolio, fecha_desde, fecha_hasta
+        )
+        print(f"✅ Composición reconstruida para {len(composicion_por_fecha)} fechas")
+        
+        # Mostrar resumen de operaciones encontradas
+        total_operaciones = sum(len(pos['operaciones']) for pos in posiciones_actuales.values())
+        print(f"📊 Total de operaciones procesadas: {total_operaciones}")
+        
+        for simbolo, pos in posiciones_actuales.items():
+            if pos['operaciones']:
+                compras = len([op for op in pos['operaciones'] if op['tipo'] == 'compra'])
+                ventas = len([op for op in pos['operaciones'] if op['tipo'] == 'venta'])
+                print(f"  {simbolo}: {compras} compras, {ventas} ventas, cantidad actual: {pos['cantidad']}")
+                
+    except Exception as e:
+        print(f"⚠️ Error al reconstruir composición: {str(e)}")
+        print("🔄 Continuando con método tradicional...")
+        composicion_por_fecha = {}
+        posiciones_actuales = {}
+    
     # 1. Calcular concentración del portafolio (Índice de Herfindahl-Hirschman normalizado)
     if len(portafolio) == 0:
         concentracion = 0
@@ -3374,9 +3850,41 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
                 print(f"No hay suficiente variación en los precios de {simbolo}")
                 continue
             
-            # Calcular métricas básicas
-            retorno_medio = retornos_validos.mean() * 252  # Anualizado
-            volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
+            # CALCULAR MÉTRICAS BASÁNDOSE EN OPERACIONES REALES SI ESTÁN DISPONIBLES
+            if posiciones_actuales and simbolo in posiciones_actuales:
+                print(f"📊 Calculando métricas basadas en operaciones reales para {simbolo}")
+                
+                # Calcular retorno real basado en operaciones
+                retorno_real = calcular_retorno_real_activo(simbolo, posiciones_actuales, serie_historica)
+                
+                if retorno_real:
+                    retorno_medio = retorno_real['retorno_anualizado']
+                    volatilidad = retorno_real['volatilidad_anualizada']
+                    
+                    # Mostrar información detallada del retorno real
+                    print(f"  💰 Retorno real: {retorno_real['retorno_total']*100:.2f}% total, {retorno_real['retorno_anualizado']*100:.2f}% anual")
+                    print(f"  📅 Primera compra: {retorno_real['fecha_primera_compra']}")
+                    print(f"  💵 Flujo compras: ${retorno_real['flujo_compras']:,.2f}, Flujo ventas: ${retorno_real['flujo_ventas']:,.2f}")
+                    print(f"  📈 Valor actual: ${retorno_real['valor_actual']:,.2f}")
+                    
+                    # Guardar métricas adicionales del retorno real
+                    metricas_activos[simbolo].update({
+                        'retorno_real_total': retorno_real['retorno_total'],
+                        'fecha_primera_compra': retorno_real['fecha_primera_compra'],
+                        'flujo_compras': retorno_real['flujo_compras'],
+                        'flujo_ventas': retorno_real['flujo_ventas'],
+                        'valor_actual_real': retorno_real['valor_actual']
+                    })
+                else:
+                    print(f"  ⚠️ No se pudo calcular retorno real, usando método tradicional")
+                    # Calcular métricas básicas tradicionales
+                    retorno_medio = retornos_validos.mean() * 252  # Anualizado
+                    volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
+            else:
+                print(f"  📊 Usando método tradicional (sin operaciones disponibles)")
+                # Calcular métricas básicas tradicionales
+                retorno_medio = retornos_validos.mean() * 252  # Anualizado
+                volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
             
             # Asegurar valores razonables
             retorno_medio = np.clip(retorno_medio, -5, 5)  # Límite de ±500% anual
@@ -3532,7 +4040,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador):
+def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -3797,7 +4305,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 "📈 Mostrar Histograma de Retornos por Activo", 
                 value=False,
                 help="Muestra histogramas de retornos históricos para cada activo del portafolio",
-                key="mostrar_histograma_retornos_detallado"
+                key=f"mostrar_histograma_retornos_detallado_{portfolio_id}"
             )
             
             col1, col2 = st.columns(2)
@@ -7173,26 +7681,27 @@ def mostrar_analisis_portafolio():
         portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🇦🇷 Portafolio Argentina", 
         "🇺🇸 Portafolio EEUU",
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
-        "💱 Cotizaciones"
+        "💱 Cotizaciones",
+        "📈 Operaciones Reales"
     ])
 
     with tab1:
         if portafolio_ar:
             st.subheader("🇦🇷 Portafolio Argentina")
-            mostrar_resumen_portafolio(portafolio_ar, token_acceso)
+            mostrar_resumen_portafolio(portafolio_ar, token_acceso, "ar")
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
         if portafolio_eeuu:
             st.subheader("🇺🇸 Portafolio Estados Unidos")
-            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso)
+            mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu")
         else:
             st.warning("No se pudo obtener el portafolio de EEUU")
     
@@ -7292,6 +7801,26 @@ def mostrar_analisis_portafolio():
     
     with tab6:
         mostrar_cotizaciones_mercado(token_acceso)
+    
+    with tab7:
+        st.subheader("📈 Análisis de Operaciones Reales")
+        st.info("🔍 Esta sección analiza las operaciones reales de compra/venta de tu portafolio para calcular retornos basados en fechas reales de compra.")
+        
+        # Seleccionar portafolio a analizar
+        portafolio_seleccionado = st.selectbox(
+            "Seleccionar portafolio para análisis:",
+            options=[
+                ("🇦🇷 Argentina", portafolio_ar),
+                ("🇺🇸 Estados Unidos", portafolio_eeuu)
+            ],
+            format_func=lambda x: x[0],
+            help="Selecciona el portafolio que deseas analizar"
+        )
+        
+        if portafolio_seleccionado[1]:
+            mostrar_resumen_operaciones_reales(portafolio_seleccionado[1], token_acceso, "operaciones_reales")
+        else:
+            st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
 
 def main():
     # Configuración de rendimiento
