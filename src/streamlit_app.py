@@ -2773,7 +2773,8 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
             "Benchmark de Referencia:",
             options=benchmark_options,
             index=0,
-            help="Índice de referencia para análisis alpha/beta"
+            help="Índice de referencia para análisis alpha/beta",
+            key="benchmark_avanzada"
         )
         
         profit_esperado = st.number_input(
@@ -3445,7 +3446,8 @@ def mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_ha
         position_security = st.selectbox(
             "Activo principal de la posición:",
             options=simbolos,
-            help="Selecciona el activo principal que deseas cubrir"
+            help="Selecciona el activo principal que deseas cubrir",
+            key="position_security_cobertura"
         )
         
         position_delta_usd = st.number_input(
@@ -3458,7 +3460,8 @@ def mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_ha
             "Benchmark de referencia:",
             options=['^SPX', 'SPY', 'BTC-USD', 'ETH-USD'] + simbolos,
             index=0,
-            help="Índice de referencia para calcular betas"
+            help="Índice de referencia para calcular betas",
+            key="benchmark_cobertura"
         )
     
     with col2:
@@ -4367,7 +4370,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                 tipo_grafico = st.selectbox(
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
-                    help="Seleccione el tipo de visualización para los valores de activos"
+                    help="Seleccione el tipo de visualización para los valores de activos",
+                    key="tipo_grafico_distribuciones"
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
@@ -4875,7 +4879,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        key="simbolo_analisis_tecnico"
     )
     
     if simbolo_seleccionado:
@@ -4973,12 +4978,14 @@ def mostrar_movimientos_asesor():
             tipo_fecha = st.selectbox(
                 "Tipo de fecha",
                 ["fechaOperacion", "fechaLiquidacion"],
-                index=0
+                index=0,
+                key="tipo_fecha_movimientos"
             )
             estado = st.selectbox(
                 "Estado",
                 ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
+                index=0,
+                key="estado_movimientos"
             )
         with col2:
             tipo_operacion = st.text_input("Tipo de operación")
@@ -5355,7 +5362,8 @@ def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, f
             "🔄 Rebalanceo",
             "📈 Optimizaciones"
         ],
-        help="Elija la categoría de análisis que desea realizar"
+        help="Elija la categoría de análisis que desea realizar",
+        key="categoria_optimizacion_unificado"
     )
     
     if categoria == "🔄 Rebalanceo":
@@ -5368,7 +5376,8 @@ def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, f
                 "📊 Optimización Básica",
                 "📈 Frontera Eficiente"
             ],
-            help="Elija el tipo de rebalanceo que desea realizar"
+            help="Elija el tipo de rebalanceo que desea realizar",
+            key="tipo_rebalanceo_unificado"
         )
         
         if tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
@@ -5391,7 +5400,8 @@ def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, f
                 "🚀 Optimización Avanzada",
                 "🛡️ Análisis de Cobertura"
             ],
-            help="Elija el tipo de optimización que desea realizar"
+            help="Elija el tipo de optimización que desea realizar",
+            key="tipo_optimizacion_unificado"
         )
         
         if tipo_optimizacion == "🎲 Optimización Aleatoria":
@@ -5460,7 +5470,8 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
                 'Tasa_Fija_6%': 'Tasa Fija 6%',
                 'Tasa_Fija_8%': 'Tasa Fija 8%'
             }[x],
-            help="Seleccione el benchmark que servirá como tasa libre de riesgo"
+            help="Seleccione el benchmark que servirá como tasa libre de riesgo",
+            key="benchmark_composicion_actual"
         )
     
     with col2:
@@ -5510,7 +5521,8 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
                 'min_variance': 'Mínima Varianza',
                 'sharpe_ratio': 'Máximo Ratio de Sharpe'
             }[x],
-            help="Seleccione el criterio de optimización"
+            help="Seleccione el criterio de optimización",
+            key="modo_optimizacion_composicion_actual"
         )
     
     with col2:
@@ -5656,7 +5668,8 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
                 'min_variance': 'Mínima Varianza',
                 'sharpe_ratio': 'Máximo Ratio de Sharpe'
             }[x],
-            help="Seleccione el criterio de optimización"
+            help="Seleccione el criterio de optimización",
+            key="modo_optimizacion_aleatorio"
         )
     
     with col2:
@@ -5676,7 +5689,8 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
                 'max_30': 'Máximo 30% por activo',
                 'max_40': 'Máximo 40% por activo'
             }[x],
-            help="Limita el peso máximo por activo"
+            help="Limita el peso máximo por activo",
+            key="restriccion_pesos_aleatorio"
         )
     
     # Configuración avanzada
@@ -6122,7 +6136,8 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
                 'Bono_GD30', 'Bono_GD35', 'Bono_GD38', 'Bono_GD41', 'Bono_GD46',
                 'Indice_S&P_Merval', 'Indice_Burcap', 'Indice_IGPA'
             ],
-            help="Benchmark para calcular alpha y beta"
+            help="Benchmark para calcular alpha y beta",
+            key="benchmark_optimizacion_aleatoria"
         )
     
     with col2:
@@ -6178,7 +6193,8 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
                     'max_return': 'Máximo Retorno',
                     'min_variance': 'Mínima Varianza',
                     'sharpe_ratio': 'Máximo Ratio de Sharpe'
-                }[x]
+                }[x],
+                key="estrategia_optimizacion_aleatoria"
             )
         with col2:
             mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="mostrar_histogramas_aleatoria")
@@ -6800,7 +6816,8 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                 'Tasa_Fija_6%': 'Tasa Fija 6%',
                 'Tasa_Fija_8%': 'Tasa Fija 8%'
             }[x],
-            help="Seleccione el benchmark que servirá como tasa libre de riesgo"
+            help="Seleccione el benchmark que servirá como tasa libre de riesgo",
+            key="benchmark_optimizacion_basica"
         )
     
     with col2:
@@ -6850,7 +6867,8 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                 'min-variance-l1': 'Mínima Varianza L1',
                 'min-variance-l2': 'Mínima Varianza L2',
                 'long-only': 'Solo Posiciones Largas'
-            }[x]
+            }[x],
+            key="estrategia_optimizacion_basica"
         )
     
     with col2:
@@ -7814,7 +7832,8 @@ def mostrar_analisis_portafolio():
                 ("🇺🇸 Estados Unidos", portafolio_eeuu)
             ],
             format_func=lambda x: x[0],
-            help="Selecciona el portafolio que deseas analizar"
+            help="Selecciona el portafolio que deseas analizar",
+            key="portafolio_operaciones_reales"
         )
         
         if portafolio_seleccionado[1]:
@@ -7938,7 +7957,8 @@ def main():
                     "Seleccione un cliente:",
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    key="cliente_seleccionado_principal"
                 )
                 
                 st.session_state.cliente_seleccionado = next(
