@@ -1726,8 +1726,11 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
     
     try:
         url = "https://api.invertironline.com/api/v2/operaciones"
+        print(f"🔍 Consultando operaciones para {simbolo} desde {fecha_desde} hasta {fecha_hasta}")
+        print(f"🔑 Token usado: {token_portador[:20]}...")
         response = requests.get(url, headers=headers, params=params)
         
+        print(f"📡 Respuesta de API para {simbolo}: {response.status_code}")
         if response.status_code == 200:
             operaciones = response.json()
             # Filtrar solo las operaciones del símbolo específico
@@ -1735,9 +1738,17 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
                 op for op in operaciones 
                 if op.get('simbolo') == simbolo
             ]
+            print(f"✅ Operaciones obtenidas para {simbolo}: {len(operaciones_activo)} operaciones")
             return operaciones_activo
+        elif response.status_code == 401:
+            print(f"❌ Error de autenticación (401) al obtener operaciones para {simbolo}")
+            print(f"Token usado: {token_portador[:20]}...")
+            return []
+        elif response.status_code == 403:
+            print(f"❌ Error de permisos (403) al obtener operaciones para {simbolo}")
+            return []
         else:
-            print(f"Error al obtener operaciones: {response.status_code} - {response.text}")
+            print(f"❌ Error al obtener operaciones para {simbolo}: {response.status_code} - {response.text}")
             return []
             
     except Exception as e:
@@ -4381,6 +4392,7 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
                 simbolos_portafolio.append(simbolo)
         
         if not simbolos_portafolio:
+            st.warning("⚠️ No se encontraron símbolos válidos en el portafolio")
             return None
         
         # Calcular métricas por activo basándose en operaciones reales
@@ -4389,9 +4401,12 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
         flujo_total_compras = 0
         flujo_total_ventas = 0
         
+        st.info(f"🔍 Procesando {len(simbolos_portafolio)} símbolos del portafolio")
+        
         for simbolo in simbolos_portafolio:
             if simbolo in composicion_historica:
                 posicion = composicion_historica[simbolo]
+                st.info(f"📊 Procesando {simbolo}: {len(posicion.get('operaciones', []))} operaciones")
                 
                 if posicion['operaciones']:
                     # Obtener serie histórica del activo
@@ -4401,10 +4416,12 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
                     )
                     
                     if serie_historica is not None and not serie_historica.empty:
+                        st.success(f"✅ Serie histórica obtenida para {simbolo}: {len(serie_historica)} puntos de datos")
                         # Calcular retorno real basado en operaciones
                         retorno_info = calcular_retorno_real_activo(simbolo, posicion, serie_historica)
                         
                         if retorno_info:
+                            st.success(f"✅ Retorno calculado para {simbolo}: {retorno_info.get('retorno_total', 0)*100:.2f}%")
                             # Agregar a métricas del portafolio
                             valor_actual = retorno_info['valor_actual']
                             valor_total_portafolio += valor_actual
@@ -4442,6 +4459,8 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
                                     evolucion_portafolio[fecha] += posicion['cantidad'] * precio
         
         # Calcular métricas agregadas del portafolio
+        st.info(f"💰 Valor total del portafolio: ${valor_total_portafolio:,.2f}")
+        
         if valor_total_portafolio > 0:
             # Retorno total del portafolio
             retorno_total_portafolio = ((valor_total_portafolio + flujo_total_ventas - flujo_total_compras) / flujo_total_compras) - 1
@@ -4495,6 +4514,7 @@ def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_hist
         
     except Exception as e:
         print(f"Error al calcular métricas del portafolio: {str(e)}")
+        st.error(f"❌ Error detallado: {str(e)}")
         return None
 
 # --- Funciones de Visualización ---
@@ -5172,6 +5192,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                             simbolos_portafolio.append(simbolo)
                     
                     if simbolos_portafolio:
+                        # Verificar token antes de reconstruir
+                        st.info(f"🔑 Token para reconstrucción: {token_portador[:20]}...")
+                        
                         # Reconstruir composición histórica
                         composicion_historica = reconstruir_composicion_portafolio(
                             token_portador, 
@@ -5253,6 +5276,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                     if simbolos_portafolio:
                         # Reconstruir composición histórica si no está disponible
                         if 'composicion_historica' not in locals():
+                            st.info(f"🔑 Token para métricas: {token_portador[:20]}...")
                             composicion_historica = reconstruir_composicion_portafolio(
                                 token_portador, 
                                 portafolio, 
