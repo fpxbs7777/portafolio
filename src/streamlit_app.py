@@ -1889,6 +1889,27 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
                             for op in operaciones_similares[:2]:
                                 st.info(f"  🔍 Similar: {op.get('simbolo', 'N/A')} ({op.get('tipo', 'N/A')})")
                 
+                # 🔍 ANÁLISIS DETALLADO DE OPERACIONES DISPONIBLES
+                st.markdown("#### 🔍 Análisis Detallado de Operaciones Disponibles")
+                
+                # Mostrar todas las operaciones con detalles completos
+                st.info(f"📊 Mostrando detalles de las {len(todas_operaciones_api)} operaciones disponibles:")
+                
+                for i, op in enumerate(todas_operaciones_api[:10]):  # Mostrar primeras 10
+                    st.info(f"""
+                    **Operación {i+1}:**
+                    - Símbolo: {op.get('simbolo', 'N/A')}
+                    - Tipo: {op.get('tipo', 'N/A')}
+                    - Estado: {op.get('estado', 'N/A')}
+                    - Mercado: {op.get('mercado', 'N/A')}
+                    - Cantidad: {op.get('cantidad', 'N/A')}
+                    - Precio: ${op.get('precio', 'N/A')}
+                    - Fecha: {op.get('fechaOperada', op.get('fechaOrden', 'N/A'))}
+                    """)
+                
+                if len(todas_operaciones_api) > 10:
+                    st.info(f"... y {len(todas_operaciones_api) - 10} operaciones más")
+                
                 # 🔍 BUSQUEDA ALTERNATIVA: Probar diferentes estados de operaciones
                 st.markdown("#### 🔍 Búsqueda con Diferentes Estados")
                 
