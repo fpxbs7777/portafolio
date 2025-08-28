@@ -725,52 +725,33 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
     url_portafolio_asesores = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
     encabezados = obtener_encabezado_autorizacion(token_portador)
     
-    st.info(f"🔍 Intentando obtener portafolio EEUU del cliente {id_cliente}")
-    st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
-    
     try:
         # Primer intento: endpoint de Asesores
         respuesta = requests.get(url_portafolio_asesores, headers=encabezados, timeout=30)
         
         if respuesta.status_code == 200:
             data = respuesta.json()
-            st.success(f"✅ Portafolio EEUU obtenido vía Asesores: {len(data.get('activos', []))} activos")
             return data
         elif respuesta.status_code == 404:
-            st.info("ℹ️ No se encontró portafolio EEUU vía Asesores, intentando endpoint directo...")
-            
             # Segundo intento: endpoint directo
             url_portafolio_directo = f'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
             respuesta_directo = requests.get(url_portafolio_directo, headers=encabezados, timeout=30)
             
             if respuesta_directo.status_code == 200:
                 data_directo = respuesta_directo.json()
-                st.success(f"✅ Portafolio EEUU obtenido vía endpoint directo: {len(data_directo.get('activos', []))} activos")
                 return data_directo
             elif respuesta_directo.status_code == 401:
-                st.error("❌ Error 401: Token de autenticación inválido o expirado")
-                st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
                 return None
             elif respuesta_directo.status_code == 403:
-                st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
-                st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
                 return None
             else:
-                st.error(f"❌ Error HTTP {respuesta_directo.status_code} en endpoint directo")
-                st.info(f"📄 Respuesta: {respuesta_directo.text[:500]}")
                 return None
                 
         elif respuesta.status_code == 401:
-            st.error("❌ Error 401: Token de autenticación inválido o expirado")
-            st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
             return None
         elif respuesta.status_code == 403:
-            st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
-            st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
             return None
         else:
-            st.error(f"❌ Error HTTP {respuesta.status_code} en endpoint de Asesores")
-            st.info(f"📄 Respuesta: {respuesta.text[:500]}")
             return None
             
     except requests.exceptions.Timeout:
@@ -831,10 +812,7 @@ def obtener_estado_cuenta_eeuu(token_portador):
                     'total_cuentas_eeuu': len(cuentas_eeuu)
                 }
                 
-                if cuentas_eeuu:
-                    st.success(f"✅ Estado de cuenta EEUU filtrado: {len(cuentas_eeuu)} cuentas de EEUU")
-                else:
-                    st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+
                 
                 return data_eeuu
                 
@@ -4025,7 +4003,8 @@ def validar_datos_financieros(returns, min_observaciones=30):
 
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
-    Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
+    Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos
+    indexados a operaciones reales para estadísticas más precisas.
     
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
@@ -4371,6 +4350,152 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
         'probabilidades': probabilidades,
         'riesgo_anual': volatilidad_portafolio  # Usamos la volatilidad como proxy de riesgo
     }
+
+def calcular_metricas_portafolio_operaciones_reales(portafolio, composicion_historica, token_portador, fecha_desde, fecha_hasta):
+    """
+    Calcula métricas del portafolio basándose en operaciones reales y series históricas indexadas.
+    
+    Args:
+        portafolio (dict): Portafolio actual
+        composicion_historica (dict): Composición histórica reconstruida desde operaciones
+        token_portador (str): Token de autenticación
+        fecha_desde (date): Fecha de inicio del análisis
+        fecha_hasta (date): Fecha de fin del análisis
+        
+    Returns:
+        dict: Métricas del portafolio basadas en operaciones reales
+    """
+    try:
+        # Inicializar estructuras
+        activos_detalle = []
+        evolucion_portafolio = {}
+        retornos_diarios_portafolio = []
+        
+        # Obtener símbolos del portafolio
+        activos = portafolio.get('activos', [])
+        simbolos_portafolio = []
+        for activo in activos:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                simbolos_portafolio.append(simbolo)
+        
+        if not simbolos_portafolio:
+            return None
+        
+        # Calcular métricas por activo basándose en operaciones reales
+        valor_total_portafolio = 0
+        retorno_total_portafolio = 0
+        flujo_total_compras = 0
+        flujo_total_ventas = 0
+        
+        for simbolo in simbolos_portafolio:
+            if simbolo in composicion_historica:
+                posicion = composicion_historica[simbolo]
+                
+                if posicion['operaciones']:
+                    # Obtener serie histórica del activo
+                    mercado = 'BCBA'  # Por defecto, se puede mejorar
+                    serie_historica = obtener_serie_historica_iol(
+                        token_portador, mercado, simbolo, fecha_desde, fecha_hasta
+                    )
+                    
+                    if serie_historica is not None and not serie_historica.empty:
+                        # Calcular retorno real basado en operaciones
+                        retorno_info = calcular_retorno_real_activo(simbolo, posicion, serie_historica)
+                        
+                        if retorno_info:
+                            # Agregar a métricas del portafolio
+                            valor_actual = retorno_info['valor_actual']
+                            valor_total_portafolio += valor_actual
+                            flujo_total_compras += retorno_info['flujo_compras']
+                            flujo_total_ventas += retorno_info['flujo_ventas']
+                            
+                            # Calcular retorno ponderado
+                            peso_activo = valor_actual / valor_total_portafolio if valor_total_portafolio > 0 else 0
+                            retorno_total_portafolio += retorno_info['retorno_total'] * peso_activo
+                            
+                            # Agregar detalle del activo
+                            activos_detalle.append({
+                                'Símbolo': simbolo,
+                                'Cantidad': posicion['cantidad'],
+                                'Valor Actual': f"${valor_actual:,.2f}",
+                                'Peso (%)': f"{peso_activo*100:.2f}%",
+                                'Retorno Total (%)': f"{retorno_info['retorno_total']*100:.2f}%",
+                                'Retorno Anualizado (%)': f"{retorno_info['retorno_anualizado']*100:.2f}%",
+                                'Volatilidad (%)': f"{retorno_info['volatilidad_anualizada']*100:.2f}%",
+                                'Operaciones': len(posicion['operaciones'])
+                            })
+                            
+                            # Construir evolución del portafolio
+                            if 'fecha_primera_compra' in retorno_info:
+                                fecha_inicio = retorno_info['fecha_primera_compra']
+                                if isinstance(fecha_inicio, str):
+                                    fecha_inicio = datetime.strptime(fecha_inicio, '%Y-%m-%d')
+                                
+                                # Obtener precios desde la primera compra
+                                precios_desde_compra = serie_historica[serie_historica.index >= fecha_inicio]
+                                
+                                for fecha, precio in precios_desde_compra.items():
+                                    if fecha not in evolucion_portafolio:
+                                        evolucion_portafolio[fecha] = 0
+                                    evolucion_portafolio[fecha] += posicion['cantidad'] * precio
+        
+        # Calcular métricas agregadas del portafolio
+        if valor_total_portafolio > 0:
+            # Retorno total del portafolio
+            retorno_total_portafolio = ((valor_total_portafolio + flujo_total_ventas - flujo_total_compras) / flujo_total_compras) - 1
+            
+            # Calcular volatilidad del portafolio
+            if evolucion_portafolio:
+                fechas_ordenadas = sorted(evolucion_portafolio.keys())
+                valores_ordenados = [evolucion_portafolio[fecha] for fecha in fechas_ordenadas]
+                
+                # Calcular retornos diarios del portafolio
+                for i in range(1, len(valores_ordenados)):
+                    if valores_ordenados[i-1] > 0:
+                        retorno_diario = (valores_ordenados[i] - valores_ordenados[i-1]) / valores_ordenados[i-1]
+                        retornos_diarios_portafolio.append(retorno_diario)
+                
+                if retornos_diarios_portafolio:
+                    volatilidad_anual_portafolio = np.std(retornos_diarios_portafolio) * np.sqrt(252)
+                    
+                    # Calcular métricas de riesgo
+                    retornos_array = np.array(retornos_diarios_portafolio)
+                    
+                    # VaR y CVaR al 95%
+                    var_95 = np.percentile(retornos_array, 5)
+                    cvar_95 = np.mean(retornos_array[retornos_array <= var_95])
+                    
+                    # Máximo drawdown
+                    valores_acumulados = np.cumprod(1 + np.array(retornos_diarios_portafolio))
+                    running_max = np.maximum.accumulate(valores_acumulados)
+                    drawdown = (valores_acumulados - running_max) / running_max
+                    max_drawdown = np.min(drawdown)
+                    
+                    # Ratio Sharpe (asumiendo tasa libre de riesgo del 4%)
+                    tasa_libre_riesgo = 0.04
+                    retorno_anualizado_portafolio = np.mean(retornos_array) * 252
+                    ratio_sharpe = (retorno_anualizado_portafolio - tasa_libre_riesgo) / volatilidad_anual_portafolio if volatilidad_anual_portafolio > 0 else 0
+                    
+                    return {
+                        'retorno_total_portafolio': retorno_total_portafolio,
+                        'retorno_anualizado_portafolio': retorno_anualizado_portafolio,
+                        'volatilidad_anual_portafolio': volatilidad_anual_portafolio,
+                        'ratio_sharpe': ratio_sharpe,
+                        'var_95': var_95,
+                        'cvar_95': cvar_95,
+                        'max_drawdown': max_drawdown,
+                        'activos_detalle': activos_detalle,
+                        'evolucion_portafolio': evolucion_portafolio,
+                        'total_operaciones': sum(len(composicion_historica[s]['operaciones']) for s in simbolos_portafolio if s in composicion_historica)
+                    }
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error al calcular métricas del portafolio: {str(e)}")
+        return None
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
@@ -5030,6 +5155,186 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                 else:
                     st.warning("⚠️ No hay símbolos válidos en el portafolio para análisis de retornos")
         
+        # Análisis de Composición Histórica del Portafolio
+        st.subheader("📈 Composición Histórica del Portafolio")
+        st.info("🔍 Esta sección reconstruye la composición del portafolio a lo largo del tiempo basándose en operaciones reales")
+        
+        # Botón para reconstruir composición histórica
+        if st.button("🔄 Reconstruir Composición Histórica", use_container_width=True):
+            with st.spinner("🔄 Reconstruyendo composición histórica del portafolio..."):
+                try:
+                    # Obtener símbolos del portafolio
+                    simbolos_portafolio = []
+                    for activo in activos:
+                        titulo = activo.get('titulo', {})
+                        simbolo = titulo.get('simbolo', '')
+                        if simbolo:
+                            simbolos_portafolio.append(simbolo)
+                    
+                    if simbolos_portafolio:
+                        # Reconstruir composición histórica
+                        composicion_historica = reconstruir_composicion_portafolio(
+                            token_portador, 
+                            portafolio, 
+                            st.session_state.fecha_desde, 
+                            st.session_state.fecha_hasta
+                        )
+                        
+                        if composicion_historica:
+                            st.success(f"✅ Composición histórica reconstruida para {len(composicion_historica)} activos")
+                            
+                            # Mostrar resumen de la reconstrucción
+                            st.markdown("#### 📊 Resumen de la Reconstrucción")
+                            col1, col2, col3 = st.columns(3)
+                            
+                            total_operaciones = sum(len(pos['operaciones']) for pos in composicion_historica.values())
+                            activos_con_operaciones = sum(1 for pos in composicion_historica.values() if pos['operaciones'])
+                            
+                            with col1:
+                                st.metric("Activos Analizados", len(composicion_historica))
+                            with col2:
+                                st.metric("Total Operaciones", total_operaciones)
+                            with col3:
+                                st.metric("Activos con Operaciones", activos_con_operaciones)
+                            
+                            # Mostrar detalles por activo
+                            st.markdown("#### 📋 Detalle por Activo")
+                            detalles_activos = []
+                            
+                            for simbolo, posicion in composicion_historica.items():
+                                if posicion['operaciones']:
+                                    # Calcular retorno basado en operaciones
+                                    retorno_info = calcular_retorno_real_activo(
+                                        simbolo, 
+                                        posicion, 
+                                        st.session_state.fecha_desde, 
+                                        st.session_state.fecha_hasta
+                                    )
+                                    
+                                    detalles_activos.append({
+                                        'Símbolo': simbolo,
+                                        'Cantidad Actual': posicion['cantidad'],
+                                        'Operaciones': len(posicion['operaciones']),
+                                        'Inversión Total': f"${posicion['inversion_total']:,.2f}",
+                                        'Retorno (%)': f"{retorno_info.get('retorno_porcentaje', 0):.2f}%" if retorno_info else "N/A",
+                                        'Retorno ($)': f"${retorno_info.get('retorno_dolares', 0):,.2f}" if retorno_info else "N/A"
+                                    })
+                            
+                            if detalles_activos:
+                                df_detalles = pd.DataFrame(detalles_activos)
+                                st.dataframe(df_detalles, use_container_width=True, height=300)
+                            else:
+                                st.info("ℹ️ No se encontraron operaciones para calcular retornos históricos")
+                        else:
+                            st.warning("⚠️ No se pudo reconstruir la composición histórica")
+                    else:
+                        st.warning("⚠️ No hay símbolos válidos en el portafolio para análisis histórico")
+                except Exception as e:
+                    st.error(f"❌ Error al reconstruir composición histórica: {str(e)}")
+        
+        # Métricas del Portafolio Basadas en Operaciones Reales
+        st.subheader("📊 Métricas del Portafolio (Basadas en Operaciones Reales)")
+        st.info("🔍 Esta sección calcula estadísticas reales de retornos y riesgos indexando las series históricas a las operaciones reales")
+        
+        # Botón para calcular métricas basadas en operaciones
+        if st.button("📈 Calcular Métricas Reales del Portafolio", use_container_width=True):
+            with st.spinner("🔄 Calculando métricas reales del portafolio..."):
+                try:
+                    # Obtener símbolos del portafolio
+                    simbolos_portafolio = []
+                    for activo in activos:
+                        titulo = activo.get('titulo', {})
+                        simbolo = titulo.get('simbolo', '')
+                        if simbolo:
+                            simbolos_portafolio.append(simbolo)
+                    
+                    if simbolos_portafolio:
+                        # Reconstruir composición histórica si no está disponible
+                        if 'composicion_historica' not in locals():
+                            composicion_historica = reconstruir_composicion_portafolio(
+                                token_portador, 
+                                portafolio, 
+                                st.session_state.fecha_desde, 
+                                st.session_state.fecha_hasta
+                            )
+                        
+                        if composicion_historica:
+                            # Calcular métricas del portafolio basadas en operaciones reales
+                            metricas_reales = calcular_metricas_portafolio_operaciones_reales(
+                                portafolio, 
+                                composicion_historica, 
+                                token_portador,
+                                st.session_state.fecha_desde,
+                                st.session_state.fecha_hasta
+                            )
+                            
+                            if metricas_reales:
+                                st.success("✅ Métricas reales del portafolio calculadas exitosamente")
+                                
+                                # Mostrar métricas principales
+                                st.markdown("#### 📊 Métricas Principales del Portafolio")
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.metric("Retorno Total Real", f"{metricas_reales['retorno_total_portafolio']*100:.2f}%")
+                                with col2:
+                                    st.metric("Retorno Anualizado", f"{metricas_reales['retorno_anualizado_portafolio']*100:.2f}%")
+                                with col3:
+                                    st.metric("Volatilidad Anual", f"{metricas_reales['volatilidad_anual_portafolio']*100:.2f}%")
+                                with col4:
+                                    st.metric("Ratio Sharpe", f"{metricas_reales['ratio_sharpe']:.3f}")
+                                
+                                # Mostrar métricas de riesgo
+                                st.markdown("#### ⚖️ Métricas de Riesgo")
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    st.metric("VaR (95%)", f"{metricas_reales['var_95']*100:.2f}%")
+                                with col2:
+                                    st.metric("CVaR (95%)", f"{metricas_reales['cvar_95']*100:.2f}%")
+                                with col3:
+                                    st.metric("Máximo Drawdown", f"{metricas_reales['max_drawdown']*100:.2f}%")
+                                
+                                # Mostrar composición del portafolio por activo
+                                st.markdown("#### 📋 Composición y Retornos por Activo")
+                                if 'activos_detalle' in metricas_reales:
+                                    df_activos_detalle = pd.DataFrame(metricas_reales['activos_detalle'])
+                                    st.dataframe(df_activos_detalle, use_container_width=True, height=400)
+                                
+                                # Gráfico de evolución del portafolio
+                                if 'evolucion_portafolio' in metricas_reales and metricas_reales['evolucion_portafolio']:
+                                    st.markdown("#### 📈 Evolución del Portafolio en el Tiempo")
+                                    fig = go.Figure()
+                                    
+                                    # Agregar línea del portafolio
+                                    fechas = list(metricas_reales['evolucion_portafolio'].keys())
+                                    valores = list(metricas_reales['evolucion_portafolio'].values())
+                                    
+                                    fig.add_trace(go.Scatter(
+                                        x=fechas,
+                                        y=valores,
+                                        mode='lines',
+                                        name='Valor del Portafolio',
+                                        line=dict(color='#0d6efd', width=2)
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title="Evolución del Portafolio Basada en Operaciones Reales",
+                                        xaxis_title="Fecha",
+                                        yaxis_title="Valor del Portafolio ($)",
+                                        height=500
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.warning("⚠️ No se pudieron calcular las métricas reales del portafolio")
+                        else:
+                            st.warning("⚠️ No se pudo reconstruir la composición histórica para calcular métricas")
+                    else:
+                        st.warning("⚠️ No hay símbolos válidos en el portafolio para análisis")
+                except Exception as e:
+                    st.error(f"❌ Error al calcular métricas reales: {str(e)}")
+        
         # Recomendaciones
         st.subheader("💡 Recomendaciones")
         if metricas:
@@ -5110,8 +5415,7 @@ def mostrar_estado_cuenta(estado_cuenta, es_eeuu=False):
             
             # Mostrar resumen específico para EEUU
             st.info(f"💡 **Resumen EEUU**: {total_cuentas_eeuu} cuentas con saldo total de AR$ {total_en_pesos:,.2f}")
-        else:
-            st.info("ℹ️ No se encontraron cuentas específicas de EEUU")
+
     else:
         # Estado de cuenta general (no filtrado)
         total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
@@ -8134,14 +8438,13 @@ def mostrar_analisis_portafolio():
             st.rerun()
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🇦🇷 Portafolio Argentina", 
         "🇺🇸 Portafolio EEUU",
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
-        "💱 Cotizaciones",
-        "📈 Operaciones Reales"
+        "💱 Cotizaciones"
     ])
 
     with tab1:
@@ -8255,55 +8558,7 @@ def mostrar_analisis_portafolio():
     with tab6:
         mostrar_cotizaciones_mercado(token_acceso)
     
-    with tab7:
-        st.subheader("📈 Análisis de Operaciones Reales")
-        st.info("🔍 Esta sección analiza las operaciones reales de compra/venta de tu portafolio para calcular retornos basados en fechas reales de compra.")
-        
-        # Verificar si ya tenemos datos de operaciones en caché
-        operaciones_cache_key = f"operaciones_cache_{id_cliente}"
-        
-        if operaciones_cache_key not in st.session_state:
-            st.info("📊 Haz clic en 'Cargar Operaciones' para comenzar el análisis")
-            
-            if st.button("🚀 Cargar Operaciones", use_container_width=True):
-                with st.spinner("🔄 Cargando operaciones reales..."):
-                    # Seleccionar portafolio a analizar
-                    portafolio_seleccionado = st.selectbox(
-                        "Seleccionar portafolio para análisis:",
-                        options=[
-                            ("🇦🇷 Argentina", portafolio_ar),
-                            ("🇺🇸 Estados Unidos", portafolio_eeuu)
-                        ],
-                        format_func=lambda x: x[0],
-                        help="Selecciona el portafolio que deseas analizar",
-                        key="portafolio_operaciones_reales"
-                    )
-                    
-                    if portafolio_seleccionado[1]:
-                        # Ejecutar análisis y cachear resultados
-                        resultado = mostrar_analisis_operaciones_reales(portafolio_seleccionado[1], token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
-                        if resultado:
-                            st.session_state[operaciones_cache_key] = resultado
-                            st.success("✅ Análisis completado y cacheado")
-                    else:
-                        st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
-        else:
-            st.success("✅ Datos de operaciones cargados desde caché")
-            
-            # Mostrar opciones para refrescar o ver resultados
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                if st.button("📊 Ver Análisis Cacheado", use_container_width=True):
-                    st.session_state[f"mostrar_operaciones_{id_cliente}"] = True
-            
-            with col2:
-                if st.button("🔄 Refrescar Operaciones", use_container_width=True):
-                    del st.session_state[operaciones_cache_key]
-                    st.rerun()
-            
-            # Mostrar resultados si se solicita
-            if st.session_state.get(f"mostrar_operaciones_{id_cliente}", False):
-                mostrar_analisis_operaciones_reales(portafolio_ar or portafolio_eeuu, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+
 
 def limpiar_cache_cliente_anterior():
     """
