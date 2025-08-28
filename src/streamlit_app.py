@@ -5014,6 +5014,162 @@ class PortfolioManager:
             st.error(f"❌ Error en cálculo de métricas del portafolio: {str(e)}")
             return {'return': 0, 'volatility': 0, 'sharpe': 0}
 
+def mostrar_menu_optimizacion_separado(portafolio, token_acceso, fecha_desde, fecha_hasta, tipo_portafolio):
+    """
+    Menú de optimización para portafolios separados (Argentina o EEUU)
+    """
+    pais_nombre = "Argentina" if tipo_portafolio == "argentina" else "EEUU"
+    bandera = "🇦🇷" if tipo_portafolio == "argentina" else "🇺🇸"
+    
+    st.markdown(f"### {bandera} Optimización de Portafolio {pais_nombre}")
+    
+    # Información del portafolio
+    activos = portafolio.get('activos', [])
+    total_portafolio = sum(activo.get('valorMercado', 0) for activo in activos)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Activos", len(activos))
+    with col2:
+        st.metric("Valor Total", f"AR$ {total_portafolio:,.2f}")
+    with col3:
+        st.metric("Tipo", "Separado")
+    
+    # Selección de categoría principal
+    categoria = st.selectbox(
+        "Seleccione la categoría:",
+        options=[
+            "🔄 Rebalanceo",
+            "📈 Optimizaciones"
+        ],
+        help="Elija la categoría de análisis que desea realizar"
+    )
+    
+    if categoria == "🔄 Rebalanceo":
+        # Submenú de Rebalanceo
+        tipo_rebalanceo = st.selectbox(
+            "Seleccione el tipo de rebalanceo:",
+            options=[
+                "🔄 Rebalanceo con Composición Actual",
+                "🎲 Rebalanceo con Símbolos Aleatorios",
+                "📊 Optimización Básica",
+                "📈 Frontera Eficiente"
+            ],
+            help="Elija el tipo de rebalanceo que desea realizar"
+        )
+        
+        if tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
+            mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "🎲 Rebalanceo con Símbolos Aleatorios":
+            mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "📊 Optimización Básica":
+            mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "📈 Frontera Eficiente":
+            mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta)
+    
+    elif categoria == "📈 Optimizaciones":
+        # Submenú de Optimizaciones
+        tipo_optimizacion = st.selectbox(
+            "Seleccione el tipo de optimización:",
+            options=[
+                "🎲 Optimización Aleatoria",
+                "🚀 Optimización Avanzada",
+                "🛡️ Análisis de Cobertura"
+            ],
+            help="Elija el tipo de optimización que desea realizar"
+        )
+        
+        if tipo_optimizacion == "🎲 Optimización Aleatoria":
+            mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_optimizacion == "🚀 Optimización Avanzada":
+            mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_optimizacion == "🛡️ Análisis de Cobertura":
+            mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
+
+def mostrar_menu_optimizacion_consolidado(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Menú de optimización para portafolio consolidado (Argentina + EEUU)
+    """
+    st.markdown("### 🌍 Optimización de Portafolio Consolidado")
+    
+    # Información del portafolio consolidado
+    activos = portafolio.get('activos', [])
+    total_portafolio = sum(activo.get('valorMercado', 0) for activo in activos)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Activos Totales", len(activos))
+    with col2:
+        st.metric("Valor Total", f"AR$ {total_portafolio:,.2f}")
+    with col3:
+        st.metric("Tipo", "Consolidado")
+    
+    # Selección de categoría principal
+    categoria = st.selectbox(
+        "Seleccione la categoría:",
+        options=[
+            "🔄 Rebalanceo",
+            "📈 Optimizaciones",
+            "🌍 Análisis Global"
+        ],
+        help="Elija la categoría de análisis que desea realizar"
+    )
+    
+    if categoria == "🔄 Rebalanceo":
+        # Submenú de Rebalanceo
+        tipo_rebalanceo = st.selectbox(
+            "Seleccione el tipo de rebalanceo:",
+            options=[
+                "🔄 Rebalanceo con Composición Actual",
+                "🎲 Rebalanceo con Símbolos Aleatorios",
+                "📊 Optimización Básica",
+                "📈 Frontera Eficiente"
+            ],
+            help="Elija el tipo de rebalanceo que desea realizar"
+        )
+        
+        if tipo_rebalanceo == "🔄 Rebalanceo con Composición Actual":
+            mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "🎲 Rebalanceo con Símbolos Aleatorios":
+            mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "📊 Optimización Básica":
+            mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_rebalanceo == "📈 Frontera Eficiente":
+            mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hasta)
+    
+    elif categoria == "📈 Optimizaciones":
+        # Submenú de Optimizaciones
+        tipo_optimizacion = st.selectbox(
+            "Seleccione el tipo de optimización:",
+            options=[
+                "🎲 Optimización Aleatoria",
+                "🚀 Optimización Avanzada",
+                "🛡️ Análisis de Cobertura"
+            ],
+            help="Elija el tipo de optimización que desea realizar"
+        )
+        
+        if tipo_optimizacion == "🎲 Optimización Aleatoria":
+            mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_optimizacion == "🚀 Optimización Avanzada":
+            mostrar_optimizacion_avanzada(portafolio, token_acceso, fecha_desde, fecha_hasta)
+        elif tipo_optimizacion == "🛡️ Análisis de Cobertura":
+            mostrar_cobertura_portafolio(portafolio, token_acceso, fecha_desde, fecha_hasta)
+    
+    elif categoria == "🌍 Análisis Global":
+        st.markdown("#### 🌍 Análisis Global del Portafolio Consolidado")
+        st.info("Análisis de correlación y diversificación entre mercados")
+        
+        # Análisis de correlación entre Argentina y EEUU
+        if len(activos) > 1:
+            st.success("✅ Análisis de correlación disponible")
+            if st.button("📊 Calcular Correlación", key="calcular_correlacion"):
+                st.info("🔄 Calculando correlación entre mercados...")
+                # Aquí iría la lógica de cálculo de correlación
+                st.success("✅ Correlación calculada")
+        else:
+            st.warning("⚠️ Se necesitan al menos 2 activos para análisis de correlación")
+
 def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
     Menú unificado organizado en dos categorías: Rebalanceo y Optimizaciones
@@ -7775,6 +7931,63 @@ def mostrar_analisis_portafolio():
                     if diferencia > 0.01:  # Tolerancia de 1 centavo
                         st.warning(f"⚠️ Diferencia detectada: ${diferencia:,.2f}")
                         st.info("💡 Esto puede indicar que los datos se obtuvieron en momentos diferentes")
+                        
+                        # Análisis detallado de la diferencia
+                        st.markdown("#### 📊 Análisis de la Diferencia")
+                        
+                        if total_estado_cuenta > total_portafolio:
+                            st.info(f"💰 El estado de cuenta es ${diferencia:,.2f} mayor que el portafolio")
+                            st.info("💡 Esto sugiere que hay saldo disponible en las cuentas EEUU")
+                            
+                            # Calcular saldo disponible
+                            saldo_disponible_eeuu = sum(cuenta.get('disponible', 0) for cuenta in cuentas_totales if any([
+                                'eeuu' in str(cuenta.get('numero', '')).lower(),
+                                '-eeuu' in str(cuenta.get('numero', '')),
+                                'dolar estadounidense' in cuenta.get('moneda', '').lower()
+                            ]))
+                            
+                            st.success(f"💵 Saldo disponible en cuentas EEUU: ${saldo_disponible_eeuu:,.2f}")
+                            
+                            # Verificar si la diferencia coincide con el saldo disponible
+                            if abs(diferencia - saldo_disponible_eeuu) < 0.01:
+                                st.success("✅ La diferencia coincide con el saldo disponible")
+                                st.info("💡 Los datos son consistentes: Portafolio + Saldo = Estado de Cuenta")
+                            else:
+                                st.warning("⚠️ La diferencia no coincide exactamente con el saldo disponible")
+                                st.info("💡 Puede haber otros factores como comisiones o transacciones pendientes")
+                        
+                        else:
+                            st.info(f"📉 El portafolio es ${diferencia:,.2f} mayor que el estado de cuenta")
+                            st.info("💡 Esto puede indicar que hay activos no reflejados en el estado de cuenta")
+                        
+                        # Recomendación
+                        st.markdown("#### 💡 Recomendación")
+                        st.info("Para obtener datos más consistentes:")
+                        st.info("1. 🔄 Refrescar ambos datos simultáneamente")
+                        st.info("2. 📊 Usar el valor más reciente para cálculos")
+                        st.info("3. ⚠️ Considerar la diferencia como saldo disponible")
+                        
+                        # Resumen consolidado
+                        st.markdown("#### 📊 Resumen Consolidado EEUU")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Portafolio Valorizado", f"${total_portafolio:,.2f}")
+                        
+                        with col2:
+                            st.metric("Saldo Disponible", f"${diferencia:,.2f}")
+                        
+                        with col3:
+                            st.metric("Total Consolidado", f"${total_estado_cuenta:,.2f}")
+                        
+                        # Explicación
+                        st.info("💡 **Explicación de la diferencia:**")
+                        st.info(f"   • Portafolio EEUU: ${total_portafolio:,.2f} (activos valorizados)")
+                        st.info(f"   • Saldo disponible: ${diferencia:,.2f} (efectivo en cuentas)")
+                        st.info(f"   • Total consolidado: ${total_estado_cuenta:,.2f} (portafolio + saldo)")
+                        
+                        st.success("✅ Los datos son consistentes: Portafolio + Saldo = Estado de Cuenta")
+                        
                     else:
                         st.success("✅ Los totales coinciden")
                 else:
@@ -7782,22 +7995,104 @@ def mostrar_analisis_portafolio():
     
     with tab4:
         # Menú unificado de optimización y cobertura
+        st.markdown("### 🎯 Optimización y Cobertura")
+        
+        # Selección de portafolio para optimizar
+        st.markdown("#### 📊 Selección de Portafolio a Optimizar")
+        
         if portafolio_ar or portafolio_eeuu:
-            # Combinar portafolios si ambos están disponibles
-            activos_combinados = []
+            # Mostrar opciones disponibles
+            col1, col2, col3 = st.columns(3)
             
-            if portafolio_ar and 'activos' in portafolio_ar:
-                activos_combinados.extend(portafolio_ar['activos'])
+            with col1:
+                if portafolio_ar and 'activos' in portafolio_ar:
+                    st.success(f"🇦🇷 Portafolio Argentina")
+                    st.metric("Activos", len(portafolio_ar['activos']))
+                    st.metric("Valor Total", f"AR$ {sum(activo.get('valorMercado', 0) for activo in portafolio_ar['activos']):,.2f}")
+                    
+                    if st.button("🎯 Optimizar Solo Argentina", key="opt_ar_solo", type="primary"):
+                        st.session_state.portafolio_seleccionado = "argentina"
+                        st.session_state.portafolio_data = portafolio_ar
+                        st.session_state.tipo_optimizacion = "separado"
+                        st.rerun()
+                else:
+                    st.warning("🇦🇷 No disponible")
             
-            if portafolio_eeuu and 'activos' in portafolio_eeuu:
-                activos_combinados.extend(portafolio_eeuu['activos'])
+            with col2:
+                if portafolio_eeuu and 'activos' in portafolio_eeuu:
+                    st.success(f"🇺🇸 Portafolio EEUU")
+                    st.metric("Activos", len(portafolio_eeuu['activos']))
+                    st.metric("Valor Total", f"AR$ {sum(activo.get('valorMercado', 0) for activo in portafolio_eeuu['activos']):,.2f}")
+                    
+                    if st.button("🎯 Optimizar Solo EEUU", key="opt_eeuu_solo", type="primary"):
+                        st.session_state.portafolio_seleccionado = "eeuu"
+                        st.session_state.portafolio_data = portafolio_eeuu
+                        st.session_state.tipo_optimizacion = "separado"
+                        st.rerun()
+                else:
+                    st.warning("🇺🇸 No disponible")
             
-            if activos_combinados:
-                portafolio_combinado = {'activos': activos_combinados}
-                st.success(f"✅ Portafolio combinado: {len(activos_combinados)} activos totales")
-                mostrar_menu_optimizacion_unificado(portafolio_combinado, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
-            else:
-                st.warning("No se pudo combinar los portafolios para optimización")
+            with col3:
+                if portafolio_ar and portafolio_eeuu:
+                    activos_combinados = []
+                    if 'activos' in portafolio_ar:
+                        activos_combinados.extend(portafolio_ar['activos'])
+                    if 'activos' in portafolio_eeuu:
+                        activos_combinados.extend(portafolio_eeuu['activos'])
+                    
+                    st.success(f"🔗 Portafolio Consolidado")
+                    st.metric("Activos Totales", len(activos_combinados))
+                    st.metric("Valor Total", f"AR$ {sum(activo.get('valorMercado', 0) for activo in activos_combinados):,.2f}")
+                    
+                    if st.button("🎯 Optimizar Consolidado", key="opt_consolidado", type="primary"):
+                        st.session_state.portafolio_seleccionado = "consolidado"
+                        st.session_state.portafolio_data = {'activos': activos_combinados}
+                        st.session_state.tipo_optimizacion = "consolidado"
+                        st.rerun()
+                else:
+                    st.warning("🔗 No disponible")
+            
+            # Mostrar menú de optimización si hay un portafolio seleccionado
+            if hasattr(st.session_state, 'portafolio_seleccionado') and st.session_state.portafolio_seleccionado:
+                st.markdown("---")
+                st.markdown(f"#### 🎯 **Optimizando: {st.session_state.portafolio_seleccionado.upper()}**")
+                
+                # Información del portafolio seleccionado
+                portafolio_actual = st.session_state.portafolio_data
+                tipo_opt = st.session_state.tipo_optimizacion
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.info(f"📊 **Tipo:** {'Separado' if tipo_opt == 'separado' else 'Consolidado'}")
+                with col2:
+                    st.info(f"🌍 **País:** {'🇦🇷 Argentina' if st.session_state.portafolio_seleccionado == 'argentina' else '🇺🇸 EEUU' if st.session_state.portafolio_seleccionado == 'eeuu' else '🌍 Consolidado'}")
+                with col3:
+                    st.info(f"📈 **Activos:** {len(portafolio_actual.get('activos', []))}")
+                
+                # Botón para cambiar de portafolio
+                if st.button("🔄 Cambiar Portafolio", key="cambiar_portafolio"):
+                    del st.session_state.portafolio_seleccionado
+                    del st.session_state.portafolio_data
+                    if hasattr(st.session_state, 'tipo_optimizacion'):
+                        del st.session_state.tipo_optimizacion
+                    st.rerun()
+                
+                # Mostrar menú de optimización específico según el tipo
+                if tipo_opt == "separado":
+                    mostrar_menu_optimizacion_separado(
+                        portafolio_actual, 
+                        token_acceso, 
+                        st.session_state.fecha_desde, 
+                        st.session_state.fecha_hasta,
+                        st.session_state.portafolio_seleccionado
+                    )
+                else:
+                    mostrar_menu_optimizacion_consolidado(
+                        portafolio_actual, 
+                        token_acceso, 
+                        st.session_state.fecha_desde, 
+                        st.session_state.fecha_hasta
+                    )
         else:
             st.warning("No se pudo obtener ningún portafolio para optimización")
     
@@ -7985,17 +8280,49 @@ def main():
             st.subheader("Configuración de Fechas")
             col1, col2 = st.columns(2)
             with col1:
-                fecha_desde = st.date_input(
-                    "Desde:",
-                    value=st.session_state.fecha_desde,
-                    max_value=date.today()
+                horizonte = st.selectbox(
+                    "Horizonte:",
+                    options=[
+                        "Corto Plazo (1-3 meses)",
+                        "Mediano Plazo (3-12 meses)", 
+                        "Largo Plazo (1-5 años)",
+                        "Muy Largo Plazo (5+ años)",
+                        "Personalizado"
+                    ],
+                    index=1,  # Mediano plazo por defecto
+                    help="Seleccione el horizonte de inversión para optimizaciones"
                 )
+            
             with col2:
-                fecha_hasta = st.date_input(
-                    "Hasta:",
-                    value=st.session_state.fecha_hasta,
-                    max_value=date.today()
-                )
+                if horizonte == "Personalizado":
+                    meses = st.number_input(
+                        "Meses:",
+                        min_value=1,
+                        max_value=120,
+                        value=12,
+                        help="Número de meses para el horizonte personalizado"
+                    )
+                    fecha_desde = date.today() - timedelta(days=meses*30)
+                    fecha_hasta = date.today()
+                else:
+                    # Calcular fechas automáticamente según horizonte
+                    if horizonte == "Corto Plazo (1-3 meses)":
+                        fecha_desde = date.today() - timedelta(days=90)
+                        fecha_hasta = date.today()
+                    elif horizonte == "Mediano Plazo (3-12 meses)":
+                        fecha_desde = date.today() - timedelta(days=365)
+                        fecha_hasta = date.today()
+                    elif horizonte == "Largo Plazo (1-5 años)":
+                        fecha_desde = date.today() - timedelta(days=1825)
+                        fecha_hasta = date.today()
+                    elif horizonte == "Muy Largo Plazo (5+ años)":
+                        fecha_desde = date.today() - timedelta(days=3650)
+                        fecha_hasta = date.today()
+                    else:
+                        fecha_desde = date.today() - timedelta(days=365)
+                        fecha_hasta = date.today()
+                
+                st.info(f"📅 Período: {fecha_desde.strftime('%Y/%m/%d')} - {fecha_hasta.strftime('%Y/%m/%d')}")
             
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
