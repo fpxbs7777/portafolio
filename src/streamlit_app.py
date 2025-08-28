@@ -4709,7 +4709,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
                     help="Seleccione el tipo de visualización para los valores de activos",
-                    key="tipo_grafico_distribuciones"
+                    key=f"tipo_grafico_distribuciones_{portfolio_id}"
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
@@ -8099,19 +8099,47 @@ def mostrar_analisis_portafolio():
 
     st.title(f"Análisis de Portafolio - {nombre_cliente}")
     
-    # Cargar datos una sola vez y cachearlos
-    @st.cache_data(ttl=300)  # Cache por 5 minutos
-    def cargar_datos_cliente(token, cliente_id):
-        """Carga y cachea los datos del cliente para evitar llamadas repetitivas"""
-        portafolio_ar = obtener_portafolio(token, cliente_id, 'Argentina')
-        portafolio_eeuu = obtener_portafolio_eeuu(token, cliente_id)
-        estado_cuenta_ar = obtener_estado_cuenta(token, cliente_id)
-        estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token)
-        return portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu
+    # Verificar si ya tenemos los datos en session_state para este cliente
+    cache_key = f"cliente_data_{id_cliente}"
     
-    # Cargar datos con cache
-    with st.spinner("🔄 Cargando datos del cliente..."):
-        portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
+    if cache_key not in st.session_state:
+        # Cargar datos por primera vez
+        with st.spinner("🔄 Cargando datos del cliente por primera vez..."):
+            portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+            portafolio_eeuu = obtener_portafolio_eeuu(token_acceso, id_cliente)
+            estado_cuenta_ar = obtener_estado_cuenta(token_acceso, id_cliente)
+            estado_cuenta_eeuu = obtener_estado_cuenta_eeuu(token_acceso)
+            
+            # Guardar en session_state
+            st.session_state[cache_key] = {
+                'portafolio_ar': portafolio_ar,
+                'portafolio_eeuu': portafolio_eeuu,
+                'estado_cuenta_ar': estado_cuenta_ar,
+                'estado_cuenta_eeuu': estado_cuenta_eeuu,
+                'timestamp': time.time()
+            }
+    else:
+        # Usar datos del cache
+        cached_data = st.session_state[cache_key]
+        portafolio_ar = cached_data['portafolio_ar']
+        portafolio_eeuu = cached_data['portafolio_eeuu']
+        estado_cuenta_ar = cached_data['estado_cuenta_ar']
+        estado_cuenta_eeuu = cached_data['estado_cuenta_eeuu']
+        
+        # Mostrar indicador de datos cacheados
+        tiempo_cache = time.time() - cached_data['timestamp']
+        if tiempo_cache < 300:  # 5 minutos
+            st.success(f"✅ Datos cargados desde caché ({tiempo_cache:.0f}s)")
+        else:
+            st.info("ℹ️ Datos cargados desde caché (pueden estar desactualizados)")
+    
+    # Botón para refrescar datos
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("🔄 Refrescar Datos", use_container_width=True):
+            # Limpiar cache y recargar
+            del st.session_state[cache_key]
+            st.rerun()
     
     # Crear tabs con iconos
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -8239,22 +8267,74 @@ def mostrar_analisis_portafolio():
         st.subheader("📈 Análisis de Operaciones Reales")
         st.info("🔍 Esta sección analiza las operaciones reales de compra/venta de tu portafolio para calcular retornos basados en fechas reales de compra.")
         
-        # Seleccionar portafolio a analizar
-        portafolio_seleccionado = st.selectbox(
-            "Seleccionar portafolio para análisis:",
-            options=[
-                ("🇦🇷 Argentina", portafolio_ar),
-                ("🇺🇸 Estados Unidos", portafolio_eeuu)
-            ],
-            format_func=lambda x: x[0],
-            help="Selecciona el portafolio que deseas analizar",
-            key="portafolio_operaciones_reales"
-        )
+        # Verificar si ya tenemos datos de operaciones en caché
+        operaciones_cache_key = f"operaciones_cache_{id_cliente}"
         
-        if portafolio_seleccionado[1]:
-            mostrar_analisis_operaciones_reales(portafolio_seleccionado[1], token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+        if operaciones_cache_key not in st.session_state:
+            st.info("📊 Haz clic en 'Cargar Operaciones' para comenzar el análisis")
+            
+            if st.button("🚀 Cargar Operaciones", use_container_width=True):
+                with st.spinner("🔄 Cargando operaciones reales..."):
+                    # Seleccionar portafolio a analizar
+                    portafolio_seleccionado = st.selectbox(
+                        "Seleccionar portafolio para análisis:",
+                        options=[
+                            ("🇦🇷 Argentina", portafolio_ar),
+                            ("🇺🇸 Estados Unidos", portafolio_eeuu)
+                        ],
+                        format_func=lambda x: x[0],
+                        help="Selecciona el portafolio que deseas analizar",
+                        key="portafolio_operaciones_reales"
+                    )
+                    
+                    if portafolio_seleccionado[1]:
+                        # Ejecutar análisis y cachear resultados
+                        resultado = mostrar_analisis_operaciones_reales(portafolio_seleccionado[1], token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+                        if resultado:
+                            st.session_state[operaciones_cache_key] = resultado
+                            st.success("✅ Análisis completado y cacheado")
+                    else:
+                        st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
         else:
-            st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
+            st.success("✅ Datos de operaciones cargados desde caché")
+            
+            # Mostrar opciones para refrescar o ver resultados
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                if st.button("📊 Ver Análisis Cacheado", use_container_width=True):
+                    st.session_state[f"mostrar_operaciones_{id_cliente}"] = True
+            
+            with col2:
+                if st.button("🔄 Refrescar Operaciones", use_container_width=True):
+                    del st.session_state[operaciones_cache_key]
+                    st.rerun()
+            
+            # Mostrar resultados si se solicita
+            if st.session_state.get(f"mostrar_operaciones_{id_cliente}", False):
+                mostrar_analisis_operaciones_reales(portafolio_ar or portafolio_eeuu, token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
+
+def limpiar_cache_cliente_anterior():
+    """
+    Limpia el caché del cliente anterior cuando se selecciona uno nuevo
+    """
+    # Obtener cliente anterior
+    cliente_anterior = st.session_state.get('cliente_anterior', None)
+    
+    if cliente_anterior:
+        # Limpiar caché del cliente anterior
+        cache_keys_to_remove = [
+            f"cliente_data_{cliente_anterior}",
+            f"operaciones_cache_{cliente_anterior}",
+            f"mostrar_operaciones_{cliente_anterior}"
+        ]
+        
+        for key in cache_keys_to_remove:
+            if key in st.session_state:
+                del st.session_state[key]
+    
+    # Guardar cliente actual como anterior para la próxima vez
+    if 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
+        st.session_state['cliente_anterior'] = st.session_state.cliente_seleccionado.get('numeroCliente', st.session_state.cliente_seleccionado.get('id'))
 
 def main():
     # Configuración de rendimiento
@@ -8373,7 +8453,8 @@ def main():
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
                     label_visibility="collapsed",
-                    key="cliente_seleccionado_principal"
+                    key="cliente_seleccionado_principal",
+                    on_change=lambda: limpiar_cache_cliente_anterior()
                 )
                 
                 st.session_state.cliente_seleccionado = next(
@@ -8399,8 +8480,31 @@ def main():
                             st.rerun()
                         else:
                             st.error("❌ No se pudo refrescar el token")
-            else:
-                st.warning("No se encontraron clientes")
+            
+            # Indicadores de rendimiento
+            st.divider()
+            st.subheader("⚡ Rendimiento")
+            
+            # Mostrar estadísticas del caché
+            if st.button("📊 Ver Estadísticas de Caché", use_container_width=True):
+                cache_stats = {
+                    'Total entradas': len([k for k in st.session_state.keys() if 'cache' in k or 'data' in k]),
+                    'Cliente actual': st.session_state.get('cliente_seleccionado', {}).get('apellidoYNombre', 'N/A'),
+                    'Datos cacheados': 'Sí' if any('cliente_data_' in k for k in st.session_state.keys()) else 'No'
+                }
+                
+                for key, value in cache_stats.items():
+                    st.metric(key, value)
+            
+            # Botón para limpiar todo el caché
+            if st.button("🗑️ Limpiar Todo el Caché", use_container_width=True):
+                keys_to_remove = [k for k in st.session_state.keys() if 'cache' in k or 'data' in k]
+                for key in keys_to_remove:
+                    del st.session_state[key]
+                st.success("✅ Caché limpiado")
+                st.rerun()
+        else:
+            st.warning("No se encontraron clientes")
 
     # Contenido principal
     try:
