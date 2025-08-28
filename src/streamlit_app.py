@@ -973,6 +973,344 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         st.error(f"Error de conexión: {str(e)}")
         return None
 
+def obtener_operaciones_reales(token_acceso, fecha_desde=None, fecha_hasta=None, pais="argentina", estado="terminadas"):
+    """
+    Obtiene las operaciones reales de compra/venta del portafolio
+    """
+    try:
+        if fecha_desde is None:
+            fecha_desde = date.today() - timedelta(days=365)
+        if fecha_hasta is None:
+            fecha_hasta = date.today()
+        
+        # Formatear fechas para la API
+        fecha_desde_str = fecha_desde.strftime("%Y-%m-%d")
+        fecha_hasta_str = fecha_hasta.strftime("%Y-%m-%d")
+        
+        # Construir URL con filtros
+        url = f"https://api.invertironline.com/api/v2/operaciones"
+        params = {
+            'filtro.estado': estado,
+            'filtro.fechaDesde': fecha_desde_str,
+            'filtro.fechaHasta': fecha_hasta_str,
+            'filtro.pais': pais
+        }
+        
+        headers = {
+            'Authorization': f'Bearer {token_acceso}',
+            'Accept': 'application/json'
+        }
+        
+        response = requests.get(url, params=params, headers=headers)
+        
+        if response.status_code == 200:
+            operaciones = response.json()
+            st.success(f"✅ Operaciones obtenidas: {len(operaciones)} operaciones")
+            return operaciones
+        else:
+            st.error(f"❌ Error obteniendo operaciones: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Error en obtener_operaciones_reales: {str(e)}")
+        return None
+
+def construir_timeline_operaciones(operaciones, simbolos_portafolio):
+    """
+    Construye una línea de tiempo de operaciones por activo
+    """
+    try:
+        timeline = {}
+        
+        for operacion in operaciones:
+            simbolo = operacion.get('simbolo', '')
+            if simbolo not in simbolos_portafolio:
+                continue
+                
+            if simbolo not in timeline:
+                timeline[simbolo] = []
+            
+            # Extraer información de la operación
+            fecha_operada = operacion.get('fechaOperada')
+            if fecha_operada:
+                try:
+                    fecha = datetime.fromisoformat(fecha_operada.replace('Z', '+00:00'))
+                except:
+                    fecha = datetime.now()
+            else:
+                fecha = datetime.now()
+            
+            tipo = operacion.get('tipo', '')  # compra o venta
+            cantidad = operacion.get('cantidadOperada', 0)
+            precio = operacion.get('precioOperado', 0)
+            monto = operacion.get('montoOperado', 0)
+            
+            if cantidad > 0 and precio > 0:
+                timeline[simbolo].append({
+                    'fecha': fecha,
+                    'tipo': tipo,
+                    'cantidad': cantidad,
+                    'precio': precio,
+                    'monto': monto,
+                    'numero_operacion': operacion.get('numero', 0)
+                })
+        
+        # Ordenar operaciones por fecha para cada símbolo
+        for simbolo in timeline:
+            timeline[simbolo].sort(key=lambda x: x['fecha'])
+        
+        return timeline
+        
+    except Exception as e:
+        st.error(f"❌ Error construyendo timeline: {str(e)}")
+        return {}
+
+def calcular_posicion_actual_por_operaciones(timeline, simbolos_portafolio):
+    """
+    Calcula la posición actual de cada activo basado en operaciones reales
+    """
+    try:
+        posiciones = {}
+        
+        for simbolo in simbolos_portafolio:
+            if simbolo not in timeline:
+                posiciones[simbolo] = {
+                    'cantidad_total': 0,
+                    'costo_promedio': 0,
+                    'inversion_total': 0,
+                    'operaciones': []
+                }
+                continue
+            
+            cantidad_total = 0
+            inversion_total = 0
+            operaciones = timeline[simbolo]
+            
+            for op in operaciones:
+                if op['tipo'] == 'compra':
+                    cantidad_total += op['cantidad']
+                    inversion_total += op['monto']
+                elif op['tipo'] == 'venta':
+                    cantidad_total -= op['cantidad']
+                    inversion_total -= op['monto']
+            
+            # Calcular costo promedio
+            costo_promedio = 0
+            if cantidad_total > 0:
+                costo_promedio = inversion_total / cantidad_total
+            
+            posiciones[simbolo] = {
+                'cantidad_total': cantidad_total,
+                'costo_promedio': costo_promedio,
+                'inversion_total': inversion_total,
+                'operaciones': operaciones
+            }
+        
+        return posiciones
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando posiciones: {str(e)}")
+        return {}
+
+def calcular_retorno_real_por_operaciones(posiciones, precios_actuales, fecha_desde, fecha_hasta):
+    """
+    Calcula el retorno real basado en operaciones y precios actuales
+    """
+    try:
+        retornos_reales = {}
+        
+        for simbolo, posicion in posiciones.items():
+            if simbolo not in precios_actuales or posicion['cantidad_total'] <= 0:
+                continue
+            
+            precio_actual = precios_actuales[simbolo]
+            costo_promedio = posicion['costo_promedio']
+            cantidad = posicion['cantidad_total']
+            
+            # Calcular valor actual
+            valor_actual = precio_actual * cantidad
+            inversion_inicial = posicion['inversion_total']
+            
+            # Calcular retorno
+            if inversion_inicial > 0:
+                retorno_porcentual = ((valor_actual - inversion_inicial) / inversion_inicial) * 100
+                retorno_absoluto = valor_actual - inversion_inicial
+            else:
+                retorno_porcentual = 0
+                retorno_absoluto = 0
+            
+            retornos_reales[simbolo] = {
+                'cantidad': cantidad,
+                'costo_promedio': costo_promedio,
+                'precio_actual': precio_actual,
+                'valor_actual': valor_actual,
+                'inversion_inicial': inversion_inicial,
+                'retorno_porcentual': retorno_porcentual,
+                'retorno_absoluto': retorno_absoluto,
+                'operaciones': len(posicion['operaciones'])
+            }
+        
+        return retornos_reales
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando retornos reales: {str(e)}")
+        return {}
+
+def mostrar_analisis_operaciones_reales(portafolio, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Muestra análisis completo basado en operaciones reales
+    """
+    st.markdown("#### 📊 Análisis Basado en Operaciones Reales")
+    st.info("🔍 Este análisis calcula retornos basados en operaciones reales de compra/venta")
+    
+    # Obtener operaciones para ambos países
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**🇦🇷 Operaciones Argentina**")
+        operaciones_ar = obtener_operaciones_reales(token_acceso, fecha_desde, fecha_hasta, "argentina")
+    
+    with col2:
+        st.markdown("**🇺🇸 Operaciones Estados Unidos**")
+        operaciones_eeuu = obtener_operaciones_reales(token_acceso, fecha_desde, fecha_hasta, "estados_Unidos")
+    
+    if not operaciones_ar and not operaciones_eeuu:
+        st.warning("⚠️ No se pudieron obtener operaciones para análisis")
+        return
+    
+    # Extraer símbolos del portafolio
+    simbolos_portafolio = []
+    if portafolio.get('activos'):
+        for activo in portafolio['activos']:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                simbolos_portafolio.append(simbolo)
+    
+    if not simbolos_portafolio:
+        st.warning("⚠️ No se encontraron símbolos en el portafolio")
+        return
+    
+    # Construir timeline combinado
+    timeline_completo = {}
+    
+    if operaciones_ar:
+        timeline_ar = construir_timeline_operaciones(operaciones_ar, simbolos_portafolio)
+        timeline_completo.update(timeline_ar)
+    
+    if operaciones_eeuu:
+        timeline_eeuu = construir_timeline_operaciones(operaciones_eeuu, simbolos_portafolio)
+        # Combinar operaciones si hay duplicados
+        for simbolo, ops in timeline_eeuu.items():
+            if simbolo in timeline_completo:
+                timeline_completo[simbolo].extend(ops)
+                # Reordenar por fecha
+                timeline_completo[simbolo].sort(key=lambda x: x['fecha'])
+            else:
+                timeline_completo[simbolo] = ops
+    
+    # Calcular posiciones actuales
+    posiciones = calcular_posicion_actual_por_operaciones(timeline_completo, simbolos_portafolio)
+    
+    # Obtener precios actuales
+    with st.spinner("📊 Obteniendo precios actuales..."):
+        precios_actuales = {}
+        for simbolo in simbolos_portafolio:
+            try:
+                ticker = yf.Ticker(simbolo)
+                info = ticker.info
+                if 'regularMarketPrice' in info and info['regularMarketPrice']:
+                    precios_actuales[simbolo] = info['regularMarketPrice']
+                else:
+                    # Intentar con datos históricos recientes
+                    hist = ticker.history(period="1d")
+                    if not hist.empty:
+                        precios_actuales[simbolo] = hist['Close'].iloc[-1]
+            except:
+                continue
+    
+    # Calcular retornos reales
+    retornos_reales = calcular_retorno_real_por_operaciones(posiciones, precios_actuales, fecha_desde, fecha_hasta)
+    
+    if not retornos_reales:
+        st.warning("⚠️ No se pudieron calcular retornos reales")
+        return
+    
+    # Mostrar resultados
+    st.success(f"✅ Análisis completado para {len(retornos_reales)} activos")
+    
+    # Resumen general
+    col1, col2, col3 = st.columns(3)
+    
+    total_inversion = sum(r['inversion_inicial'] for r in retornos_reales.values())
+    total_valor_actual = sum(r['valor_actual'] for r in retornos_reales.values())
+    retorno_total = ((total_valor_actual - total_inversion) / total_inversion * 100) if total_inversion > 0 else 0
+    
+    with col1:
+        st.metric("💰 Inversión Total", f"${total_inversion:,.2f}")
+    with col2:
+        st.metric("📈 Valor Actual", f"${total_valor_actual:,.2f}")
+    with col3:
+        st.metric("📊 Retorno Total", f"{retorno_total:.2f}%")
+    
+    # Tabla detallada
+    st.markdown("#### 📋 Detalle por Activo")
+    
+    df_retornos = pd.DataFrame.from_dict(retornos_reales, orient='index')
+    df_retornos = df_retornos.reset_index().rename(columns={'index': 'Símbolo'})
+    
+    # Formatear columnas
+    df_retornos['Costo Promedio'] = df_retornos['costo_promedio'].apply(lambda x: f"${x:.2f}")
+    df_retornos['Precio Actual'] = df_retornos['precio_actual'].apply(lambda x: f"${x:.2f}")
+    df_retornos['Inversión Inicial'] = df_retornos['inversion_inicial'].apply(lambda x: f"${x:,.2f}")
+    df_retornos['Valor Actual'] = df_retornos['valor_actual'].apply(lambda x: f"${x:,.2f}")
+    df_retornos['Retorno (%)'] = df_retornos['retorno_porcentual'].apply(lambda x: f"{x:.2f}%")
+    df_retornos['Retorno ($)'] = df_retornos['retorno_absoluto'].apply(lambda x: f"${x:,.2f}")
+    
+    # Seleccionar columnas para mostrar
+    columnas_mostrar = ['Símbolo', 'Cantidad', 'Costo Promedio', 'Precio Actual', 
+                        'Inversión Inicial', 'Valor Actual', 'Retorno (%)', 'Retorno ($)', 'Operaciones']
+    
+    st.dataframe(df_retornos[columnas_mostrar], use_container_width=True)
+    
+    # Gráfico de retornos
+    st.markdown("#### 📊 Gráfico de Retornos por Activo")
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            x=df_retornos['Símbolo'],
+            y=df_retornos['retorno_porcentual'],
+            text=df_retornos['retorno_porcentual'].apply(lambda x: f"{x:.1f}%"),
+            textposition='auto',
+            marker_color=['green' if x >= 0 else 'red' for x in df_retornos['retorno_porcentual']]
+        )
+    ])
+    
+    fig.update_layout(
+        title="Retornos por Activo (Basado en Operaciones Reales)",
+        xaxis_title="Activos",
+        yaxis_title="Retorno (%)",
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Timeline de operaciones
+    st.markdown("#### ⏰ Timeline de Operaciones")
+    
+    for simbolo, operaciones in timeline_completo.items():
+        if simbolo in simbolos_portafolio and operaciones:
+            with st.expander(f"📈 {simbolo} - {len(operaciones)} operaciones"):
+                df_ops = pd.DataFrame(operaciones)
+                df_ops['Fecha'] = df_ops['fecha'].apply(lambda x: x.strftime("%Y-%m-%d %H:%M"))
+                df_ops['Tipo'] = df_ops['tipo'].apply(lambda x: "🟢 Compra" if x == "compra" else "🔴 Venta")
+                df_ops['Cantidad'] = df_ops['cantidad'].apply(lambda x: f"{x:,.0f}")
+                df_ops['Precio'] = df_ops['precio'].apply(lambda x: f"${x:.2f}")
+                df_ops['Monto'] = df_ops['monto'].apply(lambda x: f"${x:,.2f}")
+                
+                columnas_ops = ['Fecha', 'Tipo', 'Cantidad', 'Precio', 'Monto', 'numero_operacion']
+                st.dataframe(df_ops[columnas_ops], use_container_width=True)
+
 def obtener_tasas_caucion(token_portador):
     """
     Obtiene las tasas de caución desde la API de IOL
@@ -5348,6 +5686,83 @@ class PortfolioManager:
         except Exception as e:
             st.error(f"❌ Error en cálculo de métricas del portafolio: {str(e)}")
             return {'return': 0, 'volatility': 0, 'sharpe': 0}
+    
+    def calculate_real_returns_from_operations(self, operaciones_ar=None, operaciones_eeuu=None):
+        """
+        Calcula retornos reales basados en operaciones de compra/venta
+        """
+        try:
+            if not operaciones_ar and not operaciones_eeuu:
+                st.warning("⚠️ No hay operaciones disponibles para cálculo de retornos reales")
+                return None
+            
+            # Construir timeline de operaciones
+            timeline_completo = {}
+            
+            if operaciones_ar:
+                timeline_ar = construir_timeline_operaciones(operaciones_ar, self.symbols)
+                timeline_completo.update(timeline_ar)
+            
+            if operaciones_eeuu:
+                timeline_eeuu = construir_timeline_operaciones(operaciones_eeuu, self.symbols)
+                # Combinar operaciones si hay duplicados
+                for simbolo, ops in timeline_eeuu.items():
+                    if simbolo in timeline_completo:
+                        timeline_completo[simbolo].extend(ops)
+                        # Reordenar por fecha
+                        timeline_completo[simbolo].sort(key=lambda x: x['fecha'])
+                    else:
+                        timeline_completo[simbolo] = ops
+            
+            # Calcular posiciones actuales
+            posiciones = calcular_posicion_actual_por_operaciones(timeline_completo, self.symbols)
+            
+            # Obtener precios actuales
+            precios_actuales = {}
+            for simbolo in self.symbols:
+                try:
+                    ticker = yf.Ticker(simbolo)
+                    info = ticker.info
+                    if 'regularMarketPrice' in info and info['regularMarketPrice']:
+                        precios_actuales[simbolo] = info['regularMarketPrice']
+                    else:
+                        # Intentar con datos históricos recientes
+                        hist = ticker.history(period="1d")
+                        if not hist.empty:
+                            precios_actuales[simbolo] = hist['Close'].iloc[-1]
+                except:
+                    continue
+            
+            # Calcular retornos reales
+            retornos_reales = calcular_retorno_real_por_operaciones(posiciones, precios_actuales, self.fecha_desde, self.fecha_hasta)
+            
+            if not retornos_reales:
+                return None
+            
+            # Calcular métricas del portafolio real
+            total_inversion = sum(r['inversion_inicial'] for r in retornos_reales.values())
+            total_valor_actual = sum(r['valor_actual'] for r in retornos_reales.values())
+            
+            if total_inversion > 0:
+                retorno_total_porcentual = ((total_valor_actual - total_inversion) / total_inversion) * 100
+                retorno_total_absoluto = total_valor_actual - total_inversion
+            else:
+                retorno_total_porcentual = 0
+                retorno_total_absoluto = 0
+            
+            return {
+                'retornos_por_activo': retornos_reales,
+                'total_inversion': total_inversion,
+                'total_valor_actual': total_valor_actual,
+                'retorno_total_porcentual': retorno_total_porcentual,
+                'retorno_total_absoluto': retorno_total_absoluto,
+                'timeline_operaciones': timeline_completo,
+                'posiciones_actuales': posiciones
+            }
+            
+        except Exception as e:
+            st.error(f"❌ Error calculando retornos reales: {str(e)}")
+            return None
 
 def mostrar_menu_optimizacion_unificado(portafolio, token_acceso, fecha_desde, fecha_hasta):
     """
@@ -7837,7 +8252,7 @@ def mostrar_analisis_portafolio():
         )
         
         if portafolio_seleccionado[1]:
-            mostrar_resumen_operaciones_reales(portafolio_seleccionado[1], token_acceso, "operaciones_reales")
+            mostrar_analisis_operaciones_reales(portafolio_seleccionado[1], token_acceso, st.session_state.fecha_desde, st.session_state.fecha_hasta)
         else:
             st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
 
