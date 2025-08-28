@@ -2332,7 +2332,8 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
         
         usar_tasa_manual = st.checkbox(
             "Usar Tasa Libre de Riesgo Manual",
-            help="Marcar para usar tasa personalizada en lugar de la del benchmark"
+            help="Marcar para usar tasa personalizada en lugar de la del benchmark",
+            key="usar_tasa_manual_avanzada"
         )
     
     # Configuración de estrategias
@@ -2357,8 +2358,8 @@ def mostrar_menu_optimizaciones_avanzadas(portafolio, token_acceso, fecha_desde,
         )
     
     with col3:
-        mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
-        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True)
+        mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="mostrar_histogramas_avanzada")
+        mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=True, key="mostrar_frontera_avanzada")
     
     # Botón de ejecución
     ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Avanzada", type="primary")
@@ -3795,7 +3796,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             mostrar_histograma_retornos = st.checkbox(
                 "📈 Mostrar Histograma de Retornos por Activo", 
                 value=False,
-                help="Muestra histogramas de retornos históricos para cada activo del portafolio"
+                help="Muestra histogramas de retornos históricos para cada activo del portafolio",
+                key="mostrar_histograma_retornos_detallado"
             )
             
             col1, col2 = st.columns(2)
@@ -4981,7 +4983,8 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         usar_benchmark = st.checkbox(
             "Usar Benchmark como Tasa Libre de Riesgo",
             value=True,
-            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones"
+            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones",
+            key="usar_benchmark_composicion_actual"
         )
     
     # Configuración de optimización
@@ -5010,7 +5013,7 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         )
     
     with col3:
-        mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
+        mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True, key="mostrar_comparacion_composicion_actual")
     
     # Botón de ejecución
     col1, col2 = st.columns(2)
@@ -5078,7 +5081,8 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
     incluir_saldo_disponible = st.checkbox(
         "💳 Incluir saldo disponible del estado de cuenta",
         value=False,
-        help="Si está marcado, se incluirá el saldo disponible en el capital total"
+        help="Si está marcado, se incluirá el saldo disponible en el capital total",
+        key="incluir_saldo_disponible_aleatorio"
     )
     
     capital_disponible = 0
@@ -5118,7 +5122,8 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
         incluir_actuales = st.checkbox(
             "🔄 Incluir símbolos actuales",
             value=True,
-            help="Incluir algunos símbolos del portafolio actual en la selección aleatoria"
+            help="Incluir algunos símbolos del portafolio actual en la selección aleatoria",
+            key="incluir_actuales_aleatorio"
         )
     
     with col3:
@@ -5176,9 +5181,9 @@ def mostrar_rebalanceo_simbolos_aleatorios(portafolio, token_acceso, fecha_desde
                 help="Para cálculo del ratio de Sharpe"
             )
         with col2:
-            mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True)
+            mostrar_comparacion = st.checkbox("Mostrar Comparación con Actual", value=True, key="mostrar_comparacion_aleatorio")
         with col3:
-            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
+            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="mostrar_metricas_aleatorio")
     
     # Botón de ejecución
     col1, col2, col3 = st.columns(3)
@@ -5616,7 +5621,8 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
         usar_portafolio_actual = st.checkbox(
             "🔄 Usar portafolio actual como benchmark",
             value=False,
-            help="Si está marcado, se usará el portafolio actual como benchmark"
+            help="Si está marcado, se usará el portafolio actual como benchmark",
+            key="usar_portafolio_actual_aleatoria"
         )
     
     with col3:
@@ -5667,9 +5673,9 @@ def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_
                 }[x]
             )
         with col2:
-            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True)
+            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="mostrar_histogramas_aleatoria")
         with col3:
-            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False)
+            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False, key="mostrar_frontera_aleatoria")
     
     # Botones de ejecución
     col1, col2, col3 = st.columns(3)
@@ -6317,7 +6323,8 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
         usar_benchmark = st.checkbox(
             "Usar Benchmark como Tasa Libre de Riesgo",
             value=True,
-            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones"
+            help="Si está marcado, el benchmark se usará como tasa libre de riesgo en optimizaciones",
+            key="usar_benchmark_optimizacion_basica"
         )
     
     # Configuración de optimización
@@ -6346,24 +6353,27 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
         )
     
     with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier_basica")
     
     # Configuración avanzada de frontera eficiente
     with st.expander("⚙️ Configuración Avanzada de Frontera Eficiente", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
             calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, 
-                                       help="Calcula automáticamente todas las estrategias disponibles")
+                                       help="Calcula automáticamente todas las estrategias disponibles",
+                                       key="calcular_todos_basica")
             num_puntos = st.slider("Número de Puntos en Frontera", min_value=10, max_value=100, value=50,
                                  help="Más puntos = frontera más suave pero más lento")
         with col2:
             incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True,
-                                       help="Muestra el portafolio actual en la frontera")
-            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
+                                       help="Muestra el portafolio actual en la frontera",
+                                       key="incluir_actual_basica")
+            mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="mostrar_metricas_basica")
         with col3:
             target_return_frontier = st.number_input("Retorno Objetivo Frontera", min_value=0.0, max_value=1.0, 
                                                    value=0.08, step=0.01, help="Para optimización de frontera")
-            auto_refresh = st.checkbox("Auto-refresh", value=True, help="Actualiza automáticamente con cambios")
+            auto_refresh = st.checkbox("Auto-refresh", value=True, help="Actualiza automáticamente con cambios",
+                                     key="auto_refresh_basica")
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -6910,9 +6920,9 @@ def mostrar_optimizacion_basica(portafolio, token_acceso, fecha_desde, fecha_has
                         with col1:
                             zoom_level = st.slider("Zoom", min_value=0.5, max_value=3.0, value=1.0, step=0.1)
                         with col2:
-                            mostrar_grid = st.checkbox("Mostrar Grid", value=True)
+                            mostrar_grid = st.checkbox("Mostrar Grid", value=True, key="mostrar_grid_avanzada")
                         with col3:
-                            mostrar_leyenda = st.checkbox("Mostrar Leyenda", value=True)
+                            mostrar_leyenda = st.checkbox("Mostrar Leyenda", value=True, key="mostrar_leyenda_avanzada")
                         
                         # Aplicar configuraciones al gráfico
                         if fig:
@@ -7098,12 +7108,12 @@ def mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hast
         num_puntos = st.slider("Número de Puntos", min_value=10, max_value=100, value=50)
     
     with col2:
-        incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True)
-        mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True)
+        incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True, key="incluir_actual_avanzada")
+        mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="mostrar_metricas_avanzada")
     
     with col3:
-        calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True)
-        auto_refresh = st.checkbox("Auto-refresh", value=True)
+        calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, key="calcular_todos_avanzada")
+        auto_refresh = st.checkbox("Auto-refresh", value=True, key="auto_refresh_avanzada")
     
     ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", use_container_width=True)
     
