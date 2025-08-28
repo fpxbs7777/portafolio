@@ -1845,6 +1845,77 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
                 
                 if len(simbolos_disponibles) > 20:
                     st.info(f"... y {len(simbolos_disponibles) - 20} símbolos más")
+                
+                # 🔍 DIAGNÓSTICO AVANZADO: Buscar operaciones por diferentes criterios
+                st.markdown("#### 🔍 Diagnóstico Avanzado de Operaciones")
+                
+                for simbolo in portafolio_dict.keys():
+                    st.info(f"🔍 Analizando {simbolo}...")
+                    
+                    # Buscar operaciones con diferentes variaciones del símbolo
+                    variaciones_simbolo = [
+                        simbolo,
+                        simbolo.upper(),
+                        simbolo.lower(),
+                        simbolo.replace('0', 'O').replace('1', 'I').replace('5', 'S'),  # Común en letras
+                        simbolo.replace('O', '0').replace('I', '1').replace('S', '5'),  # Común en letras
+                    ]
+                    
+                    operaciones_encontradas = []
+                    for var_simbolo in variaciones_simbolo:
+                        for op in todas_operaciones_api:
+                            if op.get('simbolo', '').upper() == var_simbolo.upper():
+                                operaciones_encontradas.append(op)
+                    
+                    if operaciones_encontradas:
+                        st.success(f"✅ {simbolo}: {len(operaciones_encontradas)} operaciones encontradas con variaciones")
+                        for op in operaciones_encontradas[:3]:  # Mostrar primeras 3
+                            st.info(f"  📊 {op.get('tipo', 'N/A')} {op.get('cantidad', 0)} {op.get('simbolo', 'N/A')} a ${op.get('precioOperado', op.get('precio', 0))}")
+                    else:
+                        st.error(f"❌ {simbolo}: NO se encontraron operaciones ni con variaciones")
+                        
+                        # Mostrar operaciones similares
+                        operaciones_similares = []
+                        for op in todas_operaciones_api:
+                            simbolo_op = op.get('simbolo', '').upper()
+                            if (simbolo.upper() in simbolo_op or 
+                                simbolo_op in simbolo.upper() or
+                                simbolo_op.startswith(simbolo.upper()) or
+                                simbolo.upper().startswith(simbolo_op)):
+                                operaciones_similares.append(op)
+                        
+                        if operaciones_similares:
+                            st.warning(f"⚠️ {simbolo}: Operaciones similares encontradas:")
+                            for op in operaciones_similares[:2]:
+                                st.info(f"  🔍 Similar: {op.get('simbolo', 'N/A')} ({op.get('tipo', 'N/A')})")
+                
+                # 🔍 BUSQUEDA ALTERNATIVA: Probar diferentes estados de operaciones
+                st.markdown("#### 🔍 Búsqueda con Diferentes Estados")
+                
+                estados_operaciones = ['todas', 'terminadas', 'pendientes', 'iniciada']
+                for estado in estados_operaciones:
+                    try:
+                        params_alternativo = {
+                            'filtro.estado': estado,
+                            'filtro.fechaDesde': fecha_desde,
+                            'filtro.fechaHasta': fecha_hasta,
+                            'filtro.pais': 'argentina'
+                        }
+                        
+                        response_alt = requests.get(url, headers=headers, params=params_alternativo)
+                        if response_alt.status_code == 200:
+                            operaciones_alt = response_alt.json()
+                            st.info(f"📊 Estado '{estado}': {len(operaciones_alt)} operaciones")
+                            
+                            # Buscar símbolos del portafolio en estas operaciones
+                            for simbolo in portafolio_dict.keys():
+                                encontradas = [op for op in operaciones_alt if op.get('simbolo', '').upper() == simbolo.upper()]
+                                if encontradas:
+                                    st.success(f"✅ {simbolo}: {len(encontradas)} operaciones con estado '{estado}'")
+                        else:
+                            st.warning(f"⚠️ Estado '{estado}': Error {response_alt.status_code}")
+                    except Exception as e:
+                        st.warning(f"⚠️ Estado '{estado}': Error - {str(e)}")
                     
         except Exception as e:
             st.error(f"❌ Error obteniendo operaciones completas: {str(e)}")
