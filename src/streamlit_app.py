@@ -2224,9 +2224,21 @@ def obtener_variables_bcra():
         try:
             st.info("🌐 Intentando obtener datos reales del BCRA...")
             variables_reales = obtener_variables_bcra_reales()
-            if not variables_reales.empty:
+            if variables_reales is not None and not variables_reales.empty:
                 st.success("✅ Datos reales del BCRA obtenidos exitosamente")
-                return variables_reales
+                # Convertir DataFrame a formato estándar
+                variables_estandar = {}
+                for _, row in variables_reales.iterrows():
+                    nombre = row.get('nombre', 'Variable_BCRA')
+                    variables_estandar[nombre] = {
+                        'descripcion': nombre,
+                        'ticker': row.get('serie_id', 'N/A'),
+                        'fuente': row.get('fuente', 'BCRA_REAL'),
+                        'relevancia': row.get('relevancia', 'MEDIA'),
+                        'impacto_mercado': row.get('impacto_mercado', 'MEDIATO'),
+                        'frecuencia': row.get('frecuencia', 'DIARIA')
+                    }
+                return variables_estandar
         except Exception as e:
             st.warning(f"⚠️ No se pudieron obtener datos reales del BCRA: {str(e)}")
             st.info("🔄 Usando proxies de yfinance como fallback...")
@@ -2993,7 +3005,7 @@ def mostrar_panel_bcra():
         # Obtener variables disponibles
         variables_bcra = obtener_variables_bcra()
         
-        if not variables_bcra:
+        if variables_bcra is None or (hasattr(variables_bcra, 'empty') and variables_bcra.empty):
             st.error("❌ No se pudieron obtener las variables BCRA")
             return
         
@@ -3004,11 +3016,18 @@ def mostrar_panel_bcra():
         
         with col1:
             st.write("**Variables Macroeconómicas:**")
-            for key, var in variables_bcra.items():
-                st.info(f"**{var['descripcion']}**")
-                st.write(f"Fuente: {var['fuente']}")
-                st.write(f"Ticker: `{var['ticker']}`")
-                st.divider()
+            if hasattr(variables_bcra, 'items'):  # Si es un diccionario
+                for key, var in variables_bcra.items():
+                    st.info(f"**{var['descripcion']}**")
+                    st.write(f"Fuente: {var['fuente']}")
+                    st.write(f"Ticker: `{var['ticker']}`")
+                    st.divider()
+            else:  # Si es un DataFrame
+                for _, row in variables_bcra.iterrows():
+                    st.info(f"**{row.get('nombre', 'N/A')}**")
+                    st.write(f"Fuente: {row.get('fuente', 'N/A')}")
+                    st.write(f"Relevancia: {row.get('relevancia', 'N/A')}")
+                    st.divider()
         
         with col2:
             st.write("**Uso en Optimización:**")
@@ -3021,11 +3040,18 @@ def mostrar_panel_bcra():
         # Selector de variables para análisis
         st.subheader("🔍 Análisis de Variables Específicas")
         
+        if hasattr(variables_bcra, 'keys'):  # Si es un diccionario
+            options = list(variables_bcra.keys())
+            format_func = lambda x: variables_bcra[x]['descripcion']
+        else:  # Si es un DataFrame
+            options = variables_bcra['nombre'].tolist() if 'nombre' in variables_bcra.columns else []
+            format_func = lambda x: x
+        
         variables_seleccionadas = st.multiselect(
             "Seleccionar variables para análisis:",
-            options=list(variables_bcra.keys()),
-            default=['Tipo_Cambio_BNA', 'Tasa_LELIQ'],
-            format_func=lambda x: variables_bcra[x]['descripcion']
+            options=options,
+            default=options[:2] if len(options) >= 2 else options,
+            format_func=format_func
         )
         
         if variables_seleccionadas:
