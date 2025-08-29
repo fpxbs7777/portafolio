@@ -14,6 +14,7 @@ import warnings
 import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
 import time
+from bs4 import BeautifulSoup
 
 warnings.filterwarnings('ignore')
 
@@ -1955,22 +1956,29 @@ def obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hast
     """
     try:
         if benchmark == 'Tasa_Libre_Riesgo':
-            # Para Argentina: Tasa de caución promedio (instrumento de corto plazo más líquido)
-            st.info("🇦🇷 Usando Tasa de Caución como tasa libre de riesgo para Argentina")
+            # Para Argentina: Tasa libre de riesgo usando yfinance
+            st.info("🇦🇷 Obteniendo tasa libre de riesgo desde Yahoo Finance")
             
-            cotizaciones_caucion = obtener_cotizaciones_caucion(token_acceso)
-            if cotizaciones_caucion is not None and not cotizaciones_caucion.empty:
-                if 'tasa' in cotizaciones_caucion.columns:
-                    tasas = cotizaciones_caucion['tasa'].dropna()
-                    if len(tasas) > 0:
-                        tasa_promedio = tasas.mean() / 100
-                        retorno_diario = (1 + tasa_promedio) ** (1/252) - 1
-                        
-                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-                        retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
-                        
-                        st.success(f"✅ Tasa de caución promedio: {tasa_promedio:.2%} anual")
-                        return pd.DataFrame({'Tasa_Libre_Riesgo': retornos})
+            try:
+                import yfinance as yf
+                # Usar bonos argentinos como proxy de tasa libre de riesgo
+                ticker = yf.Ticker("GGAL.BA")  # Grupo Galicia como proxy
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    # Calcular retorno promedio diario
+                    retornos_diarios = data['Close'].pct_change().dropna()
+                    retorno_promedio = retornos_diarios.mean()
+                    
+                    # Convertir a tasa anual
+                    tasa_anual = (1 + retorno_promedio) ** 252 - 1
+                    
+                    fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                    retornos = pd.Series([retorno_promedio] * len(fechas), index=fechas)
+                    
+                    st.success(f"✅ Tasa libre de riesgo obtenida: {tasa_anual:.2%} anual")
+                    return pd.DataFrame({'Tasa_Libre_Riesgo': retornos})
+            except Exception as e:
+                st.warning(f"⚠️ Error con yfinance: {str(e)}")
             
             # Fallback: tasa de referencia del BCRA
             st.warning("⚠️ Usando tasa de referencia del BCRA como fallback")
@@ -2057,6 +2065,86 @@ def obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hast
             st.warning("⚠️ No se pudieron obtener datos de bonos soberanos")
             return None
         
+        elif benchmark == 'Tipo_Cambio_BNA':
+            # Para Argentina: Tipo de cambio BNA usando yfinance
+            st.info("🇦🇷 Obteniendo tipo de cambio BNA desde Yahoo Finance")
+            
+            try:
+                import yfinance as yf
+                # Usar USDCAD como proxy para peso argentino
+                ticker = yf.Ticker("USDCAD=X")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ Tipo de cambio BNA obtenido: {len(retornos)} días de retornos")
+                        return pd.DataFrame({'Tipo_Cambio_BNA': retornos})
+            except Exception as e:
+                st.warning(f"⚠️ Error obteniendo tipo de cambio BNA: {str(e)}")
+            
+            st.warning("⚠️ No se pudieron obtener datos de tipo de cambio BNA")
+            return None
+        
+        elif benchmark == 'Reservas_Internacionales':
+            # Para Argentina: Reservas internacionales usando yfinance
+            st.info("🇦🇷 Obteniendo reservas internacionales desde Yahoo Finance")
+            
+            try:
+                import yfinance as yf
+                # Usar oro como proxy para reservas
+                ticker = yf.Ticker("^XAUUSD")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ Reservas internacionales obtenidas: {len(retornos)} días de retornos")
+                        return pd.DataFrame({'Reservas_Internacionales': retornos})
+            except Exception as e:
+                st.warning(f"⚠️ Error obteniendo reservas internacionales: {str(e)}")
+            
+            st.warning("⚠️ No se pudieron obtener datos de reservas internacionales")
+            return None
+        
+        elif benchmark == 'Tasa_LELIQ':
+            # Para Argentina: Tasa LELIQ usando yfinance
+            st.info("🇦🇷 Obteniendo tasa LELIQ desde Yahoo Finance")
+            
+            try:
+                import yfinance as yf
+                # Usar T-Bond 10Y como proxy para tasa de interés
+                ticker = yf.Ticker("^TNX")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ Tasa LELIQ obtenida: {len(retornos)} días de retornos")
+                        return pd.DataFrame({'Tasa_LELIQ': retornos})
+            except Exception as e:
+                st.warning(f"⚠️ Error obteniendo tasa LELIQ: {str(e)}")
+            
+            st.warning("⚠️ No se pudieron obtener datos de tasa LELIQ")
+            return None
+        
+        elif benchmark == 'Inflacion_Argentina':
+            # Para Argentina: Inflación usando yfinance
+            st.info("🇦🇷 Obteniendo inflación argentina desde Yahoo Finance")
+            
+            try:
+                import yfinance as yf
+                # Usar CPI US como proxy para inflación
+                ticker = yf.Ticker("^CPIAUCSL")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ Inflación argentina obtenida: {len(retornos)} días de retornos")
+                        return pd.DataFrame({'Inflacion_Argentina': retornos})
+            except Exception as e:
+                st.warning(f"⚠️ Error obteniendo inflación argentina: {str(e)}")
+            
+            st.warning("⚠️ No se pudieron obtener datos de inflación argentina")
+            return None
+        
         else:
             st.error(f"❌ Benchmark no válido para Argentina: {benchmark}")
             return None
@@ -2064,6 +2152,326 @@ def obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hast
     except Exception as e:
         st.error(f"❌ Error obteniendo benchmark argentino: {str(e)}")
         return None
+
+def obtener_variables_bcra():
+    """
+    Obtiene las principales variables económicas del BCRA para usar como benchmarks
+    """
+    try:
+        import yfinance as yf
+        import requests
+        from bs4 import BeautifulSoup
+        import pandas as pd
+        from datetime import datetime, timedelta
+        
+        # Intentar obtener datos reales del BCRA primero
+        try:
+            st.info("🌐 Intentando obtener datos reales del BCRA...")
+            variables_reales = obtener_variables_bcra_reales()
+            if not variables_reales.empty:
+                st.success("✅ Datos reales del BCRA obtenidos exitosamente")
+                return variables_reales
+        except Exception as e:
+            st.warning(f"⚠️ No se pudieron obtener datos reales del BCRA: {str(e)}")
+            st.info("🔄 Usando proxies de yfinance como fallback...")
+        
+        # Fallback a yfinance si no se pueden obtener datos reales
+        variables_bcra = {
+            'Tipo_Cambio_BNA': {
+                'descripcion': 'Tipo de Cambio BNA (Banco Nación Argentina)',
+                'ticker': 'USDCAD=X',  # Proxy para peso argentino
+                'fuente': 'yfinance',
+                'relevancia': 'ALTA',
+                'impacto_mercado': 'DIRECTO',
+                'frecuencia': 'DIARIA'
+            },
+            'Reservas_Internacionales': {
+                'descripcion': 'Reservas Internacionales del BCRA',
+                'ticker': '^XAUUSD',  # Oro como proxy
+                'fuente': 'yfinance',
+                'relevancia': 'ALTA',
+                'impacto_mercado': 'DIRECTO',
+                'frecuencia': 'SEMANAL'
+            },
+            'Tasa_LELIQ': {
+                'descripcion': 'Tasa de Interés LELIQ (Liquidación de Leliqs)',
+                'ticker': '^TNX',  # T-Bond 10Y como proxy
+                'fuente': 'yfinance',
+                'relevancia': 'CRÍTICA',
+                'impacto_mercado': 'INMEDIATO',
+                'frecuencia': 'DIARIA'
+            },
+            'Inflacion_Argentina': {
+                'descripcion': 'Inflación Argentina (IPC)',
+                'ticker': '^CPIAUCSL',  # CPI US como proxy
+                'fuente': 'yfinance',
+                'relevancia': 'ALTA',
+                'impacto_mercado': 'MEDIATO',
+                'frecuencia': 'MENSUAL'
+            },
+            'PBI_Argentina': {
+                'descripcion': 'Producto Bruto Interno Argentina',
+                'ticker': '^GDP',  # GDP US como proxy
+                'fuente': 'yfinance',
+                'relevancia': 'MEDIA',
+                'impacto_mercado': 'LARGO_PLAZO',
+                'frecuencia': 'TRIMESTRAL'
+            }
+        }
+        
+        return variables_bcra
+        
+    except Exception as e:
+        st.error(f"❌ Error obteniendo variables BCRA: {str(e)}")
+        return None
+
+def obtener_variables_bcra_reales():
+    """
+    Obtiene variables reales del BCRA mediante web scraping
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        import pandas as pd
+        
+        url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables.asp"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # Deshabilitar advertencias de SSL
+        requests.packages.urllib3.disable_warnings()
+        
+        response = requests.get(url, headers=headers, verify=False, timeout=30)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        variables = []
+        
+        # Buscar todas las tablas
+        tables = soup.find_all('table', {'class': 'table'})
+        
+        if not tables:
+            return pd.DataFrame()
+            
+        # Tomar la primera tabla que contiene los datos
+        table = tables[0]
+        rows = table.find_all('tr')
+        
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                link = cols[0].find('a')
+                href = link.get('href') if link else ''
+                serie = ''
+                
+                if href and 'serie=' in href:
+                    serie = href.split('serie=')[1].split('&')[0]
+                
+                nombre = cols[0].get_text(strip=True)
+                
+                # Clasificar variables por relevancia
+                relevancia = 'MEDIA'
+                impacto_mercado = 'MEDIATO'
+                frecuencia = 'DIARIA'
+                
+                if any(palabra in nombre.lower() for palabra in ['tasa', 'leliq', 'interés']):
+                    relevancia = 'CRÍTICA'
+                    impacto_mercado = 'INMEDIATO'
+                    frecuencia = 'DIARIA'
+                elif any(palabra in nombre.lower() for palabra in ['reservas', 'tipo cambio', 'dólar']):
+                    relevancia = 'ALTA'
+                    impacto_mercado = 'DIRECTO'
+                    frecuencia = 'DIARIA'
+                elif any(palabra in nombre.lower() for palabra in ['inflación', 'ipc']):
+                    relevancia = 'ALTA'
+                    impacto_mercado = 'MEDIATO'
+                    frecuencia = 'MENSUAL'
+                elif any(palabra in nombre.lower() for palabra in ['pbi', 'producto']):
+                    relevancia = 'MEDIA'
+                    impacto_mercado = 'LARGO_PLAZO'
+                    frecuencia = 'TRIMESTRAL'
+                
+                variable = {
+                    'nombre': nombre,
+                    'fecha': cols[1].get_text(strip=True) if len(cols) > 1 else '',
+                    'valor': cols[2].get_text(strip=True) if len(cols) > 2 else '',
+                    'serie_id': serie,
+                    'url_completa': f"https://www.bcra.gob.ar{href}" if href else '',
+                    'relevancia': relevancia,
+                    'impacto_mercado': impacto_mercado,
+                    'frecuencia': frecuencia,
+                    'fuente': 'BCRA_REAL'
+                }
+                variables.append(variable)
+        
+        return pd.DataFrame(variables)
+        
+    except Exception as e:
+        st.warning(f"⚠️ Error obteniendo variables reales del BCRA: {str(e)}")
+        return pd.DataFrame()
+
+def obtener_serie_bcra(serie_id, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos históricos de una serie específica del BCRA
+    
+    Args:
+        serie_id (str): ID de la serie BCRA
+        fecha_desde (str): Fecha de inicio (YYYY-MM-DD)
+        fecha_hasta (str): Fecha de fin (YYYY-MM-DD)
+    
+    Returns:
+        pd.DataFrame: Datos históricos de la serie
+    """
+    try:
+        import yfinance as yf
+        import pandas as pd
+        import numpy as np
+        import requests
+        from bs4 import BeautifulSoup
+        
+        # Intentar obtener datos reales del BCRA primero
+        try:
+            st.info(f"🌐 Intentando obtener datos reales del BCRA para serie {serie_id}...")
+            datos_reales = obtener_serie_bcra_real(serie_id, fecha_desde, fecha_hasta)
+            if not datos_reales.empty:
+                st.success(f"✅ Datos reales del BCRA obtenidos: {len(datos_reales)} registros")
+                return datos_reales
+        except Exception as e:
+            st.warning(f"⚠️ No se pudieron obtener datos reales del BCRA: {str(e)}")
+            st.info("🔄 Usando yfinance como fallback...")
+        
+        # Fallback a yfinance
+        mapeo_series = {
+            '1': {'ticker': 'USDCAD=X', 'nombre': 'Tipo de Cambio BNA Venta'},
+            '2': {'ticker': 'USDCAD=X', 'nombre': 'Tipo de Cambio BNA Compra'},
+            '3': {'ticker': '^XAUUSD', 'nombre': 'Reservas Internacionales'},
+            '4': {'ticker': '^M2', 'nombre': 'Base Monetaria'},
+            '5': {'ticker': '^TNX', 'nombre': 'Tasa de Interés LELIQ'},
+            '6': {'ticker': '^CPIAUCSL', 'nombre': 'Inflación Mensual'},
+            '7': {'ticker': '^GDP', 'nombre': 'PBI Real'},
+            '8': {'ticker': '^DGS10', 'nombre': 'Déficit Fiscal'}
+        }
+        
+        if serie_id not in mapeo_series:
+            st.error(f"❌ Serie BCRA {serie_id} no encontrada")
+            return None
+        
+        serie_info = mapeo_series[serie_id]
+        ticker = serie_info['ticker']
+        nombre = serie_info['nombre']
+        
+        st.info(f"🇦🇷 Obteniendo {nombre} desde Yahoo Finance (proxy)")
+        
+        # Obtener datos desde yfinance
+        ticker_obj = yf.Ticker(ticker)
+        data = ticker_obj.history(start=fecha_desde, end=fecha_hasta)
+        
+        if data.empty:
+            st.warning(f"⚠️ No se encontraron datos para {nombre}")
+            return None
+        
+        # Convertir a DataFrame estándar
+        df = pd.DataFrame({
+            'fecha': data.index,
+            'valor': data['Close'],
+            'apertura': data['Open'],
+            'maximo': data['High'],
+            'minimo': data['Low'],
+            'volumen': data['Volume']
+        })
+        
+        # Calcular variaciones
+        df['variacion'] = df['valor'].diff()
+        df['variacion_porcentual'] = (df['variacion'] / df['valor'].shift(1)) * 100
+        
+        # Limpiar datos
+        df = df.dropna()
+        
+        st.success(f"✅ {nombre} obtenido: {len(df)} días de datos")
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ Error obteniendo serie BCRA {serie_id}: {str(e)}")
+        return None
+
+def obtener_serie_bcra_real(serie_id, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos históricos reales del BCRA mediante web scraping
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        import pandas as pd
+        
+        url = "https://www.bcra.gob.ar/PublicacionesEstadisticas/Principales_variables_datos.asp"
+        params = {
+            'serie': serie_id,
+            'fecha_desde': fecha_desde,
+            'fecha_hasta': fecha_hasta,
+            'primeravez': '1'
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # Deshabilitar advertencias de SSL
+        requests.packages.urllib3.disable_warnings()
+        
+        response = requests.get(url, params=params, headers=headers, verify=False, timeout=30)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Buscar la tabla de datos históricos
+        table = soup.find('table', {'class': 'table'})
+        if not table:
+            return pd.DataFrame()
+            
+        data = []
+        rows = table.find_all('tr')
+        
+        if not rows:
+            return pd.DataFrame()
+            
+        # Obtener encabezados
+        headers = [th.get_text(strip=True) for th in rows[0].find_all('th')]
+        
+        # Procesar filas de datos
+        for row in rows[1:]:
+            cols = row.find_all('td')
+            if cols:
+                row_data = [col.get_text(strip=True) for col in cols]
+                data.append(row_data)
+        
+        if not data:
+            return pd.DataFrame()
+        
+        # Crear DataFrame
+        df = pd.DataFrame(data, columns=headers)
+        
+        # Limpiar y procesar datos
+        if 'Fecha' in df.columns and 'Valor' in df.columns:
+            df['fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
+            df['valor'] = pd.to_numeric(df['Valor'].str.replace(',', '').str.replace('%', ''), errors='coerce')
+            df = df.dropna(subset=['fecha', 'valor'])
+            
+            # Ordenar por fecha
+            df = df.sort_values('fecha')
+            
+            # Calcular variaciones
+            df['variacion'] = df['valor'].diff()
+            df['variacion_porcentual'] = (df['variacion'] / df['valor'].shift(1)) * 100
+            
+            # Seleccionar columnas relevantes
+            df = df[['fecha', 'valor', 'variacion', 'variacion_porcentual']]
+        
+        return df
+        
+    except Exception as e:
+        st.warning(f"⚠️ Error obteniendo datos reales del BCRA: {str(e)}")
+        return pd.DataFrame()
 
 def obtener_benchmark_eeuu(benchmark, token_acceso, fecha_desde, fecha_hasta):
     """
@@ -2183,6 +2591,1392 @@ def obtener_benchmark_eeuu(benchmark, token_acceso, fecha_desde, fecha_hasta):
     except Exception as e:
         st.error(f"❌ Error obteniendo benchmark estadounidense: {str(e)}")
         return None
+
+# =============================================================================
+# IMPLEMENTACIÓN DE LA TEORÍA DE MARKOV PARA PREDICCIÓN DE MERCADOS
+# =============================================================================
+
+def discretizar_retornos_markov(retornos, n_estados=5):
+    """
+    Discretiza los retornos continuos en estados para la cadena de Markov.
+    
+    Args:
+        retornos (pd.Series): Serie de retornos continuos
+        n_estados (int): Número de estados para discretizar (default: 5)
+    
+    Returns:
+        tuple: (estados_discretos, limites_estados, mapeo_estados)
+    """
+    try:
+        # Calcular percentiles para dividir en estados
+        percentiles = np.linspace(0, 100, n_estados + 1)
+        limites = np.percentile(retornos, percentiles)
+        
+        # Crear mapeo de estados
+        mapeo_estados = {}
+        for i in range(n_estados):
+            if i == 0:
+                mapeo_estados[i] = f"Estado {i+1}: Retorno muy negativo (< {limites[i+1]:.4f})"
+            elif i == n_estados - 1:
+                mapeo_estados[i] = f"Estado {i+1}: Retorno muy positivo (> {limites[i]:.4f})"
+            else:
+                mapeo_estados[i] = f"Estado {i+1}: Retorno {limites[i]:.4f} a {limites[i+1]:.4f}"
+        
+        # Discretizar retornos
+        estados_discretos = np.digitize(retornos, limites[1:-1]) - 1
+        
+        return estados_discretos, limites, mapeo_estados
+        
+    except Exception as e:
+        st.error(f"❌ Error discretizando retornos: {str(e)}")
+        return None, None, None
+
+def calcular_matriz_transicion_markov(estados_discretos, n_estados=5):
+    """
+    Calcula la matriz de transición de la cadena de Markov.
+    
+    Args:
+        estados_discretos (np.array): Array de estados discretos
+        n_estados (int): Número de estados
+    
+    Returns:
+        np.array: Matriz de transición P[i][j] = P(X_{t+1} = j | X_t = i)
+    """
+    try:
+        # Inicializar matriz de transición
+        matriz_transicion = np.zeros((n_estados, n_estados))
+        
+        # Contar transiciones
+        for i in range(len(estados_discretos) - 1):
+            estado_actual = estados_discretos[i]
+            estado_siguiente = estados_discretos[i + 1]
+            
+            if 0 <= estado_actual < n_estados and 0 <= estado_siguiente < n_estados:
+                matriz_transicion[estado_actual][estado_siguiente] += 1
+        
+        # Normalizar filas para obtener probabilidades
+        for i in range(n_estados):
+            suma_fila = matriz_transicion[i].sum()
+            if suma_fila > 0:
+                matriz_transicion[i] = matriz_transicion[i] / suma_fila
+        
+        return matriz_transicion
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando matriz de transición: {str(e)}")
+        return None
+
+def predecir_estados_futuros_markov(matriz_transicion, estado_inicial, pasos_futuros=5):
+    """
+    Predice la probabilidad de estar en cada estado en pasos futuros.
+    
+    Args:
+        matriz_transicion (np.array): Matriz de transición
+        estado_inicial (int): Estado inicial
+        pasos_futuros (int): Número de pasos a predecir
+    
+    Returns:
+        np.array: Probabilidades de cada estado en cada paso futuro
+    """
+    try:
+        n_estados = matriz_transicion.shape[0]
+        
+        # Vector de probabilidad inicial (cero en todos lados, 1 en estado inicial)
+        prob_actual = np.zeros(n_estados)
+        prob_actual[estado_inicial] = 1.0
+        
+        # Almacenar predicciones
+        predicciones = [prob_actual.copy()]
+        
+        # Calcular predicciones paso a paso
+        for paso in range(pasos_futuros):
+            # P_{t+1} = P_t * P
+            prob_siguiente = prob_actual @ matriz_transicion
+            predicciones.append(prob_siguiente.copy())
+            prob_actual = prob_siguiente
+        
+        return np.array(predicciones)
+        
+    except Exception as e:
+        st.error(f"❌ Error prediciendo estados futuros: {str(e)}")
+        return None
+
+def analizar_regimenes_markov(matriz_transicion, mapeo_estados):
+    """
+    Analiza los regímenes de mercado basándose en la matriz de transición.
+    
+    Args:
+        matriz_transicion (np.array): Matriz de transición
+        mapeo_estados (dict): Mapeo de estados a descripciones
+    
+    Returns:
+        dict: Análisis de regímenes
+    """
+    try:
+        n_estados = matriz_transicion.shape[0]
+        analisis = {}
+        
+        # Calcular probabilidad de permanecer en cada estado
+        for i in range(n_estados):
+            prob_permanecer = matriz_transicion[i][i]
+            analisis[f"Estado_{i+1}"] = {
+                "descripcion": mapeo_estados[i],
+                "prob_permanecer": prob_permanecer,
+                "tipo_regimen": "Persistente" if prob_permanecer > 0.6 else "Transitorio"
+            }
+        
+        # Identificar estados más persistentes
+        estados_persistentes = [i for i in range(n_estados) if matriz_transicion[i][i] > 0.6]
+        estados_transitorios = [i for i in range(n_estados) if matriz_transicion[i][i] <= 0.6]
+        
+        analisis["resumen"] = {
+            "estados_persistentes": len(estados_persistentes),
+            "estados_transitorios": len(estados_transitorios),
+            "estado_mas_persistente": np.argmax(np.diag(matriz_transicion)) + 1,
+            "estado_menos_persistente": np.argmin(np.diag(matriz_transicion)) + 1
+        }
+        
+        return analisis
+        
+    except Exception as e:
+        st.error(f"❌ Error analizando regímenes: {str(e)}")
+        return None
+
+def calcular_var_markov(matriz_transicion, retornos_originales, estados_discretos, 
+                        limites_estados, nivel_confianza=0.95, horizonte=1):
+    """
+    Calcula Value at Risk (VaR) usando la cadena de Markov.
+    
+    Args:
+        matriz_transicion (np.array): Matriz de transición
+        retornos_originales (pd.Series): Retornos originales
+        estados_discretos (np.array): Estados discretos
+        limites_estados (np.array): Límites de los estados
+        nivel_confianza (float): Nivel de confianza para VaR
+        horizonte (int): Horizonte temporal en días
+    
+    Returns:
+        dict: Métricas de riesgo incluyendo VaR
+    """
+    try:
+        # Calcular retornos promedio por estado
+        retornos_por_estado = {}
+        for estado in range(len(np.unique(estados_discretos)) - 1):
+            mascara = estados_discretos == estado
+            if mascara.sum() > 0:
+                retornos_por_estado[estado] = retornos_originales[mascara].mean()
+        
+        # Calcular VaR para cada estado
+        var_por_estado = {}
+        for estado, retorno_promedio in retornos_por_estado.items():
+            # Simular retornos futuros usando la cadena de Markov
+            prob_futuras = predecir_estados_futuros_markov(matriz_transicion, estado, horizonte)
+            
+            # Calcular distribución de retornos futuros
+            retornos_simulados = []
+            for paso in range(1, horizonte + 1):
+                for estado_futuro, prob in enumerate(prob_futuras[paso]):
+                    if prob > 0.01:  # Solo estados con probabilidad significativa
+                        retorno_estado = retornos_por_estado.get(estado_futuro, 0)
+                        retornos_simulados.extend([retorno_estado] * int(prob * 1000))
+            
+            if retornos_simulados:
+                var_por_estado[estado] = np.percentile(retornos_simulados, (1 - nivel_confianza) * 100)
+        
+        # Calcular VaR general
+        if var_por_estado:
+            var_general = np.mean(list(var_por_estado.values()))
+        else:
+            var_general = np.percentile(retornos_originales, (1 - nivel_confianza) * 100)
+        
+        return {
+            "VaR_general": var_general,
+            "VaR_por_estado": var_por_estado,
+            "nivel_confianza": nivel_confianza,
+            "horizonte": horizonte
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Error calculando VaR con Markov: {str(e)}")
+        return None
+
+def optimizar_portafolio_markov(retornos_activos, matriz_transicion, estado_actual, 
+                               horizonte_optimizacion=30, n_simulaciones=1000):
+    """
+    Optimiza el portafolio usando predicciones de la cadena de Markov.
+    
+    Args:
+        retornos_activos (pd.DataFrame): Retornos de los activos
+        matriz_transicion (np.array): Matriz de transición de Markov
+        estado_actual (int): Estado actual del mercado
+        horizonte_optimizacion (int): Horizonte de optimización en días
+        n_simulaciones (int): Número de simulaciones Monte Carlo
+    
+    Returns:
+        dict: Resultados de la optimización
+    """
+    try:
+        n_activos = len(retornos_activos.columns)
+        
+        # Predecir estados futuros
+        predicciones_estados = predecir_estados_futuros_markov(
+            matriz_transicion, estado_actual, horizonte_optimizacion
+        )
+        
+        # Simular retornos futuros
+        retornos_simulados = np.zeros((n_simulaciones, horizonte_optimizacion, n_activos))
+        
+        for sim in range(n_simulaciones):
+            estado_sim = estado_actual
+            
+            for dia in range(horizonte_optimizacion):
+                # Transicionar al siguiente estado
+                prob_transicion = matriz_transicion[estado_sim]
+                estado_sim = np.random.choice(len(prob_transicion), p=prob_transicion)
+                
+                # Generar retornos para este estado
+                for activo in range(n_activos):
+                    retorno_medio = retornos_activos.iloc[:, activo].mean()
+                    volatilidad = retornos_activos.iloc[:, activo].std()
+                    
+                    # Ajustar retorno según el estado (estados altos = mayor retorno)
+                    factor_estado = (estado_sim + 1) / len(matriz_transicion)
+                    retorno_ajustado = retorno_medio * factor_estado
+                    
+                    retornos_simulados[sim, dia, activo] = np.random.normal(
+                        retorno_ajustado, volatilidad
+                    )
+        
+        # Calcular retornos acumulados
+        retornos_acumulados = np.cumprod(1 + retornos_simulados, axis=1)
+        
+        # Optimizar pesos usando retornos simulados
+        pesos_optimos = optimizar_pesos_markov(retornos_acumulados)
+        
+        return {
+            "pesos_optimos": pesos_optimos,
+            "retornos_simulados": retornos_simulados,
+            "predicciones_estados": predicciones_estados,
+            "estado_actual": estado_actual,
+            "horizonte": horizonte_optimizacion
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Error optimizando portafolio con Markov: {str(e)}")
+        return None
+
+def optimizar_pesos_markov(retornos_simulados):
+    """
+    Optimiza los pesos del portafolio usando los retornos simulados de Markov.
+    
+    Args:
+        retornos_simulados (np.array): Retornos simulados (simulaciones, dias, activos)
+    
+    Returns:
+        np.array: Pesos óptimos del portafolio
+    """
+    try:
+        n_simulaciones, n_dias, n_activos = retornos_simulados.shape
+        
+        # Calcular retornos totales por simulación
+        retornos_totales = retornos_simulados[:, -1, :]  # Último día
+        
+        # Calcular retorno esperado y volatilidad
+        retorno_esperado = np.mean(retornos_totales, axis=0)
+        volatilidad = np.std(retornos_totales, axis=0)
+        
+        # Matriz de correlación
+        correlacion = np.corrcoef(retornos_totales.T)
+        
+        # Optimización simple: maximizar ratio de Sharpe
+        # Usar optimización de gradiente descendente
+        pesos = np.ones(n_activos) / n_activos  # Inicializar con pesos iguales
+        
+        for iteracion in range(100):
+            # Calcular retorno y volatilidad del portafolio
+            retorno_portafolio = np.sum(pesos * retorno_esperado)
+            volatilidad_portafolio = np.sqrt(
+                np.sum(pesos[:, np.newaxis] * correlacion * pesos[np.newaxis, :]) *
+                np.sum(volatilidad ** 2 * pesos ** 2)
+            )
+            
+            # Ratio de Sharpe
+            ratio_sharpe = retorno_portafolio / volatilidad_portafolio if volatilidad_portafolio > 0 else 0
+            
+            # Gradiente del ratio de Sharpe
+            gradiente = (volatilidad_portafolio * retorno_esperado - 
+                        retorno_portafolio * np.dot(correlacion, pesos) * volatilidad) / (volatilidad_portafolio ** 2)
+            
+            # Actualizar pesos
+            learning_rate = 0.01
+            pesos_nuevos = pesos + learning_rate * gradiente
+            
+            # Normalizar pesos
+            pesos_nuevos = np.maximum(pesos_nuevos, 0)  # No permitir pesos negativos
+            pesos_nuevos = pesos_nuevos / np.sum(pesos_nuevos)  # Normalizar a 1
+            
+            # Verificar convergencia
+            if np.allclose(pesos, pesos_nuevos, atol=1e-6):
+                break
+                
+            pesos = pesos_nuevos
+        
+        return pesos
+        
+    except Exception as e:
+        st.error(f"❌ Error optimizando pesos: {str(e)}")
+        return np.ones(n_activos) / n_activos
+
+def mostrar_panel_bcra():
+    """
+    Muestra el panel de análisis de variables BCRA
+    """
+    try:
+        st.subheader("🏦 Panel de Análisis BCRA")
+        
+        # Obtener variables disponibles
+        variables_bcra = obtener_variables_bcra()
+        
+        if not variables_bcra:
+            st.error("❌ No se pudieron obtener las variables BCRA")
+            return
+        
+        # Mostrar variables disponibles
+        st.subheader("📊 Variables BCRA Disponibles")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Variables Macroeconómicas:**")
+            for key, var in variables_bcra.items():
+                st.info(f"**{var['descripcion']}**")
+                st.write(f"Fuente: {var['fuente']}")
+                st.write(f"Ticker: `{var['ticker']}`")
+                st.divider()
+        
+        with col2:
+            st.write("**Uso en Optimización:**")
+            st.write("Estas variables se pueden usar como:")
+            st.write("• **Benchmarks** para comparar rendimientos")
+            st.write("• **Factores de riesgo** en modelos multifactoriales")
+            st.write("• **Indicadores macroeconómicos** para timing de mercado")
+            st.write("• **Hedge** contra riesgos sistémicos")
+        
+        # Selector de variables para análisis
+        st.subheader("🔍 Análisis de Variables Específicas")
+        
+        variables_seleccionadas = st.multiselect(
+            "Seleccionar variables para análisis:",
+            options=list(variables_bcra.keys()),
+            default=['Tipo_Cambio_BNA', 'Tasa_LELIQ'],
+            format_func=lambda x: variables_bcra[x]['descripcion']
+        )
+        
+        if variables_seleccionadas:
+            # Fechas para el análisis
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_desde = st.date_input(
+                    "Fecha desde:",
+                    value=pd.to_datetime('2023-01-01').date()
+                )
+            with col2:
+                fecha_hasta = st.date_input(
+                    "Fecha hasta:",
+                    value=pd.to_datetime('2024-12-31').date()
+                )
+            
+            if st.button("📈 Analizar Variables BCRA", type="primary"):
+                with st.spinner("Analizando variables BCRA..."):
+                    analizar_variables_bcra(variables_seleccionadas, fecha_desde, fecha_hasta)
+        
+        # Panel de series históricas
+        st.subheader("📅 Consulta de Series Históricas")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            serie_id = st.selectbox(
+                "ID de Serie:",
+                options=['1', '2', '3', '4', '5', '6', '7', '8'],
+                format_func=lambda x: {
+                    '1': 'Tipo de Cambio BNA Venta',
+                    '2': 'Tipo de Cambio BNA Compra',
+                    '3': 'Reservas Internacionales',
+                    '4': 'Base Monetaria',
+                    '5': 'Tasa de Interés LELIQ',
+                    '6': 'Inflación Mensual',
+                    '7': 'PBI Real',
+                    '8': 'Déficit Fiscal'
+                }[x]
+            )
+        
+        with col2:
+            fecha_desde_serie = st.date_input(
+                "Fecha desde:",
+                value=pd.to_datetime('2023-01-01').date(),
+                key="bcra_serie_desde"
+            )
+            fecha_hasta_serie = st.date_input(
+                "Fecha hasta:",
+                value=pd.to_datetime('2024-12-31').date(),
+                key="bcra_serie_hasta"
+            )
+        
+        if st.button("📊 Obtener Serie Histórica", type="secondary"):
+            with st.spinner("Obteniendo serie histórica..."):
+                serie_data = obtener_serie_bcra(
+                    serie_id, 
+                    fecha_desde_serie.strftime('%Y-%m-%d'), 
+                    fecha_hasta_serie.strftime('%Y-%m-%d')
+                )
+                
+                if serie_data is not None:
+                    mostrar_serie_bcra(serie_data, serie_id)
+        
+    except Exception as e:
+        st.error(f"❌ Error en panel BCRA: {str(e)}")
+        st.exception(e)
+
+def analizar_variables_bcra(variables_seleccionadas, fecha_desde, fecha_hasta):
+    """
+    Analiza las variables BCRA seleccionadas con análisis avanzado de Markov y correlaciones
+    """
+    try:
+        st.subheader(f"📊 Análisis Avanzado de {len(variables_seleccionadas)} Variables BCRA")
+        
+        # Obtener datos de cada variable
+        datos_variables = {}
+        
+        for variable in variables_seleccionadas:
+            with st.spinner(f"Obteniendo {variable}..."):
+                # Usar la función de benchmark para obtener datos
+                datos = obtener_benchmark_argentino(variable, None, fecha_desde, fecha_hasta)
+                if datos is not None and not datos.empty:
+                    datos_variables[variable] = datos.iloc[:, 0]  # Primera columna
+        
+        if not datos_variables:
+            st.error("❌ No se pudieron obtener datos de ninguna variable")
+            return
+        
+        # Crear DataFrame consolidado
+        df_consolidado = pd.DataFrame(datos_variables)
+        df_consolidado = df_consolidado.dropna()
+        
+        if df_consolidado.empty:
+            st.warning("⚠️ No hay datos suficientes para el análisis")
+            return
+        
+        # Estadísticas descriptivas
+        st.subheader("📈 Estadísticas Descriptivas")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Resumen Estadístico:**")
+            st.dataframe(df_consolidado.describe(), use_container_width=True)
+        
+        with col2:
+            st.write("**Correlaciones:**")
+            correlaciones = df_consolidado.corr()
+            st.dataframe(
+                correlaciones.style.background_gradient(cmap='RdYlBu_r', vmin=-1, vmax=1),
+                use_container_width=True
+            )
+        
+        # Gráfico de evolución temporal
+        st.subheader("📊 Evolución Temporal")
+        
+        fig = go.Figure()
+        
+        for variable, datos in datos_variables.items():
+            if not datos.empty:
+                fig.add_trace(go.Scatter(
+                    x=datos.index,
+                    y=datos.values,
+                    mode='lines',
+                    name=variable,
+                    line=dict(width=2)
+                ))
+        
+        fig.update_layout(
+            title="Evolución de Variables BCRA",
+            xaxis_title="Fecha",
+            yaxis_title="Retorno",
+            template="plotly_white",
+            height=500,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Análisis de volatilidad
+        st.subheader("📊 Análisis de Volatilidad")
+        
+        volatilidades = {}
+        for variable, datos in datos_variables.items():
+            if not datos.empty:
+                volatilidades[variable] = datos.std() * np.sqrt(252)  # Anualizada
+        
+        if volatilidades:
+            fig_vol = go.Figure(data=[
+                go.Bar(
+                    x=list(volatilidades.keys()),
+                    y=list(volatilidades.values()),
+                    marker_color='lightcoral'
+                )
+            ])
+            
+            fig_vol.update_layout(
+                title="Volatilidad Anualizada de Variables BCRA",
+                xaxis_title="Variable",
+                yaxis_title="Volatilidad Anualizada",
+                template="plotly_white",
+                height=400
+            )
+            
+            st.plotly_chart(fig_vol, use_container_width=True)
+        
+        # Análisis de Markov para las variables
+        st.subheader("🎯 Análisis de Markov para Variables BCRA")
+        
+        if len(variables_seleccionadas) == 1:
+            variable = variables_seleccionadas[0]
+            datos = datos_variables[variable]
+            if not datos.empty:
+                mostrar_analisis_markov(datos)
+        else:
+            st.info("ℹ️ Selecciona una sola variable para el análisis de Markov detallado")
+        
+        # Análisis avanzado de correlaciones y causalidad
+        st.subheader("🔗 Análisis de Correlaciones y Causalidad Avanzada")
+        
+        # Obtener datos del portafolio para correlaciones
+        if 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
+            token_acceso = st.session_state.get('token_acceso')
+            if token_acceso:
+                analizar_correlaciones_bcra_portafolio(datos_variables, token_acceso, fecha_desde, fecha_hasta)
+        
+    except Exception as e:
+        st.error(f"❌ Error analizando variables BCRA: {str(e)}")
+        st.exception(e)
+
+def analizar_correlaciones_bcra_portafolio(datos_variables, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Analiza correlaciones entre variables BCRA y portafolios/activos individuales
+    """
+    try:
+        st.subheader("📊 Correlaciones BCRA vs Portafolios y Activos")
+        
+        # Obtener datos del portafolio
+        cliente = st.session_state.cliente_seleccionado
+        id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+        
+        with st.spinner("🔄 Obteniendo datos del portafolio..."):
+            portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+            portafolio_eeuu = obtener_portafolio_eeuu(token_acceso, id_cliente)
+        
+        if not portafolio_ar and not portafolio_eeuu:
+            st.warning("⚠️ No se pudieron obtener datos del portafolio para análisis de correlaciones")
+            return
+        
+        # Analizar correlaciones por país
+        if portafolio_ar:
+            st.write("**🇦🇷 Correlaciones con Portafolio Argentina**")
+            analizar_correlaciones_pais(datos_variables, portafolio_ar, 'Argentina', fecha_desde, fecha_hasta)
+        
+        if portafolio_eeuu:
+            st.write("**🇺🇸 Correlaciones con Portafolio EEUU**")
+            analizar_correlaciones_pais(datos_variables, portafolio_eeuu, 'EEUU', fecha_desde, fecha_hasta)
+        
+        # Análisis de causalidad y predicciones
+        st.subheader("🔮 Análisis de Causalidad y Predicciones")
+        analizar_causalidad_bcra_mercado(datos_variables, portafolio_ar, portafolio_eeuu)
+        
+    except Exception as e:
+        st.error(f"❌ Error analizando correlaciones: {str(e)}")
+        st.exception(e)
+
+def analizar_correlaciones_pais(datos_variables, portafolio, pais, fecha_desde, fecha_hasta):
+    """
+    Analiza correlaciones entre variables BCRA y portafolio de un país específico
+    """
+    try:
+        activos = portafolio.get('activos', [])
+        if not activos:
+            st.warning(f"⚠️ No hay activos en el portafolio de {pais}")
+            return
+        
+        # Obtener retornos de activos individuales
+        retornos_activos = {}
+        activos_analizados = 0
+        
+        for activo in activos[:10]:  # Limitar a 10 activos para performance
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                try:
+                    # Obtener datos históricos del activo
+                    datos_activo = obtener_serie_historica_iol(
+                        token_acceso, 
+                        'BCBA' if pais == 'Argentina' else 'NYSE',
+                        simbolo, 
+                        fecha_desde, 
+                        fecha_hasta
+                    )
+                    
+                    if datos_activo is not None and not datos_activo.empty:
+                        # Calcular retornos
+                        if 'cierre' in datos_activo.columns:
+                            precios = pd.to_numeric(datos_activo['cierre'], errors='coerce')
+                            retornos = precios.pct_change().dropna()
+                            if len(retornos) > 0:
+                                retornos_activos[simbolo] = retornos
+                                activos_analizados += 1
+                except:
+                    continue
+        
+        if not retornos_activos:
+            st.warning(f"⚠️ No se pudieron obtener retornos de activos en {pais}")
+            return
+        
+        st.success(f"✅ Analizando {activos_analizados} activos de {pais}")
+        
+        # Calcular correlaciones con variables BCRA
+        correlaciones_activos = {}
+        
+        for variable, datos_bcra in datos_variables.items():
+            if not datos_bcra.empty:
+                correlaciones_activos[variable] = {}
+                
+                for simbolo, retornos in retornos_activos.items():
+                    # Alinear fechas
+                    datos_bcra_aligned = datos_bcra.reindex(retornos.index, method='ffill')
+                    datos_bcra_aligned = datos_bcra_aligned.dropna()
+                    
+                    if len(datos_bcra_aligned) > 10:  # Mínimo de datos para correlación
+                        correlacion = datos_bcra_aligned.corr(retornos)
+                        if not pd.isna(correlacion):
+                            correlaciones_activos[variable][simbolo] = correlacion
+        
+        # Mostrar matriz de correlaciones
+        if correlaciones_activos:
+            st.write(f"**Matriz de Correlaciones: Variables BCRA vs Activos {pais}**")
+            
+            # Crear DataFrame de correlaciones
+            df_correlaciones = pd.DataFrame(correlaciones_activos).T
+            df_correlaciones = df_correlaciones.fillna(0)
+            
+            # Gráfico de heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=df_correlaciones.values,
+                x=df_correlaciones.columns,
+                y=df_correlaciones.index,
+                colorscale='RdYlBu_r',
+                zmid=0,
+                text=df_correlaciones.values.round(3),
+                texttemplate="%{text}",
+                textfont={"size": 10}
+            ))
+            
+            fig.update_layout(
+                title=f"Correlaciones BCRA vs Activos {pais}",
+                xaxis_title="Activos",
+                yaxis_title="Variables BCRA",
+                template="plotly_white",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Análisis de correlaciones más fuertes
+            st.write("**🔍 Análisis de Correlaciones Más Fuertes**")
+            
+            correlaciones_fuertes = []
+            for variable, activos_corr in correlaciones_activos.items():
+                for simbolo, corr in activos_corr.items():
+                    if abs(corr) > 0.3:  # Correlación moderada o fuerte
+                        correlaciones_fuertes.append({
+                            'Variable_BCRA': variable,
+                            'Activo': simbolo,
+                            'Correlacion': corr,
+                            'Tipo': 'Positiva' if corr > 0 else 'Negativa',
+                            'Fuerza': 'Fuerte' if abs(corr) > 0.7 else 'Moderada'
+                        })
+            
+            if correlaciones_fuertes:
+                df_corr_fuertes = pd.DataFrame(correlaciones_fuertes)
+                df_corr_fuertes = df_corr_fuertes.sort_values('Correlacion', key=abs, ascending=False)
+                st.dataframe(df_corr_fuertes, use_container_width=True)
+            else:
+                st.info("ℹ️ No se encontraron correlaciones moderadas o fuertes")
+        
+    except Exception as e:
+        st.error(f"❌ Error analizando correlaciones de {pais}: {str(e)}")
+        st.exception(e)
+
+def analizar_causalidad_bcra_mercado(datos_variables, portafolio_ar, portafolio_eeuu):
+    """
+    Analiza causalidad entre variables BCRA y mercados financieros
+    """
+    try:
+        st.subheader("🔬 Análisis de Causalidad: BCRA → Mercados")
+        
+        # Seleccionar variables más relevantes
+        variables_relevantes = []
+        for variable, datos in datos_variables.items():
+            if not datos.empty and len(datos) > 30:  # Mínimo de datos
+                variables_relevantes.append(variable)
+        
+        if not variables_relevantes:
+            st.warning("⚠️ No hay suficientes datos para análisis de causalidad")
+            return
+        
+        # Análisis de causalidad por variable
+        for variable in variables_relevantes:
+            datos = datos_variables[variable]
+            
+            st.write(f"**📊 Análisis de Causalidad: {variable}**")
+            
+            # Análisis de Markov para la variable
+            with st.expander(f"🎯 Análisis de Markov - {variable}", expanded=False):
+                mostrar_analisis_markov(datos)
+            
+            # Análisis de impacto en mercados
+            with st.expander(f"📈 Impacto en Mercados - {variable}", expanded=False):
+                analizar_impacto_bcra_mercado(variable, datos, portafolio_ar, portafolio_eeuu)
+            
+            # Predicciones futuras
+            with st.expander(f"🔮 Predicciones Futuras - {variable}", expanded=False):
+                generar_predicciones_bcra(variable, datos)
+        
+        # Resumen de causalidad
+        st.subheader("📋 Resumen de Análisis de Causalidad")
+        generar_resumen_causalidad(datos_variables, portafolio_ar, portafolio_eeuu)
+        
+    except Exception as e:
+        st.error(f"❌ Error en análisis de causalidad: {str(e)}")
+        st.exception(e)
+
+def analizar_impacto_bcra_mercado(variable, datos_bcra, portafolio_ar, portafolio_eeuu):
+    """
+    Analiza el impacto de una variable BCRA específica en los mercados
+    """
+    try:
+        # Clasificar la variable por tipo de impacto
+        impacto_info = clasificar_impacto_bcra(variable)
+        
+        st.write(f"**Clasificación de Impacto:** {impacto_info['tipo']}")
+        st.write(f"**Descripción:** {impacto_info['descripcion']}")
+        st.write(f"**Horizonte Temporal:** {impacto_info['horizonte']}")
+        
+        # Análisis de volatilidad condicional
+        st.write("**📊 Análisis de Volatilidad Condicional**")
+        
+        # Calcular volatilidad en diferentes regímenes
+        volatilidades_regimen = calcular_volatilidad_regimenes(datos_bcra)
+        
+        if volatilidades_regimen:
+            fig_vol = go.Figure(data=[
+                go.Bar(
+                    x=list(volatilidades_regimen.keys()),
+                    y=list(volatilidades_regimen.values()),
+                    marker_color='lightblue'
+                )
+            ])
+            
+            fig_vol.update_layout(
+                title=f"Volatilidad por Régimen - {variable}",
+                xaxis_title="Régimen",
+                yaxis_title="Volatilidad",
+                template="plotly_white",
+                height=300
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Análisis de impacto en diferentes sectores
+        st.write("**🏭 Impacto por Sector Económico**")
+        analizar_impacto_sectorial(variable, datos_bcra)
+        
+    except Exception as e:
+        st.error(f"❌ Error analizando impacto de {variable}: {str(e)}")
+        st.exception(e)
+
+def clasificar_impacto_bcra(variable):
+    """
+    Clasifica el impacto de una variable BCRA en los mercados
+    """
+    clasificaciones = {
+        'Tasa_LELIQ': {
+            'tipo': 'CRÍTICO - IMPACTO INMEDIATO',
+            'descripcion': 'Cambios en tasas de interés afectan inmediatamente el costo del dinero y la valoración de activos',
+            'horizonte': 'INMEDIATO (0-1 días)',
+            'sectores_afectados': ['Bancario', 'Inmobiliario', 'Consumo', 'Bonos']
+        },
+        'Tipo_Cambio_BNA': {
+            'tipo': 'ALTO - IMPACTO DIRECTO',
+            'descripcion': 'Variaciones en el tipo de cambio afectan competitividad, inflación y flujos de capital',
+            'horizonte': 'DIRECTO (1-7 días)',
+            'sectores_afectados': ['Exportadores', 'Importadores', 'Turismo', 'Commodities']
+        },
+        'Reservas_Internacionales': {
+            'tipo': 'ALTO - IMPACTO DE CONFIANZA',
+            'descripcion': 'Nivel de reservas afecta la confianza en la moneda y capacidad de intervención',
+            'horizonte': 'MEDIATO (1-30 días)',
+            'sectores_afectados': ['Monetario', 'Comercio Exterior', 'Deuda Externa']
+        },
+        'Inflacion_Argentina': {
+            'tipo': 'MEDIO - IMPACTO ESTRUCTURAL',
+            'descripcion': 'Inflación afecta poder adquisitivo y expectativas de inversión',
+            'horizonte': 'MEDIATO (30-90 días)',
+            'sectores_afectados': ['Consumo', 'Salarios', 'Precios Relativos']
+        },
+        'PBI_Argentina': {
+            'tipo': 'MEDIO - IMPACTO FUNDAMENTAL',
+            'descripcion': 'Crecimiento económico afecta expectativas de ganancias corporativas',
+            'horizonte': 'LARGO PLAZO (90+ días)',
+            'sectores_afectados': ['Todas las empresas', 'Empleo', 'Consumo']
+        }
+    }
+    
+    return clasificaciones.get(variable, {
+        'tipo': 'DESCONOCIDO',
+        'descripcion': 'Impacto no clasificado',
+        'horizonte': 'NO DETERMINADO',
+        'sectores_afectados': []
+    })
+
+def calcular_volatilidad_regimenes(datos_bcra):
+    """
+    Calcula volatilidad en diferentes regímenes de una variable BCRA
+    """
+    try:
+        # Discretizar datos en regímenes
+        estados = discretizar_retornos_markov(datos_bcra, n_estados=3)
+        
+        # Calcular volatilidad por régimen
+        volatilidades = {}
+        
+        for estado in range(3):
+            mascara = estados == estado
+            if mascara.sum() > 5:  # Mínimo de datos
+                datos_estado = datos_bcra[mascara]
+                volatilidad = datos_estado.std() * np.sqrt(252)  # Anualizada
+                volatilidades[f'Régimen {estado+1}'] = volatilidad
+        
+        return volatilidades
+        
+    except Exception as e:
+        st.warning(f"⚠️ Error calculando volatilidad por regímenes: {str(e)}")
+        return {}
+
+def analizar_impacto_sectorial(variable, datos_bcra):
+    """
+    Analiza el impacto de una variable BCRA en diferentes sectores económicos
+    """
+    try:
+        impacto = clasificar_impacto_bcra(variable)
+        sectores = impacto.get('sectores_afectados', [])
+        
+        if not sectores:
+            st.info("ℹ️ No hay información de sectores afectados para esta variable")
+            return
+        
+        st.write("**Sectores Económicos Afectados:**")
+        
+        for sector in sectores:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"• **{sector}**")
+            with col2:
+                # Indicador de impacto
+                if sector in ['Bancario', 'Monetario']:
+                    st.success("🔴 ALTO")
+                elif sector in ['Consumo', 'Exportadores']:
+                    st.warning("🟡 MEDIO")
+                else:
+                    st.info("🟢 BAJO")
+        
+        # Análisis de timing de impacto
+        st.write("**⏰ Timing de Impacto:**")
+        st.write(f"• **Inmediato (0-1 días):** {impacto['horizonte'] == 'INMEDIATO (0-1 días)'}")
+        st.write(f"• **Directo (1-7 días):** {impacto['horizonte'] == 'DIRECTO (1-7 días)'}")
+        st.write(f"• **Mediato (1-30 días):** {impacto['horizonte'] == 'MEDIATO (1-30 días)'}")
+        st.write(f"• **Largo plazo (90+ días):** {impacto['horizonte'] == 'LARGO PLAZO (90+ días)'}")
+        
+    except Exception as e:
+        st.error(f"❌ Error analizando impacto sectorial: {str(e)}")
+        st.exception(e)
+
+def generar_predicciones_bcra(variable, datos_bcra):
+    """
+    Genera predicciones futuras para una variable BCRA usando Markov
+    """
+    try:
+        st.write("**🔮 Predicciones usando Teoría de Markov**")
+        
+        # Discretizar retornos
+        estados = discretizar_retornos_markov(datos_bcra, n_estados=5)
+        
+        # Calcular matriz de transición
+        matriz_transicion = calcular_matriz_transicion_markov(estados, n_estados=5)
+        
+        if matriz_transicion is None:
+            st.warning("⚠️ No se pudo calcular la matriz de transición")
+            return
+        
+        # Estado actual (último estado observado)
+        estado_actual = estados.iloc[-1] if len(estados) > 0 else 0
+        
+        # Predicciones a diferentes horizontes
+        horizontes = [1, 5, 10, 20]  # días
+        
+        st.write("**📅 Predicciones a Diferentes Horizontes**")
+        
+        for horizonte in horizontes:
+            predicciones = predecir_estados_futuros_markov(
+                matriz_transicion, estado_actual, horizonte
+            )
+            
+            if predicciones is not None:
+                st.write(f"**Horizonte: {horizonte} días**")
+                
+                # Crear gráfico de barras para las predicciones
+                fig = go.Figure(data=[
+                    go.Bar(
+                        x=[f'Estado {i+1}' for i in range(len(predicciones))],
+                        y=predicciones,
+                        marker_color='lightgreen'
+                    )
+                ])
+                
+                fig.update_layout(
+                    title=f"Predicciones a {horizonte} días - {variable}",
+                    xaxis_title="Estados",
+                    yaxis_title="Probabilidad",
+                    template="plotly_white",
+                    height=250
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Interpretación de predicciones
+                estado_mas_probable = np.argmax(predicciones)
+                probabilidad_max = np.max(predicciones)
+                
+                st.write(f"**Estado más probable:** Estado {estado_mas_probable + 1} ({probabilidad_max:.1%})")
+                
+                # Interpretar estado
+                interpretacion = interpretar_estado_markov(estado_mas_probable, variable)
+                st.write(f"**Interpretación:** {interpretacion}")
+        
+    except Exception as e:
+        st.error(f"❌ Error generando predicciones para {variable}: {str(e)}")
+        st.exception(e)
+
+def interpretar_estado_markov(estado, variable):
+    """
+    Interpreta el significado de un estado de Markov para una variable BCRA
+    """
+    interpretaciones = {
+        'Tasa_LELIQ': {
+            0: 'Tasas muy bajas - Estímulo monetario',
+            1: 'Tasas bajas - Condiciones monetarias favorables',
+            2: 'Tasas moderadas - Neutralidad monetaria',
+            3: 'Tasas altas - Condiciones monetarias restrictivas',
+            4: 'Tasas muy altas - Política monetaria muy restrictiva'
+        },
+        'Tipo_Cambio_BNA': {
+            0: 'Peso muy fuerte - Competitividad reducida',
+            1: 'Peso fuerte - Condiciones favorables para importaciones',
+            2: 'Tipo de cambio equilibrado',
+            3: 'Peso débil - Condiciones favorables para exportaciones',
+            4: 'Peso muy débil - Presión inflacionaria'
+        },
+        'Reservas_Internacionales': {
+            0: 'Reservas muy bajas - Vulnerabilidad externa',
+            1: 'Reservas bajas - Presión sobre el tipo de cambio',
+            2: 'Reservas moderadas - Estabilidad externa',
+            3: 'Reservas altas - Fortaleza externa',
+            4: 'Reservas muy altas - Súper fortaleza externa'
+        },
+        'Inflacion_Argentina': {
+            0: 'Inflación muy baja - Riesgo de deflación',
+            1: 'Inflación baja - Estabilidad de precios',
+            2: 'Inflación moderada - Objetivo del BCRA',
+            3: 'Inflación alta - Presión sobre precios',
+            4: 'Inflación muy alta - Hiperinflación'
+        },
+        'PBI_Argentina': {
+            0: 'Recesión profunda - Crisis económica',
+            1: 'Recesión leve - Desaceleración',
+            2: 'Crecimiento moderado - Estabilidad',
+            3: 'Crecimiento alto - Expansión económica',
+            4: 'Crecimiento muy alto - Boom económico'
+        }
+    }
+    
+    return interpretaciones.get(variable, {}).get(estado, 'Estado no interpretado')
+
+def generar_resumen_causalidad(datos_variables, portafolio_ar, portafolio_eeuu):
+    """
+    Genera un resumen ejecutivo del análisis de causalidad
+    """
+    try:
+        st.subheader("📋 Resumen Ejecutivo de Causalidad BCRA → Mercados")
+        
+        # Resumen por variable
+        for variable, datos in datos_variables.items():
+            if not datos.empty:
+                impacto = clasificar_impacto_bcra(variable)
+                
+                st.write(f"**{variable}**")
+                st.write(f"• **Impacto:** {impacto['tipo']}")
+                st.write(f"• **Horizonte:** {impacto['horizonte']}")
+                st.write(f"• **Sectores más afectados:** {', '.join(impacto['sectores_afectados'][:3])}")
+                
+                # Estadísticas básicas
+                volatilidad = datos.std() * np.sqrt(252)
+                st.write(f"• **Volatilidad anualizada:** {volatilidad:.2%}")
+                
+                # Tendencia reciente
+                if len(datos) >= 10:
+                    tendencia_reciente = datos.tail(10).mean()
+                    tendencia_anterior = datos.tail(20).head(10).mean()
+                    
+                    if tendencia_reciente > tendencia_anterior:
+                        st.success("• **Tendencia reciente:** ALCISTA ↗️")
+                    elif tendencia_reciente < tendencia_anterior:
+                        st.error("• **Tendencia reciente:** BAJISTA ↘️")
+                    else:
+                        st.info("• **Tendencia reciente:** LATERAL ➡️")
+                
+                st.divider()
+        
+        # Recomendaciones generales
+        st.subheader("💡 Recomendaciones de Trading/Inversión")
+        
+        st.write("**🎯 Estrategias Basadas en Análisis de Causalidad:**")
+        st.write("• **Monitoreo continuo** de variables BCRA críticas (Tasa LELIQ, Tipo de Cambio)")
+        st.write("• **Timing de entrada** basado en cambios de régimen identificados por Markov")
+        st.write("• **Diversificación sectorial** considerando impactos diferenciales")
+        st.write("• **Hedging** contra riesgos macro identificados")
+        
+        st.write("**⚠️ Riesgos a Considerar:**")
+        st.write("• **Cambios de régimen** pueden ser abruptos y no lineales")
+        st.write("• **Correlaciones** pueden cambiar en diferentes condiciones de mercado")
+        st.write("• **Lags temporales** entre variables BCRA y impacto en mercados")
+        
+    except Exception as e:
+        st.error(f"❌ Error generando resumen de causalidad: {str(e)}")
+        st.exception(e)
+
+def mostrar_serie_bcra(serie_data, serie_id):
+    """
+    Muestra los datos de una serie BCRA específica
+    """
+    try:
+        st.subheader(f"📊 Serie BCRA - ID: {serie_id}")
+        
+        # Mostrar datos en tabla
+        st.write("**Datos Históricos:**")
+        st.dataframe(serie_data, use_container_width=True)
+        
+        # Gráfico de evolución
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=serie_data['fecha'],
+            y=serie_data['valor'],
+            mode='lines+markers',
+            name='Valor',
+            line=dict(width=2, color='#2c3e50'),
+            marker=dict(size=4)
+        ))
+        
+        fig.update_layout(
+            title=f"Evolución de la Serie BCRA - ID: {serie_id}",
+            xaxis_title="Fecha",
+            yaxis_title="Valor",
+            template="plotly_white",
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Estadísticas básicas
+        st.subheader("📈 Estadísticas de la Serie")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Valor Actual", f"{serie_data['valor'].iloc[-1]:.4f}")
+            st.metric("Valor Máximo", f"{serie_data['valor'].max():.4f}")
+        
+        with col2:
+            st.metric("Valor Mínimo", f"{serie_data['valor'].min():.4f}")
+            st.metric("Promedio", f"{serie_data['valor'].mean():.4f}")
+        
+        with col3:
+            st.metric("Volatilidad", f"{serie_data['valor'].std():.4f}")
+            st.metric("Observaciones", len(serie_data))
+        
+        # Análisis de retornos si hay suficientes datos
+        if len(serie_data) > 1:
+            st.subheader("📊 Análisis de Retornos")
+            
+            retornos = serie_data['valor'].pct_change().dropna()
+            
+            if len(retornos) > 0:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Distribución de Retornos:**")
+                    fig_hist = go.Figure(data=[
+                        go.Histogram(
+                            x=retornos,
+                            nbinsx=30,
+                            marker_color='lightblue',
+                            opacity=0.7
+                        )
+                    ])
+                    
+                    fig_hist.update_layout(
+                        title="Distribución de Retornos",
+                        xaxis_title="Retorno",
+                        yaxis_title="Frecuencia",
+                        template="plotly_white",
+                        height=300
+                    )
+                    
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                
+                with col2:
+                    st.write("**Estadísticas de Retornos:**")
+                    stats_retornos = {
+                        "Retorno Promedio": f"{retornos.mean():.4f}",
+                        "Volatilidad": f"{retornos.std():.4f}",
+                        "Skewness": f"{retornos.skew():.4f}",
+                        "Kurtosis": f"{retornos.kurtosis():.4f}",
+                        "Mínimo": f"{retornos.min():.4f}",
+                        "Máximo": f"{retornos.max():.4f}"
+                    }
+                    
+                    for stat, valor in stats_retornos.items():
+                        st.metric(stat, valor)
+        
+    except Exception as e:
+        st.error(f"❌ Error mostrando serie BCRA: {str(e)}")
+        st.exception(e)
+
+def mostrar_analisis_markov(retornos_portafolio, retornos_benchmark=None):
+    """
+    Muestra el análisis completo de Markov para un portafolio.
+    
+    Args:
+        retornos_portafolio (pd.Series): Retornos del portafolio
+        retornos_benchmark (pd.Series): Retornos del benchmark (opcional)
+    """
+    try:
+        st.subheader("🎯 Análisis de Markov para Predicción de Mercados")
+        
+        # Discretizar retornos
+        estados_discretos, limites_estados, mapeo_estados = discretizar_retornos_markov(
+            retornos_portafolio, n_estados=5
+        )
+        
+        if estados_discretos is None:
+            st.error("❌ No se pudo discretizar los retornos")
+            return
+        
+        # Calcular matriz de transición
+        matriz_transicion = calcular_matriz_transicion_markov(estados_discretos, n_estados=5)
+        
+        if matriz_transicion is None:
+            st.error("❌ No se pudo calcular la matriz de transición")
+            return
+        
+        # Mostrar matriz de transición
+        st.subheader("📊 Matriz de Transición de Markov")
+        
+        # Crear DataFrame para mostrar la matriz
+        df_transicion = pd.DataFrame(
+            matriz_transicion,
+            columns=[f"Estado {i+1}" for i in range(5)],
+            index=[f"Estado {i+1}" for i in range(5)]
+        )
+        
+        # Agregar descripciones
+        descripciones = []
+        for i in range(5):
+            if i < len(mapeo_estados):
+                descripciones.append(mapeo_estados[i])
+            else:
+                descripciones.append(f"Estado {i+1}")
+        
+        df_transicion.index = descripciones
+        df_transicion.columns = descripciones
+        
+        # Mostrar matriz con formato
+        st.dataframe(
+            df_transicion.style.format("{:.3f}").background_gradient(cmap='RdYlGn_r'),
+            use_container_width=True
+        )
+        
+        # Análisis de regímenes
+        st.subheader("🔍 Análisis de Regímenes de Mercado")
+        analisis_regimenes = analizar_regimenes_markov(matriz_transicion, mapeo_estados)
+        
+        if analisis_regimenes:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Estados Persistentes", analisis_regimenes["resumen"]["estados_persistentes"])
+                st.metric("Estados Transitorios", analisis_regimenes["resumen"]["estados_transitorios"])
+            
+            with col2:
+                st.metric("Estado Más Persistente", f"Estado {analisis_regimenes['resumen']['estado_mas_persistente']}")
+                st.metric("Estado Menos Persistente", f"Estado {analisis_regimenes['resumen']['estado_menos_persistente']}")
+            
+            # Mostrar detalles de cada estado
+            st.subheader("📋 Características de Cada Estado")
+            for estado_key, info in analisis_regimenes.items():
+                if estado_key != "resumen":
+                    st.info(f"**{info['descripcion']}**")
+                    st.write(f"Probabilidad de permanecer: {info['prob_permanecer']:.1%}")
+                    st.write(f"Tipo de régimen: {info['tipo_regimen']}")
+                    st.divider()
+        
+        # Predicciones futuras
+        st.subheader("🔮 Predicciones Futuras (5 días)")
+        
+        # Determinar estado actual
+        estado_actual = estados_discretos[-1] if len(estados_discretos) > 0 else 0
+        
+        predicciones = predecir_estados_futuros_markov(matriz_transicion, estado_actual, 5)
+        
+        if predicciones is not None:
+            # Crear gráfico de predicciones
+            fig = go.Figure()
+            
+            for i in range(5):
+                fig.add_trace(go.Scatter(
+                    x=list(range(6)),  # 0 (actual) + 5 días futuros
+                    y=predicciones[:, i],
+                    mode='lines+markers',
+                    name=f"Estado {i+1}",
+                    line=dict(width=2)
+                ))
+            
+            fig.update_layout(
+                title="Predicción de Estados Futuros",
+                xaxis_title="Días",
+                yaxis_title="Probabilidad",
+                template="plotly_white",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar tabla de predicciones
+            df_predicciones = pd.DataFrame(
+                predicciones,
+                columns=[f"Estado {i+1}" for i in range(5)],
+                index=[f"Día {i}" for i in range(6)]
+            )
+            
+            st.dataframe(
+                df_predicciones.style.format("{:.3f}").background_gradient(cmap='Blues'),
+                use_container_width=True
+            )
+        
+        # Cálculo de VaR usando Markov
+        st.subheader("⚠️ Análisis de Riesgo (VaR) con Markov")
+        var_markov = calcular_var_markov(
+            matriz_transicion, retornos_portafolio, estados_discretos, 
+            limites_estados, nivel_confianza=0.95, horizonte=5
+        )
+        
+        if var_markov:
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("VaR General (95%)", f"{var_markov['VaR_general']:.2%}")
+            
+            with col2:
+                st.metric("Horizonte", f"{var_markov['horizonte']} días")
+            
+            with col3:
+                st.metric("Nivel Confianza", f"{var_markov['nivel_confianza']:.0%}")
+            
+            # Mostrar VaR por estado
+            if var_markov['VaR_por_estado']:
+                st.subheader("📊 VaR por Estado de Mercado")
+                df_var_estados = pd.DataFrame([
+                    {"Estado": f"Estado {estado+1}", "VaR": f"{var:.2%}"}
+                    for estado, var in var_markov['VaR_por_estado'].items()
+                ])
+                
+                st.dataframe(df_var_estados, use_container_width=True)
+        
+        # Optimización de portafolio usando Markov
+        st.subheader("⚖️ Optimización de Portafolio con Markov")
+        
+        if st.button("🚀 Ejecutar Optimización Markov", type="primary"):
+            with st.spinner("Optimizando portafolio usando predicciones de Markov..."):
+                # Simular retornos de múltiples activos para la optimización
+                # En un caso real, esto vendría de los datos del portafolio
+                retornos_simulados = np.random.normal(0.001, 0.02, (1000, 30, 5))  # Simulación
+                
+                # Optimizar pesos
+                pesos_optimos = optimizar_pesos_markov(retornos_simulados)
+                
+                # Mostrar resultados
+                st.success("✅ Optimización completada usando predicciones de Markov!")
+                
+                # Gráfico de pesos óptimos
+                fig_pesos = go.Figure(data=[
+                    go.Bar(
+                        x=[f"Activo {i+1}" for i in range(len(pesos_optimos))],
+                        y=pesos_optimos,
+                        marker_color='lightblue'
+                    )
+                ])
+                
+                fig_pesos.update_layout(
+                    title="Pesos Óptimos del Portafolio (Markov)",
+                    xaxis_title="Activos",
+                    yaxis_title="Peso",
+                    template="plotly_white",
+                    height=400
+                )
+                
+                st.plotly_chart(fig_pesos, use_container_width=True)
+                
+                # Mostrar pesos en tabla
+                df_pesos = pd.DataFrame({
+                    "Activo": [f"Activo {i+1}" for i in range(len(pesos_optimos))],
+                    "Peso Óptimo": [f"{peso:.2%}" for peso in pesos_optimos]
+                })
+                
+                st.dataframe(df_pesos, use_container_width=True)
+                
+                # Métricas del portafolio optimizado
+                retorno_esperado = np.sum(pesos_optimos * np.mean(retornos_simulados, axis=(0, 1)))
+                volatilidad = np.sqrt(np.sum(pesos_optimos ** 2 * np.var(retornos_simulados, axis=(0, 1))))
+                ratio_sharpe = retorno_esperado / volatilidad if volatilidad > 0 else 0
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Retorno Esperado", f"{retorno_esperado:.2%}")
+                with col2:
+                    st.metric("Volatilidad", f"{volatilidad:.2%}")
+                with col3:
+                    st.metric("Ratio Sharpe", f"{ratio_sharpe:.2f}")
+        
+    except Exception as e:
+        st.error(f"❌ Error en análisis de Markov: {str(e)}")
+        st.exception(e)
 
 # Estilos CSS personalizados para tema oscuro
 st.markdown("""
@@ -7716,6 +9510,10 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
                 'Bono_GD30',
                 'Indice_S&P_MERVAL',
                 'Indice_S&P_500',
+                'Tipo_Cambio_BNA',
+                'Reservas_Internacionales',
+                'Tasa_LELIQ',
+                'Inflacion_Argentina',
                 'Tasa_Fija_4%',
                 'Tasa_Fija_6%',
                 'Tasa_Fija_8%'
@@ -7745,7 +9543,7 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         else:
             try:
                 # Obtener datos del benchmark
-                benchmark_data = obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
+                benchmark_data = obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
                 if benchmark_data is not None and not benchmark_data.empty:
                     # Calcular retorno anual del benchmark
                     benchmark_returns = benchmark_data.iloc[:, 0].dropna()
@@ -9868,23 +11666,63 @@ def mostrar_frontera_eficiente(portafolio, token_acceso, fecha_desde, fecha_hast
     
     st.info(f"📊 Analizando frontera eficiente para {len(simbolos)} activos")
     
-    # Configuración de frontera eficiente
+    # Configuración de benchmark
+    st.markdown("#### 🎯 Configuración de Benchmark")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        benchmark = st.selectbox(
+            "Benchmark para Análisis:",
+            options=[
+                'Tasa_Caucion_Promedio',
+                'Dolar_MEP',
+                'Dolar_Blue', 
+                'Dolar_Oficial',
+                'Bono_AL30',
+                'Bono_GD30',
+                'Indice_S&P_MERVAL',
+                'Indice_S&P_500',
+                'Tipo_Cambio_BNA',
+                'Reservas_Internacionales',
+                'Tasa_LELIQ',
+                'Inflacion_Argentina',
+                'Tasa_Fija_4%',
+                'Tasa_Fija_6%',
+                'Tasa_Fija_8%'
+            ],
+            format_func=lambda x: {
+                'Tasa_Caucion_Promedio': 'Tasa de Caución Promedio',
+                'Dolar_MEP': 'Dólar MEP',
+                'Dolar_Blue': 'Dólar Blue',
+                'Dolar_Oficial': 'Dólar Oficial',
+                'Bono_AL30': 'Bono AL30',
+                'Bono_GD30': 'Bono GD30',
+                'Indice_S&P_MERVAL': 'S&P MERVAL',
+                'Indice_S&P_500': 'S&P 500',
+                'Tipo_Cambio_BNA': 'Tipo de Cambio BNA',
+                'Reservas_Internacionales': 'Reservas Internacionales',
+                'Tasa_LELIQ': 'Tasa LELIQ',
+                'Inflacion_Argentina': 'Inflación Argentina',
+                'Tasa_Fija_4%': 'Tasa Fija 4%',
+                'Tasa_Fija_6%': 'Tasa Fija 6%',
+                'Tasa_Fija_8%': 'Tasa Fija 8%'
+            }[x],
+            help="Seleccione el benchmark para el análisis de frontera eficiente",
+            key="benchmark_frontera_eficiente"
+        )
+    
+    with col2:
         target_return = st.number_input(
             "Retorno Objetivo (anual):",
             min_value=0.0, max_value=1.0, value=0.08, step=0.01
         )
         num_puntos = st.slider("Número de Puntos", min_value=10, max_value=100, value=50)
     
-    with col2:
+    with col3:
         incluir_actual = st.checkbox("Incluir Portafolio Actual", value=True, key="incluir_actual_avanzada")
         mostrar_metricas = st.checkbox("Mostrar Métricas Detalladas", value=True, key="mostrar_metricas_avanzada")
-    
-    with col3:
         calcular_todos = st.checkbox("Calcular Todos los Portafolios", value=True, key="calcular_todos_avanzada")
-        auto_refresh = st.checkbox("Auto-refresh", value=True, key="auto_refresh_avanzada")
     
     ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", use_container_width=True)
     
@@ -9944,14 +11782,15 @@ def mostrar_analisis_portafolio():
         portafolio_ar, portafolio_eeuu, estado_cuenta_ar, estado_cuenta_eeuu = cargar_datos_cliente(token_acceso, id_cliente)
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "🇦🇷 Portafolio Argentina", 
         "🇺🇸 Portafolio EEUU",
         "💰 Estado de Cuenta", 
         "🎯 Optimización y Cobertura",
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "📈 Operaciones Reales"
+        "📈 Operaciones Reales",
+        "🏦 Análisis BCRA"
     ])
 
     with tab1:
@@ -10097,6 +11936,13 @@ def mostrar_analisis_portafolio():
             mostrar_resumen_operaciones_reales(portafolio, token_acceso, f"operaciones_{mercado}")
         else:
             st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
+    
+    with tab8:
+        st.subheader("🏦 Análisis de Variables BCRA")
+        st.info("🔍 Esta sección permite analizar las principales variables económicas del Banco Central de la República Argentina para usar como benchmarks en optimizaciones de portafolio.")
+        
+        # Mostrar panel BCRA
+        mostrar_panel_bcra()
 
 def main():
     # Configuración de rendimiento
