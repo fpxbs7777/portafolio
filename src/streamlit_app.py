@@ -1317,7 +1317,11 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 # Eliminar duplicados manteniendo el último valor
                 serie = serie[~serie.index.duplicated(keep='last')]
                 
-                return serie
+                # Verificar que la serie tenga datos válidos
+                if serie.notna().sum() > 0 and serie.nunique() > 1:
+                    return serie
+                else:
+                    return None
             else:
                 return None
                 
@@ -1417,86 +1421,114 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
             mercado = 'ar'
     
     # Parámetros para filtrar operaciones según el mercado
+    # Usar filtros más restrictivos para evitar operaciones incorrectas
     params = {
-        'filtro.estado': 'terminadas',
+        'filtro.estado': 'terminadas',  # Solo operaciones terminadas
         'filtro.fechaDesde': fecha_desde,
         'filtro.fechaHasta': fecha_hasta,
         'filtro.simbolo': simbolo  # Filtrar por símbolo específico
     }
     
-    # Agregar filtro de país según el mercado
+    # Agregar filtros adicionales según el mercado
     if mercado == 'ar':
         params['filtro.pais'] = 'argentina'
         print(f"   🇦🇷 Configurando filtro para mercado Argentina")
     elif mercado == 'eeuu':
-        # Para EEUU, no usar filtro de país o usar 'estados_unidos'
+        # Para EEUU, no usar filtro de país
         print(f"   🇺🇸 Configurando filtro para mercado EEUU")
-        # Algunos activos de EEUU pueden necesitar parámetros diferentes
+    
+    print(f"   📋 Parámetros iniciales: {params}")
+    print(f"   📅 Rango de fechas: {fecha_desde} a {fecha_hasta}")
     
     try:
-        url = "https://api.invertironline.com/api/v2/operaciones"
-        print(f"🌐 Llamando API para {simbolo} (mercado: {mercado}): {url}")
-        print(f"   📋 Parámetros: {params}")
+        # Probar diferentes endpoints de la API de IOL
+        urls_to_try = [
+            "https://api.invertironline.com/api/v2/operaciones",
+            "https://api.invertironline.com/api/v2/operaciones/terminadas"
+        ]
         
-        response = requests.get(url, headers=headers, params=params)
+        operaciones_activo = []
         
-        print(f"   📡 Respuesta: {response.status_code} - {len(response.text)} caracteres")
-        
-        if response.status_code == 200:
-            operaciones = response.json()
+        for url in urls_to_try:
+            print(f"🌐 Probando endpoint: {url}")
+            print(f"   📋 Parámetros: {params}")
             
-            # Verificar si la respuesta es una lista o tiene estructura de paginación
-            if isinstance(operaciones, dict):
-                if 'items' in operaciones:
-                    operaciones = operaciones['items']
-                    print(f"   📄 Respuesta paginada: {len(operaciones)} items")
-                elif 'data' in operaciones:
-                    operaciones = operaciones['data']
-                    print(f"   📄 Respuesta con data: {len(operaciones)} items")
-                else:
-                    print(f"   ⚠️ Estructura de respuesta inesperada: {list(operaciones.keys())}")
+            response = requests.get(url, headers=headers, params=params)
             
-            # Verificar que las operaciones correspondan al símbolo
-            operaciones_activo = [
-                op for op in operaciones 
-                if op.get('simbolo') == simbolo
-            ]
+            print(f"   📡 Respuesta: {response.status_code} - {len(response.text)} caracteres")
             
-            # Si no se encontraron operaciones con el filtro de símbolo, intentar sin filtro
-            if not operaciones_activo and len(operaciones) > 0:
-                print(f"   ⚠️ No se encontraron operaciones para {simbolo} con filtro, intentando sin filtro...")
-                # Intentar llamada sin filtro de símbolo
-                params_sin_filtro = params.copy()
-                params_sin_filtro.pop('filtro.simbolo', None)
+            if response.status_code == 200:
+                operaciones = response.json()
+                print(f"   📄 Respuesta JSON recibida: {type(operaciones)}")
                 
-                response_sin_filtro = requests.get(url, headers=headers, params=params_sin_filtro)
-                if response_sin_filtro.status_code == 200:
-                    operaciones_sin_filtro = response_sin_filtro.json()
-                    if isinstance(operaciones_sin_filtro, dict):
-                        if 'items' in operaciones_sin_filtro:
-                            operaciones_sin_filtro = operaciones_sin_filtro['items']
-                        elif 'data' in operaciones_sin_filtro:
-                            operaciones_sin_filtro = operaciones_sin_filtro['data']
-                    
-                    operaciones_activo = [
-                        op for op in operaciones_sin_filtro 
-                        if op.get('simbolo') == simbolo
-                    ]
-                    print(f"   🔄 Sin filtro: {len(operaciones_activo)} operaciones encontradas para {simbolo}")
-            
-            # Debug: mostrar información sobre las operaciones encontradas
-            print(f"🔍 Operaciones para {simbolo}: {len(operaciones_activo)} de {len(operaciones)} totales")
-            if operaciones_activo:
-                print(f"   📅 Rango de fechas: {operaciones_activo[0].get('fechaOperada', 'N/A')} a {operaciones_activo[-1].get('fechaOperada', 'N/A')}")
-            
-            return operaciones_activo
-        else:
-            print(f"❌ Error al obtener operaciones para {simbolo}: {response.status_code} - {response.text}")
-            return []
-            
+                # Verificar si la respuesta es una lista o tiene estructura de paginación
+                if isinstance(operaciones, dict):
+                    print(f"   📋 Claves en respuesta: {list(operaciones.keys())}")
+                    if 'items' in operaciones:
+                        operaciones = operaciones['items']
+                        print(f"   📄 Respuesta paginada: {len(operaciones)} items")
+                    elif 'data' in operaciones:
+                        operaciones = operaciones['data']
+                        print(f"   📄 Respuesta con data: {len(operaciones)} items")
+                    elif 'operaciones' in operaciones:
+                        operaciones = operaciones['operaciones']
+                        print(f"   📄 Respuesta con operaciones: {len(operaciones)} items")
+                    else:
+                        print(f"   ⚠️ Estructura de respuesta inesperada: {list(operaciones.keys())}")
+                        # Si no reconocemos la estructura, usar la respuesta completa
+                        operaciones = [operaciones]
+                
+                # Si no es una lista, convertir a lista
+                if not isinstance(operaciones, list):
+                    operaciones = [operaciones] if operaciones else []
+                
+                print(f"   📊 Total de operaciones en respuesta: {len(operaciones)}")
+                
+                # Verificar que las operaciones correspondan al símbolo y estén en el rango de fechas
+                for op in operaciones:
+                    if isinstance(op, dict):
+                        simbolo_op = op.get('simbolo') or op.get('instrumento') or op.get('ticker')
+                        if simbolo_op == simbolo:
+                            # Verificar que la fecha esté en el rango válido
+                            fecha_op = op.get('fechaOperada') or op.get('fechaOrden')
+                            if fecha_op:
+                                try:
+                                    fecha_op_dt = datetime.strptime(fecha_op, '%Y-%m-%d')
+                                    fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                                    fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+                                    
+                                    if fecha_desde_dt <= fecha_op_dt <= fecha_hasta_dt:
+                                        operaciones_activo.append(op)
+                                        print(f"   ✅ Operación válida para {simbolo} en {fecha_op}")
+                                    else:
+                                        print(f"   ⚠️ Operación fuera de rango para {simbolo} en {fecha_op}")
+                                except ValueError:
+                                    print(f"   ⚠️ Fecha inválida en operación: {fecha_op}")
+                            else:
+                                print(f"   ⚠️ Operación sin fecha para {simbolo}")
+                
+                print(f"   🔍 Operaciones válidas encontradas para '{simbolo}' en {url}: {len(operaciones_activo)}")
+                
+                # Si encontramos operaciones, no necesitamos probar más endpoints
+                if operaciones_activo:
+                    break
+            else:
+                print(f"   ❌ Error en {url}: {response.status_code}")
+        
+        # Debug: mostrar información sobre las operaciones encontradas
+        print(f"🔍 Operaciones finales para {simbolo}: {len(operaciones_activo)} totales")
+        if operaciones_activo:
+            fechas = [op.get('fechaOperada', op.get('fechaOrden', 'N/A')) for op in operaciones_activo if op.get('fechaOperada') or op.get('fechaOrden')]
+            if fechas:
+                print(f"   📅 Rango de fechas: {min(fechas)} a {max(fechas)}")
+        
+        return operaciones_activo
+        
     except Exception as e:
-        print(f"Error al obtener operaciones para {simbolo}: {str(e)}")
+        print(f"❌ Error al obtener operaciones para {simbolo}: {str(e)}")
         return []
+            
+
 
 def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_desde=None, fecha_hasta=None, mercado=None):
     """
@@ -1779,8 +1811,8 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
                     )
                     
                     if serie is not None and len(serie) > 10:
-                        # Verificar que los datos no sean todos iguales
-                        if serie.nunique() > 1:
+                        # Verificar que los datos no sean todos iguales y que no sean todos nan
+                        if serie.nunique() > 1 and serie.notna().sum() > 5:
                             df_precios[simbolo_consulta] = serie
                             simbolos_exitosos.append(simbolo_consulta)
                             serie_obtenida = True
@@ -1821,7 +1853,15 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             with st.expander("📋 Ver activos exitosos"):
                 for simbolo in simbolos_exitosos:
                     if simbolo in df_precios.columns:
-                        datos_info = f"{simbolo}: {len(df_precios[simbolo])} puntos, rango: {df_precios[simbolo].min():.2f} - {df_precios[simbolo].max():.2f}"
+                        serie = df_precios[simbolo]
+                        # Manejar casos donde min/max pueden ser nan
+                        min_val = serie.min()
+                        max_val = serie.max()
+                        
+                        if pd.isna(min_val) or pd.isna(max_val):
+                            datos_info = f"{simbolo}: {len(serie)} puntos, rango: datos incompletos"
+                        else:
+                            datos_info = f"{simbolo}: {len(serie)} puntos, rango: {min_val:.2f} - {max_val:.2f}"
                         st.text(datos_info)
         
         if simbolos_fallidos:
@@ -1870,26 +1910,61 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
             for col in df_precios.columns:
                 serie = df_precios[col]
                 st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
+            
+            # Mostrar información adicional sobre el DataFrame
+            st.text(f"Shape del DataFrame: {df_precios.shape}")
+            st.text(f"Tipos de datos: {df_precios.dtypes.to_dict()}")
+            st.text(f"Columnas con valores NaN: {df_precios.isna().sum().to_dict()}")
+        
+        # Limpiar datos antes de alinear - remover columnas con demasiados nan
+        columnas_originales = list(df_precios.columns)
+        columnas_limpias = []
+        
+        for col in columnas_originales:
+            serie = df_precios[col]
+            # Calcular porcentaje de datos válidos
+            datos_validos = serie.notna().sum()
+            porcentaje_valido = datos_validos / len(serie)
+            
+            if porcentaje_valido >= 0.5:  # Al menos 50% de datos válidos
+                columnas_limpias.append(col)
+            else:
+                st.warning(f"⚠️ Removiendo {col}: solo {porcentaje_valido:.1%} de datos válidos")
+        
+        if len(columnas_limpias) < 2:
+            st.error("❌ Después de limpiar datos, no quedan suficientes activos para análisis")
+            return None, None, None
+        
+        # Usar solo columnas limpias
+        df_precios = df_precios[columnas_limpias]
+        st.info(f"✅ Usando {len(columnas_limpias)} activos con datos válidos")
         
         # Intentar diferentes estrategias de alineación
         try:
+            st.info("🔄 Iniciando proceso de alineación de datos...")
+            
             # Estrategia 1: Forward fill y luego backward fill
+            st.info("📊 Aplicando forward fill y backward fill...")
             df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            st.info(f"✅ Forward/backward fill completado. Shape: {df_precios_filled.shape}")
             
             # Estrategia 2: Interpolar valores faltantes
+            st.info("📊 Aplicando interpolación temporal...")
             df_precios_interpolated = df_precios.interpolate(method='time')
+            st.info(f"✅ Interpolación completada. Shape: {df_precios_interpolated.shape}")
             
             # Usar la estrategia que conserve más datos
             if not df_precios_filled.dropna().empty:
                 df_precios = df_precios_filled.dropna()
-                st.info("✅ Usando estrategia forward/backward fill")
+                st.info(f"✅ Usando estrategia forward/backward fill. Shape final: {df_precios.shape}")
             elif not df_precios_interpolated.dropna().empty:
                 df_precios = df_precios_interpolated.dropna()
-                st.info("✅ Usando estrategia de interpolación")
+                st.info(f"✅ Usando estrategia de interpolación. Shape final: {df_precios.shape}")
             else:
                 # Estrategia 3: Usar solo fechas con datos completos
+                st.info("📊 Usando solo fechas con datos completos...")
                 df_precios = df_precios.dropna()
-                st.info("✅ Usando solo fechas con datos completos")
+                st.info(f"✅ Usando solo fechas completas. Shape final: {df_precios.shape}")
                 
         except Exception as e:
             st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
@@ -1897,6 +1972,7 @@ def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, 
         
         if df_precios.empty:
             st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            st.error(f"❌ DataFrame vacío después de alineación. Shape: {df_precios.shape}")
             return None, None, None
         
         st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
@@ -5123,7 +5199,7 @@ class PortfolioManager:
                     weights = self._optimize_min_variance()
                 elif strategy == 'sharpe_ratio':
                     # Optimización para máximo ratio de Sharpe
-                    weights = self._optimize_sharpe_ratio()
+                    weights = self._optimize_sharpe_ratio(target_return)
                 else:
                     # Markowitz por defecto
                     weights = optimize_portfolio(self.returns, risk_free_rate=self.risk_free_rate, target_return=target_return)
@@ -5216,9 +5292,10 @@ class PortfolioManager:
             st.error(f"Error en optimización de mínima varianza: {str(e)}")
             return np.array([1/len(self.returns.columns)] * len(self.returns.columns))
     
-    def _optimize_sharpe_ratio(self):
+    def _optimize_sharpe_ratio(self, target_return=None):
         """
         Optimiza para máximo ratio de Sharpe usando la tasa libre de riesgo configurada
+        Si se especifica target_return, se agrega como restricción adicional
         """
         try:
             # Calcular retornos esperados y matriz de covarianza
@@ -5240,14 +5317,22 @@ class PortfolioManager:
                 return -sharpe_ratio  # Minimizar negativo = maximizar positivo
             
             # Restricciones: pesos suman 1
-            def constraint(weights):
-                return np.sum(weights) - 1.0
+            constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
+            
+            # Agregar restricción de retorno objetivo si se especifica
+            if target_return is not None:
+                # Convertir retorno anual a retorno por período
+                target_return_period = target_return / 252  # Asumiendo 252 días hábiles
+                constraints.append({
+                    'type': 'eq', 
+                    'fun': lambda w: np.sum(expected_returns * w) - target_return_period
+                })
+                st.info(f"ℹ️ Aplicando restricción de retorno objetivo: {target_return:.1%} anual")
             
             # Optimización
             n_assets = len(self.returns.columns)
             initial_weights = np.array([1/n_assets] * n_assets)
             
-            constraints = {'type': 'eq', 'fun': constraint}
             bounds = [(0, 1) for _ in range(n_assets)]
             
             result = optimize.minimize(objective, initial_weights, 
@@ -6549,26 +6634,152 @@ def obtener_datos_benchmark_argentino(benchmark, token_acceso, fecha_desde, fech
                         return pd.DataFrame({'Tasa_Caucion_Promedio': retornos})
         
         elif benchmark == 'Dolar_MEP':
-            # Obtener datos del dólar MEP (simulado por ahora)
-            # Aquí se integraría con la API de InvertirOnline para obtener datos reales
-            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-            # Simular retornos del dólar MEP (esto se reemplazará con datos reales)
-            retornos_mep = np.random.normal(0.0005, 0.02, len(fechas))  # 0.05% diario promedio
-            return pd.DataFrame({'Dolar_MEP': retornos_mep}, index=fechas)
+            # Calcular dólar MEP como AL30/AL30D
+            try:
+                st.info("🔍 Calculando dólar MEP como AL30/AL30D...")
+                
+                # Obtener datos históricos de AL30 (pesos)
+                datos_al30 = obtener_serie_historica_iol(token_acceso, 'BONOS', 'AL30', fecha_desde, fecha_hasta)
+                if datos_al30 is None or datos_al30.empty:
+                    st.warning("⚠️ No se pudieron obtener datos de AL30")
+                    raise Exception("Datos de AL30 no disponibles")
+                
+                # Obtener datos históricos de AL30D (dólares)
+                datos_al30d = obtener_serie_historica_iol(token_acceso, 'BONOS', 'AL30D', fecha_desde, fecha_hasta)
+                if datos_al30d is None or datos_al30d.empty:
+                    st.warning("⚠️ No se pudieron obtener datos de AL30D")
+                    raise Exception("Datos de AL30D no disponibles")
+                
+                st.success(f"✅ Datos obtenidos: AL30 ({len(datos_al30)} puntos), AL30D ({len(datos_al30d)} puntos)")
+                
+                # Crear DataFrame con ambas series alineadas por fecha
+                df_mep = pd.DataFrame({
+                    'AL30': datos_al30,
+                    'AL30D': datos_al30d
+                })
+                
+                # Alinear fechas y remover filas con datos faltantes
+                df_mep = df_mep.dropna()
+                
+                if df_mep.empty:
+                    st.warning("⚠️ No hay fechas comunes entre AL30 y AL30D")
+                    raise Exception("Sin fechas comunes")
+                
+                st.info(f"✅ Fechas alineadas: {len(df_mep)} días comunes")
+                
+                # Calcular dólar MEP = AL30 / AL30D
+                df_mep['Dolar_MEP'] = df_mep['AL30'] / df_mep['AL30D']
+                
+                # Calcular retornos del dólar MEP
+                retornos_mep = df_mep['Dolar_MEP'].pct_change().dropna()
+                
+                if len(retornos_mep) > 0:
+                    st.success(f"✅ Dólar MEP calculado correctamente: {len(retornos_mep)} días de retornos")
+                    
+                    # Mostrar estadísticas del dólar MEP calculado
+                    with st.expander("📊 Estadísticas del Dólar MEP"):
+                        st.text(f"Rango de cotización: ${df_mep['Dolar_MEP'].min():.2f} - ${df_mep['Dolar_MEP'].max():.2f}")
+                        st.text(f"Valor promedio: ${df_mep['Dolar_MEP'].mean():.2f}")
+                        st.text(f"Volatilidad diaria: {retornos_mep.std():.4f}")
+                        st.text(f"Retorno promedio diario: {retornos_mep.mean():.4f}")
+                    
+                    return pd.DataFrame({'Dolar_MEP': retornos_mep})
+                else:
+                    st.warning("⚠️ No se pudieron calcular retornos del dólar MEP")
+                    raise Exception("Sin retornos válidos")
+                
+            except Exception as e:
+                st.warning(f"⚠️ Error calculando dólar MEP: {str(e)}")
+                
+                # Fallback: intentar obtener directamente desde API de dólares
+                try:
+                    st.info("🔄 Intentando obtener dólar MEP directamente desde API...")
+                    cotizaciones_dolar = obtener_cotizaciones_generico('dolares', 'argentina', token_acceso)
+                    if cotizaciones_dolar is not None and not cotizaciones_dolar.empty:
+                        dolar_mep_data = cotizaciones_dolar[cotizaciones_dolar['simbolo'].str.contains('MEP', case=False, na=False)]
+                        if not dolar_mep_data.empty:
+                            simbolo_mep = dolar_mep_data.iloc[0]['simbolo']
+                            datos_mep = obtener_serie_historica_iol(token_acceso, 'DOLARES', simbolo_mep, fecha_desde, fecha_hasta)
+                            if datos_mep is not None and not datos_mep.empty:
+                                retornos = datos_mep.pct_change().dropna()
+                                if len(retornos) > 0:
+                                    st.success(f"✅ Dólar MEP obtenido directamente: {len(retornos)} días")
+                                    return pd.DataFrame({'Dolar_MEP': retornos})
+                except:
+                    pass
+                
+                # Fallback final: tasa fija conservadora
+                st.warning("⚠️ Usando tasa fija conservadora para dólar MEP")
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                retorno_diario = 0.0002  # 0.02% diario = ~5% anual
+                retornos_mep = [retorno_diario] * len(fechas)
+                return pd.DataFrame({'Dolar_MEP': retornos_mep}, index=fechas)
         
         elif benchmark == 'Dolar_Blue':
-            # Obtener datos del dólar Blue (simulado por ahora)
-            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-            # Simular retornos del dólar Blue
-            retornos_blue = np.random.normal(0.0008, 0.025, len(fechas))  # 0.08% diario promedio
-            return pd.DataFrame({'Dolar_Blue': retornos_blue}, index=fechas)
+            # Obtener datos reales del dólar Blue desde IOL
+            try:
+                # Intentar obtener cotizaciones de dólar Blue
+                cotizaciones_dolar = obtener_cotizaciones_generico('dolares', 'argentina', token_acceso)
+                if cotizaciones_dolar is not None and not cotizaciones_dolar.empty:
+                    # Buscar el dólar Blue específico
+                    dolar_blue_data = cotizaciones_dolar[cotizaciones_dolar['simbolo'].str.contains('BLUE', case=False, na=False)]
+                    if not dolar_blue_data.empty:
+                        # Obtener datos históricos del dólar Blue
+                        simbolo_blue = dolar_blue_data.iloc[0]['simbolo']
+                        datos_blue = obtener_serie_historica_iol(token_acceso, 'DOLARES', simbolo_blue, fecha_desde, fecha_hasta)
+                        if datos_blue is not None and not datos_blue.empty and 'close' in datos_blue.columns:
+                            # Calcular retornos reales
+                            retornos = datos_blue['close'].pct_change().dropna()
+                            if len(retornos) > 0:
+                                return pd.DataFrame({'Dolar_Blue': retornos})
+                
+                # Si no se pueden obtener datos reales, usar tasa fija más conservadora
+                st.warning("⚠️ No se pudieron obtener datos reales del dólar Blue, usando tasa fija conservadora")
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                # Tasa diaria conservadora del 0.03% (aproximadamente 7.5% anual)
+                retorno_diario = 0.0003
+                retornos_blue = [retorno_diario] * len(fechas)
+                return pd.DataFrame({'Dolar_Blue': retornos_blue}, index=fechas)
+                
+            except Exception as e:
+                st.warning(f"⚠️ Error obteniendo datos del dólar Blue: {str(e)}, usando tasa fija")
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                retorno_diario = 0.0003  # 0.03% diario = ~7.5% anual
+                retornos_blue = [retorno_diario] * len(fechas)
+                return pd.DataFrame({'Dolar_Blue': retornos_blue}, index=fechas)
         
         elif benchmark == 'Dolar_Oficial':
-            # Obtener datos del dólar Oficial (simulado por ahora)
-            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-            # Simular retornos del dólar Oficial
-            retornos_oficial = np.random.normal(0.0002, 0.01, len(fechas))  # 0.02% diario promedio
-            return pd.DataFrame({'Dolar_Oficial': retornos_oficial}, index=fechas)
+            # Obtener datos reales del dólar Oficial desde IOL
+            try:
+                # Intentar obtener cotizaciones de dólar Oficial
+                cotizaciones_dolar = obtener_cotizaciones_generico('dolares', 'argentina', token_acceso)
+                if cotizaciones_dolar is not None and not cotizaciones_dolar.empty:
+                    # Buscar el dólar Oficial específico
+                    dolar_oficial_data = cotizaciones_dolar[cotizaciones_dolar['simbolo'].str.contains('OFICIAL', case=False, na=False)]
+                    if not dolar_oficial_data.empty:
+                        # Obtener datos históricos del dólar Oficial
+                        simbolo_oficial = dolar_oficial_data.iloc[0]['simbolo']
+                        datos_oficial = obtener_serie_historica_iol(token_acceso, 'DOLARES', simbolo_oficial, fecha_desde, fecha_hasta)
+                        if datos_oficial is not None and not datos_oficial.empty and 'close' in datos_oficial.columns:
+                            # Calcular retornos reales
+                            retornos = datos_oficial['close'].pct_change().dropna()
+                            if len(retornos) > 0:
+                                return pd.DataFrame({'Dolar_Oficial': retornos})
+                
+                # Si no se pueden obtener datos reales, usar tasa fija más conservadora
+                st.warning("⚠️ No se pudieron obtener datos reales del dólar Oficial, usando tasa fija conservadora")
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                # Tasa diaria conservadora del 0.01% (aproximadamente 2.5% anual)
+                retorno_diario = 0.0001
+                retornos_oficial = [retorno_diario] * len(fechas)
+                return pd.DataFrame({'Dolar_Oficial': retornos_oficial}, index=fechas)
+                
+            except Exception as e:
+                st.warning(f"⚠️ Error obteniendo datos del dólar Oficial: {str(e)}, usando tasa fija")
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                retorno_diario = 0.0001  # 0.01% diario = ~2.5% anual
+                retornos_oficial = [retorno_diario] * len(fechas)
+                return pd.DataFrame({'Dolar_Oficial': retornos_oficial}, index=fechas)
         
         elif benchmark.startswith('Bono_'):
             # Obtener datos de bonos argentinos
