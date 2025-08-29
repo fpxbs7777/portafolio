@@ -791,6 +791,2165 @@ def obtener_portafolio_eeuu(token_portador, id_cliente):
         st.error(f'❌ Error inesperado al obtener portafolio de EEUU: {str(e)}')
         return None
 
+def obtener_tasas_caucion(token_portador):
+    """
+    Obtiene las tasas de caución desde la API de IOL
+    
+    Args:
+        token_portador (str): Token de autenticación Bearer
+        
+    Returns:
+        DataFrame: DataFrame con las tasas de caución o None en caso de error
+    """
+    url = "https://api.invertironline.com/api/v2/cotizaciones-orleans/cauciones/argentina/Operables"
+    params = {
+        'cotizacionInstrumentoModel.instrumento': 'cauciones',
+        'cotizacionInstrumentoModel.pais': 'argentina'
+    }
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if 'titulos' in data and isinstance(data['titulos'], list) and data['titulos']:
+                df = pd.DataFrame(data['titulos'])
+                
+                # Filtrar solo las cauciónes y limpiar los datos
+                df = df[df['plazo'].notna()].copy()
+                
+                # Extraer el plazo en días
+                df['plazo_dias'] = df['plazo'].str.extract('(\d+)').astype(float)
+                
+                # Limpiar la tasa (convertir a float si es necesario)
+                if 'ultimoPrecio' in df.columns:
+                    df['tasa_limpia'] = df['ultimoPrecio'].astype(str).str.rstrip('%').astype('float')
+                
+                # Asegurarse de que las columnas necesarias existan
+                if 'monto' not in df.columns and 'volumen' in df.columns:
+                    df['monto'] = df['volumen']
+                
+                # Ordenar por plazo
+                df = df.sort_values('plazo_dias')
+                
+                # Seleccionar solo las columnas necesarias
+                columnas_requeridas = ['simbolo', 'plazo', 'plazo_dias', 'ultimoPrecio', 'tasa_limpia', 'monto', 'moneda']
+                columnas_disponibles = [col for col in columnas_requeridas if col in df.columns]
+                
+                return df[columnas_disponibles]
+            
+            st.warning("No se encontraron datos de tasas de caución en la respuesta")
+            return None
+            
+        elif response.status_code == 401:
+            st.error("Error de autenticación. Por favor, verifique su token de acceso.")
+            return None
+            
+        else:
+            error_msg = f"Error {response.status_code} al obtener tasas de caución"
+            try:
+                error_data = response.json()
+                error_msg += f": {error_data.get('message', 'Error desconocido')}"
+            except:
+                error_msg += f": {response.text}"
+            st.error(error_msg)
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error de conexión: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado al procesar tasas de caución: {str(e)}")
+        return None
+
+def mostrar_tasas_caucion(token_portador):
+    """
+    Muestra las tasas de caución en una tabla y gráfico de curva de tasas
+    """
+    st.subheader("📊 Tasas de Caución")
+    
+    try:
+        with st.spinner('Obteniendo tasas de caución...'):
+            df_cauciones = obtener_tasas_caucion(token_portador)
+            
+            # Verificar si se obtuvieron datos
+            if df_cauciones is None or df_cauciones.empty:
+                st.warning("No se encontraron datos de tasas de caución.")
+                return
+                
+            # Verificar columnas requeridas
+            required_columns = ['simbolo', 'plazo', 'ultimoPrecio', 'plazo_dias', 'tasa_limpia']
+            missing_columns = [col for col in required_columns if col not in df_cauciones.columns]
+            if missing_columns:
+                st.error(f"Faltan columnas requeridas en los datos: {', '.join(missing_columns)}")
+                return
+            
+            # Mostrar tabla con las tasas
+            st.dataframe(
+                df_cauciones[['simbolo', 'plazo', 'ultimoPrecio', 'monto'] if 'monto' in df_cauciones.columns 
+                             else ['simbolo', 'plazo', 'ultimoPrecio']]
+                .rename(columns={
+                    'simbolo': 'Instrumento',
+                    'plazo': 'Plazo',
+                    'ultimoPrecio': 'Tasa',
+                    'monto': 'Monto (en millones)'
+                }),
+                use_container_width=True,
+                height=min(400, 50 + len(df_cauciones) * 35)  # Ajustar altura dinámicamente
+            )
+            
+            # Crear gráfico de curva de tasas si hay suficientes puntos
+            if len(df_cauciones) > 1:
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_cauciones['plazo_dias'],
+                    y=df_cauciones['tasa_limpia'],
+                    mode='lines+markers+text',
+                    name='Tasa',
+                    text=df_cauciones['tasa_limpia'].round(2).astype(str) + '%',
+                    textposition='top center',
+                    line=dict(color='#1f77b4', width=2),
+                    marker=dict(size=10, color='#1f77b4')
+                ))
+                
+                fig.update_layout(
+                    title='Curva de Tasas de Caución',
+                    xaxis_title='Plazo (días)',
+                    yaxis_title='Tasa Anual (%)',
+                    template='plotly_white',
+                    height=500,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar resumen estadístico
+            if 'tasa_limpia' in df_cauciones.columns and 'plazo_dias' in df_cauciones.columns:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Tasa Mínima", f"{df_cauciones['tasa_limpia'].min():.2f}%")
+                    st.metric("Tasa Máxima", f"{df_cauciones['tasa_limpia'].max():.2f}%")
+                with col2:
+                    st.metric("Tasa Promedio", f"{df_cauciones['tasa_limpia'].mean():.2f}%")
+                    st.metric("Plazo Promedio", f"{df_cauciones['plazo_dias'].mean():.1f} días")
+                    
+    except Exception as e:
+        st.error(f"Error al mostrar las tasas de caución: {str(e)}")
+        st.exception(e)  # Mostrar el traceback completo para depuración
+
+
+def obtener_endpoint_historico(mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """Devuelve la URL correcta para la serie histórica del símbolo indicado.
+
+    La prioridad es:
+    1. Usar el mercado recibido (ya normalizado por la llamada superior)
+       si existe en el mapeo de casos especiales.
+    2. Caso contrario, construir la ruta estándar
+       "{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/...".
+
+    No se aplican heurísticas sobre el símbolo: la función que invoque debe
+    pasar el mercado correcto (por ejemplo: 'Bonos', 'Cedears', 'BCBA').
+    """
+    base_url = "https://api.invertironline.com/api/v2"
+
+    # Cubrir alias frecuentes para que el mapeo sea coherente
+    alias = {
+        'TITULOSPUBLICOS': 'TitulosPublicos',
+        'TITULOS PUBLICOS': 'TitulosPublicos'
+    }
+    mercado_norm = alias.get(mercado.upper(), mercado)
+
+    especiales = {
+        'Opciones': f"{base_url}/Opciones/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'FCI': f"{base_url}/Titulos/FCI/{simbolo}/cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'MEP': f"{base_url}/Cotizaciones/MEP/{simbolo}",
+        'Caucion': f"{base_url}/Cotizaciones/Cauciones/Todas/Argentina",
+        'TitulosPublicos': f"{base_url}/TitulosPublicos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Cedears': f"{base_url}/Cedears/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'ADRs': f"{base_url}/ADRs/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+        'Bonos': f"{base_url}/Bonos/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}",
+    }
+
+    if mercado_norm in especiales:
+        return especiales[mercado_norm]
+
+    # Ruta genérica (acciones BCBA, NYSE, NASDAQ, etc.)
+    return f"{base_url}/{mercado_norm}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+
+def parse_datetime_flexible(date_str: str):
+    """
+    Parses a datetime string that may or may not include microseconds or timezone info.
+    Handles both formats: with and without milliseconds.
+    """
+    if not isinstance(date_str, str):
+        return None
+    try:
+        # First try parsing with the exact format that matches the error
+        try:
+            # Handle format without milliseconds: "2024-12-10T17:11:04"
+            if len(date_str) == 19 and 'T' in date_str and date_str.count(':') == 2:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S', utc=True)
+            # Handle format with milliseconds: "2024-12-10T17:11:04.123"
+            elif '.' in date_str and 'T' in date_str:
+                return pd.to_datetime(date_str, format='%Y-%m-%dT%H:%M:%S.%f', utc=True)
+        except (ValueError, TypeError):
+            pass
+            
+        # Fall back to pandas' built-in parser if specific formats don't match
+        return pd.to_datetime(date_str, errors='coerce', utc=True)
+    except Exception as e:
+        st.warning(f"Error parsing date '{date_str}': {str(e)}")
+        return None
+
+def procesar_respuesta_historico(data, tipo_activo):
+    """
+    Procesa la respuesta de la API según el tipo de activo
+    """
+    if not data:
+        return None
+    
+    try:
+        # Para series históricas estándar
+        if isinstance(data, list):
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    # Manejar diferentes estructuras de respuesta
+                    if isinstance(item, dict):
+                        precio = item.get('ultimoPrecio') or item.get('precio') or item.get('valor')
+                        if not precio or precio == 0:
+                            precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                        
+                        fecha_str = item.get('fechaHora') or item.get('fecha')
+                        
+                        if precio is not None and precio > 0 and fecha_str:
+                            fecha_parsed = parse_datetime_flexible(fecha_str)
+                            if pd.notna(fecha_parsed):
+                                precios.append(float(precio))
+                                fechas.append(fecha_parsed)
+                except (ValueError, AttributeError) as e:
+                    continue
+            
+            if precios and fechas:
+                df = pd.DataFrame({'fecha': fechas, 'precio': precios})
+                # Eliminar duplicados manteniendo el último
+                df = df.drop_duplicates(subset=['fecha'], keep='last')
+                df = df.sort_values('fecha')
+                return df
+        
+        # Para respuestas que son un solo valor (ej: MEP)
+        elif isinstance(data, (int, float)):
+            df = pd.DataFrame({'fecha': [pd.Timestamp.now(tz='UTC').date()], 'precio': [float(data)]})
+            return df
+            
+        return None
+        
+    except Exception as e:
+        st.error(f"Error al procesar respuesta histórica: {str(e)}")
+        return None
+
+def obtener_fondos_comunes(token_portador):
+    """
+    Obtiene la lista de fondos comunes de inversión disponibles
+    """
+    url = 'https://api.invertironline.com/api/v2/Titulos/FCI'
+    headers = {
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al obtener fondos comunes: {str(e)}")
+        return []
+
+def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, fecha_hasta, ajustada="SinAjustar"):
+    """
+    Obtiene la serie histórica de precios de un título desde la API de IOL.
+    Actualizada para manejar correctamente la estructura de respuesta de la API.
+    """
+    # Determinar endpoint según tipo de instrumento según la documentación de IOL
+    if mercado == "Opciones":
+        url = f"https://api.invertironline.com/api/v2/Opciones/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    elif mercado == "FCI":
+        url = f"https://api.invertironline.com/api/v2/Titulos/FCI/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    else:
+        # Para mercados tradicionales usar el formato estándar
+        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if not data:
+                return None
+            
+            precios = []
+            fechas = []
+            
+            for item in data:
+                try:
+                    # Usar ultimoPrecio como precio principal según la documentación
+                    precio = item.get('ultimoPrecio')
+                    
+                    # Si ultimoPrecio es 0 o None, intentar otros campos
+                    if not precio or precio == 0:
+                        precio = item.get('cierreAnterior') or item.get('precioPromedio') or item.get('apertura')
+                    
+                    fecha_str = item.get('fechaHora') or item.get('fecha')
+                    
+                    if precio is not None and precio > 0 and fecha_str:
+                        fecha_parsed = parse_datetime_flexible(fecha_str)
+                        if fecha_parsed is not None:
+                            precios.append(precio)
+                            fechas.append(fecha_parsed)
+                            
+                except Exception as e:
+                    # Log individual item errors but continue processing
+                    continue
+            
+            if precios and fechas:
+                # Crear serie ordenada por fecha
+                serie = pd.Series(precios, index=fechas)
+                serie = serie.sort_index()  # Asegurar orden cronológico
+                
+                # Eliminar duplicados manteniendo el último valor
+                serie = serie[~serie.index.duplicated(keep='last')]
+                
+                # Verificar que la serie tenga datos válidos
+                if serie.notna().sum() > 0 and serie.nunique() > 1:
+                    return serie
+                else:
+                    return None
+            else:
+                return None
+                
+        elif response.status_code == 401:
+            # Token expirado o inválido - silencioso para no interrumpir
+            return None
+            
+        elif response.status_code == 404:
+            # Símbolo no encontrado en este mercado - silencioso
+            return None
+            
+        elif response.status_code == 400:
+            # Parámetros inválidos - silencioso
+            return None
+            
+        elif response.status_code == 500:
+            # Error del servidor - silencioso para no interrumpir el flujo
+            return None
+            
+        else:
+            # Otros errores HTTP - silencioso
+            return None
+            
+    except requests.exceptions.Timeout:
+        # Timeout - silencioso
+        return None
+    except requests.exceptions.ConnectionError:
+        # Error de conexión - silencioso
+        return None
+    except Exception as e:
+        # Error general - silencioso para no interrumpir el análisis
+        return None
+
+def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
+    """
+    Fallback usando yfinance para símbolos que no estén disponibles en IOL
+    """
+    try:
+        # Mapear símbolos argentinos a Yahoo Finance si es posible
+        simbolo_yf = simbolo
+        
+        # Agregar sufijos comunes para acciones argentinas
+        sufijos_ar = ['.BA', '.AR']
+        
+        for sufijo in sufijos_ar:
+            try:
+                ticker = yf.Ticker(simbolo + sufijo)
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty and len(data) > 10:
+                    # Usar precio de cierre
+                    return data['Close']
+            except Exception:
+                continue
+        
+        # Intentar sin sufijo
+        try:
+            ticker = yf.Ticker(simbolo)
+            data = ticker.history(start=fecha_desde, end=fecha_hasta)
+            if not data.empty and len(data) > 10:
+                return data['Close']
+        except Exception:
+            pass
+            
+        return None
+    except Exception:
+        return None
+
+def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_hasta=None, mercado=None):
+    """
+    Obtiene todas las operaciones de un activo específico desde la API de IOL.
+    
+    Args:
+        token_portador (str): Token de autorización
+        simbolo (str): Símbolo del activo
+        fecha_desde (str): Fecha desde (YYYY-MM-DD), por defecto 2 años atrás
+        fecha_hasta (str): Fecha hasta (YYYY-MM-DD), por defecto hoy
+        mercado (str): Mercado del activo ('ar' para Argentina, 'eeuu' para EEUU)
+        
+    Returns:
+        list: Lista de operaciones del activo
+    """
+    if fecha_desde is None:
+        fecha_desde = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+    if fecha_hasta is None:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+    
+    # Determinar el mercado del activo si no se especifica
+    if mercado is None:
+        if simbolo.endswith('.O') or simbolo.endswith('.BA') or simbolo.endswith('.MA'):
+            mercado = 'eeuu'
+        else:
+            mercado = 'ar'
+    
+    # Parámetros para filtrar operaciones según el mercado
+    # Usar filtros más restrictivos para evitar operaciones incorrectas
+    params = {
+        'filtro.estado': 'terminadas',  # Solo operaciones terminadas
+        'filtro.fechaDesde': fecha_desde,
+        'filtro.fechaHasta': fecha_hasta,
+        'filtro.simbolo': simbolo  # Filtrar por símbolo específico
+    }
+    
+    # Agregar filtros adicionales según el mercado
+    if mercado == 'ar':
+        params['filtro.pais'] = 'argentina'
+        print(f"   🇦🇷 Configurando filtro para mercado Argentina")
+    elif mercado == 'eeuu':
+        # Para EEUU, no usar filtro de país
+        print(f"   🇺🇸 Configurando filtro para mercado EEUU")
+    
+    print(f"   📋 Parámetros iniciales: {params}")
+    print(f"   📅 Rango de fechas: {fecha_desde} a {fecha_hasta}")
+    
+    try:
+        # Probar diferentes endpoints de la API de IOL
+        urls_to_try = [
+            "https://api.invertironline.com/api/v2/operaciones",
+            "https://api.invertironline.com/api/v2/operaciones/terminadas"
+        ]
+        
+        operaciones_activo = []
+        
+        for url in urls_to_try:
+            print(f"🌐 Probando endpoint: {url}")
+            print(f"   📋 Parámetros: {params}")
+            
+            response = requests.get(url, headers=headers, params=params)
+            
+            print(f"   📡 Respuesta: {response.status_code} - {len(response.text)} caracteres")
+            
+            if response.status_code == 200:
+                operaciones = response.json()
+                print(f"   📄 Respuesta JSON recibida: {type(operaciones)}")
+                
+                # Verificar si la respuesta es una lista o tiene estructura de paginación
+                if isinstance(operaciones, dict):
+                    print(f"   📋 Claves en respuesta: {list(operaciones.keys())}")
+                    if 'items' in operaciones:
+                        operaciones = operaciones['items']
+                        print(f"   📄 Respuesta paginada: {len(operaciones)} items")
+                    elif 'data' in operaciones:
+                        operaciones = operaciones['data']
+                        print(f"   📄 Respuesta con data: {len(operaciones)} items")
+                    elif 'operaciones' in operaciones:
+                        operaciones = operaciones['operaciones']
+                        print(f"   📄 Respuesta con operaciones: {len(operaciones)} items")
+                    else:
+                        print(f"   ⚠️ Estructura de respuesta inesperada: {list(operaciones.keys())}")
+                        # Si no reconocemos la estructura, usar la respuesta completa
+                        operaciones = [operaciones]
+                
+                # Si no es una lista, convertir a lista
+                if not isinstance(operaciones, list):
+                    operaciones = [operaciones] if operaciones else []
+                
+                print(f"   📊 Total de operaciones en respuesta: {len(operaciones)}")
+                
+                # Verificar que las operaciones correspondan al símbolo y estén en el rango de fechas
+                for op in operaciones:
+                    if isinstance(op, dict):
+                        simbolo_op = op.get('simbolo') or op.get('instrumento') or op.get('ticker')
+                        if simbolo_op == simbolo:
+                            # Verificar que la fecha esté en el rango válido
+                            fecha_op = op.get('fechaOperada') or op.get('fechaOrden')
+                            if fecha_op:
+                                try:
+                                    fecha_op_dt = datetime.strptime(fecha_op, '%Y-%m-%d')
+                                    fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                                    fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+                                    
+                                    if fecha_desde_dt <= fecha_op_dt <= fecha_hasta_dt:
+                                        operaciones_activo.append(op)
+                                        print(f"   ✅ Operación válida para {simbolo} en {fecha_op}")
+                                    else:
+                                        print(f"   ⚠️ Operación fuera de rango para {simbolo} en {fecha_op}")
+                                except ValueError:
+                                    print(f"   ⚠️ Fecha inválida en operación: {fecha_op}")
+                            else:
+                                print(f"   ⚠️ Operación sin fecha para {simbolo}")
+                
+                print(f"   🔍 Operaciones válidas encontradas para '{simbolo}' en {url}: {len(operaciones_activo)}")
+                
+                # Si encontramos operaciones, no necesitamos probar más endpoints
+                if operaciones_activo:
+                    break
+            else:
+                print(f"   ❌ Error en {url}: {response.status_code}")
+        
+        # Debug: mostrar información sobre las operaciones encontradas
+        print(f"🔍 Operaciones finales para {simbolo}: {len(operaciones_activo)} totales")
+        if operaciones_activo:
+            fechas = [op.get('fechaOperada', op.get('fechaOrden', 'N/A')) for op in operaciones_activo if op.get('fechaOperada') or op.get('fechaOrden')]
+            if fechas:
+                print(f"   📅 Rango de fechas: {min(fechas)} a {max(fechas)}")
+        
+        return operaciones_activo
+        
+    except Exception as e:
+        print(f"❌ Error al obtener operaciones para {simbolo}: {str(e)}")
+        return []
+            
+
+
+def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_desde=None, fecha_hasta=None, mercado=None):
+    """
+    Reconstruye la composición del portafolio a lo largo del tiempo basándose en todas las operaciones.
+    
+    Args:
+        token_portador (str): Token de autorización
+        portafolio_actual (dict): Portafolio actual con estructura {'activos': [...]}
+        fecha_desde (str): Fecha desde para reconstruir
+        fecha_hasta (str): Fecha hasta para reconstruir
+        mercado (str): Mercado del portafolio ('ar' para Argentina, 'eeuu' para EEUU)
+        
+    Returns:
+        dict: Composición del portafolio por fecha
+    """
+    if fecha_desde is None:
+        fecha_desde = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+    if fecha_hasta is None:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    
+    # Convertir portafolio a formato de diccionario por símbolo
+    portafolio_dict = {}
+    if 'activos' in portafolio_actual:
+        for activo in portafolio_actual['activos']:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', '')
+            if simbolo:
+                portafolio_dict[simbolo] = activo
+    else:
+        # Si ya es un diccionario por símbolo
+        portafolio_dict = portafolio_actual
+    
+    # Obtener todas las operaciones de todos los activos
+    todas_operaciones = []
+    
+    print(f"🔄 Procesando {len(portafolio_dict)} activos para obtener operaciones...")
+    
+    for simbolo in portafolio_dict.keys():
+        print(f"  📊 Obteniendo operaciones para: {simbolo}")
+        operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta, mercado)
+        print(f"     ✅ Encontradas {len(operaciones)} operaciones para {simbolo}")
+        
+        for op in operaciones:
+            op['simbolo_original'] = simbolo
+            todas_operaciones.append(op)
+    
+    print(f"🎯 Total de operaciones obtenidas: {len(todas_operaciones)}")
+    
+    # Ordenar operaciones por fecha
+    todas_operaciones.sort(key=lambda x: x.get('fechaOperada', x.get('fechaOrden', '1900-01-01')))
+    
+    # Reconstruir composición día a día
+    composicion_por_fecha = {}
+    posiciones_actuales = {}
+    
+    # Inicializar con el portafolio actual
+    for simbolo, activo in portafolio_dict.items():
+        # Obtener cantidad del activo
+        cantidad = activo.get('cantidad', 0)
+        if not cantidad:
+            # Intentar otros campos de cantidad
+            cantidad = activo.get('Cantidad', activo.get('cantidadNominal', 0))
+        
+        posiciones_actuales[simbolo] = {
+            'cantidad': cantidad,
+            'precio_compra': 0,
+            'fecha_compra': None,
+            'operaciones': []
+        }
+    
+    # Procesar operaciones en orden cronológico
+    for op in todas_operaciones:
+        simbolo = op.get('simbolo_original')
+        tipo = op.get('tipo', '').lower()
+        fecha = op.get('fechaOperada') or op.get('fechaOrden')
+        cantidad = op.get('cantidadOperada', op.get('cantidad', 0))
+        precio = op.get('precioOperado', op.get('precio', 0))
+        
+        if not fecha or simbolo not in posiciones_actuales:
+            continue
+            
+        # Convertir fecha a string para usar como clave
+        try:
+            fecha_dt = datetime.fromisoformat(fecha.replace('Z', '+00:00'))
+            fecha_str = fecha_dt.strftime('%Y-%m-%d')
+        except:
+            continue
+        
+        # Actualizar posiciones
+        if tipo == 'compra':
+            posiciones_actuales[simbolo]['cantidad'] += cantidad
+            # Calcular precio promedio de compra
+            cantidad_anterior = posiciones_actuales[simbolo]['cantidad'] - cantidad
+            precio_anterior = posiciones_actuales[simbolo]['precio_compra']
+            
+            if cantidad_anterior > 0:
+                precio_promedio = ((precio_anterior * cantidad_anterior) + (precio * cantidad)) / posiciones_actuales[simbolo]['cantidad']
+            else:
+                precio_promedio = precio
+                
+            posiciones_actuales[simbolo]['precio_compra'] = precio_promedio
+            posiciones_actuales[simbolo]['fecha_compra'] = fecha_str
+            
+        elif tipo == 'venta':
+            posiciones_actuales[simbolo]['cantidad'] -= cantidad
+            if posiciones_actuales[simbolo]['cantidad'] <= 0:
+                posiciones_actuales[simbolo]['cantidad'] = 0
+                posiciones_actuales[simbolo]['precio_compra'] = 0
+                posiciones_actuales[simbolo]['fecha_compra'] = None
+        
+        # Registrar operación
+        posiciones_actuales[simbolo]['operaciones'].append({
+            'fecha': fecha_str,
+            'tipo': tipo,
+            'cantidad': cantidad,
+            'precio': precio
+        })
+        
+        # Guardar composición para esta fecha
+        composicion_por_fecha[fecha_str] = {
+            simbolo: {
+                'cantidad': posiciones_actuales[simbolo]['cantidad'],
+                'precio_compra': posiciones_actuales[simbolo]['precio_compra'],
+                'fecha_compra': posiciones_actuales[simbolo]['fecha_compra']
+            }
+            for simbolo in posiciones_actuales.keys()
+            if posiciones_actuales[simbolo]['cantidad'] > 0
+        }
+    
+    return composicion_por_fecha, posiciones_actuales
+
+def calcular_retorno_real_activo(simbolo, posiciones_actuales, precios_historicos):
+    """
+    Calcula el retorno real de un activo basándose en su historial de operaciones.
+    
+    Args:
+        simbolo (str): Símbolo del activo
+        posiciones_actuales (dict): Posiciones actuales del activo
+        precios_historicos (pd.Series): Precios históricos del activo
+        
+    Returns:
+        dict: Métricas de retorno real
+    """
+    if simbolo not in posiciones_actuales:
+        return None
+        
+    posicion = posiciones_actuales[simbolo]
+    
+    if not posicion['operaciones'] or posicion['cantidad'] <= 0:
+        return None
+    
+    # Obtener precio actual
+    if precios_historicos is None or precios_historicos.empty:
+        return None
+        
+    precio_actual = precios_historicos.iloc[-1]
+    
+    # Calcular retorno basado en operaciones
+    operaciones = posicion['operaciones']
+    
+    # Separar compras y ventas
+    compras = [op for op in operaciones if op['tipo'] == 'compra']
+    ventas = [op for op in operaciones if op['tipo'] == 'venta']
+    
+    # Calcular flujo de caja
+    flujo_compras = sum(op['cantidad'] * op['precio'] for op in compras)
+    flujo_ventas = sum(op['cantidad'] * op['precio'] for op in ventas)
+    
+    # Valor actual de la posición
+    valor_actual = posicion['cantidad'] * precio_actual
+    
+    # Calcular retorno total (incluyendo ventas realizadas)
+    if flujo_compras > 0:
+        retorno_total = ((valor_actual + flujo_ventas - flujo_compras) / flujo_compras) - 1
+    else:
+        retorno_total = 0
+    
+    # Calcular retorno anualizado basado en la primera compra
+    if compras:
+        primera_compra = min(compras, key=lambda x: x['fecha'])
+        ultima_operacion = max(operaciones, key=lambda x: x['fecha'])
+        
+        try:
+            fecha_inicio = datetime.strptime(primera_compra['fecha'], '%Y-%m-%d')
+            fecha_fin = datetime.strptime(ultima_operacion['fecha'], '%Y-%m-%d')
+            dias_transcurridos = (fecha_fin - fecha_inicio).days
+            
+            if dias_transcurridos > 0:
+                retorno_anualizado = ((1 + retorno_total) ** (365 / dias_transcurridos)) - 1
+            else:
+                retorno_anualizado = retorno_total
+        except:
+            retorno_anualizado = retorno_total
+    else:
+        retorno_anualizado = retorno_total
+    
+    # Calcular volatilidad desde la primera compra
+    if compras and precios_historicos is not None:
+        primera_compra = min(compras, key=lambda x: x['fecha'])
+        try:
+            fecha_inicio = datetime.strptime(primera_compra['fecha'], '%Y-%m-%d')
+            precios_desde_compra = precios_historicos[precios_historicos.index >= fecha_inicio]
+            
+            if len(precios_desde_compra) > 1:
+                retornos_diarios = precios_desde_compra.pct_change().dropna()
+                volatilidad_anualizada = retornos_diarios.std() * np.sqrt(252)
+            else:
+                volatilidad_anualizada = 0
+        except:
+            volatilidad_anualizada = 0
+     else:
+        volatilidad_anualizada = 0
+    
+    return {
+        'retorno_total': retorno_total,
+        'retorno_anualizado': retorno_anualizado,
+        'volatilidad_anualizada': volatilidad_anualizada,
+        'flujo_compras': flujo_compras,
+        'flujo_ventas': flujo_ventas,
+        'valor_actual': valor_actual,
+        'cantidad_actual': posicion['cantidad'],
+        'precio_compra_promedio': posicion['precio_compra'],
+        'fecha_primera_compra': posicion['fecha_compra']
+    }
+
+def get_historical_data_for_optimization(token_portador, simbolos, fecha_desde, fecha_hasta):
+    """
+    Obtiene datos históricos para optimización de portafolio con manejo mejorado de errores.
+    Actualizada para mejor compatibilidad con la API de IOL y optimizada para rendimiento.
+    """
+    try:
+        df_precios = pd.DataFrame()
+        simbolos_exitosos = []
+        simbolos_fallidos = []
+        detalles_errores = {}
+        
+        # Convertir fechas a string en formato correcto
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d')
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
+        
+        st.info(f"🔍 Buscando datos históricos desde {fecha_desde_str} hasta {fecha_hasta_str}")
+        
+        # Optimización: Limitar número de símbolos para mejor rendimiento
+        if len(simbolos) > 20:
+            st.warning(f"⚠️ Limitando análisis a los primeros 20 símbolos de {len(simbolos)} para mejor rendimiento")
+            simbolos = simbolos[:20]
+        
+        # Crear barra de progreso optimizada
+        progress_bar = st.progress(0)
+        total_simbolos = len(simbolos)
+        
+        for idx, simbolo in enumerate(simbolos):
+            # Actualizar barra de progreso
+            progress_bar.progress((idx + 1) / total_simbolos, text=f"Procesando {simbolo}...")
+            
+            # Detectar mercado más probable para el símbolo
+            mercado_detectado = detectar_mercado_simbolo(simbolo, token_portador)
+            
+            # Usar mercados correctos según la API de IOL
+            # Ordenar mercados por probabilidad de éxito para optimizar búsqueda
+            if mercado_detectado:
+                mercados = [mercado_detectado, 'bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+            else:
+                mercados = ['bCBA', 'FCI', 'nYSE', 'nASDAQ', 'rOFEX', 'Opciones']
+            
+            serie_obtenida = False
+            
+            for mercado in mercados:
+                try:
+                    # Buscar clase D si es posible (solo para mercados tradicionales)
+                    simbolo_consulta = simbolo
+                    if mercado not in ['Opciones', 'FCI']:
+                        clase_d = obtener_clase_d(simbolo, mercado, token_portador)
+                        if clase_d:
+                            simbolo_consulta = clase_d
+                    
+                    serie = obtener_serie_historica_iol(
+                        token_portador, mercado, simbolo_consulta, 
+                        fecha_desde_str, fecha_hasta_str
+                    )
+                    
+                    if serie is not None and len(serie) > 10:
+                        # Verificar que los datos no sean todos iguales y que no sean todos nan
+                        if serie.nunique() > 1 and serie.notna().sum() > 5:
+                            df_precios[simbolo_consulta] = serie
+                            simbolos_exitosos.append(simbolo_consulta)
+                            serie_obtenida = True
+                            
+                            # Mostrar información del símbolo exitoso
+                            st.success(f"✅ {simbolo_consulta} ({mercado}): {len(serie)} puntos de datos")
+                            break
+                        
+                except Exception as e:
+                    detalles_errores[f"{simbolo}_{mercado}"] = str(e)
+                    continue
+            
+            # Si IOL falló completamente, intentar con yfinance como fallback
+            if not serie_obtenida:
+                try:
+                    serie_yf = obtener_datos_alternativos_yfinance(
+                        simbolo, fecha_desde, fecha_hasta
+                    )
+                    if serie_yf is not None and len(serie_yf) > 10:
+                        if serie_yf.nunique() > 1:
+                            df_precios[simbolo] = serie_yf
+                            simbolos_exitosos.append(simbolo)
+                            serie_obtenida = True
+                            st.info(f"ℹ️ {simbolo} (Yahoo Finance): {len(serie_yf)} puntos de datos")
+                except Exception as e:
+                    detalles_errores[f"{simbolo}_yfinance"] = str(e)
+            
+            if not serie_obtenida:
+                simbolos_fallidos.append(simbolo)
+                st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+        
+        # Limpiar barra de progreso
+        progress_bar.empty()
+        
+        # Informar resultados detallados
+        if simbolos_exitosos:
+            st.success(f"✅ Datos obtenidos para {len(simbolos_exitosos)} activos")
+            with st.expander("📋 Ver activos exitosos"):
+                for simbolo in simbolos_exitosos:
+                    if simbolo in df_precios.columns:
+                        serie = df_precios[simbolo]
+                        # Manejar casos donde min/max pueden ser nan
+                        min_val = serie.min()
+                        max_val = serie.max()
+                        
+                        if pd.isna(min_val) or pd.isna(max_val):
+                            datos_info = f"{simbolo}: {len(serie)} puntos, rango: datos incompletos"
+                        else:
+                            datos_info = f"{simbolo}: {len(serie)} puntos, rango: {min_val:.2f} - {max_val:.2f}"
+                        st.text(datos_info)
+        
+        if simbolos_fallidos:
+            st.warning(f"⚠️ No se pudieron obtener datos para {len(simbolos_fallidos)} activos")
+            with st.expander("❌ Ver activos fallidos y errores"):
+                for simbolo in simbolos_fallidos:
+                    st.text(f"• {simbolo}")
+                
+                if detalles_errores:
+                    st.markdown("**Detalles de errores:**")
+                    for key, error in detalles_errores.items():
+                        st.text(f"{key}: {error}")
+        
+        # Continuar si tenemos al menos 2 activos
+        if len(simbolos_exitosos) < 2:
+            if len(simbolos_exitosos) == 1:
+                st.error("❌ Se necesitan al menos 2 activos con datos históricos válidos para el análisis.")
+            else:
+                st.error("❌ No se pudieron obtener datos históricos para ningún activo.")
+            
+            # Mostrar sugerencias
+            st.markdown("#### 💡 Sugerencias para resolver el problema:")
+            st.markdown("""
+            1. **Verificar conectividad**: Asegúrese de que su conexión a IOL esté activa
+            2. **Revisar símbolos**: Algunos símbolos pueden haber cambiado o no estar disponibles
+            3. **Ajustar fechas**: Pruebe con un rango de fechas más amplio o diferente
+            4. **Verificar permisos**: Asegúrese de tener permisos para acceder a datos históricos
+            5. **Usar símbolos conocidos**: Pruebe con símbolos como 'GGAL', 'YPF', 'PAMP', 'COME' para acciones argentinas
+            """)
+            
+            return None, None, None
+        
+        if len(simbolos_exitosos) < len(simbolos):
+            st.info(f"ℹ️ Continuando análisis con {len(simbolos_exitosos)} de {len(simbolos)} activos disponibles.")
+        
+        # Alinear datos por fechas comunes con mejor manejo
+        st.info(f"📊 Alineando datos de {len(df_precios.columns)} activos...")
+        
+        # Verificar que tenemos datos válidos antes de alinear
+        if df_precios.empty:
+            st.error("❌ DataFrame de precios está vacío")
+            return None, None, None
+        
+        # Mostrar información de debug sobre las fechas
+        with st.expander("🔍 Debug - Información de fechas"):
+            for col in df_precios.columns:
+                serie = df_precios[col]
+                st.text(f"{col}: {len(serie)} puntos, desde {serie.index.min()} hasta {serie.index.max()}")
+            
+            # Mostrar información adicional sobre el DataFrame
+            st.text(f"Shape del DataFrame: {df_precios.shape}")
+            st.text(f"Tipos de datos: {df_precios.dtypes.to_dict()}")
+            st.text(f"Columnas con valores NaN: {df_precios.isna().sum().to_dict()}")
+        
+        # Limpiar datos antes de alinear - remover columnas con demasiados nan
+        columnas_originales = list(df_precios.columns)
+        columnas_limpias = []
+        
+        for col in columnas_originales:
+            serie = df_precios[col]
+            # Calcular porcentaje de datos válidos
+            datos_validos = serie.notna().sum()
+            porcentaje_valido = datos_validos / len(serie)
+            
+            if porcentaje_valido >= 0.5:  # Al menos 50% de datos válidos
+                columnas_limpias.append(col)
+            else:
+                st.warning(f"⚠️ Removiendo {col}: solo {porcentaje_valido:.1%} de datos válidos")
+        
+        if len(columnas_limpias) < 2:
+            st.error("❌ Después de limpiar datos, no quedan suficientes activos para análisis")
+            return None, None, None
+        
+        # Usar solo columnas limpias
+        df_precios = df_precios[columnas_limpias]
+        st.info(f"✅ Usando {len(columnas_limpias)} activos con datos válidos")
+        
+        # Intentar diferentes estrategias de alineación
+        try:
+            st.info("🔄 Iniciando proceso de alineación de datos...")
+            
+            # Estrategia 1: Forward fill y luego backward fill
+            st.info("📊 Aplicando forward fill y backward fill...")
+            df_precios_filled = df_precios.fillna(method='ffill').fillna(method='bfill')
+            st.info(f"✅ Forward/backward fill completado. Shape: {df_precios_filled.shape}")
+            
+            # Estrategia 2: Interpolar valores faltantes
+            st.info("📊 Aplicando interpolación temporal...")
+            df_precios_interpolated = df_precios.interpolate(method='time')
+            st.info(f"✅ Interpolación completada. Shape: {df_precios_interpolated.shape}")
+            
+            # Usar la estrategia que conserve más datos
+            if not df_precios_filled.dropna().empty:
+                df_precios = df_precios_filled.dropna()
+                st.info(f"✅ Usando estrategia forward/backward fill. Shape final: {df_precios.shape}")
+            elif not df_precios_interpolated.dropna().empty:
+                df_precios = df_precios_interpolated.dropna()
+                st.info(f"✅ Usando estrategia de interpolación. Shape final: {df_precios.shape}")
+            else:
+                # Estrategia 3: Usar solo fechas con datos completos
+                st.info("📊 Usando solo fechas con datos completos...")
+                df_precios = df_precios.dropna()
+                st.info(f"✅ Usando solo fechas completas. Shape final: {df_precios.shape}")
+                
+        except Exception as e:
+            st.warning(f"⚠️ Error en alineación de datos: {str(e)}. Usando datos sin procesar.")
+            df_precios = df_precios.dropna()
+        
+        if df_precios.empty:
+            st.error("❌ No hay fechas comunes entre los activos después del procesamiento")
+            st.error(f"❌ DataFrame vacío después de alineación. Shape: {df_precios.shape}")
+            return None, None, None
+        
+        st.success(f"✅ Datos alineados: {len(df_precios)} observaciones para {len(df_precios.columns)} activos")
+        
+        # Calcular retornos
+        returns = df_precios.pct_change().dropna()
+        
+        if returns.empty or len(returns) < 30:
+            st.error("❌ No hay suficientes datos para calcular retornos válidos (mínimo 30 observaciones)")
+            return None, None, None
+        
+        # Verificar que los retornos no sean constantes
+        if (returns.std() == 0).any():
+            columnas_constantes = returns.columns[returns.std() == 0].tolist()
+            st.warning(f"⚠️ Removiendo activos con retornos constantes: {columnas_constantes}")
+            returns = returns.drop(columns=columnas_constantes)
+            df_precios = df_precios.drop(columns=columnas_constantes)
+        
+        if len(returns.columns) < 2:
+            st.error("❌ Después de filtrar, no quedan suficientes activos para análisis")
+            return None, None, None
+        
+        # Calcular métricas finales
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+        
+        # Mostrar estadísticas finales
+        st.info(f"📊 Datos finales: {len(returns.columns)} activos, {len(returns)} observaciones de retornos")
+        
+        return mean_returns, cov_matrix, df_precios
+        
+    except Exception as e:
+        st.error(f"❌ Error crítico obteniendo datos históricos: {str(e)}")
+        with st.expander("🔍 Información de debug"):
+            st.code(f"Error: {str(e)}")
+            st.code(f"Símbolos: {simbolos}")
+            st.code(f"Rango de fechas: {fecha_desde} a {fecha_hasta}")
+        return None, None, None
+
+def obtener_serie_historica(simbolo, mercado, fecha_desde, fecha_hasta, ajustada, bearer_token):
+    """
+    Obtiene la serie histórica de precios para un símbolo y mercado específico.
+    Actualizada para usar nombres correctos de mercados IOL.
+    """
+    # Mapear nombres de mercados a los correctos de IOL
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFEX': 'rOFEX',
+        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception:
+        return None
+
+def detectar_mercado_simbolo(simbolo, bearer_token):
+    """
+    Detecta automáticamente el mercado correcto para un símbolo.
+    Devuelve el mercado más probable o None si no se puede determinar.
+    """
+    # Patrones para detectar tipos de instrumentos
+    if simbolo.endswith('D') or len(simbolo) >= 8:
+        return 'bCBA'  # Probablemente un bono argentino
+    elif simbolo in ['COME', 'GGAL', 'YPF', 'PAMP', 'TECO2', 'TGS', 'EDN', 'APBR']:
+        return 'bCBA'  # Acciones argentinas conocidas
+    elif simbolo in ['GOOGL', 'AAPL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'INTC']:
+        return 'nYSE'  # Acciones estadounidenses conocidas
+    elif simbolo.endswith('FCI') or simbolo in ['ADCGLOA', 'AE38', 'ETHA']:
+        return 'FCI'  # Fondos comunes de inversión
+    else:
+        # Intentar detectar consultando la API
+        mercados_test = ['bCBA', 'FCI', 'nYSE', 'nASDAQ']
+        for mercado in mercados_test:
+            try:
+                url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion"
+                headers = {
+                    'Accept': 'application/json',
+                    'Authorization': f'Bearer {bearer_token}'
+                }
+                response = requests.get(url, headers=headers, timeout=5)
+                if response.status_code == 200:
+                    return mercado
+            except Exception:
+                continue
+        return None
+
+def obtener_clase_d(simbolo, mercado, bearer_token):
+    """
+    Busca automáticamente la clase 'D' de un bono dado su símbolo y mercado.
+    Devuelve el símbolo de la clase 'D' si existe, si no, devuelve None.
+    """
+    # Mapear nombres de mercados a los correctos de IOL
+    mercados_mapping = {
+        'BCBA': 'bCBA',
+        'NYSE': 'nYSE', 
+        'NASDAQ': 'nASDAQ',
+        'ROFEX': 'rOFEX',
+        'Merval': 'bCBA'  # Merval no existe, usar bCBA
+    }
+    
+    mercado_correcto = mercados_mapping.get(mercado, mercado)
+    
+    url = f"https://api.invertironline.com/api/v2/{mercado_correcto}/Titulos/{simbolo}/Clases"
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {bearer_token}'
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            clases = response.json()
+            for clase in clases:
+                if clase.get('simbolo', '').endswith('D'):
+                    return clase['simbolo']
+            return None
+        else:
+            # Silencioso para no interrumpir el flujo
+            return None
+    except Exception:
+        # Silencioso para no interrumpir el flujo
+        return None
+
+def obtener_benchmark_mercado(mercado, benchmark, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Obtiene benchmarks apropiados para cada mercado (Argentina o EEUU) según la práctica real del asesoramiento financiero.
+    
+    Args:
+        mercado (str): 'ar' para Argentina, 'us' para EEUU
+        benchmark (str): Tipo de benchmark solicitado
+        token_acceso (str): Token de autenticación IOL
+        fecha_desde (datetime): Fecha de inicio
+        fecha_hasta (datetime): Fecha de fin
+    
+    Returns:
+        pd.DataFrame: DataFrame con los retornos del benchmark
+    """
+    
+    if mercado == 'ar':
+        return obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
+    elif mercado == 'us':
+        return obtener_benchmark_eeuu(benchmark, token_acceso, fecha_desde, fecha_hasta)
+    else:
+        st.error(f"❌ Mercado no válido: {mercado}")
+        return None
+
+def obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Benchmarks apropiados para el mercado argentino según la práctica real del asesoramiento financiero
+    """
+    try:
+        if benchmark == 'Tasa_Libre_Riesgo':
+            # Para Argentina: Tasa de caución promedio (instrumento de corto plazo más líquido)
+            st.info("🇦🇷 Usando Tasa de Caución como tasa libre de riesgo para Argentina")
+            
+            cotizaciones_caucion = obtener_cotizaciones_caucion(token_acceso)
+            if cotizaciones_caucion is not None and not cotizaciones_caucion.empty:
+                if 'tasa' in cotizaciones_caucion.columns:
+                    tasas = cotizaciones_caucion['tasa'].dropna()
+                    if len(tasas) > 0:
+                        tasa_promedio = tasas.mean() / 100
+                        retorno_diario = (1 + tasa_promedio) ** (1/252) - 1
+                        
+                        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                        retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
+                        
+                        st.success(f"✅ Tasa de caución promedio: {tasa_promedio:.2%} anual")
+                        return pd.DataFrame({'Tasa_Libre_Riesgo': retornos})
+            
+            # Fallback: tasa de referencia del BCRA
+            st.warning("⚠️ Usando tasa de referencia del BCRA como fallback")
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            retorno_diario = 0.0003  # ~7.5% anual (tasa aproximada del BCRA)
+            retornos = [retorno_diario] * len(fechas)
+            return pd.DataFrame({'Tasa_Libre_Riesgo': retornos}, index=fechas)
+        
+        elif benchmark == 'Indice_Mercado':
+            # Para Argentina: MERVAL (índice principal del mercado local)
+            st.info("🇦🇷 Usando MERVAL como índice de mercado para Argentina")
+            
+            try:
+                datos_merval = obtener_serie_historica_iol(token_acceso, 'INDICES', 'MERVAL', fecha_desde, fecha_hasta)
+                if datos_merval is not None and not datos_merval.empty:
+                    retornos = datos_merval.pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ MERVAL obtenido: {len(retornos)} días de retornos")
+                        return pd.DataFrame({'Indice_Mercado': retornos})
+            except:
+                pass
+            
+            # Fallback: usar datos de yfinance
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker("^MERV")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    st.success(f"✅ MERVAL obtenido desde Yahoo Finance: {len(retornos)} días")
+                    return pd.DataFrame({'Indice_Mercado': retornos})
+            except:
+                pass
+            
+            st.error("❌ No se pudieron obtener datos del MERVAL")
+            return None
+        
+        elif benchmark == 'Dolar_MEP':
+            # Dólar MEP calculado como AL30/AL30D (metodología estándar del mercado)
+            st.info("🇦🇷 Calculando Dólar MEP como AL30/AL30D (metodología estándar)")
+            
+            try:
+                # Obtener datos de AL30 (pesos) y AL30D (dólares)
+                datos_al30 = obtener_serie_historica_iol(token_acceso, 'BONOS', 'AL30', fecha_desde, fecha_hasta)
+                datos_al30d = obtener_serie_historica_iol(token_acceso, 'BONOS', 'AL30D', fecha_desde, fecha_hasta)
+                
+                if datos_al30 is not None and not datos_al30.empty and datos_al30d is not None and not datos_al30d.empty:
+                    # Crear DataFrame y alinear fechas
+                    df_mep = pd.DataFrame({'AL30': datos_al30, 'AL30D': datos_al30d}).dropna()
+                    
+                    if not df_mep.empty:
+                        # Calcular dólar MEP = AL30 / AL30D
+                        df_mep['Dolar_MEP'] = df_mep['AL30'] / df_mep['AL30D']
+                        retornos = df_mep['Dolar_MEP'].pct_change().dropna()
+                        
+                        if len(retornos) > 0:
+                            st.success(f"✅ Dólar MEP calculado: {len(retornos)} días, cotización actual: ${df_mep['Dolar_MEP'].iloc[-1]:.2f}")
+                            return pd.DataFrame({'Dolar_MEP': retornos})
+                
+                st.warning("⚠️ Fallback a tasa fija para dólar MEP")
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                retorno_diario = 0.0002  # ~5% anual
+                return pd.DataFrame({'Dolar_MEP': [retorno_diario] * len(fechas)}, index=fechas)
+                
+            except Exception as e:
+                st.warning(f"⚠️ Error calculando dólar MEP: {str(e)}")
+                return None
+        
+        elif benchmark == 'Bonos_Soberanos':
+            # Para Argentina: Bonos soberanos en pesos (GD30, AL30, etc.)
+            st.info("🇦🇷 Usando bonos soberanos argentinos como benchmark")
+            
+            try:
+                # Intentar obtener GD30 (bono soberano en pesos)
+                datos_gd30 = obtener_serie_historica_iol(token_acceso, 'BONOS', 'GD30', fecha_desde, fecha_hasta)
+                if datos_gd30 is not None and not datos_gd30.empty:
+                    retornos = datos_gd30.pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ GD30 obtenido: {len(retornos)} días de retornos")
+                        return pd.DataFrame({'Bonos_Soberanos': retornos})
+            except:
+                pass
+            
+            st.warning("⚠️ No se pudieron obtener datos de bonos soberanos")
+            return None
+        
+        else:
+            st.error(f"❌ Benchmark no válido para Argentina: {benchmark}")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Error obteniendo benchmark argentino: {str(e)}")
+        return None
+
+def obtener_benchmark_eeuu(benchmark, token_acceso, fecha_desde, fecha_hasta):
+    """
+    Benchmarks apropiados para el mercado estadounidense según la práctica real del asesoramiento financiero
+    """
+    try:
+        if benchmark == 'Tasa_Libre_Riesgo':
+            # Para EEUU: T-Bill 3 meses (instrumento de corto plazo más líquido)
+            st.info("🇺🇸 Usando T-Bill 3 meses como tasa libre de riesgo para EEUU")
+            
+            try:
+                # Intentar obtener desde IOL si está disponible
+                datos_tbill = obtener_serie_historica_iol(token_acceso, 'BONOS', 'TBILL3M', fecha_desde, fecha_hasta)
+                if datos_tbill is not None and not datos_tbill.empty:
+                    retornos = datos_tbill.pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ T-Bill 3 meses obtenido: {len(retornos)} días")
+                        return pd.DataFrame({'Tasa_Libre_Riesgo': retornos})
+            except:
+                pass
+            
+            # Fallback: usar yfinance para obtener datos del T-Bill
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker("^IRX")  # T-Bill 13 weeks
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    # Convertir tasa anual a retorno diario
+                    tasa_anual = data['Close'].iloc[-1] / 100
+                    retorno_diario = (1 + tasa_anual) ** (1/252) - 1
+                    
+                    fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+                    retornos = pd.Series([retorno_diario] * len(fechas), index=fechas)
+                    
+                    st.success(f"✅ T-Bill 3 meses desde Yahoo Finance: {tasa_anual:.2%} anual")
+                    return pd.DataFrame({'Tasa_Libre_Riesgo': retornos})
+            except:
+                pass
+            
+            # Fallback final: tasa de referencia de la Fed
+            st.warning("⚠️ Usando tasa de referencia de la Fed como fallback")
+            fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+            retorno_diario = 0.0002  # ~5% anual (tasa aproximada actual)
+            retornos = [retorno_diario] * len(fechas)
+            return pd.DataFrame({'Tasa_Libre_Riesgo': retornos}, index=fechas)
+        
+        elif benchmark == 'Indice_Mercado':
+            # Para EEUU: S&P 500 (índice principal del mercado estadounidense)
+            st.info("🇺🇸 Usando S&P 500 como índice de mercado para EEUU")
+            
+            try:
+                # Intentar obtener desde IOL si está disponible
+                datos_sp500 = obtener_serie_historica_iol(token_acceso, 'INDICES', 'SPX', fecha_desde, fecha_hasta)
+                if datos_sp500 is not None and not datos_sp500.empty:
+                    retornos = datos_sp500.pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ S&P 500 obtenido: {len(retornos)} días")
+                        return pd.DataFrame({'Indice_Mercado': retornos})
+            except:
+                pass
+            
+            # Fallback: usar yfinance
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker("^GSPC")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    st.success(f"✅ S&P 500 desde Yahoo Finance: {len(retornos)} días")
+                    return pd.DataFrame({'Indice_Mercado': retornos})
+            except:
+                pass
+            
+            st.error("❌ No se pudieron obtener datos del S&P 500")
+            return None
+        
+        elif benchmark == 'Dolar_Index':
+            # Para EEUU: DXY (índice del dólar estadounidense)
+            st.info("🇺🇸 Usando DXY como índice del dólar estadounidense")
+            
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker("DX-Y.NYB")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    st.success(f"✅ DXY obtenido: {len(retornos)} días")
+                    return pd.DataFrame({'Dolar_Index': retornos})
+            except:
+                pass
+            
+            st.warning("⚠️ No se pudieron obtener datos del DXY")
+            return None
+        
+        elif benchmark == 'Bonos_Corporativos':
+            # Para EEUU: ETF de bonos corporativos (LQD)
+            st.info("🇺🇸 Usando LQD (bonos corporativos) como benchmark")
+            
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker("LQD")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    st.success(f"✅ LQD obtenido: {len(retornos)} días")
+                    return pd.DataFrame({'Bonos_Corporativos': retornos})
+            except:
+                pass
+            
+            st.warning("⚠️ No se pudieron obtener datos de bonos corporativos")
+            return None
+        
+        else:
+            st.error(f"❌ Benchmark no válido para EEUU: {benchmark}")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Error obteniendo benchmark estadounidense: {str(e)}")
+        return None
+
+# Estilos CSS personalizados para tema oscuro
+st.markdown("""
+<style>
+    /* Estilos generales dark theme */
+    .stApp, 
+    .stApp > div[data-testid="stAppViewContainer"],
+    .stApp > div[data-testid="stAppViewContainer"] > div {
+        background-color: #0f172a !important;
+        color: #f8f9fa !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    /* Asegurar que todo el texto sea claro */
+    body, p, div, span, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button,
+    .stSelectbox div[data-baseweb="select"] div,
+    .stDateInput div[data-baseweb="input"] input,
+    .stTextInput div[data-baseweb="input"] input,
+    .stNumberInput div[data-baseweb="input"] input,
+    .stTextArea div[data-baseweb="textarea"] textarea,
+    .stAlert,
+    .stAlert p,
+    .stAlert div,
+    .stAlert span,
+    .stTooltip,
+    .stTooltip p,
+    .stTooltip div,
+    .stTooltip span,
+    .stMarkdown,
+    .stMarkdown p,
+    .stMarkdown div,
+    .stMarkdown span,
+    a,
+    a:visited,
+    a:hover,
+    .st-bb,
+    .st-bj,
+    .st-bk,
+    .st-bn,
+    .st-bo,
+    .st-bp,
+    .st-bq,
+    .st-br,
+    .st-bs,
+    .st-bt {
+        color: #f8f9fa !important;
+    }
+    
+    /* Asegurar que los enlaces sean visibles */
+    a {
+        color: #4CAF50 !important;
+        text-decoration: none;
+    }
+    
+    a:hover {
+        color: #45a049 !important;
+        text-decoration: underline;
+    }
+    
+    /* Mejorar la visibilidad de los placeholders */
+    ::placeholder {
+        color: #94a3b8 !important;
+        opacity: 1;
+    }
+    
+    /* Mejorar la visibilidad de los tooltips */
+    .stTooltip {
+        background-color: #1e293b !important;
+        border: 1px solid #4CAF50 !important;
+        color: #f8f9fa !important;
+    }
+    
+    /* Estilos para menús desplegables y listas */
+    /* Select principal */
+    div[data-baseweb="select"],
+    div[data-baseweb="select"] div,
+    div[data-baseweb="select"] input,
+    div[data-baseweb="select"] div[role="button"],
+    div[data-baseweb="select"] div[role="listbox"],
+    div[data-baseweb="select"] div[role="combobox"],
+    div[data-baseweb="select"] div[data-baseweb="select"] {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+        border-color: #4CAF50 !important;
+    }
+    
+    /* Opciones del menú desplegable */
+    div[role="listbox"],
+    div[role="listbox"] ul,
+    div[role="listbox"] li,
+    div[role="option"],
+    div[role="option"] > div,
+    div[role="option"] > span,
+    div[role="listbox"] > div,
+    div[role="listbox"] > div > div,
+    div[data-baseweb*="popover"] *,
+    div[data-baseweb*="popover"] div,
+    div[data-baseweb*="popover"] span,
+    div[data-baseweb*="popover"] li,
+    div[data-baseweb*="popover"] ul,
+    div[data-baseweb*="popover"] p,
+    div[data-baseweb*="popover"] a,
+    div[data-baseweb*="popover"] button,
+    div[data-baseweb*="popover"] input,
+    div[data-baseweb*="popover"] select,
+    div[data-baseweb*="popover"] option {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+    }
+    
+    /* Asegurar que el texto dentro de los popovers sea visible */
+    div[data-baseweb*="popover"] {
+        background-color: #1e293b !important;
+        border: 1px solid #4CAF50 !important;
+    }
+    
+    /* Asegurar que el texto de las opciones sea visible */
+    div[role="option"] *,
+    div[role="option"] span,
+    div[role="option"] div {
+        color: #f8f9fa !important;
+    }
+    
+    /* Efecto hover en opciones */
+    div[role="option"]:hover,
+    div[role="option"]:hover > div,
+    div[role="option"]:hover > span,
+    div[role="listbox"] > div:hover,
+    div[role="listbox"] > div > div:hover {
+        background-color: #2d3748 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Opción seleccionada */
+    div[aria-selected="true"],
+    div[aria-selected="true"] > div,
+    div[aria-selected="true"] > span {
+        background-color: #4CAF50 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Estilos para las listas de selección múltiple */
+    .stMultiSelect [role="button"],
+    .stMultiSelect [role="button"]:hover,
+    .stMultiSelect [role="button"]:focus {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+        border-color: #4CAF50 !important;
+    }
+    
+    .stMultiSelect [role="option"] {
+        background-color: #1e293b !important;
+        color: #f8f9fa !important;
+    }
+    
+    .stMultiSelect [role="option"]:hover {
+        background-color: #2d3748 !important;
+    }
+    
+    /* Mejorar la visibilidad de los mensajes */
+    .stAlert {
+        background-color: rgba(30, 41, 59, 0.9) !important;
+        border-left: 4px solid #4CAF50 !important;
+        border-radius: 8px !important;
+        padding: 1rem !important;
+    }
+    
+    /* Ajustes para gráficos */
+    .stPlotlyChart {
+        background-color: #1e293b !important;
+        border-radius: 8px;
+        padding: 1rem;
+    }
+    
+    /* Asegurar que los checkboxes y radio buttons sean visibles */
+    .stCheckbox > label,
+    .stRadio > label,
+    .stCheckbox > div,
+    .stRadio > div {
+        color: #f8f9fa !important;
+    }
+    
+    /* Estilos para las pestañas activas */
+    [data-baseweb="tab"] {
+        color: #f8f9fa !important;
+    }
+    
+    [data-baseweb="tab"]:hover {
+        background-color: #2d3748 !important;
+    }
+    
+    /* Estilos para los mensajes de error */
+    .stAlert.stAlert-warning {
+        border-left: 4px solid #ff9800 !important;
+    }
+    
+    .stAlert.stAlert-error {
+        border-left: 4px solid #f44336 !important;
+    }
+    
+    .stAlert.stAlert-success {
+        border-left: 4px solid #4CAF50 !important;
+    }
+    
+    .stAlert.stAlert-info {
+        border-left: 4px solid #2196F3 !important;
+    }
+    
+    /* Mejora de tarjetas y métricas */
+    .stMetric, 
+    .stMetric > div > div,
+    .stMetric > div > div > div {
+        background-color: #1e293b !important;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        border-left: 4px solid #4CAF50;
+        color: #f8f9fa !important;
+    }
+    
+    .stMetric > div > div {
+        color: #94a3b8 !important;
+    }
+    
+    /* Mejora de pestañas */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 5px;
+        background-color: #0f172a;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        padding: 0 20px;
+        background-color: #1e293b;
+        border-radius: 8px !important;
+        font-weight: 500;
+        color: #e2e8f0;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #4CAF50 !important;
+        color: white !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #334155 !important;
+    }
+    
+    /* Mejora de inputs */
+    .stTextInput, .stNumberInput, .stDateInput, .stSelectbox, .stTextArea {
+        background-color: #1e293b;
+        border-radius: 8px;
+        color: #e2e8f0;
+        border: 1px solid #334155;
+    }
+    
+    /* Estilos para las etiquetas de los inputs */
+    .stTextInput > label, .stNumberInput > label, 
+    .stDateInput > label, .stSelectbox > label,
+    .stTextArea > label {
+        color: #94a3b8 !important;
+    }
+    
+    /* Botones */
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 500;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        transition: all 0.2s;
+    }
+    
+    .stButton > button:hover {
+        background-color: #45a049;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
+    
+    /* Barra lateral */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f172a, #0c1424);
+        color: white;
+    }
+    
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stTextInput label,
+    [data-testid="stSidebar"] .stNumberInput label {
+        color: #94a3b8 !important;
+    }
+    
+    /* Títulos */
+    h1, h2, h3, h4, h5, h6 {
+        color: #4CAF50;
+        font-weight: 600;
+    }
+    
+    /* Tablas */
+    .dataframe {
+        background-color: #1e293b !important;
+        color: #e2e8f0 !important;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
+    
+    .dataframe th {
+        background-color: #334155 !important;
+        color: #e2e8f0 !important;
+    }
+    
+    .dataframe tr:nth-child(even) {
+        background-color: #1a2233 !important;
+    }
+    
+    .dataframe tr:hover {
+        background-color: #2c3a58 !important;
+    }
+    
+    /* Progress bar */
+    .stProgress > div > div > div {
+        background-color: #4CAF50;
+    }
+    
+    /* Scrollbar personalizada */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #0f172a;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #4CAF50;
+        border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #45a049;
+    }
+    
+    /* Efectos hover para tarjetas */
+    div[data-testid="stExpander"] {
+        background-color: #1e293b;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        transition: all 0.3s ease;
+    }
+    
+    div[data-testid="stExpander"]:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        transform: translateY(-2px);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def obtener_encabezado_autorizacion(token_portador):
+    return {
+        'Authorization': f'Bearer {token_portador}',
+        'Content-Type': 'application/json'
+    }
+
+def obtener_tokens(usuario, contraseña):
+    """
+    Obtiene tokens de autenticación de IOL con manejo mejorado de errores y reintentos
+    """
+    url_login = 'https://api.invertironline.com/token'
+    datos = {
+        'username': usuario,
+        'password': contraseña,
+        'grant_type': 'password'
+    }
+    
+    # Configuración de sesión con reintentos
+    session = requests.Session()
+    session.mount('https://', requests.adapters.HTTPAdapter(
+        max_retries=3,
+        pool_connections=10,
+        pool_maxsize=10
+    ))
+    
+    # Headers adicionales para mejorar la conexión
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            st.info(f"🔄 Intento {attempt + 1}/{max_attempts} de conexión a IOL...")
+            
+            # Timeout más largo para la primera conexión
+            timeout = 30 if attempt == 0 else 15
+            
+            respuesta = session.post(
+                url_login, 
+                data=datos, 
+                headers=headers,
+                timeout=timeout,
+                verify=True  # Verificar certificados SSL
+            )
+            
+            # Verificar si la respuesta es exitosa
+            if respuesta.status_code == 200:
+                try:
+                    respuesta_json = respuesta.json()
+                    if 'access_token' in respuesta_json and 'refresh_token' in respuesta_json:
+                        st.success("✅ Autenticación exitosa con IOL")
+                        return respuesta_json['access_token'], respuesta_json['refresh_token']
+                    else:
+                        st.error("❌ Respuesta de IOL incompleta - faltan tokens")
+                        return None, None
+                except ValueError as json_err:
+                    st.error(f"❌ Error al procesar respuesta JSON: {json_err}")
+                    return None, None
+            
+            # Manejar códigos de error específicos
+            elif respuesta.status_code == 400:
+                st.error("❌ Error 400: Verifique sus credenciales (usuario/contraseña)")
+                return None, None
+            elif respuesta.status_code == 401:
+                st.error("❌ Error 401: Credenciales inválidas o cuenta bloqueada")
+                return None, None
+            elif respuesta.status_code == 403:
+                st.error("❌ Error 403: Acceso denegado - verifique permisos de su cuenta")
+                return None, None
+            elif respuesta.status_code == 429:
+                st.warning("⚠️ Demasiadas solicitudes. Esperando antes de reintentar...")
+                if attempt < max_attempts - 1:
+                    time.sleep(2 ** attempt)  # Backoff exponencial
+                    continue
+                else:
+                    st.error("❌ Límite de solicitudes excedido")
+                    return None, None
+            elif respuesta.status_code >= 500:
+                st.warning(f"⚠️ Error del servidor ({respuesta.status_code}). Reintentando...")
+                if attempt < max_attempts - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                else:
+                    st.error(f"❌ Error persistente del servidor: {respuesta.status_code}")
+                    return None, None
+            else:
+                st.error(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text[:200]}")
+                return None, None
+                
+        except requests.exceptions.Timeout:
+            st.warning(f"⏱️ Timeout en intento {attempt + 1}. Reintentando...")
+            if attempt < max_attempts - 1:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                st.error("❌ Timeout persistente al conectar con IOL")
+                st.info("💡 Sugerencias:")
+                st.info("• Verifique su conexión a internet")
+                st.info("• Intente nuevamente en unos minutos")
+                st.info("• Contacte a IOL si el problema persiste")
+                return None, None
+                
+        except requests.exceptions.ConnectionError:
+            st.warning(f"🔌 Error de conexión en intento {attempt + 1}. Reintentando...")
+            if attempt < max_attempts - 1:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                st.error("❌ Error de conexión persistente")
+                st.info("💡 Verifique:")
+                st.info("• Su conexión a internet")
+                st.info("• Que no haya firewall bloqueando la conexión")
+                st.info("• Que el servidor de IOL esté disponible")
+                return None, None
+                
+        except requests.exceptions.SSLError:
+            st.error("❌ Error de certificado SSL")
+            st.info("💡 Esto puede indicar problemas de seguridad de red")
+            return None, None
+            
+        except Exception as e:
+            st.error(f"❌ Error inesperado: {str(e)}")
+            if attempt < max_attempts - 1:
+                st.info("🔄 Reintentando...")
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                return None, None
+    
+    st.error("❌ No se pudo establecer conexión después de múltiples intentos")
+    return None, None
+
+def refrescar_token(refresh_token):
+    """
+    Refresca el token de acceso usando el refresh token
+    """
+    url_refresh = 'https://api.invertironline.com/token'
+    datos_refresh = {
+        'grant_type': 'refresh_token',
+        'refresh_token': refresh_token
+    }
+    
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    }
+    
+    try:
+        respuesta = requests.post(url_refresh, data=datos_refresh, headers=headers, timeout=30)
+        
+        if respuesta.status_code == 200:
+            respuesta_json = respuesta.json()
+            if 'access_token' in respuesta_json and 'refresh_token' in respuesta_json:
+                st.success("✅ Token refrescado exitosamente")
+                return respuesta_json['access_token'], respuesta_json['refresh_token']
+            else:
+                st.error("❌ Respuesta de refresh inválida")
+                return None, None
+        elif respuesta.status_code == 400:
+            st.error("❌ Error 400: Refresh token inválido")
+            return None, None
+        elif respuesta.status_code == 401:
+            st.error("❌ Error 401: Refresh token expirado")
+            return None, None
+        else:
+            st.error(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text[:200]}")
+            return None, None
+            
+    except Exception as e:
+        st.error(f"❌ Error al refrescar token: {str(e)}")
+        return None, None
+
+def verificar_y_refrescar_token(token_acceso, refresh_token):
+    """
+    Verifica si el token está válido y lo refresca si es necesario
+    """
+    if not token_acceso or not refresh_token:
+        return None, None
+    
+    # Probar el token con una llamada simple
+    url_test = 'https://api.invertironline.com/api/v2/estadocuenta'
+    headers = obtener_encabezado_autorizacion(token_acceso)
+    
+    try:
+        respuesta = requests.get(url_test, headers=headers, timeout=10)
+        if respuesta.status_code == 200:
+            return token_acceso, refresh_token  # Token válido
+        elif respuesta.status_code == 401:
+            st.warning("⚠️ Token expirado, intentando refrescar...")
+            nuevo_token, nuevo_refresh = refrescar_token(refresh_token)
+            if nuevo_token:
+                return nuevo_token, nuevo_refresh
+            else:
+                st.error("❌ No se pudo refrescar el token")
+                return None, None
+        else:
+            return token_acceso, refresh_token  # Otro error, mantener token actual
+    except Exception:
+        return token_acceso, refresh_token  # Error de conexión, mantener token actual
+
+def obtener_lista_clientes(token_portador):
+    """
+    Obtiene la lista de clientes del asesor
+    
+    Args:
+        token_portador (str): Token de autenticación
+        
+    Returns:
+        list: Lista de clientes o lista vacía en caso de error
+    """
+    url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    try:
+        respuesta = requests.get(url_clientes, headers=encabezados, timeout=30)
+        if respuesta.status_code == 200:
+            clientes_data = respuesta.json()
+            if isinstance(clientes_data, list):
+                return clientes_data
+            elif isinstance(clientes_data, dict) and 'clientes' in clientes_data:
+                return clientes_data['clientes']
+            else:
+                st.warning("Formato de respuesta inesperado al obtener clientes")
+                return []
+        elif respuesta.status_code == 401:
+            st.error("Error de autenticación al obtener lista de clientes")
+            return []
+        elif respuesta.status_code == 403:
+            st.error("No tiene permisos para acceder a la lista de clientes")
+            return []
+        else:
+            st.error(f'Error HTTP {respuesta.status_code} al obtener la lista de clientes')
+            return []
+    except requests.exceptions.Timeout:
+        st.error("Timeout al obtener lista de clientes")
+        return []
+    except Exception as e:
+        st.error(f'Error de conexión al obtener clientes: {str(e)}')
+        return []
+
+def obtener_estado_cuenta(token_portador, id_cliente=None):
+    """
+    Obtiene el estado de cuenta del cliente o del usuario autenticado
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str, optional): ID del cliente. Si es None, obtiene el estado de cuenta del usuario
+        
+    Returns:
+        dict: Estado de cuenta o None en caso de error
+    """
+    # Evitar recursión infinita
+    if hasattr(obtener_estado_cuenta, '_recursion_depth'):
+        obtener_estado_cuenta._recursion_depth += 1
+    else:
+        obtener_estado_cuenta._recursion_depth = 0
+    
+    # Limitar la profundidad de recursión
+    if obtener_estado_cuenta._recursion_depth > 2:
+        st.error("Error: Demasiadas llamadas recursivas al obtener estado de cuenta")
+        obtener_estado_cuenta._recursion_depth = 0
+        return None
+    
+    if id_cliente:
+        url_estado_cuenta = f'https://api.invertironline.com/api/v2/Asesores/EstadoDeCuenta/{id_cliente}'
+    else:
+        url_estado_cuenta = 'https://api.invertironline.com/api/v2/estadocuenta'
+    
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    try:
+        respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
+        if respuesta.status_code == 200:
+            # Resetear contador de recursión en caso de éxito
+            obtener_estado_cuenta._recursion_depth = 0
+            return respuesta.json()
+        elif respuesta.status_code == 401:
+            # Solo intentar una vez más sin ID de cliente
+            if obtener_estado_cuenta._recursion_depth == 1:
+                st.warning("Error de autenticación. Intentando obtener estado de cuenta general...")
+                return obtener_estado_cuenta(token_portador, None)
+            else:
+                st.error("Error de autenticación persistente")
+                obtener_estado_cuenta._recursion_depth = 0
+                return None
+        else:
+            st.error(f"Error HTTP {respuesta.status_code} al obtener estado de cuenta")
+            obtener_estado_cuenta._recursion_depth = 0
+            return None
+    except requests.exceptions.Timeout:
+        st.error("Timeout al obtener estado de cuenta")
+        obtener_estado_cuenta._recursion_depth = 0
+        return None
+    except Exception as e:
+        st.error(f'Error al obtener estado de cuenta: {str(e)}')
+        obtener_estado_cuenta._recursion_depth = 0
+        return None
+
+def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
+    """
+    Obtiene el portafolio de un cliente específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        pais (str): País del portafolio (default: 'Argentina')
+        
+    Returns:
+        dict: Portafolio del cliente o None en caso de error
+    """
+    url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    try:
+        respuesta = requests.get(url_portafolio, headers=encabezados, timeout=30)
+        if respuesta.status_code == 200:
+            return respuesta.json()
+        elif respuesta.status_code == 401:
+            st.error("Error de autenticación al obtener portafolio")
+            return None
+        elif respuesta.status_code == 404:
+            st.warning(f"No se encontró portafolio para el cliente {id_cliente}")
+            return None
+        else:
+            st.error(f"Error HTTP {respuesta.status_code} al obtener portafolio")
+            return None
+    except requests.exceptions.Timeout:
+        st.error("Timeout al obtener portafolio")
+        return None
+    except Exception as e:
+        st.error(f'Error al obtener portafolio: {str(e)}')
+        return None
+
+def obtener_portafolio_eeuu(token_portador, id_cliente):
+    """
+    Obtiene el portafolio de Estados Unidos de un cliente específico
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str): ID del cliente
+        
+    Returns:
+        dict: Portafolio de EEUU del cliente o None en caso de error
+    """
+    # Intentar primero con el endpoint de Asesores (mismo que Argentina)
+    url_portafolio_asesores = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/estados_Unidos'
+    encabezados = obtener_encabezado_autorizacion(token_portador)
+    
+    st.info(f"🔍 Intentando obtener portafolio EEUU del cliente {id_cliente}")
+    st.info(f"🔑 Token válido: {'Sí' if token_portador else 'No'}")
+    
+    try:
+        # Primer intento: endpoint de Asesores
+        respuesta = requests.get(url_portafolio_asesores, headers=encabezados, timeout=30)
+        
+        if respuesta.status_code == 200:
+            data = respuesta.json()
+            st.success(f"✅ Portafolio EEUU obtenido vía Asesores: {len(data.get('activos', []))} activos")
+            return data
+        elif respuesta.status_code == 404:
+            st.info("ℹ️ No se encontró portafolio EEUU vía Asesores, intentando endpoint directo...")
+            
+            # Segundo intento: endpoint directo
+            url_portafolio_directo = f'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+            respuesta_directo = requests.get(url_portafolio_directo, headers=encabezados, timeout=30)
+            
+            if respuesta_directo.status_code == 200:
+                data_directo = respuesta_directo.json()
+                st.success(f"✅ Portafolio EEUU obtenido vía endpoint directo: {len(data_directo.get('activos', []))} activos")
+                return data_directo
+            elif respuesta_directo.status_code == 401:
+                st.error("❌ Error 401: Token de autenticación inválido o expirado")
+                st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
+                return None
+            elif respuesta_directo.status_code == 403:
+                st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
+                st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
+                return None
+            else:
+                st.error(f"❌ Error HTTP {respuesta_directo.status_code} en endpoint directo")
+                st.info(f"📄 Respuesta: {respuesta_directo.text[:500]}")
+                return None
+                
+        elif respuesta.status_code == 401:
+            st.error("❌ Error 401: Token de autenticación inválido o expirado")
+            st.info("💡 Intente refrescar el token o inicie sesión nuevamente")
+            return None
+        elif respuesta.status_code == 403:
+            st.error("❌ Error 403: Acceso denegado al portafolio de EEUU")
+            st.info("💡 Verifique que su cuenta tenga permisos para acceder a portafolios de EEUU")
+            return None
+        else:
+            st.error(f"❌ Error HTTP {respuesta.status_code} en endpoint de Asesores")
+            st.info(f"📄 Respuesta: {respuesta.text[:500]}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Timeout al obtener portafolio de EEUU")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error("🔌 Error de conexión al obtener portafolio de EEUU")
+        return None
+    except Exception as e:
+        st.error(f'❌ Error inesperado al obtener portafolio de EEUU: {str(e)}')
+        return None
+
 def obtener_estado_cuenta_eeuu(token_portador):
     """
     Obtiene el estado de cuenta de Estados Unidos del usuario autenticado
