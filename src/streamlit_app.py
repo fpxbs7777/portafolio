@@ -2661,11 +2661,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             
                                             rendimiento_extra_total += rendimiento * peso_instrumento
                                         
-                                        # Mostrar métricas de rendimiento extra
-                                        col1, col2, col3 = st.columns(3)
-                                        col1.metric("Peso Renta Fija", f"{peso_renta_fija:.1%}")
-                                        col2.metric("Rendimiento Extra Estimado", f"{rendimiento_extra_total:.1%}")
-                                        col3.metric("Valor Renta Fija", f"${total_renta_fija:,.2f}")
+                                        # Ocultar métricas de rendimiento extra por solicitud
                                         
                                         # Gráfico de composición por tipo de instrumento
                                         if len(instrumentos_renta_fija) > 1:
@@ -2683,29 +2679,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             )
                                             st.plotly_chart(fig_renta_fija, use_container_width=True)
                                         
-                                        # Recomendaciones específicas para renta fija
-                                        st.markdown("#### 💡 Recomendaciones Renta Fija")
-                                        
-                                        if peso_renta_fija < 0.2:
-                                            st.info("📈 **Considerar aumentar exposición a renta fija**: Menos del 20% del portafolio")
-                                        elif peso_renta_fija > 0.6:
-                                            st.warning("📉 **Considerar reducir exposición a renta fija**: Más del 60% del portafolio")
-                                        else:
-                                            st.success("✅ **Exposición equilibrada a renta fija**: Entre 20% y 60% del portafolio")
-                                        
-                                        if rendimiento_extra_total > 0.10:
-                                            st.success("🎯 **Excelente rendimiento extra estimado**: Más del 10% anual")
-                                        elif rendimiento_extra_total > 0.05:
-                                            st.info("📊 **Buen rendimiento extra estimado**: Entre 5% y 10% anual")
-                                        else:
-                                            st.warning("⚠️ **Rendimiento extra bajo**: Menos del 5% anual")
-                                    
                                     else:
-                                        st.info("ℹ️ No se identificaron instrumentos de renta fija en el portafolio")
-                                        st.info("💡 **Recomendación**: Considerar agregar FCIs, bonos o títulos públicos para diversificar")
+                                        pass
                                 
                                 # Análisis de retorno esperado por horizonte de inversión
-                                st.markdown("#### 📊 Análisis de Retorno Esperado")
+                                st.markdown("#### Análisis de retorno esperado")
                                 
                                 # Calcular retornos en USD para diferentes horizontes
                                 horizontes_analisis = [1, 7, 30, 90, 180, 365]
@@ -2734,106 +2712,43 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     retornos_ars = list(retornos_ars_por_horizonte.values())
                                     retornos_usd = list(retornos_usd_por_horizonte.values())
                                     
+                                    etiquetas_x = [f"{h} días" for h in horizontes]
                                     # Barras para ARS
                                     fig_horizontes.add_trace(go.Bar(
-                                        x=[f"{h} días" for h in horizontes],
+                                        x=etiquetas_x,
                                         y=retornos_ars,
                                         name="Retorno ARS",
-                                        marker_color=['#28a745' if r >= 0 else '#dc3545' for r in retornos_ars],
+                                        marker_color="#10b981",
+                                        hovertemplate="ARS: %{y:.2%}<extra></extra>",
                                         text=[f"{r:.2%}" for r in retornos_ars],
                                         textposition='auto'
                                     ))
-                                    
                                     # Barras para USD
                                     fig_horizontes.add_trace(go.Bar(
-                                        x=[f"{h} días" for h in horizontes],
+                                        x=etiquetas_x,
                                         y=retornos_usd,
                                         name="Retorno USD",
-                                        marker_color=['#0d6efd' if r >= 0 else '#ff6b6b' for r in retornos_usd],
+                                        marker_color="#3b82f6",
+                                        hovertemplate="USD: %{y:.2%}<extra></extra>",
                                         text=[f"{r:.2%}" for r in retornos_usd],
                                         textposition='auto'
                                     ))
                                     
+                                    fig_horizontes.add_hline(y=0, line_dash="dash", line_color="#9ca3af")
                                     fig_horizontes.update_layout(
-                                        title=f"Retornos Acumulados por Horizonte de Inversión (ARS y USD)",
-                                        xaxis_title="Horizonte de Inversión",
-                                        yaxis_title="Retorno Acumulado",
-                                        height=400,
-                                        template='plotly_white',
-                                        barmode='group'
+                                        title="Retornos acumulados por horizonte de inversión (ARS y USD)",
+                                        xaxis_title="Horizonte de inversión",
+                                        yaxis_title="Retorno acumulado",
+                                        height=420,
+                                        template='plotly_dark',
+                                        barmode='group',
+                                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                                        margin=dict(t=60, r=20, b=40, l=50)
                                     )
                                     
                                     st.plotly_chart(fig_horizontes, use_container_width=True)
                                     
-                                    # Mostrar métricas de retorno esperado (ARS y USD)
-                                    st.markdown("#### 📈 Métricas de Retorno Esperado")
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    
-                                    # Calcular retorno esperado anualizado en ARS
-                                    retorno_anualizado_ars = mean_return_annual
-                                    col1.metric("Retorno Esperado Anual (ARS)", f"{retorno_anualizado_ars:.2%}")
-                                    
-                                    # Calcular retorno esperado anualizado en USD
-                                    mean_return_annual_usd = df_portfolio_returns_usd.mean() * 252
-                                    col2.metric("Retorno Esperado Anual (USD)", f"{mean_return_annual_usd:.2%}")
-                                    
-                                    # Calcular retorno esperado para el horizonte seleccionado
-                                    retorno_esperado_horizonte_ars = retorno_anualizado_ars * (dias_analisis / 365)
-                                    retorno_esperado_horizonte_usd = mean_return_annual_usd * (dias_analisis / 365)
-                                    col3.metric(f"Retorno Esperado ({dias_analisis} días) ARS", f"{retorno_esperado_horizonte_ars:.2%}")
-                                    col4.metric(f"Retorno Esperado ({dias_analisis} días) USD", f"{retorno_esperado_horizonte_usd:.2%}")
-                                    
-                                    # Calcular intervalos de confianza
-                                    z_score_95 = 1.96  # 95% de confianza
-                                    std_return_annual_usd = df_portfolio_returns_usd.std() * np.sqrt(252)
-                                    intervalo_confianza_ars = z_score_95 * std_return_annual * np.sqrt(dias_analisis / 365)
-                                    intervalo_confianza_usd = z_score_95 * std_return_annual_usd * np.sqrt(dias_analisis / 365)
-                                    
-                                    col1, col2 = st.columns(2)
-                                    col1.metric("Intervalo de Confianza 95% (ARS)", f"±{intervalo_confianza_ars:.2%}")
-                                    col2.metric("Intervalo de Confianza 95% (USD)", f"±{intervalo_confianza_usd:.2%}")
-                                    
-                                    # Proyecciones de valor del portafolio
-                                    st.markdown("#### 💰 Proyecciones de Valor del Portafolio")
-                                    
-                                    valor_actual = df_portfolio['Portfolio_Total'].iloc[-1]
-                                    
-                                    # Calcular proyecciones optimista, pesimista y esperada
-                                    proyeccion_esperada = valor_actual * (1 + retorno_esperado_horizonte_ars)
-                                    proyeccion_optimista = valor_actual * (1 + retorno_esperado_horizonte_ars + intervalo_confianza_ars)
-                                    proyeccion_pesimista = valor_actual * (1 + retorno_esperado_horizonte_ars - intervalo_confianza_ars)
-                                    
-                                    col1, col2, col3 = st.columns(3)
-                                    col1.metric("Proyección Esperada", f"${proyeccion_esperada:,.2f}")
-                                    col2.metric("Proyección Optimista", f"${proyeccion_optimista:,.2f}")
-                                    col3.metric("Proyección Pesimista", f"${proyeccion_pesimista:,.2f}")
-                                    
-
-                                    
-                                    # Resumen de análisis
-                                    st.markdown("#### 📋 Resumen del Análisis")
-                                    
-                                    if retorno_esperado_horizonte_ars > 0:
-                                        st.success(f"✅ **Retorno Esperado Positivo**: Se espera un retorno de {retorno_esperado_horizonte_ars:.2%} en {dias_analisis} días")
-                                    else:
-                                        st.warning(f"⚠️ **Retorno Esperado Negativo**: Se espera un retorno de {retorno_esperado_horizonte_ars:.2%} en {dias_analisis} días")
-                                    
-                                    if sharpe_ratio > 1:
-                                        st.success(f"✅ **Excelente Ratio de Sharpe**: {sharpe_ratio:.2f} indica buenos retornos ajustados por riesgo")
-                                    elif sharpe_ratio > 0.5:
-                                        st.info(f"ℹ️ **Buen Ratio de Sharpe**: {sharpe_ratio:.2f} indica retornos razonables ajustados por riesgo")
-                                    else:
-                                        st.warning(f"⚠️ **Ratio de Sharpe Bajo**: {sharpe_ratio:.2f} indica retornos pobres ajustados por riesgo")
-                                    
-                                    # Recomendaciones basadas en el análisis
-                                    st.markdown("#### 💡 Recomendaciones")
-                                    
-                                    if retorno_esperado_horizonte_ars > 0.05:  # 5% en el horizonte
-                                        st.success("🎯 **Mantener Posición**: El portafolio muestra buenas perspectivas de retorno")
-                                    elif retorno_esperado_horizonte_ars < -0.05:  # -5% en el horizonte
-                                        st.warning("🔄 **Considerar Rebalanceo**: El portafolio podría beneficiarse de ajustes")
-                                    else:
-                                        st.info("📊 **Monitorear**: El portafolio muestra retornos moderados")
+                                    # Se removieron métricas y proyecciones de retorno esperado y recomendaciones
                                 
                                 else:
                                     st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
@@ -2854,7 +2769,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 st.exception(e)
         
         # Tabla de activos
-        st.subheader("📋 Detalle de Activos")
+        st.subheader("Detalle de activos")
         df_display = df_activos.copy()
         df_display['Valuación'] = df_display['Valuación'].apply(
             lambda x: f"${x:,.2f}" if x > 0 else "N/A"
@@ -2864,36 +2779,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         st.dataframe(df_display, use_container_width=True, height=400)
         
-        # Recomendaciones
-        st.subheader("💡 Recomendaciones")
+        # Recomendaciones (removidas por solicitud)
+        # st.subheader("Recomendaciones")
         if metricas:
-            if metricas['concentracion'] > 0.5:
-                st.warning("""
-                **⚠️ Portafolio Altamente Concentrado**  
-                Considere diversificar sus inversiones para reducir el riesgo.
-                """)
-            elif metricas['concentracion'] > 0.25:
-                st.info("""
-                **ℹ️ Concentración Moderada**  
-                Podría mejorar su diversificación para optimizar el riesgo.
-                """)
-            else:
-                st.success("""
-                **✅ Buena Diversificación**  
-                Su portafolio está bien diversificado.
-                """)
-            
-            ratio_riesgo_retorno = metricas['retorno_esperado_anual'] / metricas['riesgo_anual'] if metricas['riesgo_anual'] > 0 else 0
-            if ratio_riesgo_retorno > 0.5:
-                st.success("""
-                **✅ Buen Balance Riesgo-Retorno**  
-                La relación entre riesgo y retorno es favorable.
-                """)
-            else:
-                st.warning("""
-                **⚠️ Revisar Balance Riesgo-Retorno**  
-                El riesgo podría ser alto en relación al retorno esperado.
-                """)
+            pass
     else:
         st.warning("No se encontraron activos en el portafolio")
 
