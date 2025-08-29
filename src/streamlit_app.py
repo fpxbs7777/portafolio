@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore')
 # Configuración de la página con aspecto profesional
 st.set_page_config(
     page_title="IOL Portfolio Analyzer",
-    page_icon="📊",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -29,17 +29,19 @@ st.markdown("""
 <style>
     /* Estilos generales */
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #0f172a;
+        color: #e5e7eb;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     
     /* Mejora de tarjetas y métricas */
     .stMetric {
-        background-color: white;
+        background-color: #111827;
+        color: #e5e7eb;
         border-radius: 10px;
         padding: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        border-left: 4px solid #0d6efd;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.25);
+        border-left: 4px solid #3b82f6;
     }
     
     /* Mejora de pestañas */
@@ -50,15 +52,16 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] {
         height: 45px;
         padding: 0 20px;
-        background-color: #e9ecef;
+        background-color: #1f2937;
         border-radius: 8px !important;
         font-weight: 500;
         transition: all 0.3s ease;
+        color: #e5e7eb;
     }
     
     .stTabs [aria-selected="true"] {
-        background-color: #0d6efd !important;
-        color: white !important;
+        background-color: #3b82f6 !important;
+        color: #ffffff !important;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
@@ -104,7 +107,7 @@ st.markdown("""
     
     /* Títulos */
     h1, h2, h3, h4, h5, h6 {
-        color: #2c3e50;
+        color: #e5e7eb;
         font-weight: 600;
     }
     
@@ -750,15 +753,17 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 error_msg += f" - Respuesta: {e.response.text[:200]}"
             except:
                 pass
+        # Log en consola, sin ruido en la UI
         print(error_msg)
-        st.warning(error_msg)
         return None
     except Exception as e:
         error_msg = f"Error inesperado al procesar {simbolo} en {mercado}: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
-        st.error(error_msg)
+        # Log en consola, sin ruido en la UI
+        # Mantener errores críticos para depuración si se desea reactivar
+        print(error_msg)
         return None
         return None
 
@@ -2096,7 +2101,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
 
         
         # Gráficos
-        st.subheader("📊 Distribución de Activos")
+        st.subheader("Distribución de activos")
         
         if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
             tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
@@ -2108,17 +2113,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
             )])
             fig_pie.update_layout(
-                title="Distribución por Tipo",
-                height=400
+                title="Distribución por tipo",
+                height=400,
+                template='plotly_dark'
             )
             st.plotly_chart(fig_pie, use_container_width=True)
         
         # Histograma del portafolio total valorizado
-        st.subheader("📈 Histograma del Portafolio Total Valorizado")
+        st.subheader("Histograma del valor total del portafolio")
         
         # Configuración del horizonte de inversión
         horizonte_inversion = st.selectbox(
-            "Horizonte de Inversión:",
+            "Horizonte de inversión:",
             options=[
                 ("30 días", 30),
                 ("60 días", 60),
@@ -2135,7 +2141,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Intervalo de análisis fijo en diario
         intervalo_analisis = ("Diario", "D")
-        st.info("📊 Análisis configurado en frecuencia diaria")
+        st.info("Análisis configurado con frecuencia diaria")
         
         # Extraer valores de las tuplas
         dias_analisis = horizonte_inversion[1]
@@ -2191,9 +2197,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     'peso': peso,
                                     'serie': serie
                                 })
-                                st.success(f"✅ {simbolo}: {len(serie)} puntos de datos")
+                                # Registro conciso en consola sin UI ruidosa
+                                print(f"Serie histórica cargada: {simbolo} ({len(serie)} puntos)")
                             else:
-                                st.warning(f"⚠️ No se pudieron obtener datos para {simbolo}")
+                                print(f"Advertencia: no se pudieron obtener datos para {simbolo}")
                     
                     if len(activos_exitosos) > 0:
                         # Crear DataFrame con todas las series alineadas
@@ -2209,7 +2216,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 fechas_comunes = fechas_comunes.intersection(set(serie.index))
                         
                         if not fechas_comunes:
-                            st.warning("⚠️ No hay fechas comunes entre las series históricas")
+                            st.warning("No hay fechas comunes entre las series históricas")
                             return
                         
                         # Convertir a lista ordenada
@@ -2258,17 +2265,17 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         # Si solo hay un precio, usar la valuación actual
                                         df_portfolio[simbolo] = valuacion_activo
                                 else:
-                                    st.warning(f"⚠️ No se encontraron valores numéricos para {simbolo}")
+                                    st.warning(f"No se encontraron valores numéricos para {simbolo}")
                                     continue
                         
                         # Calcular valor total del portafolio por fecha
                         df_portfolio['Portfolio_Total'] = df_portfolio.sum(axis=1)
                         
-                        # Mostrar información de debug
-                        st.info(f"🔍 Debug: Valor total actual del portafolio: ${valor_total:,.2f}")
-                        st.info(f"🔍 Debug: Columnas en df_portfolio: {list(df_portfolio.columns)}")
-                        if len(df_portfolio) > 0:
-                            st.info(f"🔍 Debug: Último valor calculado: ${df_portfolio['Portfolio_Total'].iloc[-1]:,.2f}")
+                        # Debug silenciado en UI; dejar trazas en consola si es necesario
+                        # print(f"Valor total actual del portafolio: ${valor_total:,.2f}")
+                        # print(f"Columnas en df_portfolio: {list(df_portfolio.columns)}")
+                        # if len(df_portfolio) > 0:
+                        #     print(f"Último valor calculado: ${df_portfolio['Portfolio_Total'].iloc[-1]:,.2f}")
                         
                         # Eliminar filas con valores NaN
                         df_portfolio = df_portfolio.dropna()
@@ -2280,8 +2287,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             fig_hist = go.Figure(data=[go.Histogram(
                                 x=valores_portfolio,
                                 nbinsx=30,
-                                name="Valor Total del Portafolio",
-                                marker_color='#0d6efd',
+                                name="Valor total del portafolio",
+                                marker_color='#3b82f6',
                                 opacity=0.7
                             )])
                             
@@ -2291,28 +2298,28 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             percentil_5 = np.percentile(valores_portfolio, 5)
                             percentil_95 = np.percentile(valores_portfolio, 95)
                             
-                            fig_hist.add_vline(x=media_valor, line_dash="dash", line_color="red", 
+                            fig_hist.add_vline(x=media_valor, line_dash="dash", line_color="#ef4444", 
                                              annotation_text=f"Media: ${media_valor:,.2f}")
-                            fig_hist.add_vline(x=mediana_valor, line_dash="dash", line_color="green", 
+                            fig_hist.add_vline(x=mediana_valor, line_dash="dash", line_color="#10b981", 
                                              annotation_text=f"Mediana: ${mediana_valor:,.2f}")
-                            fig_hist.add_vline(x=percentil_5, line_dash="dash", line_color="orange", 
+                            fig_hist.add_vline(x=percentil_5, line_dash="dash", line_color="#f59e0b", 
                                              annotation_text=f"P5: ${percentil_5:,.2f}")
-                            fig_hist.add_vline(x=percentil_95, line_dash="dash", line_color="purple", 
+                            fig_hist.add_vline(x=percentil_95, line_dash="dash", line_color="#8b5cf6", 
                                              annotation_text=f"P95: ${percentil_95:,.2f}")
                             
                             fig_hist.update_layout(
-                                title="Distribución del Valor Total del Portafolio",
-                                xaxis_title="Valor del Portafolio ($)",
+                                title="Distribución del valor total del portafolio",
+                                xaxis_title="Valor del portafolio ($)",
                                 yaxis_title="Frecuencia",
                                 height=500,
                                 showlegend=False,
-                                template='plotly_white'
+                                template='plotly_dark'
                             )
                             
                             st.plotly_chart(fig_hist, use_container_width=True)
                             
                             # Mostrar estadísticas del histograma
-                            st.markdown("#### 📊 Estadísticas del Histograma")
+                            st.markdown("#### Estadísticas del histograma")
                             col1, col2, col3, col4 = st.columns(4)
                             
                             col1.metric("Valor Promedio", f"${media_valor:,.2f}")
@@ -2321,29 +2328,29 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             col4.metric("Valor Máximo (P95)", f"${percentil_95:,.2f}")
                             
                             # Mostrar evolución temporal del portafolio
-                            st.markdown("#### 📈 Evolución Temporal del Portafolio")
+                            st.markdown("#### Evolución temporal del portafolio")
                             
                             fig_evolucion = go.Figure()
                             fig_evolucion.add_trace(go.Scatter(
                                 x=df_portfolio.index,
                                 y=df_portfolio['Portfolio_Total'],
                                 mode='lines',
-                                name='Valor Total del Portafolio',
-                                line=dict(color='#0d6efd', width=2)
+                                name='Valor total del portafolio',
+                                line=dict(color='#3b82f6', width=2)
                             ))
                             
                             fig_evolucion.update_layout(
-                                title="Evolución del Valor del Portafolio en el Tiempo",
+                                title="Evolución del valor del portafolio en el tiempo",
                                 xaxis_title="Fecha",
-                                yaxis_title="Valor del Portafolio ($)",
+                                yaxis_title="Valor del portafolio ($)",
                                 height=400,
-                                template='plotly_white'
+                                template='plotly_dark'
                             )
                             
                             st.plotly_chart(fig_evolucion, use_container_width=True)
                             
                             # Mostrar contribución de cada activo
-                            st.markdown("#### 🥧 Contribución de Activos al Valor Total")
+                            st.markdown("#### Contribución de activos al valor total")
                             
                             contribucion_activos = {}
                             for activo_info in activos_exitosos:
@@ -2407,18 +2414,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                                              annotation_text=f"VaR 99%: {var_99:.4f}")
                                     
                                     fig_returns_hist.update_layout(
-                                        title="Distribución de Retornos Diarios del Portafolio",
-                                        xaxis_title="Retorno Diario",
+                                        title="Distribución de retornos diarios del portafolio",
+                                        xaxis_title="Retorno diario",
                                         yaxis_title="Frecuencia",
                                         height=500,
                                         showlegend=False,
-                                        template='plotly_white'
+                                        template='plotly_dark'
                                     )
                                     
                                     st.plotly_chart(fig_returns_hist, use_container_width=True)
                                     
                                     # Mostrar estadísticas de retornos
-                                    st.markdown("#### 📈 Estadísticas de Retornos")
+                                    st.markdown("#### Estadísticas de retornos")
                                     col1, col2, col3, col4 = st.columns(4)
                                     
                                     col1.metric("Retorno Medio Diario", f"{mean_return:.4f}")
@@ -2430,7 +2437,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     col1.metric("Skewness", f"{skewness:.4f}")
                                     col2.metric("Kurtosis", f"{kurtosis:.4f}")
                                     col3.metric("JB Statistic", f"{jb_stat:.4f}")
-                                    normalidad = "✅ Normal" if is_normal else "❌ No Normal"
+                                    normalidad = "Normal" if is_normal else "No normal"
                                     col4.metric("Normalidad", normalidad)
                                     
                                     # Calcular métricas anualizadas
@@ -2438,32 +2445,32 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     std_return_annual = std_return * np.sqrt(252)
                                     sharpe_ratio = mean_return_annual / std_return_annual if std_return_annual > 0 else 0
                                     
-                                    st.markdown("#### 📊 Métricas Anualizadas")
+                                    st.markdown("#### Métricas anualizadas")
                                     col1, col2, col3 = st.columns(3)
                                     col1.metric("Retorno Anual", f"{mean_return_annual:.2%}")
                                     col2.metric("Volatilidad Anual", f"{std_return_annual:.2%}")
                                     col3.metric("Ratio de Sharpe", f"{sharpe_ratio:.4f}")
                                     
                                     # Análisis de distribución
-                                    st.markdown("#### 📋 Análisis de la Distribución")
+                                    st.markdown("#### Análisis de la distribución")
                                     if is_normal:
-                                        st.success("✅ Los retornos siguen una distribución normal (p > 0.05)")
+                                        st.info("Los retornos no presentan evidencia contra la normalidad (p > 0.05)")
                                     else:
-                                        st.warning("⚠️ Los retornos no siguen una distribución normal (p ≤ 0.05)")
+                                        st.warning("Los retornos no siguen una distribución normal (p ≤ 0.05)")
                                     
                                     if skewness > 0.5:
-                                        st.info("📈 Distribución con sesgo positivo (cola derecha)")
+                                        st.info("Distribución con sesgo positivo (cola derecha)")
                                     elif skewness < -0.5:
-                                        st.info("📉 Distribución con sesgo negativo (cola izquierda)")
+                                        st.info("Distribución con sesgo negativo (cola izquierda)")
                                     else:
-                                        st.success("📊 Distribución aproximadamente simétrica")
+                                        st.info("Distribución aproximadamente simétrica")
                                     
                                     if kurtosis > 3:
-                                        st.info("📊 Distribución leptocúrtica (colas pesadas)")
+                                        st.info("Distribución leptocúrtica (colas pesadas)")
                                     elif kurtosis < 3:
-                                        st.info("📊 Distribución platicúrtica (colas ligeras)")
+                                        st.info("Distribución platicúrtica (colas ligeras)")
                                     else:
-                                        st.success("📊 Distribución mesocúrtica (normal)")
+                                        st.info("Distribución mesocúrtica (normal)")
                                     
                                     # Gráfico de evolución del valor real del portafolio en ARS y USD
                                     st.markdown("#### 📈 Evolución del Valor Real del Portafolio")
@@ -3535,31 +3542,31 @@ def main():
     # Contenido principal
     try:
         if st.session_state.token_acceso:
-            st.sidebar.title("Menú Principal")
+            st.sidebar.title("Menú principal")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("🏠 Inicio", "📊 Análisis de Portafolio", "💰 Tasas de Caución", "👨\u200d💼 Panel del Asesor"),
+                ("Inicio", "Análisis de portafolio", "Tasas de caución", "Panel del asesor"),
                 index=0,
             )
 
             # Mostrar la página seleccionada
-            if opcion == "🏠 Inicio":
-                st.info("👆 Seleccione una opción del menú para comenzar")
-            elif opcion == "📊 Análisis de Portafolio":
+            if opcion == "Inicio":
+                st.info("Seleccione una opción del menú para comenzar")
+            elif opcion == "Análisis de portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
                 else:
-                    st.info("👆 Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "💰 Tasas de Caución":
+                    st.info("Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "Tasas de caución":
                 if 'token_acceso' in st.session_state and st.session_state.token_acceso:
                     mostrar_tasas_caucion(st.session_state.token_acceso)
                 else:
                     st.warning("Por favor inicie sesión para ver las tasas de caución")
-            elif opcion == "👨\u200d💼 Panel del Asesor":
+            elif opcion == "Panel del asesor":
                 mostrar_movimientos_asesor()
-                st.info("👆 Seleccione una opción del menú para comenzar")
+                st.info("Seleccione una opción del menú para comenzar")
         else:
-            st.info("👆 Ingrese sus credenciales para comenzar")
+            st.info("Ingrese sus credenciales para comenzar")
             
             # Panel de bienvenida
             st.markdown("""
@@ -3569,19 +3576,19 @@ def main():
                         color: white;
                         text-align: center;
                         margin: 30px 0;">
-                <h1 style="color: white; margin-bottom: 20px;">Bienvenido al Portfolio Analyzer</h1>
+                <h1 style="color: white; margin-bottom: 20px;">Bienvenido a Portfolio Analyzer</h1>
                 <p style="font-size: 18px; margin-bottom: 30px;">Conecte su cuenta de IOL para comenzar a analizar sus portafolios</p>
                 <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📊 Análisis Completo</h3>
+                        <h3>Análisis completo</h3>
                         <p>Visualice todos sus activos en un solo lugar con detalle</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>📈 Gráficos Interactivos</h3>
+                        <h3>Gráficos interactivos</h3>
                         <p>Comprenda su portafolio con visualizaciones avanzadas</p>
                     </div>
                     <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 25px; width: 250px; backdrop-filter: blur(5px);">
-                        <h3>⚖️ Gestión de Riesgo</h3>
+                        <h3>Gestión de riesgo</h3>
                         <p>Identifique concentraciones y optimice su perfil de riesgo</p>
                     </div>
                 </div>
@@ -3589,25 +3596,25 @@ def main():
             """, unsafe_allow_html=True)
             
             # Características
-            st.subheader("✨ Características Principales")
+            st.subheader("Características principales")
             cols = st.columns(3)
             with cols[0]:
                 st.markdown("""
-                **📊 Análisis Detallado**  
+                **Análisis detallado**  
                 - Valuación completa de activos  
                 - Distribución por tipo de instrumento  
                 - Concentración del portafolio  
                 """)
             with cols[1]:
                 st.markdown("""
-                **📈 Herramientas Profesionales**  
+                **Herramientas profesionales**  
                 - Optimización de portafolio  
                 - Análisis técnico avanzado  
                 - Proyecciones de rendimiento  
                 """)
             with cols[2]:
                 st.markdown("""
-                **💱 Datos de Mercado**  
+                **Datos de mercado**  
                 - Cotizaciones MEP en tiempo real  
                 - Tasas de caución actualizadas  
                 - Estado de cuenta consolidado  
