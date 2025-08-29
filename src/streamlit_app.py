@@ -19,7 +19,6 @@ warnings.filterwarnings('ignore')
 # Configuración de la página con aspecto profesional
 st.set_page_config(
     page_title="IOL Portfolio Analyzer",
-    page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -33,6 +32,14 @@ st.markdown("""
         color: #e5e7eb;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
+    :root { color-scheme: dark; }
+    /* Forzar color de texto claro en toda la app */
+    .stApp, .stApp * { color: #e5e7eb !important; }
+    [data-testid="stAppViewContainer"] * { color: #e5e7eb !important; }
+    [data-testid="stMarkdownContainer"] * { color: #e5e7eb !important; }
+    [data-testid="stSidebar"] * { color: #e5e7eb !important; }
+    a, a:visited { color: #93c5fd !important; }
+    strong, b { color: #f9fafb !important; }
     
     /* Mejora de tarjetas y métricas */
     .stMetric {
@@ -71,15 +78,23 @@ st.markdown("""
     
     /* Mejora de inputs */
     .stTextInput, .stNumberInput, .stDateInput, .stSelectbox {
-        background-color: white;
+        background-color: #111827;
         border-radius: 8px;
     }
+    .stTextInput input, .stNumberInput input, .stDateInput input, .stSelectbox div[role="combobox"] {
+        color: #f9fafb !important;
+        background-color: #111827 !important;
+    }
+    input::placeholder { color: #9ca3af !important; }
     
     /* Botones */
     .stButton>button {
         border-radius: 8px;
         font-weight: 500;
         transition: all 0.2s;
+        color: #f9fafb !important;
+        background-color: #1f2937 !important;
+        border: 1px solid #374151 !important;
     }
     
     .stButton>button:hover {
@@ -114,8 +129,11 @@ st.markdown("""
     /* Tablas */
     .dataframe {
         border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.25);
+        color: #e5e7eb;
+        background-color: #0b1220;
     }
+    .stDataFrame, .stTable { color: #e5e7eb; }
     
     /* Progress bar */
     .stProgress > div > div > div {
