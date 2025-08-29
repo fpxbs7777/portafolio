@@ -1555,7 +1555,7 @@ def calcular_retorno_real_activo(simbolo, posiciones_actuales, precios_historico
                 volatilidad_anualizada = 0
         except:
             volatilidad_anualizada = 0
-     else:
+    else:
         volatilidad_anualizada = 0
     
     return {
