@@ -4055,7 +4055,8 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     }
 
 # --- Funciones de Visualización ---
-def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
+def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id="default"):
+    print(f"🔍 Llamando mostrar_resumen_portafolio con portfolio_id: '{portfolio_id}'")
     st.markdown("### 📈 Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
@@ -4316,11 +4317,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
         # Estadísticas detalladas y distribuciones
         with st.expander("📊 Estadísticas Detalladas y Distribuciones", expanded=False):
             # Opción para mostrar histograma de retornos
+            # Asegurar que portfolio_id sea válido para la clave y agregar timestamp único
+            safe_portfolio_id = str(portfolio_id).replace(" ", "_").replace("-", "_") if portfolio_id else "default"
+            unique_key = f"mostrar_histograma_retornos_detallado_{safe_portfolio_id}_{int(time.time())}"
             mostrar_histograma_retornos = st.checkbox(
                 "📈 Mostrar Histograma de Retornos por Activo", 
                 value=False,
                 help="Muestra histogramas de retornos históricos para cada activo del portafolio",
-                key=f"mostrar_histograma_retornos_detallado_{portfolio_id}"
+                key=unique_key
             )
             
             col1, col2 = st.columns(2)
@@ -4379,11 +4383,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador, portfolio_id=""):
                 st.markdown("#### 📊 Distribuciones")
                 
                 # Opciones de visualización
+                # Asegurar que portfolio_id sea válido para la clave y agregar timestamp único
+                safe_portfolio_id = str(portfolio_id).replace(" ", "_").replace("-", "_") if portfolio_id else "default"
+                unique_key = f"tipo_grafico_distribuciones_{safe_portfolio_id}_{int(time.time())}"
                 tipo_grafico = st.selectbox(
                     "Tipo de Gráfico:",
                     ["Histograma", "Box Plot", "Violin Plot", "Density Plot"],
                     help="Seleccione el tipo de visualización para los valores de activos",
-                    key="tipo_grafico_distribuciones"
+                    key=unique_key
                 )
                 
                 valores = [a['Valuación'] for a in datos_activos if a['Valuación'] > 0]
@@ -7580,6 +7587,7 @@ def mostrar_analisis_portafolio():
     with tab1:
         if portafolio_ar:
             st.subheader("🇦🇷 Portafolio Argentina")
+            print(f"📊 Llamando mostrar_resumen_portafolio para Argentina")
             mostrar_resumen_portafolio(portafolio_ar, token_acceso, "ar")
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
@@ -7587,6 +7595,7 @@ def mostrar_analisis_portafolio():
     with tab2:
         if portafolio_eeuu:
             st.subheader("🇺🇸 Portafolio Estados Unidos")
+            print(f"📊 Llamando mostrar_resumen_portafolio para EEUU")
             mostrar_resumen_portafolio(portafolio_eeuu, token_acceso, "eeuu")
         else:
             st.warning("No se pudo obtener el portafolio de EEUU")
