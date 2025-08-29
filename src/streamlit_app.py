@@ -1385,7 +1385,7 @@ def obtener_datos_alternativos_yfinance(simbolo, fecha_desde, fecha_hasta):
     except Exception:
         return None
 
-def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_hasta=None):
+def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_hasta=None, mercado=None):
     """
     Obtiene todas las operaciones de un activo específico desde la API de IOL.
     
@@ -1394,6 +1394,7 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
         simbolo (str): Símbolo del activo
         fecha_desde (str): Fecha desde (YYYY-MM-DD), por defecto 2 años atrás
         fecha_hasta (str): Fecha hasta (YYYY-MM-DD), por defecto hoy
+        mercado (str): Mercado del activo ('ar' para Argentina, 'eeuu' para EEUU)
         
     Returns:
         list: Lista de operaciones del activo
@@ -1408,35 +1409,96 @@ def obtener_operaciones_activo(token_portador, simbolo, fecha_desde=None, fecha_
         'Content-Type': 'application/json'
     }
     
-    # Parámetros para filtrar operaciones
+    # Determinar el mercado del activo si no se especifica
+    if mercado is None:
+        if simbolo.endswith('.O') or simbolo.endswith('.BA') or simbolo.endswith('.MA'):
+            mercado = 'eeuu'
+        else:
+            mercado = 'ar'
+    
+    # Parámetros para filtrar operaciones según el mercado
     params = {
         'filtro.estado': 'terminadas',
         'filtro.fechaDesde': fecha_desde,
         'filtro.fechaHasta': fecha_hasta,
-        'filtro.pais': 'argentina'
+        'filtro.simbolo': simbolo  # Filtrar por símbolo específico
     }
+    
+    # Agregar filtro de país según el mercado
+    if mercado == 'ar':
+        params['filtro.pais'] = 'argentina'
+        print(f"   🇦🇷 Configurando filtro para mercado Argentina")
+    elif mercado == 'eeuu':
+        # Para EEUU, no usar filtro de país o usar 'estados_unidos'
+        print(f"   🇺🇸 Configurando filtro para mercado EEUU")
+        # Algunos activos de EEUU pueden necesitar parámetros diferentes
     
     try:
         url = "https://api.invertironline.com/api/v2/operaciones"
+        print(f"🌐 Llamando API para {simbolo} (mercado: {mercado}): {url}")
+        print(f"   📋 Parámetros: {params}")
+        
         response = requests.get(url, headers=headers, params=params)
+        
+        print(f"   📡 Respuesta: {response.status_code} - {len(response.text)} caracteres")
         
         if response.status_code == 200:
             operaciones = response.json()
-            # Filtrar solo las operaciones del símbolo específico
+            
+            # Verificar si la respuesta es una lista o tiene estructura de paginación
+            if isinstance(operaciones, dict):
+                if 'items' in operaciones:
+                    operaciones = operaciones['items']
+                    print(f"   📄 Respuesta paginada: {len(operaciones)} items")
+                elif 'data' in operaciones:
+                    operaciones = operaciones['data']
+                    print(f"   📄 Respuesta con data: {len(operaciones)} items")
+                else:
+                    print(f"   ⚠️ Estructura de respuesta inesperada: {list(operaciones.keys())}")
+            
+            # Verificar que las operaciones correspondan al símbolo
             operaciones_activo = [
                 op for op in operaciones 
                 if op.get('simbolo') == simbolo
             ]
+            
+            # Si no se encontraron operaciones con el filtro de símbolo, intentar sin filtro
+            if not operaciones_activo and len(operaciones) > 0:
+                print(f"   ⚠️ No se encontraron operaciones para {simbolo} con filtro, intentando sin filtro...")
+                # Intentar llamada sin filtro de símbolo
+                params_sin_filtro = params.copy()
+                params_sin_filtro.pop('filtro.simbolo', None)
+                
+                response_sin_filtro = requests.get(url, headers=headers, params=params_sin_filtro)
+                if response_sin_filtro.status_code == 200:
+                    operaciones_sin_filtro = response_sin_filtro.json()
+                    if isinstance(operaciones_sin_filtro, dict):
+                        if 'items' in operaciones_sin_filtro:
+                            operaciones_sin_filtro = operaciones_sin_filtro['items']
+                        elif 'data' in operaciones_sin_filtro:
+                            operaciones_sin_filtro = operaciones_sin_filtro['data']
+                    
+                    operaciones_activo = [
+                        op for op in operaciones_sin_filtro 
+                        if op.get('simbolo') == simbolo
+                    ]
+                    print(f"   🔄 Sin filtro: {len(operaciones_activo)} operaciones encontradas para {simbolo}")
+            
+            # Debug: mostrar información sobre las operaciones encontradas
+            print(f"🔍 Operaciones para {simbolo}: {len(operaciones_activo)} de {len(operaciones)} totales")
+            if operaciones_activo:
+                print(f"   📅 Rango de fechas: {operaciones_activo[0].get('fechaOperada', 'N/A')} a {operaciones_activo[-1].get('fechaOperada', 'N/A')}")
+            
             return operaciones_activo
         else:
-            print(f"Error al obtener operaciones: {response.status_code} - {response.text}")
+            print(f"❌ Error al obtener operaciones para {simbolo}: {response.status_code} - {response.text}")
             return []
             
     except Exception as e:
         print(f"Error al obtener operaciones para {simbolo}: {str(e)}")
         return []
 
-def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_desde=None, fecha_hasta=None):
+def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_desde=None, fecha_hasta=None, mercado=None):
     """
     Reconstruye la composición del portafolio a lo largo del tiempo basándose en todas las operaciones.
     
@@ -1445,6 +1507,7 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
         portafolio_actual (dict): Portafolio actual con estructura {'activos': [...]}
         fecha_desde (str): Fecha desde para reconstruir
         fecha_hasta (str): Fecha hasta para reconstruir
+        mercado (str): Mercado del portafolio ('ar' para Argentina, 'eeuu' para EEUU)
         
     Returns:
         dict: Composición del portafolio por fecha
@@ -1469,11 +1532,18 @@ def reconstruir_composicion_portafolio(token_portador, portafolio_actual, fecha_
     # Obtener todas las operaciones de todos los activos
     todas_operaciones = []
     
+    print(f"🔄 Procesando {len(portafolio_dict)} activos para obtener operaciones...")
+    
     for simbolo in portafolio_dict.keys():
-        operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta)
+        print(f"  📊 Obteniendo operaciones para: {simbolo}")
+        operaciones = obtener_operaciones_activo(token_portador, simbolo, fecha_desde, fecha_hasta, mercado)
+        print(f"     ✅ Encontradas {len(operaciones)} operaciones para {simbolo}")
+        
         for op in operaciones:
             op['simbolo_original'] = simbolo
             todas_operaciones.append(op)
+    
+    print(f"🎯 Total de operaciones obtenidas: {len(todas_operaciones)}")
     
     # Ordenar operaciones por fecha
     todas_operaciones.sort(key=lambda x: x.get('fechaOperada', x.get('fechaOrden', '1900-01-01')))
@@ -1964,8 +2034,6 @@ def obtener_clase_d(simbolo, mercado, bearer_token):
         # Silencioso para no interrumpir el flujo
         return None
 
-# Función duplicada eliminada - usar la versión original en línea 933
-
 def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hasta):
     """
     Obtiene la serie histórica de un Fondo Común de Inversión.
@@ -2051,73 +2119,6 @@ def obtener_serie_historica_fci(token_portador, simbolo, fecha_desde, fecha_hast
         st.error(f"Error inesperado al procesar el FCI {simbolo}: {str(e)}")
         return None
 
-
-
-
-    
-
-
-# --- Historical Data Methods ---
-def _deprecated_serie_historica_iol(*args, **kwargs):
-    """Deprecated duplicate of `obtener_serie_historica_iol`. Kept for backward compatibility."""
-    return None
-    """Obtiene series históricas desde la API de IOL
-    
-    Args:
-        token_portador: Token de autenticación Bearer
-        mercado: Mercado (BCBA, NYSE, NASDAQ, ROFEX)
-        simbolo: Símbolo del activo (puede ser string o dict con clave 'simbolo')
-        fecha_desde: Fecha inicio (YYYY-MM-DD)
-        fecha_hasta: Fecha fin (YYYY-MM-DD)
-        ajustada: "Ajustada" o "SinAjustar"
-    
-    Returns:
-        DataFrame con datos históricos o None si hay error
-    """
-    # Manejar caso donde simbolo es un diccionario
-    if isinstance(simbolo, dict):
-        simbolo = simbolo.get('simbolo', '')
-    
-    if not simbolo:
-        st.warning("No se proporcionó un símbolo válido")
-        return None
-        
-    # Asegurarse de que el mercado esté en mayúsculas
-    mercado = mercado.upper() if mercado else 'BCBA'
-    try:
-        # Construir la URL de la API
-        url = f"https://api.invertironline.com/api/v2/{mercado}/Titulos/{simbolo}/Cotizacion/seriehistorica/{fecha_desde}/{fecha_hasta}/{ajustada}"
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {token_portador}'
-        }
-        
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        data = response.json()
-        df = pd.DataFrame(data)
-        
-        if 'fechaHora' in df.columns:
-            # Handle different datetime formats
-            df['fecha'] = pd.to_datetime(
-                df['fechaHora'], 
-                format='mixed',  # Automatically infer format for each element
-                utc=True,        # Ensure timezone awareness
-                errors='coerce'  # Convert parsing errors to NaT
-            ).dt.tz_convert(None).dt.date  # Convert to naive date
-            
-            # Drop rows where date parsing failed
-            df = df.dropna(subset=['fecha'])
-            df = df.sort_values('fecha')
-            
-        return df
-        
-    except Exception as e:
-        st.error(f"Error obteniendo datos para {simbolo}: {str(e)}")
-        return None
-
-# --- Portfolio Metrics Function ---
 def portfolio_variance(x, mtx_var_covar):
     """Calcula la varianza del portafolio"""
     variance = np.matmul(np.transpose(x), np.matmul(mtx_var_covar, x))
@@ -2545,10 +2546,21 @@ def mostrar_resumen_operaciones_reales(portafolio, token_portador, portfolio_id=
         fecha_hasta = datetime.now().strftime('%Y-%m-%d')
         fecha_desde = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
         
+        # Extraer el mercado del portfolio_id
+        mercado = None
+        if portfolio_id.startswith("operaciones_"):
+            mercado = portfolio_id.replace("operaciones_", "")
+        elif portfolio_id == "ar":
+            mercado = "ar"
+        elif portfolio_id == "eeuu":
+            mercado = "eeuu"
+        
+        print(f"🏛️ Analizando operaciones para mercado: {mercado}")
+        
         with st.spinner("🔄 Analizando operaciones reales del portafolio..."):
             # Reconstruir composición del portafolio
             composicion_por_fecha, posiciones_actuales = reconstruir_composicion_portafolio(
-                token_portador, portafolio, fecha_desde, fecha_hasta
+                token_portador, portafolio, fecha_desde, fecha_hasta, mercado
             )
         
         if not posiciones_actuales:
@@ -3728,7 +3740,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     print("🔄 Reconstruyendo composición del portafolio basándose en operaciones reales...")
     try:
         composicion_por_fecha, posiciones_actuales = reconstruir_composicion_portafolio(
-            token_portador, portafolio, fecha_desde, fecha_hasta
+            token_portador, portafolio, fecha_desde, fecha_hasta, "ar"  # Por defecto Argentina
         )
         print(f"✅ Composición reconstruida para {len(composicion_por_fecha)} fechas")
         
@@ -6089,151 +6101,6 @@ def mostrar_resultados_rebalanceo_aleatorio(resultado_optimizacion, simbolos_ale
         elif diferencia_capital < 0:
             st.info(f"💡 Se liberaría capital de ${abs(diferencia_capital):,.2f}")
 
-def mostrar_optimizacion_aleatoria(portafolio, token_acceso, fecha_desde, fecha_hasta):
-    """
-    Optimización aleatoria con inputs manuales de capital, horizonte, benchmark
-    y simulaciones iterativas hasta alcanzar el retorno objetivo
-    """
-    st.markdown("#### 🎲 Optimización Aleatoria")
-    
-    # Configuración de parámetros básicos
-    st.markdown("#### 💰 Configuración de Capital y Horizonte")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        capital_inicial = st.number_input(
-            "Capital Inicial ($):",
-            min_value=1000.0, max_value=10000000.0, value=100000.0, step=1000.0,
-            help="Capital inicial para la optimización"
-        )
-    
-    with col2:
-        horizonte_dias = st.number_input(
-            "Horizonte de Inversión (días):",
-            min_value=30, max_value=3650, value=252, step=30,
-            help="Horizonte temporal para la optimización"
-        )
-    
-    with col3:
-        retorno_objetivo = st.number_input(
-            "Retorno Objetivo (anual):",
-            min_value=0.01, max_value=2.0, value=0.15, step=0.01,
-            help="Retorno anual objetivo a superar"
-        )
-    
-    # Configuración de benchmark
-    st.markdown("#### 📊 Configuración de Benchmark")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        benchmark = st.selectbox(
-            "Benchmark:",
-            options=[
-                'SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'AGG', '^GSPC', '^IXIC', '^DJI',
-                'Tasa_Caucion_Promedio', 'Dolar_MEP', 'Dolar_Blue', 'Dolar_Oficial',
-                'Bono_GD30', 'Bono_GD35', 'Bono_GD38', 'Bono_GD41', 'Bono_GD46',
-                'Indice_S&P_Merval', 'Indice_Burcap', 'Indice_IGPA'
-            ],
-            help="Benchmark para calcular alpha y beta",
-            key="benchmark_optimizacion_aleatoria"
-        )
-    
-    with col2:
-        usar_portafolio_actual = st.checkbox(
-            "🔄 Usar portafolio actual como benchmark",
-            value=False,
-            help="Si está marcado, se usará el portafolio actual como benchmark",
-            key="usar_portafolio_actual_aleatoria"
-        )
-    
-    with col3:
-        tasa_libre_riesgo = st.number_input(
-            "Tasa Libre de Riesgo (anual):",
-            min_value=0.0, max_value=0.5, value=0.04, step=0.01,
-            help="Tasa libre de riesgo para cálculos"
-        )
-    
-    # Configuración de optimización aleatoria
-    st.markdown("#### 🎯 Configuración de Optimización Aleatoria")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        num_simulaciones = st.slider(
-            "Número de Simulaciones:",
-            min_value=10, max_value=1000, value=100, step=10,
-            help="Número de simulaciones aleatorias a realizar"
-        )
-    
-    with col2:
-        num_activos = st.slider(
-            "Número de Activos por Simulación:",
-            min_value=3, max_value=20, value=8, step=1,
-            help="Número de activos a incluir en cada simulación"
-        )
-    
-    with col3:
-        max_iteraciones = st.slider(
-            "Máximo de Iteraciones:",
-            min_value=1, max_value=50, value=10, step=1,
-            help="Máximo número de iteraciones para alcanzar objetivo"
-    )
-    
-    # Configuración avanzada
-    with st.expander("⚙️ Configuración Avanzada", expanded=False):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            estrategia_optimizacion = st.selectbox(
-                "Estrategia de Optimización:",
-                options=['markowitz', 'max_return', 'min_variance', 'sharpe_ratio'],
-                format_func=lambda x: {
-                    'markowitz': 'Markowitz (Retorno-Riesgo)',
-                    'max_return': 'Máximo Retorno',
-                    'min_variance': 'Mínima Varianza',
-                    'sharpe_ratio': 'Máximo Ratio de Sharpe'
-                }[x],
-                key="estrategia_optimizacion_aleatoria"
-            )
-        with col2:
-            mostrar_histogramas = st.checkbox("Mostrar Histogramas", value=True, key="mostrar_histogramas_aleatoria")
-        with col3:
-            mostrar_frontera = st.checkbox("Mostrar Frontera Eficiente", value=False, key="mostrar_frontera_aleatoria")
-    
-    # Botones de ejecución
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización Aleatoria")
-    with col2:
-        ejecutar_iterativo = st.button("🔄 Optimización Iterativa")
-    with col3:
-        ejecutar_completo = st.button("🎯 Optimización Completa")
-    
-    if ejecutar_optimizacion or ejecutar_iterativo or ejecutar_completo:
-        # Ejecutar optimización aleatoria
-        with st.spinner("🎲 Ejecutando optimización aleatoria..."):
-            try:
-                resultados = ejecutar_optimizacion_aleatoria_completa(
-                    portafolio, token_acceso, fecha_desde, fecha_hasta,
-                    capital_inicial, horizonte_dias, retorno_objetivo,
-                    benchmark, usar_portafolio_actual, tasa_libre_riesgo,
-                    num_simulaciones, num_activos, max_iteraciones,
-                    estrategia_optimizacion, ejecutar_iterativo or ejecutar_completo
-                )
-                
-                if resultados:
-                    mostrar_resultados_optimizacion_aleatoria(
-                        resultados, capital_inicial, horizonte_dias,
-                        benchmark, retorno_objetivo, tasa_libre_riesgo,
-                        mostrar_histogramas, mostrar_frontera
-                    )
-                else:
-                    st.error("❌ Error en la optimización aleatoria")
-            
-            except Exception as e:
-                st.error(f"❌ Error en el proceso: {str(e)}")
-
 def ejecutar_optimizacion_aleatoria_completa(portafolio, token_acceso, fecha_desde, fecha_hasta,
                                            capital_inicial, horizonte_dias, retorno_objetivo,
                                            benchmark, usar_portafolio_actual, tasa_libre_riesgo,
@@ -6251,8 +6118,9 @@ def ejecutar_optimizacion_aleatoria_completa(portafolio, token_acceso, fecha_des
             # ADRs
             'BMA', 'CEPU', 'CRESY', 'EDN', 'GGAL', 'IRCP', 'PAM', 'PZE', 'TGS', 'YPF',
             # Bonos
-            'GD30', 'GD35', 'GD38', 'GD41', 'GD46', 'GD47', 'GD48', 'GD49', 'GD50',
-            'GD51', 'GD52', 'GD53', 'GD54', 'GD55', 'GD56', 'GD57', 'GD58', 'GD59',
+            'GD30', 'GD35', 'GD38', 'GD39', 'GD41', 'GD46', 'GD47', 'GD48', 'GD49',
+            'GD50', 'GD51', 'GD52', 'GD53', 'GD54', 'GD55', 'GD56', 'GD57', 'GD58',
+            'GD59',
             # ETFs
             'SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'AGG', 'TLT', 'GLD', 'SLV', 'USO',
             # Acciones internacionales
@@ -7824,20 +7692,30 @@ def mostrar_analisis_portafolio():
         st.subheader("📈 Análisis de Operaciones Reales")
         st.info("🔍 Esta sección analiza las operaciones reales de compra/venta de tu portafolio para calcular retornos basados en fechas reales de compra.")
         
-        # Seleccionar portafolio a analizar
+        # Información sobre el filtrado por mercado
+        st.markdown("""
+        **💡 Importante:** Las operaciones se filtran automáticamente según el mercado seleccionado:
+        - 🇦🇷 **Argentina**: Solo operaciones de activos argentinos (BCBA, ROFEX, etc.)
+        - 🇺🇸 **Estados Unidos**: Solo operaciones de activos internacionales (NYSE, NASDAQ, etc.)
+        """)
+        
+        # Permitir seleccionar el portafolio específico para análisis de operaciones
         portafolio_seleccionado = st.selectbox(
-            "Seleccionar portafolio para análisis:",
+            "Seleccionar portafolio para análisis de operaciones:",
             options=[
-                ("🇦🇷 Argentina", portafolio_ar),
-                ("🇺🇸 Estados Unidos", portafolio_eeuu)
+                ("🇦🇷 Argentina", portafolio_ar, "ar"),
+                ("🇺🇸 Estados Unidos", portafolio_eeuu, "eeuu")
             ],
             format_func=lambda x: x[0],
-            help="Selecciona el portafolio que deseas analizar",
+            help="Selecciona el portafolio específico para analizar sus operaciones",
             key="portafolio_operaciones_reales"
         )
         
         if portafolio_seleccionado[1]:
-            mostrar_resumen_operaciones_reales(portafolio_seleccionado[1], token_acceso, "operaciones_reales")
+            portafolio, mercado = portafolio_seleccionado[1], portafolio_seleccionado[2]
+            st.success(f"✅ Analizando operaciones del portafolio {portafolio_seleccionado[0]} ({len(portafolio.get('activos', []))} activos)")
+            st.info(f"🔍 Filtrando operaciones para mercado: {mercado.upper()}")
+            mostrar_resumen_operaciones_reales(portafolio, token_acceso, f"operaciones_{mercado}")
         else:
             st.warning("⚠️ No hay datos disponibles para el portafolio seleccionado")
 
@@ -7966,24 +7844,7 @@ def main():
                     None
                 )
                 
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
-                    with st.spinner("Actualizando..."):
-                        nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
-                        st.session_state.clientes = nuevos_clientes
-                        st.success("✅ Lista actualizada")
-                        st.rerun()
-                
-                # Botón para refrescar token manualmente
-                if st.button("🔄 Refrescar Token", use_container_width=True):
-                    with st.spinner("Refrescando token..."):
-                        nuevo_token, nuevo_refresh = refrescar_token(st.session_state.refresh_token)
-                        if nuevo_token:
-                            st.session_state.token_acceso = nuevo_token
-                            st.session_state.refresh_token = nuevo_refresh
-                            st.success("✅ Token refrescado")
-                            st.rerun()
-                        else:
-                            st.error("❌ No se pudo refrescar el token")
+
             else:
                 st.warning("No se encontraron clientes")
 
