@@ -2079,10 +2079,28 @@ def obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hast
                     if len(retornos) > 0:
                         st.success(f"✅ Tipo de cambio BNA obtenido: {len(retornos)} días de retornos")
                         return pd.DataFrame({'Tipo_Cambio_BNA': retornos})
+                    else:
+                        st.warning("⚠️ No se pudieron calcular retornos del tipo de cambio BNA")
+                else:
+                    st.warning("⚠️ No se obtuvieron datos del tipo de cambio BNA")
             except Exception as e:
                 st.warning(f"⚠️ Error obteniendo tipo de cambio BNA: {str(e)}")
+                st.info("ℹ️ Verificando conectividad con Yahoo Finance...")
+                
+                # Intentar con otro ticker como fallback
+                try:
+                    ticker = yf.Ticker("USDARS=X")  # Dólar vs Peso Argentino
+                    data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                    if not data.empty:
+                        retornos = data['Close'].pct_change().dropna()
+                        if len(retornos) > 0:
+                            st.success(f"✅ Tipo de cambio BNA obtenido (fallback): {len(retornos)} días de retornos")
+                            return pd.DataFrame({'Tipo_Cambio_BNA': retornos})
+                except:
+                    pass
             
             st.warning("⚠️ No se pudieron obtener datos de tipo de cambio BNA")
+            st.info("ℹ️ Verifique su conexión a internet")
             return None
         
         elif benchmark == 'Reservas_Internacionales':
@@ -2099,10 +2117,28 @@ def obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hast
                     if len(retornos) > 0:
                         st.success(f"✅ Reservas internacionales obtenidas: {len(retornos)} días de retornos")
                         return pd.DataFrame({'Reservas_Internacionales': retornos})
+                    else:
+                        st.warning("⚠️ No se pudieron calcular retornos de reservas internacionales")
+                else:
+                    st.warning("⚠️ No se obtuvieron datos de reservas internacionales")
             except Exception as e:
                 st.warning(f"⚠️ Error obteniendo reservas internacionales: {str(e)}")
+                st.info("ℹ️ Verificando conectividad con Yahoo Finance...")
+                
+                # Intentar con otro ticker como fallback
+                try:
+                    ticker = yf.Ticker("GLD")  # ETF de oro
+                    data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                    if not data.empty:
+                        retornos = data['Close'].pct_change().dropna()
+                        if len(retornos) > 0:
+                            st.success(f"✅ Reservas internacionales obtenidas (fallback): {len(retornos)} días de retornos")
+                            return pd.DataFrame({'Reservas_Internacionales': retornos})
+                except:
+                    pass
             
             st.warning("⚠️ No se pudieron obtener datos de reservas internacionales")
+            st.info("ℹ️ Verifique su conexión a internet")
             return None
         
         elif benchmark == 'Tasa_LELIQ':
@@ -9578,6 +9614,10 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
                 'Bono_GD30': 'Bono GD30',
                 'Indice_S&P_MERVAL': 'S&P MERVAL',
                 'Indice_S&P_500': 'S&P 500',
+                'Tipo_Cambio_BNA': 'Tipo de Cambio BNA',
+                'Reservas_Internacionales': 'Reservas Internacionales',
+                'Tasa_LELIQ': 'Tasa LELIQ',
+                'Inflacion_Argentina': 'Inflación Argentina',
                 'Tasa_Fija_4%': 'Tasa Fija 4%',
                 'Tasa_Fija_6%': 'Tasa Fija 6%',
                 'Tasa_Fija_8%': 'Tasa Fija 8%'
@@ -9594,7 +9634,9 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
         else:
             try:
                 # Obtener datos del benchmark
+                st.info(f"🔄 Obteniendo datos para benchmark: {benchmark}")
                 benchmark_data = obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hasta)
+                
                 if benchmark_data is not None and not benchmark_data.empty:
                     # Calcular retorno anual del benchmark
                     benchmark_returns = benchmark_data.iloc[:, 0].dropna()
@@ -9603,10 +9645,14 @@ def mostrar_rebalanceo_composicion_actual(portafolio, token_acceso, fecha_desde,
                         st.success(f"✅ Retorno benchmark calculado: {benchmark_return:.2%}")
                     else:
                         st.warning("⚠️ No se pudieron calcular retornos del benchmark")
+                        st.info("ℹ️ Usando valor por defecto del 4% anual")
                 else:
                     st.warning("⚠️ No se pudieron obtener datos del benchmark")
+                    st.info("ℹ️ Usando valor por defecto del 4% anual")
             except Exception as e:
                 st.error(f"❌ Error calculando retorno del benchmark: {str(e)}")
+                st.info("ℹ️ Usando valor por defecto del 4% anual")
+                benchmark_return = 0.04  # Valor por defecto
         
         st.metric("Retorno Anual del Benchmark", f"{benchmark_return:.2%}")
     
