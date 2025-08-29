@@ -2145,6 +2145,26 @@ def obtener_benchmark_argentino(benchmark, token_acceso, fecha_desde, fecha_hast
             st.warning("⚠️ No se pudieron obtener datos de inflación argentina")
             return None
         
+        elif benchmark == 'PBI_Argentina':
+            # Para Argentina: PBI usando yfinance
+            st.info("🇦🇷 Obteniendo PBI argentino desde Yahoo Finance")
+            
+            try:
+                import yfinance as yf
+                # Usar GDP US como proxy para PBI
+                ticker = yf.Ticker("^GDP")
+                data = ticker.history(start=fecha_desde, end=fecha_hasta)
+                if not data.empty:
+                    retornos = data['Close'].pct_change().dropna()
+                    if len(retornos) > 0:
+                        st.success(f"✅ PBI argentino obtenido: {len(retornos)} días de retornos")
+                        return pd.DataFrame({'PBI_Argentina': retornos})
+            except Exception as e:
+                st.warning(f"⚠️ Error obteniendo PBI argentino: {str(e)}")
+            
+            st.warning("⚠️ No se pudieron obtener datos de PBI argentino")
+            return None
+        
         else:
             st.error(f"❌ Benchmark no válido para Argentina: {benchmark}")
             return None
@@ -3046,17 +3066,33 @@ def analizar_variables_bcra(variables_seleccionadas, fecha_desde, fecha_hasta):
         
         # Obtener datos de cada variable
         datos_variables = {}
+        variables_exitosas = 0
         
         for variable in variables_seleccionadas:
-            with st.spinner(f"Obteniendo {variable}..."):
-                # Usar la función de benchmark para obtener datos
-                datos = obtener_benchmark_argentino(variable, None, fecha_desde, fecha_hasta)
-                if datos is not None and not datos.empty:
-                    datos_variables[variable] = datos.iloc[:, 0]  # Primera columna
+            try:
+                with st.spinner(f"Obteniendo {variable}..."):
+                    # Usar la función de benchmark para obtener datos
+                    datos = obtener_benchmark_argentino(variable, None, fecha_desde, fecha_hasta)
+                    if datos is not None and not datos.empty:
+                        datos_variables[variable] = datos.iloc[:, 0]  # Primera columna
+                        variables_exitosas += 1
+                        st.success(f"✅ {variable} obtenida exitosamente")
+                    else:
+                        st.warning(f"⚠️ No se pudieron obtener datos para {variable}")
+            except Exception as e:
+                st.error(f"❌ Error obteniendo {variable}: {str(e)}")
+                continue
+        
+        if variables_exitosas == 0:
+            st.error("❌ No se pudieron obtener datos de ninguna variable BCRA")
+            st.info("ℹ️ Verifique su conexión a internet y las fechas seleccionadas")
+            return
         
         if not datos_variables:
             st.error("❌ No se pudieron obtener datos de ninguna variable")
             return
+        
+        st.success(f"✅ Se obtuvieron datos de {variables_exitosas} variables BCRA")
         
         # Crear DataFrame consolidado
         df_consolidado = pd.DataFrame(datos_variables)
@@ -3151,10 +3187,19 @@ def analizar_variables_bcra(variables_seleccionadas, fecha_desde, fecha_hasta):
         st.subheader("🔗 Análisis de Correlaciones y Causalidad Avanzada")
         
         # Obtener datos del portafolio para correlaciones
-        if 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
-            token_acceso = st.session_state.get('token_acceso')
-            if token_acceso:
-                analizar_correlaciones_bcra_portafolio(datos_variables, token_acceso, fecha_desde, fecha_hasta)
+        try:
+            if 'cliente_seleccionado' in st.session_state and st.session_state.cliente_seleccionado:
+                token_acceso = st.session_state.get('token_acceso')
+                if token_acceso:
+                    analizar_correlaciones_bcra_portafolio(datos_variables, token_acceso, fecha_desde, fecha_hasta)
+                else:
+                    st.warning("⚠️ No hay token de acceso disponible para análisis de correlaciones")
+                    st.info("ℹ️ Para análisis completo, inicie sesión en IOL")
+            else:
+                st.info("ℹ️ Seleccione un cliente para análisis de correlaciones con portafolios")
+        except Exception as e:
+            st.error(f"❌ Error en análisis de correlaciones: {str(e)}")
+            st.info("ℹ️ Continuando con análisis básico de variables BCRA")
         
     except Exception as e:
         st.error(f"❌ Error analizando variables BCRA: {str(e)}")
@@ -3201,6 +3246,12 @@ def analizar_correlaciones_pais(datos_variables, portafolio, pais, fecha_desde, 
     Analiza correlaciones entre variables BCRA y portafolio de un país específico
     """
     try:
+        # Obtener token de acceso del session state
+        token_acceso = st.session_state.get('token_acceso')
+        if not token_acceso:
+            st.warning("⚠️ No hay token de acceso disponible para obtener datos de activos")
+            return
+        
         activos = portafolio.get('activos', [])
         if not activos:
             st.warning(f"⚠️ No hay activos en el portafolio de {pais}")
