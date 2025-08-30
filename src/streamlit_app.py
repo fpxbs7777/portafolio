@@ -2018,6 +2018,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             descripcion = titulo.get('descripcion', 'Sin descripción')
             tipo = titulo.get('tipo', 'N/A')
             cantidad = activo.get('cantidad', 0)
+            # Campos extra para tabla
+            precio_promedio_compra = None
+            variacion_diaria_pct = None
+            activos_comp = 0
             
             campos_valuacion = [
                 'valuacionEnMonedaOriginal',
@@ -2102,12 +2106,42 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     except (ValueError, TypeError):
                         pass
             
+            # Derivar últimos precios y promedios para la tabla
+            ultimo_precio_view = None
+            for k in ['precioActual', 'ultimoPrecio', 'precio', 'precioUnitario']:
+                if k in activo and activo[k] is not None:
+                    try:
+                        val = float(activo[k])
+                        if val > 0:
+                            ultimo_precio_view = val
+                            break
+                    except Exception:
+                        continue
+            for k in ['precioPromedio', 'precioCompra', 'precioPromedioPonderado']:
+                if k in activo and activo[k] is not None:
+                    try:
+                        precio_promedio_compra = float(activo[k])
+                        break
+                    except Exception:
+                        continue
+            for k in ['variacionPorcentual', 'variacion', 'variacionDiaria']:
+                if k in activo and activo[k] is not None:
+                    try:
+                        variacion_diaria_pct = float(activo[k])
+                        break
+                    except Exception:
+                        continue
+
             datos_activos.append({
                 'Símbolo': simbolo,
                 'Descripción': descripcion,
                 'Tipo': tipo,
                 'Cantidad': cantidad,
                 'Valuación': valuacion,
+                'UltimoPrecio': ultimo_precio_view,
+                'PrecioPromedioCompra': precio_promedio_compra,
+                'VariacionDiariaPct': variacion_diaria_pct,
+                'ActivosComp': activos_comp,
             })
             
             valor_total += valuacion
@@ -2190,6 +2224,43 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             
 
         
+        # Tabla de activos con columnas clave
+        try:
+            df_tabla = pd.DataFrame(datos_activos)
+            if not df_tabla.empty:
+                # Columnas visibles y orden
+                columnas = [
+                    'Símbolo', 'Descripción', 'Cantidad', 'ActivosComp',
+                    'VariacionDiariaPct', 'UltimoPrecio', 'PrecioPromedioCompra',
+                    'Valuación'
+                ]
+                columnas_disponibles = [c for c in columnas if c in df_tabla.columns]
+                df_view = df_tabla[columnas_disponibles].copy()
+                # Formatos
+                if 'VariacionDiariaPct' in df_view.columns:
+                    df_view['VariacionDiariaPct'] = df_view['VariacionDiariaPct'].apply(
+                        lambda x: f"{x:+.3f} %" if pd.notna(x) else "")
+                if 'UltimoPrecio' in df_view.columns:
+                    df_view['UltimoPrecio'] = df_view['UltimoPrecio'].apply(
+                        lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+                if 'PrecioPromedioCompra' in df_view.columns:
+                    df_view['PrecioPromedioCompra'] = df_view['PrecioPromedioCompra'].apply(
+                        lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+                if 'Valuación' in df_view.columns:
+                    df_view['Valuación'] = df_view['Valuación'].apply(
+                        lambda x: f"$ {x:,.2f}")
+                # Renombrar encabezados al estilo solicitado
+                df_view = df_view.rename(columns={
+                    'ActivosComp': 'Activos comp.',
+                    'VariacionDiariaPct': 'Variación diaria',
+                    'UltimoPrecio': 'Último precio',
+                    'PrecioPromedioCompra': 'Precio promedio de compra',
+                    'Valuación': 'Valorizado'
+                })
+                st.dataframe(df_view, use_container_width=True)
+        except Exception:
+            pass
+
         # Gráficos
         st.subheader("Distribución de activos")
         
