@@ -270,6 +270,35 @@ def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
     except Exception as e:
         st.error(f'Error al obtener portafolio: {str(e)}')
         return None
+def normalizar_pais_para_endpoint(pais: str) -> str:
+    """Normaliza el nombre del país para el endpoint /api/v2/portafolio/{pais}."""
+    if not pais:
+        return 'argentina'
+    p = pais.strip().lower()
+    if p in ['ar', 'arg', 'argentina']:
+        return 'argentina'
+    if p in ['us', 'usa', 'eeuu', 'estados_unidos', 'estados unidos']:
+        return 'estados_Unidos'
+    return pais
+
+def obtener_portafolio_por_pais(token_portador: str, pais: str):
+    """
+    Obtiene el portafolio del usuario autenticado para el país indicado usando
+    el endpoint estándar /api/v2/portafolio/{pais} (sin contexto de asesor).
+    """
+    pais_norm = normalizar_pais_para_endpoint(pais)
+    url = f'https://api.invertironline.com/api/v2/portafolio/{pais_norm}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    try:
+        r = requests.get(url, headers=headers, timeout=20)
+        if r.status_code == 200:
+            return r.json()
+        if r.status_code == 401:
+            return None
+        return None
+    except Exception:
+        return None
+
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
     """Obtiene el último precio de un título puntual (endpoint estándar de IOL)."""
@@ -3325,18 +3354,33 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
+        # Intentar primero portafolio asesor (si aplica)
         portafolio = obtener_portafolio(token_acceso, id_cliente)
+        if not portafolio:
+            # Fallback al endpoint genérico por país (Argentina)
+            portafolio = obtener_portafolio_por_pais(token_acceso, 'argentina')
         if portafolio:
             mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
-            st.warning("No se pudo obtener el portafolio del cliente")
+            st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
-        estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-        if estado_cuenta:
-            mostrar_estado_cuenta(estado_cuenta)
-        else:
-            st.warning("No se pudo obtener el estado de cuenta")
+        # Mostrar ambos portafolios (Argentina y EEUU) si están disponibles
+        col_ar, col_us = st.columns(2)
+        with col_ar:
+            st.markdown("#### Argentina")
+            port_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
+            if port_ar:
+                mostrar_resumen_portafolio(port_ar, token_acceso)
+            else:
+                st.info("No se pudo obtener el portafolio de Argentina (requiere autenticación válida)")
+        with col_us:
+            st.markdown("#### Estados Unidos")
+            port_us = obtener_portafolio_por_pais(token_acceso, 'estados_Unidos')
+            if port_us:
+                mostrar_resumen_portafolio(port_us, token_acceso)
+            else:
+                st.info("No se pudo obtener el portafolio de EEUU (requiere autenticación válida)")
     
     with tab3:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
