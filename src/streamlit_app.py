@@ -142,6 +142,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def es_bono_o_titulo_publico(tipo_valor) -> bool:
+    """Devuelve True si el tipo del activo corresponde a bonos/títulos públicos.
+    Abarca variantes de nomenclatura comunes del API (mayúsculas/minúsculas).
+    """
+    try:
+        if not tipo_valor:
+            return False
+        texto = str(tipo_valor).lower()
+        return any(pal in texto for pal in ["bono", "titul", "public"])
+    except Exception:
+        return False
+
 def obtener_encabezado_autorizacion(token_portador):
     return {
         'Authorization': f'Bearer {token_portador}',
@@ -2057,7 +2069,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 if precio_unitario > 0:
                     try:
                         cantidad_num = float(cantidad)
-                        if tipo == 'TitulosPublicos':
+                        # Ajuste: Títulos públicos cotizan por cada 100 nominales
+                        if es_bono_o_titulo_publico(tipo):
                             valuacion = (cantidad_num * precio_unitario) / 100.0
                         else:
                             valuacion = cantidad_num * precio_unitario
@@ -2082,7 +2095,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
-                        if tipo == 'TitulosPublicos':
+                        if es_bono_o_titulo_publico(tipo):
                             valuacion = (cantidad_num * ultimo_precio) / 100.0
                         else:
                             valuacion = cantidad_num * ultimo_precio
