@@ -205,11 +205,45 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         if respuesta.status_code == 200:
             return respuesta.json()
         elif respuesta.status_code == 401:
-            return obtener_estado_cuenta(token_portador, None)
+            # Devolver None silencioso, el caller debe manejar ausencia de saldo
+            return None
         else:
             return None
     except Exception as e:
         st.error(f'Error al obtener estado de cuenta: {str(e)}')
+        return None
+
+def obtener_totales_estado_cuenta(token_portador, id_cliente):
+    """
+    Obtiene totales de cuentas en ARS y USD desde Estado de Cuenta
+    y calcula total en ARS usando dólar MEP (AL30/AL30D).
+    """
+    try:
+        data = obtener_estado_cuenta(token_portador, id_cliente)
+        if not data:
+            return None
+        cuentas = data.get('cuentas', []) or []
+        total_ars = 0.0
+        total_usd = 0.0
+        for cta in cuentas:
+            try:
+                moneda = (cta.get('moneda') or '').lower()
+                total = float(cta.get('total') or 0.0)
+                if 'peso' in moneda:
+                    total_ars += total
+                elif 'dolar' in moneda:
+                    total_usd += total
+            except Exception:
+                continue
+        mep = obtener_tasa_mep_al30(token_portador) or 0.0
+        total_ars_mep = total_ars + (total_usd * mep if mep > 0 else 0.0)
+        return {
+            'total_ars': total_ars,
+            'total_usd': total_usd,
+            'mep': mep,
+            'total_ars_mep': total_ars_mep,
+        }
+    except Exception:
         return None
 
 def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
@@ -275,6 +309,27 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
     except Exception as e:
         st.error(f'Error al obtener cotización MEP: {str(e)}')
         return {'precio': None, 'simbolo': simbolo, 'error': str(e)}
+
+
+def obtener_tasa_mep_al30(token_portador) -> float:
+    """
+    Calcula la tasa de dólar MEP como AL30 / AL30D usando los últimos precios disponibles.
+    Devuelve un float (>0) o None si no se puede calcular.
+    """
+    try:
+        hoy = datetime.now().strftime('%Y-%m-%d')
+        hace_7 = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        datos_al30 = obtener_serie_historica_iol(token_portador, 'Bonos', 'AL30', hace_7, hoy)
+        datos_al30d = obtener_serie_historica_iol(token_portador, 'Bonos', 'AL30D', hace_7, hoy)
+        if datos_al30 is None or datos_al30.empty or datos_al30d is None or datos_al30d.empty:
+            return None
+        p_al30 = datos_al30['precio'].dropna().iloc[-1]
+        p_al30d = datos_al30d['precio'].dropna().iloc[-1]
+        if p_al30 and p_al30d and p_al30d > 0:
+            return float(p_al30) / float(p_al30d)
+        return None
+    except Exception:
+        return None
 
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
@@ -2054,14 +2109,19 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Información General
         cols = st.columns(4)
-        cols[0].metric("Total de Activos", len(datos_activos))
-        cols[1].metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de Activos", df_activos['Tipo'].nunique())
-        cols[3].metric("Valor Total", f"${valor_total:,.2f}")
+        cols[0].metric("Total de activos", len(datos_activos))
+        cols[1].metric("Símbolos únicos", df_activos['Símbolo'].nunique())
+        cols[2].metric("Tipos de activos", df_activos['Tipo'].nunique())
+        # Recalcular valor total basado en Estado de cuenta + MEP si disponible
+        totales_cta = obtener_totales_estado_cuenta(token_portador, st.session_state.get('cliente_seleccionado'))
+        if totales_cta and totales_cta.get('total_ars_mep'):
+            cols[3].metric("Valor total (ARS + USD a MEP)", f"${totales_cta['total_ars_mep']:,.2f}")
+        else:
+            cols[3].metric("Valor total (estimado por valuación)", f"${valor_total:,.2f}")
         
         if metricas:
-            # Métricas de Riesgo
-            st.subheader("⚖️ Análisis de Riesgo")
+            # Métricas de riesgo
+            st.subheader("Análisis de riesgo")
             cols = st.columns(3)
             
             # Mostrar concentración como porcentaje
@@ -2076,18 +2136,17 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                          f"{volatilidad_pct:.1f}%",
                          help="Riesgo medido como desviación estándar de retornos anuales")
             
-            # Nivel de concentración con colores
+            # Nivel de concentración
             if metricas['concentracion'] < 0.3:
-                concentracion_status = "🟢 Baja"
+                concentracion_status = "Baja"
             elif metricas['concentracion'] < 0.6:
-                concentracion_status = "🟡 Media"
+                concentracion_status = "Media"
             else:
-                concentracion_status = "🔴 Alta"
-                
-            cols[2].metric("Nivel Concentración", concentracion_status)
+                concentracion_status = "Alta"
+            cols[2].metric("Nivel de concentración", concentracion_status)
             
             # Proyecciones
-            st.subheader("📈 Proyecciones de Rendimiento")
+            st.subheader("Proyecciones de rendimiento")
             cols = st.columns(3)
             
             # Mostrar retornos como porcentaje del portafolio
@@ -2108,7 +2167,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                          help="Peor escenario con 5% de confianza")
             
             # Probabilidades
-            st.subheader("🎯 Probabilidades")
+            st.subheader("Probabilidades")
             cols = st.columns(4)
             probs = metricas['probabilidades']
             cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
@@ -2336,36 +2395,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             
                             st.plotly_chart(fig_hist, use_container_width=True)
                             
-                            # Mostrar estadísticas del histograma
-                            st.markdown("#### Estadísticas del histograma")
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            col1.metric("Valor Promedio", f"${media_valor:,.2f}")
-                            col2.metric("Valor Mediano", f"${mediana_valor:,.2f}")
-                            col3.metric("Valor Mínimo (P5)", f"${percentil_5:,.2f}")
-                            col4.metric("Valor Máximo (P95)", f"${percentil_95:,.2f}")
-                            
-                            # Mostrar evolución temporal del portafolio
-                            st.markdown("#### Evolución temporal del portafolio")
-                            
-                            fig_evolucion = go.Figure()
-                            fig_evolucion.add_trace(go.Scatter(
-                                x=df_portfolio.index,
-                                y=df_portfolio['Portfolio_Total'],
-                                mode='lines',
-                                name='Valor total del portafolio',
-                                line=dict(color='#3b82f6', width=2)
-                            ))
-                            
-                            fig_evolucion.update_layout(
-                                title="Evolución del valor del portafolio en el tiempo",
-                                xaxis_title="Fecha",
-                                yaxis_title="Valor del portafolio ($)",
-                                height=400,
-                                template='plotly_dark'
-                            )
-                            
-                            st.plotly_chart(fig_evolucion, use_container_width=True)
+                            # Ocultadas: estadísticas del histograma y evolución temporal del portafolio
                             
                             # Mostrar contribución de cada activo
                             st.markdown("#### Contribución de activos al valor total")
@@ -2469,124 +2499,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     col2.metric("Volatilidad Anual", f"{std_return_annual:.2%}")
                                     col3.metric("Ratio de Sharpe", f"{sharpe_ratio:.4f}")
                                     
-                                    # Análisis de distribución
-                                    st.markdown("#### Análisis de la distribución")
-                                    if is_normal:
-                                        st.info("Los retornos no presentan evidencia contra la normalidad (p > 0.05)")
-                                    else:
-                                        st.warning("Los retornos no siguen una distribución normal (p ≤ 0.05)")
+                                    # Se removió análisis de la distribución por solicitud
                                     
-                                    if skewness > 0.5:
-                                        st.info("Distribución con sesgo positivo (cola derecha)")
-                                    elif skewness < -0.5:
-                                        st.info("Distribución con sesgo negativo (cola izquierda)")
-                                    else:
-                                        st.info("Distribución aproximadamente simétrica")
+                                    # Se removió evolución/estadísticas del valor real y tasa MEP utilizada por solicitud
                                     
-                                    if kurtosis > 3:
-                                        st.info("Distribución leptocúrtica (colas pesadas)")
-                                    elif kurtosis < 3:
-                                        st.info("Distribución platicúrtica (colas ligeras)")
-                                    else:
-                                        st.info("Distribución mesocúrtica (normal)")
-                                    
-                                    # Gráfico de evolución del valor real del portafolio en ARS y USD
-                                    st.markdown("#### 📈 Evolución del Valor Real del Portafolio")
-                                    
-                                    # Obtener cotización MEP para conversión
-                                    try:
-                                        # Intentar obtener cotización MEP (usar AL30 como proxy)
-                                        cotizacion_mep = obtener_cotizacion_mep(token_portador, "AL30", 1, 1)
-                                        if cotizacion_mep and cotizacion_mep.get('precio'):
-                                            tasa_mep = float(cotizacion_mep['precio'])
-                                        else:
-                                            # Si no hay MEP, usar tasa aproximada
-                                            tasa_mep = 1000  # Tasa aproximada
-                                            st.info("ℹ️ Usando tasa MEP aproximada para conversiones")
-                                    except:
-                                        tasa_mep = 1000
-                                        st.info("ℹ️ Usando tasa MEP aproximada para conversiones")
-                                    
-                                    # Crear figura con dos ejes Y
-                                    fig_evolucion_real = go.Figure()
-                                    
-                                    # Traza en ARS (eje Y izquierdo)
-                                    fig_evolucion_real.add_trace(go.Scatter(
-                                        x=df_portfolio.index,
-                                        y=df_portfolio['Portfolio_Total'],
-                                        mode='lines',
-                                        name='Valor en ARS',
-                                        line=dict(color='#28a745', width=2),
-                                        yaxis='y'
-                                    ))
-                                    
-                                    # Traza en USD (eje Y derecho)
-                                    valores_usd = df_portfolio['Portfolio_Total'] / tasa_mep
-                                    fig_evolucion_real.add_trace(go.Scatter(
-                                        x=df_portfolio.index,
-                                        y=valores_usd,
-                                        mode='lines',
-                                        name='Valor en USD',
-                                        line=dict(color='#0d6efd', width=2, dash='dash'),
-                                        yaxis='y2'
-                                    ))
-                                    
-                                    # Configurar ejes
-                                    fig_evolucion_real.update_layout(
-                                        title="Evolución del Valor Real del Portafolio (ARS y USD)",
-                                        xaxis_title="Fecha",
-                                        yaxis=dict(
-                                            title=dict(
-                                                text="Valor en ARS ($)",
-                                                font=dict(color="#28a745")
-                                            ),
-                                            tickfont=dict(color="#28a745"),
-                                            side="left"
-                                        ),
-                                        yaxis2=dict(
-                                            title=dict(
-                                                text="Valor en USD ($)",
-                                                font=dict(color="#0d6efd")
-                                            ),
-                                            tickfont=dict(color="#0d6efd"),
-                                            anchor="x",
-                                            overlaying="y",
-                                            side="right"
-                                        ),
-                                        height=500,
-                                        template='plotly_white',
-                                        legend=dict(
-                                            orientation="h",
-                                            yanchor="bottom",
-                                            y=1.02,
-                                            xanchor="right",
-                                            x=1
-                                        )
-                                    )
-                                    
-                                    st.plotly_chart(fig_evolucion_real, use_container_width=True)
-                                    
-                                    # Mostrar estadísticas del valor real en ambas monedas
-                                    st.markdown("#### 📊 Estadísticas del Valor Real")
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    
-                                    valor_inicial_ars = df_portfolio['Portfolio_Total'].iloc[0]
-                                    valor_final_ars = df_portfolio['Portfolio_Total'].iloc[-1]
-                                    valor_inicial_usd = valor_inicial_ars / tasa_mep
-                                    valor_final_usd = valor_final_ars / tasa_mep
-                                    retorno_total_real = (valor_final_ars / valor_inicial_ars - 1) * 100
-                                    
-                                    col1.metric("Valor Inicial (ARS)", f"${valor_inicial_ars:,.2f}")
-                                    col2.metric("Valor Final (ARS)", f"${valor_final_ars:,.2f}")
-                                    col3.metric("Valor Inicial (USD)", f"${valor_inicial_usd:,.2f}")
-                                    col4.metric("Valor Final (USD)", f"${valor_final_usd:,.2f}")
-                                    
-                                    col1, col2 = st.columns(2)
-                                    col1.metric("Retorno Total (ARS)", f"{retorno_total_real:+.2f}%")
-                                    col2.metric("Tasa MEP Utilizada", f"${tasa_mep:,.2f}")
-                                    
-                                    # Análisis de rendimiento extra asegurado de renta fija
-                                    st.markdown("#### 🏦 Análisis de Rendimiento Extra Asegurado")
+                                    # Se removió análisis de rendimiento extra asegurado por solicitud
                                     
                                     # Identificar instrumentos de renta fija
                                     instrumentos_renta_fija = []
@@ -2618,7 +2535,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             total_renta_fija += valuacion
                                     
                                     if instrumentos_renta_fija:
-                                        st.success(f"✅ Se identificaron {len(instrumentos_renta_fija)} instrumentos de renta fija")
+                                        pass
                                             
                                         # Mostrar tabla de instrumentos de renta fija
                                         df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
