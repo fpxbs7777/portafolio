@@ -2608,6 +2608,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 retornos_usd_por_horizonte = {}
                                 
                                 # Calcular retornos en USD
+                                tasa_mep = obtener_tasa_mep_al30(token_portador) or 0
+                                if tasa_mep <= 0:
+                                    # Fallback conservador si no puede obtenerse MEP
+                                    tasa_mep = 1000.0
                                 df_portfolio_usd = df_portfolio['Portfolio_Total'] / tasa_mep
                                 df_portfolio_returns_usd = df_portfolio_usd.pct_change().dropna()
                                 
