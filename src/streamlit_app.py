@@ -152,7 +152,7 @@ def es_bono_o_titulo_publico(tipo_valor) -> bool:
             return False
         texto = str(tipo_valor).lower()
         # Excluir letras del tesoro del divisor de 100
-        if "letra" in texto:
+        if "letra" in texto or "lt" in texto or "s10n5" in texto or "s30s5" in texto:
             return False
         return any(pal in texto for pal in ["bono", "titul", "public"])
     except Exception:
@@ -2111,6 +2111,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             valuacion = (cantidad_num * precio_unitario) / 100.0
                         else:
                             valuacion = cantidad_num * precio_unitario
+                        
+                        # Corrección especial para letras del tesoro
+                        if ("letra" in str(tipo).lower() or "lt" in str(tipo).lower()) and es_bono_o_titulo_publico(tipo):
+                            valuacion = cantidad_num * precio_unitario  # Sin división por 100
                     except (ValueError, TypeError):
                         pass
                 if precio_unitario == 0:
@@ -2136,6 +2140,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             valuacion = (cantidad_num * ultimo_precio) / 100.0
                         else:
                             valuacion = cantidad_num * ultimo_precio
+                        
+                        # Corrección especial para letras del tesoro
+                        if ("letra" in str(tipo).lower() or "lt" in str(tipo).lower()) and es_bono_o_titulo_publico(tipo):
+                            valuacion = cantidad_num * ultimo_precio  # Sin división por 100
                     except (ValueError, TypeError):
                         pass
             
@@ -2281,7 +2289,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         lambda x: f"${x:,.2f}" if pd.notna(x) else "")
                 if 'Valuación' in df_view.columns:
                     df_view['Valuación'] = df_view['Valuación'].apply(
-                        lambda x: f"$ {x:,.2f}")
+                        lambda x: f"$ {x:,.0f}" if isinstance(x, (int, float)) else str(x))
                 # Renombrar encabezados al estilo solicitado
                 df_view = df_view.rename(columns={
                     'ActivosComp': 'Activos comp.',
