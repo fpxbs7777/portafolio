@@ -642,22 +642,81 @@ def obtener_cotizacion_mep(token_portador, simbolo, id_plazo_compra, id_plazo_ve
 
 def obtener_tasa_mep_al30(token_portador) -> float:
     """
-    Calcula la tasa de dólar MEP como AL30 / AL30D usando los últimos precios disponibles.
-    Devuelve un float (>0) o None si no se puede calcular.
+    Obtiene la tasa de dólar MEP desde la API de IOL.
+    Devuelve un float (>0) o None si no se puede obtener.
     """
     try:
+        # Intentar obtener MEP desde el endpoint oficial
+        url_mep = "https://api.invertironline.com/api/v2/Cotizaciones/MEP"
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        if not headers:
+            print("❌ No se pudieron generar headers para MEP")
+            return None
+        
+        # Payload para el endpoint MEP
+        payload = {
+            "simbolo": "AL30",
+            "idPlazoOperatoriaCompra": 0,
+            "idPlazoOperatoriaVenta": 0
+        }
+        
+        print("🔍 Obteniendo tasa MEP desde API oficial...")
+        response = requests.post(url_mep, headers=headers, json=payload, timeout=30)
+        print(f"📡 Respuesta MEP: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ MEP obtenido exitosamente: {data}")
+            # El endpoint devuelve directamente el valor MEP
+            if isinstance(data, (int, float)):
+                return float(data)
+            elif isinstance(data, dict) and 'cotizacion' in data:
+                return float(data['cotizacion'])
+            else:
+                print(f"⚠️ Formato MEP inesperado: {data}")
+                return None
+        elif response.status_code == 401:
+            print("❌ Error 401: No autorizado para MEP, intentando método alternativo...")
+            # Método alternativo: calcular MEP como AL30/AL30D
+            return obtener_tasa_mep_alternativa(token_portador)
+        else:
+            print(f"❌ Error HTTP {response.status_code} para MEP: {response.text}")
+            return obtener_tasa_mep_alternativa(token_portador)
+            
+    except Exception as e:
+        print(f"💥 Error al obtener MEP: {e}")
+        return obtener_tasa_mep_alternativa(token_portador)
+
+def obtener_tasa_mep_alternativa(token_portador) -> float:
+    """
+    Método alternativo para calcular MEP como AL30 / AL30D
+    """
+    try:
+        print("🔄 Usando método alternativo para MEP (AL30/AL30D)")
         hoy = datetime.now().strftime('%Y-%m-%d')
         hace_7 = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        
         datos_al30 = obtener_serie_historica_iol(token_portador, 'Bonos', 'AL30', hace_7, hoy)
         datos_al30d = obtener_serie_historica_iol(token_portador, 'Bonos', 'AL30D', hace_7, hoy)
+        
         if datos_al30 is None or datos_al30.empty or datos_al30d is None or datos_al30d.empty:
+            print("⚠️ No se pudieron obtener datos de AL30 o AL30D")
             return None
+            
         p_al30 = datos_al30['precio'].dropna().iloc[-1]
         p_al30d = datos_al30d['precio'].dropna().iloc[-1]
+        
         if p_al30 and p_al30d and p_al30d > 0:
-            return float(p_al30) / float(p_al30d)
-        return None
-    except Exception:
+            mep_rate = float(p_al30) / float(p_al30d)
+            print(f"✅ MEP calculado alternativamente: {mep_rate}")
+            return mep_rate
+        else:
+            print("⚠️ Precios inválidos para calcular MEP")
+            return None
+            
+    except Exception as e:
+        print(f"💥 Error en método alternativo MEP: {e}")
         return None
 
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
@@ -1049,6 +1108,15 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
     Para datos oficiales, consulta directamente en la plataforma de IOL.
     """)
     
+    # Botón para refrescar datos
+    col_refresh1, col_refresh2 = st.columns(2)
+    with col_refresh1:
+        if st.button("🔄 Refrescar Datos", use_container_width=True):
+            st.rerun()
+    with col_refresh2:
+        if st.button("🔍 Ver Datos Raw de la API", use_container_width=True):
+            st.json(estado_cuenta)
+    
     # Mostrar métricas principales
     cuentas = estado_cuenta.get('cuentas', [])
     total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
@@ -1084,6 +1152,45 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
     
     # Mostrar totales valorizados (portafolio real)
     st.markdown("#### 💰 Totales Valorizados (Portafolio Real)")
+    
+    # Verificar si hay un problema con los datos
+    if total_ars_valorizados == 0 and total_usd_valorizados == 0:
+        st.warning("⚠️ **Problema Detectado**: Los activos valorizados aparecen como $0.00")
+        st.info("💡 **Posibles causas:**")
+        st.info("• La API no está devolviendo el campo 'titulosValorizados'")
+        st.info("• Los datos están en un campo diferente")
+        st.info("• Hay un problema de permisos o autenticación")
+        st.info("• La estructura de la respuesta API cambió")
+        
+        # Mostrar información de debug
+        if st.session_state.get('debug_mode', False):
+            st.error("🔍 **DEBUG**: Active el modo debug para ver la estructura completa de la API")
+        
+        # Botón para intentar obtener datos del portafolio directamente
+        if st.button("📊 Intentar Obtener Portafolio Directamente"):
+            with st.spinner("Obteniendo datos del portafolio..."):
+                try:
+                    # Intentar obtener portafolio argentino
+                    portafolio_ar = obtener_portafolio_por_pais(token_portador, 'argentina')
+                    portafolio_us = obtener_portafolio_por_pais(token_portador, 'estados_unidos')
+                    
+                    if portafolio_ar or portafolio_us:
+                        st.success("✅ Datos del portafolio obtenidos")
+                        
+                        # Mostrar resumen del portafolio
+                        if portafolio_ar and 'activos' in portafolio_ar:
+                            total_ar_portafolio = sum([float(activo.get('valuacionActual', 0)) for activo in portafolio_ar['activos']])
+                            st.info(f"🇦🇷 **Portafolio Argentina**: ${total_ar_portafolio:,.2f}")
+                        
+                        if portafolio_us and 'activos' in portafolio_us:
+                            total_us_portafolio = sum([float(activo.get('valuacionActual', 0)) for activo in portafolio_us['activos']])
+                            st.info(f"🇺🇸 **Portafolio Estados Unidos**: ${total_us_portafolio:,.2f}")
+                    else:
+                        st.error("❌ No se pudieron obtener datos del portafolio")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error al obtener portafolio: {e}")
+    
     col_val1, col_val2, col_val3 = st.columns(3)
     
     with col_val1:
@@ -1170,6 +1277,16 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
     
     # Resumen comparativo con datos oficiales
     st.markdown("#### 🔍 Resumen Comparativo")
+    
+    # Mostrar valores esperados según datos oficiales
+    st.info("""
+    📋 **Datos Oficiales (Estado de Cuenta IOL):**
+    - 🇦🇷 **Argentina**: AR$ 203,142.66 (Total valorizado)
+    - 🇺🇸 **Estados Unidos**: US$ 191.79 (Total valorizado)
+    - 💰 **Disponible Argentina**: AR$ 216.24
+    - 💰 **Disponible Estados Unidos**: US$ 17.92
+    """)
+    
     col_comp1, col_comp2 = st.columns(2)
     
     with col_comp1:
@@ -1211,9 +1328,16 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
                 diferencia_ars = total_ars_valorizados - 203142.66
                 diferencia_usd = total_usd_valorizados - 191.79
                 st.write(f"🇦🇷 Diferencia en ARS: ${diferencia_ars:,.2f}")
-                st.write(f"🇺🇸 Diferencia en USD: ${diferencia_usd:,.2f}")
                 st.write(f"📊 Porcentaje de diferencia ARS: {(diferencia_ars/203142.66)*100:.2f}%")
+                st.write(f"🇺🇸 Diferencia en USD: ${diferencia_usd:,.2f}")
                 st.write(f"📊 Porcentaje de diferencia USD: {(diferencia_usd/191.79)*100:.2f}%")
+                
+                # Sugerencias de solución
+                st.info("💡 **Sugerencias para resolver la discrepancia:**")
+                st.info("1. Active el modo debug para ver la estructura de la API")
+                st.info("2. Use el botón '📊 Intentar Obtener Portafolio Directamente'")
+                st.info("3. Verifique que el token tenga permisos completos")
+                st.info("4. Consulte directamente en la plataforma de IOL")
     
     # Estadísticas del estado de cuenta
     if 'estadisticas' in estado_cuenta and estado_cuenta['estadisticas']:
@@ -1241,6 +1365,24 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
                     st.write(f"- Disponible: {cuenta.get('disponible', 'N/A')}")
                     st.write(f"- Comprometido: {cuenta.get('comprometido', 'N/A')}")
                     st.write("---")
+            
+            # Análisis adicional de la estructura de datos
+            st.write("**Estructura de datos detectada:**")
+            st.write(f"- Campo 'totalEnPesos': {estado_cuenta.get('totalEnPesos', 'No encontrado')}")
+            st.write(f"- Campo 'cuentas': {len(cuentas)} cuentas encontradas")
+            
+            # Verificar si hay otros campos que puedan contener los valores correctos
+            for key, value in estado_cuenta.items():
+                if key not in ['cuentas', 'estadisticas'] and isinstance(value, (int, float)) and value > 0:
+                    st.write(f"- Campo '{key}': {value}")
+            
+            # Verificar estructura de cada cuenta
+            st.write("**Estructura de cada cuenta:**")
+            for i, cuenta in enumerate(cuentas):
+                st.write(f"**Cuenta {i+1} - Campos disponibles:**")
+                for key, value in cuenta.items():
+                    st.write(f"  - {key}: {value}")
+                st.write("---")
 
 def mostrar_movimientos_y_analisis(movimientos, token_portador):
     """
