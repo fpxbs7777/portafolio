@@ -145,11 +145,15 @@ st.markdown("""
 def es_bono_o_titulo_publico(tipo_valor) -> bool:
     """Devuelve True si el tipo del activo corresponde a bonos/títulos públicos.
     Abarca variantes de nomenclatura comunes del API (mayúsculas/minúsculas).
+    Excluye letras del tesoro que tienen lógica de cálculo diferente.
     """
     try:
         if not tipo_valor:
             return False
         texto = str(tipo_valor).lower()
+        # Excluir letras del tesoro del divisor de 100
+        if "letra" in texto:
+            return False
         return any(pal in texto for pal in ["bono", "titul", "public"])
     except Exception:
         return False
