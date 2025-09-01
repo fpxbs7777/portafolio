@@ -2491,7 +2491,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
 
 # --- Funciones de Visualización ---
 def mostrar_resumen_portafolio(portafolio, token_portador):
-    st.markdown("### 📈 Resumen del Portafolio")
+    st.markdown("### Resumen del Portafolio")
     
     activos = portafolio.get('activos', [])
     datos_activos = []
@@ -2505,13 +2505,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             tipo = titulo.get('tipo', 'N/A')
             cantidad = activo.get('cantidad', 0)
             
-            # DEBUG: Mostrar información para S10N5 y S30S5
-            if simbolo in ['S10N5', 'S30S5']:
-                st.info(f"🔍 DEBUG {simbolo}:")
-                st.info(f"  • Tipo: '{tipo}'")
-                st.info(f"  • Descripción: '{descripcion}'")
-                st.info(f"  • Cantidad: {cantidad}")
-                st.info(f"  • Necesita ajuste por 100: {necesita_ajuste_por_100(simbolo, tipo)}")
+
             
             # Campos extra para tabla
             precio_promedio_compra = None
@@ -2579,13 +2573,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             valuacion = cantidad_num * precio_unitario
                             ajuste_aplicado = "NO"
                         
-                        # DEBUG: Mostrar cálculo para S10N5 y S30S5
-                        if simbolo in ['S10N5', 'S30S5']:
-                            st.info(f"🔢 CÁLCULO {simbolo}:")
-                            st.info(f"  • Cantidad: {cantidad_num:,.0f}")
-                            st.info(f"  • Precio: ${precio_unitario:,.2f}")
-                            st.info(f"  • Ajuste por 100: {ajuste_aplicado}")
-                            st.info(f"  • Valuación calculada: ${valuacion:,.2f}")
+
                         
                         # Validar la valuación calculada
                         if st.session_state.get('debug_mode', False):
@@ -2619,13 +2607,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             valuacion = cantidad_num * ultimo_precio
                             ajuste_api = "NO"
                         
-                        # DEBUG: Mostrar cálculo de API para S10N5 y S30S5
-                        if simbolo in ['S10N5', 'S30S5']:
-                            st.info(f"🔢 CÁLCULO API {simbolo}:")
-                            st.info(f"  • Cantidad: {cantidad_num:,.0f}")
-                            st.info(f"  • Precio API: ${ultimo_precio:,.2f}")
-                            st.info(f"  • Ajuste por 100: {ajuste_api}")
-                            st.info(f"  • Valuación calculada: ${valuacion:,.2f}")
+
                     except (ValueError, TypeError):
                         pass
             
@@ -3006,32 +2988,94 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             
                             # Ocultadas: estadísticas del histograma y evolución temporal del portafolio
                             
-                            # Mostrar contribución de cada activo
+                            # Mostrar contribución de cada activo con retornos y riesgos individuales
                             st.markdown("#### Contribución de activos al valor total")
                             
+                            # Calcular retornos y riesgos individuales de cada activo
                             contribucion_activos = {}
+                            retornos_individuales = {}
+                            riesgos_individuales = {}
+                            
                             for activo_info in activos_exitosos:
                                 simbolo = activo_info['simbolo']
+                                serie = activo_info['serie']
+                                
                                 # Usar la valuación real del activo
+                                valuacion_activo = 0
                                 for activo_original in datos_activos:
                                     if activo_original['Símbolo'] == simbolo:
-                                        contribucion_activos[simbolo] = activo_original['Valuación']
+                                        valuacion_activo = activo_original['Valuación']
+                                        contribucion_activos[simbolo] = valuacion_activo
                                         break
+                                
+                                # Calcular retorno individual del activo
+                                if 'precio' in serie.columns and len(serie) > 1:
+                                    precios = serie['precio'].values
+                                    retorno_individual = ((precios[-1] / precios[0]) - 1) * 100
+                                    retornos_individuales[simbolo] = retorno_individual
+                                    
+                                    # Calcular riesgo individual (volatilidad)
+                                    retornos_diarios = np.diff(precios) / precios[:-1]
+                                    riesgo_individual = np.std(retornos_diarios) * np.sqrt(252) * 100  # Anualizado
+                                    riesgos_individuales[simbolo] = riesgo_individual
+                                else:
+                                    retornos_individuales[simbolo] = 0
+                                    riesgos_individuales[simbolo] = 0
                             
                             if contribucion_activos:
+                                # Crear gráfico de contribución con información de retornos y riesgos
                                 fig_contribucion = go.Figure(data=[go.Pie(
-                                    labels=list(contribucion_activos.keys()),
+                                    labels=[f"{simbolo}<br>Ret: {retornos_individuales.get(simbolo, 0):.1f}%<br>Riesgo: {riesgos_individuales.get(simbolo, 0):.1f}%" 
+                                           for simbolo in contribucion_activos.keys()],
                                     values=list(contribucion_activos.values()),
                                     textinfo='label+percent+value',
                                     texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
                                     hole=0.4,
                                     marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
                                 )])
+                                
+                                # Calcular métricas globales del portafolio
+                                valor_total_portfolio = sum(contribucion_activos.values())
+                                pesos = {simbolo: valor / valor_total_portfolio for simbolo, valor in contribucion_activos.items()}
+                                
+                                # Retorno ponderado del portafolio
+                                retorno_portfolio = sum(pesos[simbolo] * retornos_individuales.get(simbolo, 0) 
+                                                      for simbolo in pesos.keys())
+                                
+                                # Riesgo del portafolio (simplificado - correlación asumida como 0.5)
+                                riesgo_portfolio = np.sqrt(sum(pesos[simbolo]**2 * riesgos_individuales.get(simbolo, 0)**2 
+                                                             for simbolo in pesos.keys()))
+                                
                                 fig_contribucion.update_layout(
-                                    title="Contribución de Activos al Valor Total del Portafolio",
-                                    height=400
+                                    title=f"Contribución de Activos al Valor Total del Portafolio<br>"
+                                          f"<sub>Retorno Global: {retorno_portfolio:.1f}% | Riesgo Global: {riesgo_portfolio:.1f}%</sub>",
+                                    height=500
                                 )
+                                
                                 st.plotly_chart(fig_contribucion, use_container_width=True)
+                                
+                                # Mostrar tabla resumen de métricas individuales y globales
+                                st.markdown("#### 📊 Métricas de Retorno y Riesgo por Activo")
+                                
+                                # Crear DataFrame para la tabla
+                                df_metricas = pd.DataFrame({
+                                    'Activo': list(contribucion_activos.keys()),
+                                    'Valuación ($)': [f"${valor:,.0f}" for valor in contribucion_activos.values()],
+                                    'Peso (%)': [f"{pesos[simbolo]*100:.1f}%" for simbolo in contribucion_activos.keys()],
+                                    'Retorno (%)': [f"{retornos_individuales.get(simbolo, 0):.1f}%" for simbolo in contribucion_activos.keys()],
+                                    'Riesgo (%)': [f"{riesgos_individuales.get(simbolo, 0):.1f}%" for simbolo in contribucion_activos.keys()]
+                                })
+                                
+                                st.dataframe(df_metricas, use_container_width=True)
+                                
+                                # Mostrar métricas globales del portafolio
+                                st.markdown("#### 🌍 Métricas Globales del Portafolio")
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                col1.metric("Valor Total", f"${valor_total_portfolio:,.0f}")
+                                col2.metric("Retorno Ponderado", f"{retorno_portfolio:.1f}%")
+                                col3.metric("Riesgo Total", f"{riesgo_portfolio:.1f}%")
+                                col4.metric("Ratio Retorno/Riesgo", f"{retorno_portfolio/riesgo_portfolio:.2f}" if riesgo_portfolio > 0 else "N/A")
                             
                             # Calcular y mostrar histograma de retornos del portafolio
                             st.markdown("#### 📊 Histograma de Retornos del Portafolio")
