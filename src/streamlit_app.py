@@ -1108,13 +1108,13 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
     Para datos oficiales, consulta directamente en la plataforma de IOL.
     """)
     
-    # Botón para refrescar datos
+                # Botón para refrescar datos
     col_refresh1, col_refresh2 = st.columns(2)
     with col_refresh1:
-        if st.button("🔄 Refrescar Datos", use_container_width=True):
+        if st.button("🔄 Refrescar Datos", key="refresh_account_data", use_container_width=True):
             st.rerun()
     with col_refresh2:
-        if st.button("🔍 Ver Datos Raw de la API", use_container_width=True):
+        if st.button("🔍 Ver Datos Raw de la API", key="view_raw_api_data", use_container_width=True):
             st.json(estado_cuenta)
     
     # Mostrar métricas principales
@@ -1133,12 +1133,36 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
     total_usd_valorizados = 0
     cuentas_operables = 0
     
+    # Función para detectar el campo correcto de valorización
+    def detectar_campo_valorizacion(cuenta):
+        """Detecta el campo correcto que contiene el valor de los títulos valorizados"""
+        campos_posibles = [
+            'titulosValorizados', 'titulos_valorizados', 'titulosValorizados',
+            'valorTitulos', 'valor_titulos', 'valorTitulos',
+            'activosValorizados', 'activos_valorizados', 'activosValorizados',
+            'valorActivos', 'valor_activos', 'valorActivos',
+            'portafolioValorizado', 'portafolio_valorizado', 'portafolioValorizado',
+            'valorPortafolio', 'valor_portafolio', 'valorPortafolio'
+        ]
+        
+        for campo in campos_posibles:
+            valor = cuenta.get(campo)
+            if valor is not None and valor != 0:
+                print(f"✅ Campo de valorización detectado: {campo} = {valor}")
+                return float(valor)
+        
+        # Si no se encuentra ningún campo, intentar calcular desde otros campos
+        print(f"⚠️ No se encontró campo de valorización directo para cuenta {cuenta.get('tipo', 'N/A')}")
+        return 0
+    
     for cuenta in cuentas:
         if cuenta.get('estado') == 'operable':
             cuentas_operables += 1
             moneda = cuenta.get('moneda', '').lower()
             total = float(cuenta.get('total', 0))
-            titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
+            
+            # Detectar el campo correcto de valorización
+            titulos_valorizados = detectar_campo_valorizacion(cuenta)
             
             if 'peso' in moneda:
                 total_ars += total
@@ -1166,30 +1190,57 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
         if st.session_state.get('debug_mode', False):
             st.error("🔍 **DEBUG**: Active el modo debug para ver la estructura completa de la API")
         
-        # Botón para intentar obtener datos del portafolio directamente
-        if st.button("📊 Intentar Obtener Portafolio Directamente"):
+        # Intentar obtener datos del portafolio automáticamente
+        st.info("🔄 **Intentando obtener datos del portafolio automáticamente...**")
+        try:
             with st.spinner("Obteniendo datos del portafolio..."):
-                try:
-                    # Intentar obtener portafolio argentino
-                    portafolio_ar = obtener_portafolio_por_pais(token_portador, 'argentina')
-                    portafolio_us = obtener_portafolio_por_pais(token_portador, 'estados_unidos')
+                # Intentar obtener portafolio argentino
+                portafolio_ar = obtener_portafolio_por_pais(token_portador, 'argentina')
+                portafolio_us = obtener_portafolio_por_pais(token_portador, 'estados_unidos')
+                
+                if portafolio_ar or portafolio_us:
+                    st.success("✅ Datos del portafolio obtenidos")
                     
-                    if portafolio_ar or portafolio_us:
-                        st.success("✅ Datos del portafolio obtenidos")
-                        
-                        # Mostrar resumen del portafolio
-                        if portafolio_ar and 'activos' in portafolio_ar:
-                            total_ar_portafolio = sum([float(activo.get('valuacionActual', 0)) for activo in portafolio_ar['activos']])
-                            st.info(f"🇦🇷 **Portafolio Argentina**: ${total_ar_portafolio:,.2f}")
-                        
-                        if portafolio_us and 'activos' in portafolio_us:
-                            total_us_portafolio = sum([float(activo.get('valuacionActual', 0)) for activo in portafolio_us['activos']])
-                            st.info(f"🇺🇸 **Portafolio Estados Unidos**: ${total_us_portafolio:,.2f}")
-                    else:
-                        st.error("❌ No se pudieron obtener datos del portafolio")
-                        
-                except Exception as e:
-                    st.error(f"❌ Error al obtener portafolio: {e}")
+                    # Calcular totales desde el portafolio
+                    total_ar_portafolio = 0
+                    total_us_portafolio = 0
+                    
+                    if portafolio_ar and 'activos' in portafolio_ar:
+                        for activo in portafolio_ar['activos']:
+                            # Buscar el campo de valuación correcto
+                            for campo in ['valuacionActual', 'valuacion', 'valorActual', 'valorMercado', 'valorTotal']:
+                                valor = activo.get(campo)
+                                if valor and valor > 0:
+                                    total_ar_portafolio += float(valor)
+                                    break
+                        st.info(f"🇦🇷 **Portafolio Argentina**: ${total_ar_portafolio:,.2f}")
+                        # Actualizar el total de ARS valorizados
+                        total_ars_valorizados = total_ar_portafolio
+                    
+                    if portafolio_us and 'activos' in portafolio_us:
+                        for activo in portafolio_us['activos']:
+                            # Buscar el campo de valuación correcto
+                            for campo in ['valuacionActual', 'valuacion', 'valorActual', 'valorMercado', 'valorTotal']:
+                                valor = activo.get(campo)
+                                if valor and valor > 0:
+                                    total_us_portafolio += float(valor)
+                                    break
+                        st.info(f"🇺🇸 **Portafolio Estados Unidos**: ${total_us_portafolio:,.2f}")
+                        # Actualizar el total de USD valorizados
+                        total_usd_valorizados = total_us_portafolio
+                    
+                    if total_ar_portafolio > 0 or total_us_portafolio > 0:
+                        st.success("✅ **Problema resuelto**: Los valores del portafolio se han actualizado automáticamente")
+                else:
+                    st.error("❌ No se pudieron obtener datos del portafolio")
+                    
+        except Exception as e:
+            st.error(f"❌ Error al obtener portafolio: {e}")
+            st.info("💡 **Solución manual**: Use el botón '📊 Intentar Obtener Portafolio Directamente'")
+        
+        # Botón manual para obtener portafolio
+        if st.button("📊 Intentar Obtener Portafolio Manualmente", key="get_portfolio_manually"):
+            st.rerun()
     
     col_val1, col_val2, col_val3 = st.columns(3)
     
@@ -1320,10 +1371,10 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
         # Botón para refrescar datos
         col_refresh1, col_refresh2 = st.columns(2)
         with col_refresh1:
-            if st.button("🔄 Refrescar Datos de la API"):
+            if st.button("🔄 Refrescar Datos de la API", key="refresh_api_data"):
                 st.rerun()
         with col_refresh2:
-            if st.button("📊 Ver Detalles de la Discrepancia"):
+            if st.button("📊 Ver Detalles de la Discrepancia", key="view_discrepancy_details"):
                 st.info("**Análisis de la discrepancia:**")
                 diferencia_ars = total_ars_valorizados - 203142.66
                 diferencia_usd = total_usd_valorizados - 191.79
@@ -1383,6 +1434,30 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
                 for key, value in cuenta.items():
                     st.write(f"  - {key}: {value}")
                 st.write("---")
+            
+            # Análisis de campos de valorización
+            st.write("**🔍 Análisis de Campos de Valorización:**")
+            campos_valorizacion = []
+            for cuenta in cuentas:
+                if cuenta.get('estado') == 'operable':
+                    for key, value in cuenta.items():
+                        if isinstance(value, (int, float)) and value > 0:
+                            if any(palabra in key.lower() for palabra in ['valor', 'titulo', 'activo', 'portafolio']):
+                                campos_valorizacion.append((cuenta.get('tipo', 'N/A'), key, value))
+            
+            if campos_valorizacion:
+                st.write("**Campos potenciales de valorización encontrados:**")
+                for tipo, campo, valor in campos_valorizacion:
+                    st.write(f"- {tipo}: {campo} = {valor}")
+            else:
+                st.write("**⚠️ No se encontraron campos de valorización**")
+                
+            # Sugerencias de solución
+            st.write("**💡 Sugerencias de solución:**")
+            st.write("1. Verifique que el token tenga permisos completos")
+            st.write("2. Consulte la documentación de la API de IOL")
+            st.write("3. Use el endpoint de portafolio directamente")
+            st.write("4. Verifique la estructura de la respuesta en la consola del navegador")
 
 def mostrar_movimientos_y_analisis(movimientos, token_portador):
     """
