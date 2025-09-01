@@ -1038,6 +1038,17 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
     """
     st.subheader("🏦 Estado de Cuenta Detallado")
     
+    # Nota sobre datos oficiales
+    st.info("""
+    📋 **Nota**: Los datos mostrados provienen de la API de IOL. 
+    Si notas discrepancias con tu estado de cuenta oficial, puede deberse a:
+    - Diferencia en el momento de la consulta
+    - API mostrando datos de un período anterior
+    - Problemas de sincronización de datos
+    
+    Para datos oficiales, consulta directamente en la plataforma de IOL.
+    """)
+    
     # Mostrar métricas principales
     cuentas = estado_cuenta.get('cuentas', [])
     total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
@@ -1050,6 +1061,8 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
     # Calcular totales por moneda
     total_ars = 0
     total_usd = 0
+    total_ars_valorizados = 0
+    total_usd_valorizados = 0
     cuentas_operables = 0
     
     for cuenta in cuentas:
@@ -1057,14 +1070,40 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
             cuentas_operables += 1
             moneda = cuenta.get('moneda', '').lower()
             total = float(cuenta.get('total', 0))
+            titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
             
             if 'peso' in moneda:
                 total_ars += total
+                total_ars_valorizados += titulos_valorizados
             elif 'dolar' in moneda:
                 total_usd += total
+                total_usd_valorizados += titulos_valorizados
     
     col3.metric("🇦🇷 Total ARS", f"${total_ars:,.2f}")
     col4.metric("🇺🇸 Total USD", f"${total_usd:,.2f}")
+    
+    # Mostrar totales valorizados (portafolio real)
+    st.markdown("#### 💰 Totales Valorizados (Portafolio Real)")
+    col_val1, col_val2, col_val3 = st.columns(3)
+    
+    with col_val1:
+        st.metric("🇦🇷 ARS Valorizados", f"${total_ars_valorizados:,.2f}")
+    with col_val2:
+        st.metric("🇺🇸 USD Valorizados", f"${total_usd_valorizados:,.2f}")
+    with col_val3:
+        # Calcular total en pesos usando MEP si está disponible
+        if 'token_portador' in locals() and token_portador:
+            try:
+                mep_rate = obtener_tasa_mep_al30(token_portador)
+                if mep_rate and mep_rate > 0:
+                    total_ars_equivalente = total_ars_valorizados + (total_usd_valorizados * mep_rate)
+                    st.metric("💱 Total Equivalente ARS (MEP)", f"${total_ars_equivalente:,.2f}")
+                else:
+                    st.metric("💱 Total Equivalente ARS", "MEP no disponible")
+            except:
+                st.metric("💱 Total Equivalente ARS", "Error cálculo")
+        else:
+            st.metric("💱 Total Equivalente ARS", "Token no disponible")
     
     # Mostrar cuentas por país
     st.markdown("#### 📋 Cuentas por País")
@@ -1093,6 +1132,10 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
                 df_ar_display[col] = df_ar_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         
         st.dataframe(df_ar_display, use_container_width=True)
+        
+        # Mostrar resumen de Argentina
+        if total_ars_valorizados > 0:
+            st.info(f"💡 **Resumen Argentina**: Total disponible: ${total_ars:,.2f} | Activos valorizados: ${total_ars_valorizados:,.2f}")
     
     # Estados Unidos
     if cuentas_eeuu:
@@ -1107,6 +1150,70 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
                 df_us_display[col] = df_us_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         
         st.dataframe(df_us_display, use_container_width=True)
+        
+        # Mostrar resumen de Estados Unidos
+        if total_usd_valorizados > 0:
+            st.info(f"💡 **Resumen Estados Unidos**: Total disponible: ${total_usd:,.2f} | Activos valorizados: ${total_usd_valorizados:,.2f}")
+    
+    # Explicación de la diferencia entre total y valorizados
+    st.markdown("#### 📚 Explicación de los Valores")
+    st.info("""
+    **💡 Diferencia entre Total y Títulos Valorizados:**
+    
+    - **Total**: Incluye saldo disponible + comprometido + títulos valorizados
+    - **Títulos Valorizados**: Representa el valor real de tu portafolio de inversiones
+    - **Disponible**: Dinero en efectivo disponible para operar
+    - **Comprometido**: Dinero comprometido en operaciones pendientes
+    
+    Los **Títulos Valorizados** son los que realmente representan tu patrimonio invertido.
+    """)
+    
+    # Resumen comparativo con datos oficiales
+    st.markdown("#### 🔍 Resumen Comparativo")
+    col_comp1, col_comp2 = st.columns(2)
+    
+    with col_comp1:
+        st.markdown("**📱 Aplicación (API)**")
+        st.write(f"🇦🇷 Argentina: ${total_ars_valorizados:,.2f}")
+        st.write(f"🇺🇸 Estados Unidos: ${total_usd_valorizados:,.2f}")
+        if 'token_portador' in locals() and token_portador:
+            try:
+                mep_rate = obtener_tasa_mep_al30(token_portador)
+                if mep_rate and mep_rate > 0:
+                    total_ars_equivalente = total_ars_valorizados + (total_usd_valorizados * mep_rate)
+                    st.write(f"💱 Total Equivalente: ${total_ars_equivalente:,.2f}")
+            except:
+                st.write("💱 Total Equivalente: Error cálculo")
+    
+    with col_comp2:
+        st.markdown("**🏦 Datos Oficiales**")
+        st.write("🇦🇷 Argentina: AR$ 203,142.66")
+        st.write("🇺🇸 Estados Unidos: US$ 191.79")
+        st.write("💱 Total Equivalente: AR$ 203,142.66")
+    
+    # Mostrar diferencia si hay discrepancia
+    if abs(total_ars_valorizados - 203142.66) > 1000 or abs(total_usd_valorizados - 191.79) > 10:
+        st.warning("⚠️ **Discrepancia Detectada**: Los valores de la API no coinciden con los datos oficiales.")
+        st.info("💡 **Posibles causas:**")
+        st.info("• Diferencia en el momento de la consulta")
+        st.info("• API mostrando datos de un período anterior")
+        st.info("• Diferencia en el cálculo de valuación")
+        st.info("• Problemas de sincronización de datos")
+        
+        # Botón para refrescar datos
+        col_refresh1, col_refresh2 = st.columns(2)
+        with col_refresh1:
+            if st.button("🔄 Refrescar Datos de la API"):
+                st.rerun()
+        with col_refresh2:
+            if st.button("📊 Ver Detalles de la Discrepancia"):
+                st.info("**Análisis de la discrepancia:**")
+                diferencia_ars = total_ars_valorizados - 203142.66
+                diferencia_usd = total_usd_valorizados - 191.79
+                st.write(f"🇦🇷 Diferencia en ARS: ${diferencia_ars:,.2f}")
+                st.write(f"🇺🇸 Diferencia en USD: ${diferencia_usd:,.2f}")
+                st.write(f"📊 Porcentaje de diferencia ARS: {(diferencia_ars/203142.66)*100:.2f}%")
+                st.write(f"📊 Porcentaje de diferencia USD: {(diferencia_usd/191.79)*100:.2f}%")
     
     # Estadísticas del estado de cuenta
     if 'estadisticas' in estado_cuenta and estado_cuenta['estadisticas']:
@@ -1116,6 +1223,24 @@ def mostrar_estado_cuenta_completo(estado_cuenta, token_portador, id_cliente):
         df_stats.columns = ['Descripción', 'Cantidad', 'Volumen']
         df_stats['Volumen'] = df_stats['Volumen'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
         st.dataframe(df_stats, use_container_width=True)
+    
+    # Debug section para desarrolladores
+    if st.session_state.get('debug_mode', False):
+        with st.expander("🔍 Debug: Datos de la API"):
+            st.write("**Datos completos de la API:**")
+            st.json(estado_cuenta)
+            
+            st.write("**Análisis de cuentas:**")
+            for i, cuenta in enumerate(cuentas):
+                if cuenta.get('estado') == 'operable':
+                    st.write(f"**Cuenta {i+1}:**")
+                    st.write(f"- Tipo: {cuenta.get('tipo', 'N/A')}")
+                    st.write(f"- Moneda: {cuenta.get('moneda', 'N/A')}")
+                    st.write(f"- Total: {cuenta.get('total', 'N/A')}")
+                    st.write(f"- Títulos Valorizados: {cuenta.get('titulosValorizados', 'N/A')}")
+                    st.write(f"- Disponible: {cuenta.get('disponible', 'N/A')}")
+                    st.write(f"- Comprometido: {cuenta.get('comprometido', 'N/A')}")
+                    st.write("---")
 
 def mostrar_movimientos_y_analisis(movimientos, token_portador):
     """
