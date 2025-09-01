@@ -23,6 +23,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Inicializar modo debug en session state
+if 'debug_mode' not in st.session_state:
+    st.session_state.debug_mode = False
+
 # Estilos CSS personalizados
 st.markdown("""
 <style>
@@ -157,6 +161,64 @@ def es_bono_o_titulo_publico(tipo_valor) -> bool:
         return any(pal in texto for pal in ["bono", "titul", "public"])
     except Exception:
         return False
+
+def necesita_ajuste_por_100(simbolo, tipo_valor) -> bool:
+    """Determina si un instrumento necesita el ajuste de división por 100.
+    
+    REGLAS DE VALUACIÓN:
+    - Letras del Tesoro (S10N5, S30S5, etc.): NO se divide por 100
+    - Bonos tradicionales (GD30, GD35, etc.): SÍ se divide por 100
+    - Acciones y otros instrumentos: NO se divide por 100
+    
+    El ajuste por 100 es necesario porque los bonos cotizan por cada $100 nominal,
+    mientras que las letras del tesoro cotizan por su valor nominal completo.
+    """
+    try:
+        if not tipo_valor:
+            return False
+        
+        texto = str(tipo_valor).lower()
+        simbolo_lower = str(simbolo).lower()
+        
+        # Letras del tesoro NO necesitan ajuste por 100
+        if ("letra" in texto or "lt" in texto or 
+            "s10n5" in simbolo_lower or "s30s5" in simbolo_lower or
+            "s10" in simbolo_lower or "s30" in simbolo_lower):
+            return False
+        
+        # Solo bonos tradicionales necesitan ajuste por 100
+        return any(pal in texto for pal in ["bono", "titul", "public"])
+    except Exception:
+        return False
+
+def validar_valuacion(simbolo, tipo, cantidad, precio, valuacion_calculada):
+    """Valida que la valuación calculada sea razonable y muestra información de debug."""
+    try:
+        cantidad_num = float(cantidad)
+        precio_num = float(precio)
+        
+        # Calcular valuación esperada
+        necesita_ajuste = necesita_ajuste_por_100(simbolo, tipo)
+        if necesita_ajuste:
+            valuacion_esperada = (cantidad_num * precio_num) / 100.0
+            ajuste_aplicado = "SÍ (÷100)"
+        else:
+            valuacion_esperada = cantidad_num * precio_num
+            ajuste_aplicado = "NO"
+        
+        # Verificar si hay discrepancia significativa
+        if abs(valuacion_calculada - valuacion_esperada) > 0.01:
+            st.warning(f"⚠️ Discrepancia en valuación de {simbolo}:")
+            st.info(f"  • Tipo: {tipo}")
+            st.info(f"  • Cantidad: {cantidad_num:,.0f}")
+            st.info(f"  • Precio: ${precio_num:,.2f}")
+            st.info(f"  • Ajuste por 100: {ajuste_aplicado}")
+            st.info(f"  • Valuación esperada: ${valuacion_esperada:,.2f}")
+            st.info(f"  • Valuación calculada: ${valuacion_calculada:,.2f}")
+        
+        return valuacion_esperada
+    except Exception:
+        return valuacion_calculada
 
 def obtener_encabezado_autorizacion(token_portador):
     return {
@@ -2106,15 +2168,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 if precio_unitario > 0:
                     try:
                         cantidad_num = float(cantidad)
-                        # Ajuste: Títulos públicos cotizan por cada 100 nominales
-                        if es_bono_o_titulo_publico(tipo):
+                        # REGLA DE VALUACIÓN: 
+                        # - Letras del Tesoro (S10N5, S30S5): cantidad × precio (sin división)
+                        # - Bonos tradicionales: cantidad × precio ÷ 100 (cotizan por cada $100 nominal)
+                        # - Acciones y otros: cantidad × precio (sin división)
+                        if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * precio_unitario) / 100.0
                         else:
                             valuacion = cantidad_num * precio_unitario
                         
-                        # Corrección especial para letras del tesoro
-                        if ("letra" in str(tipo).lower() or "lt" in str(tipo).lower()) and es_bono_o_titulo_publico(tipo):
-                            valuacion = cantidad_num * precio_unitario  # Sin división por 100
+                        # Validar la valuación calculada
+                        if st.session_state.get('debug_mode', False):
+                            validar_valuacion(simbolo, tipo, cantidad, precio_unitario, valuacion)
                     except (ValueError, TypeError):
                         pass
                 if precio_unitario == 0:
@@ -2136,14 +2201,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 if ultimo_precio:
                     try:
                         cantidad_num = float(cantidad)
-                        if es_bono_o_titulo_publico(tipo):
+                        # Aplicar la misma regla de valuación para precios de API
+                        if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * ultimo_precio) / 100.0
                         else:
                             valuacion = cantidad_num * ultimo_precio
-                        
-                        # Corrección especial para letras del tesoro
-                        if ("letra" in str(tipo).lower() or "lt" in str(tipo).lower()) and es_bono_o_titulo_publico(tipo):
-                            valuacion = cantidad_num * ultimo_precio  # Sin división por 100
                     except (ValueError, TypeError):
                         pass
             
@@ -2183,6 +2245,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 'PrecioPromedioCompra': precio_promedio_compra,
                 'VariacionDiariaPct': variacion_diaria_pct,
                 'ActivosComp': activos_comp,
+                'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
             })
             
             valor_total += valuacion
@@ -2296,7 +2359,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     'VariacionDiariaPct': 'Variación diaria',
                     'UltimoPrecio': 'Último precio',
                     'PrecioPromedioCompra': 'Precio promedio de compra',
-                    'Valuación': 'Valorizado'
+                    'Valuación': 'Valorizado',
+                    'Ajuste100': 'Ajuste ÷100'
                 })
                 st.dataframe(df_view, use_container_width=True)
         except Exception:
@@ -3511,6 +3575,16 @@ def main():
     try:
         if st.session_state.token_acceso:
             st.sidebar.title("Menú principal")
+            
+            # Toggle para modo debug
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("🔧 Configuración")
+            debug_mode = st.sidebar.checkbox("Modo Debug", value=st.session_state.debug_mode, help="Activa validaciones detalladas de valuación")
+            if debug_mode != st.session_state.debug_mode:
+                st.session_state.debug_mode = debug_mode
+                st.rerun()
+            
+            st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
                 ("Inicio", "Análisis de portafolio", "Tasas de caución", "Panel del asesor"),
