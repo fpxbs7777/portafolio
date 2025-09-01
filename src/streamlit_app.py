@@ -220,10 +220,25 @@ def validar_valuacion(simbolo, tipo, cantidad, precio, valuacion_calculada):
         return valuacion_calculada
 
 def obtener_encabezado_autorizacion(token_portador):
-    return {
-        'Authorization': f'Bearer {token_portador}',
-        'Content-Type': 'application/json'
+    """
+    Genera los headers de autorización para las peticiones a la API de IOL.
+    Valida que el token sea válido antes de proceder.
+    """
+    if not token_portador or not isinstance(token_portador, str) or len(token_portador.strip()) == 0:
+        print("❌ Error: Token de acceso inválido o vacío")
+        return None
+    
+    # Limpiar el token de espacios en blanco
+    token_limpio = token_portador.strip()
+    
+    headers = {
+        'Authorization': f'Bearer {token_limpio}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
     }
+    
+    print(f"🔑 Headers generados: Authorization: Bearer {token_limpio[:10]}...")
+    return headers
 
 def obtener_tokens(usuario, contraseña):
     url_login = 'https://api.invertironline.com/token'
@@ -233,10 +248,25 @@ def obtener_tokens(usuario, contraseña):
         'grant_type': 'password'
     }
     try:
+        print(f"🔐 Intentando autenticación para usuario: {usuario}")
         respuesta = requests.post(url_login, data=datos, timeout=15)
-        respuesta.raise_for_status()
-        respuesta_json = respuesta.json()
-        return respuesta_json['access_token'], respuesta_json['refresh_token']
+        print(f"📡 Respuesta de autenticación: {respuesta.status_code}")
+        
+        if respuesta.status_code == 200:
+            respuesta_json = respuesta.json()
+            access_token = respuesta_json.get('access_token')
+            refresh_token = respuesta_json.get('refresh_token')
+            
+            if access_token:
+                print(f"✅ Autenticación exitosa. Token obtenido: {access_token[:10]}...")
+                return access_token, refresh_token
+            else:
+                print("❌ No se recibió access_token en la respuesta")
+                return None, None
+        else:
+            print(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text}")
+            respuesta.raise_for_status()
+            
     except requests.exceptions.HTTPError as http_err:
         st.error(f'Error HTTP al obtener tokens: {http_err}')
         if respuesta.status_code == 400:
@@ -248,7 +278,63 @@ def obtener_tokens(usuario, contraseña):
         return None, None
     except Exception as e:
         st.error(f'Error inesperado al obtener tokens: {str(e)}')
+        print(f"💥 Error inesperado: {e}")
         return None, None
+
+def verificar_token_valido(token_portador):
+    """
+    Verifica si el token de acceso es válido haciendo una petición de prueba.
+    """
+    if not token_portador:
+        return False
+    
+    try:
+        # Hacer una petición simple para verificar el token
+        url_test = 'https://api.invertironline.com/api/v2/estadocuenta'
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        if not headers:
+            return False
+        
+        respuesta = requests.get(url_test, headers=headers, timeout=10)
+        return respuesta.status_code == 200
+        
+    except Exception:
+        return False
+
+def renovar_token(refresh_token):
+    """
+    Renueva el token de acceso usando el refresh token.
+    """
+    if not refresh_token:
+        return None
+    
+    try:
+        url_renovacion = 'https://api.invertironline.com/api/v2/estadocuenta'
+        datos = {
+            'grant_type': 'refresh_token',
+            'refresh_token': refresh_token
+        }
+        
+        print("🔄 Intentando renovar token de acceso...")
+        respuesta = requests.post(url_renovacion, data=datos, timeout=15)
+        
+        if respuesta.status_code == 200:
+            respuesta_json = respuesta.json()
+            nuevo_access_token = respuesta_json.get('access_token')
+            if nuevo_access_token:
+                print("✅ Token renovado exitosamente")
+                return nuevo_access_token
+            else:
+                print("❌ No se recibió nuevo access_token")
+                return None
+        else:
+            print(f"❌ Error al renovar token: {respuesta.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"💥 Error al renovar token: {e}")
+        return None
 
 def obtener_lista_clientes(token_portador):
     url_clientes = 'https://api.invertironline.com/api/v2/Asesores/Clientes'
@@ -351,17 +437,105 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
     Obtiene el portafolio del usuario autenticado para el país indicado usando
     el endpoint estándar /api/v2/portafolio/{pais} (sin contexto de asesor).
     """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
     pais_norm = normalizar_pais_para_endpoint(pais)
     url = f'https://api.invertironline.com/api/v2/portafolio/{pais_norm}'
     headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print(f"❌ No se pudieron generar headers de autorización para {pais}")
+        return None
+    
+    print(f"🔍 Intentando obtener portafolio de {pais} desde: {url}")
+    print(f"🔑 Headers de autorización: {headers}")
+    
     try:
         r = requests.get(url, headers=headers, timeout=20)
+        print(f"📡 Respuesta HTTP: {r.status_code}")
+        
         if r.status_code == 200:
-            return r.json()
-        if r.status_code == 401:
+            data = r.json()
+            print(f"✅ Portafolio obtenido exitosamente para {pais}")
+            if isinstance(data, dict) and 'activos' in data:
+                print(f"📊 Cantidad de activos encontrados: {len(data['activos'])}")
+            return data
+        elif r.status_code == 401:
+            print(f"❌ Error 401: No autorizado para {pais}")
+            print(f"📝 Respuesta del servidor: {r.text}")
+            # Intentar método alternativo usando estado de cuenta
+            print(f"🔄 Intentando método alternativo para {pais}...")
+            return obtener_portafolio_alternativo(token_portador, pais)
+        elif r.status_code == 403:
+            print(f"❌ Error 403: Prohibido para {pais}")
+            print(f"📝 Respuesta del servidor: {r.text}")
             return None
+        else:
+            print(f"❌ Error HTTP {r.status_code} para {pais}")
+            print(f"📝 Respuesta del servidor: {r.text}")
+            return None
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener portafolio de {pais}")
         return None
-    except Exception:
+    except requests.exceptions.RequestException as e:
+        print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
+        return None
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
+        return None
+
+def obtener_portafolio_alternativo(token_portador: str, pais: str):
+    """
+    Método alternativo para obtener información del portafolio usando el estado de cuenta
+    cuando el endpoint principal falla.
+    """
+    print(f"🔄 Usando método alternativo para obtener portafolio de {pais}")
+    
+    try:
+        # Obtener estado de cuenta
+        estado_cuenta = obtener_estado_cuenta(token_portador)
+        if not estado_cuenta:
+            print(f"❌ No se pudo obtener estado de cuenta para {pais}")
+            return None
+        
+        print(f"✅ Estado de cuenta obtenido para {pais}")
+        
+        # Crear estructura de portafolio simulada
+        portafolio_alternativo = {
+            'activos': [],
+            'metodo': 'alternativo_estado_cuenta',
+            'pais': pais
+        }
+        
+        # Extraer información de las cuentas
+        cuentas = estado_cuenta.get('cuentas', [])
+        for cuenta in cuentas:
+            if cuenta.get('estado') == 'operable':
+                moneda = cuenta.get('moneda', '').lower()
+                total = cuenta.get('total', 0)
+                titulos_valorizados = cuenta.get('titulosValorizados', 0)
+                
+                if total > 0 or titulos_valorizados > 0:
+                    # Crear activo simulado basado en la cuenta
+                    activo_simulado = {
+                        'titulo': {
+                            'simbolo': f"CUENTA_{moneda[:3].upper()}",
+                            'descripcion': f"Cuenta {cuenta.get('tipo', 'N/A')} - {moneda}",
+                            'tipo': 'cuenta'
+                        },
+                        'cantidad': 1,
+                        'valuacion': total,
+                        'titulosValorizados': titulos_valorizados
+                    }
+                    portafolio_alternativo['activos'].append(activo_simulado)
+        
+        print(f"📊 Método alternativo: {len(portafolio_alternativo['activos'])} cuentas encontradas")
+        return portafolio_alternativo
+        
+    except Exception as e:
+        print(f"💥 Error en método alternativo para {pais}: {e}")
         return None
 
 
@@ -3895,6 +4069,20 @@ def mostrar_analisis_portafolio():
     ])
 
     with tab1:
+        # Verificar si el token es válido
+        if not verificar_token_valido(token_acceso):
+            st.warning("⚠️ El token de acceso ha expirado. Intentando renovar...")
+            nuevo_token = renovar_token(st.session_state.refresh_token)
+            if nuevo_token:
+                st.session_state.token_acceso = nuevo_token
+                token_acceso = nuevo_token
+                st.success("✅ Token renovado exitosamente")
+            else:
+                st.error("❌ No se pudo renovar el token. Por favor, vuelva a autenticarse.")
+                st.session_state.token_acceso = None
+                st.session_state.refresh_token = None
+                return
+        
         # Intentar primero portafolio asesor (si aplica)
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if not portafolio:
@@ -3947,6 +4135,18 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     que se pueden convertir a dólares (MELID, MELIC, etc.).
     """)
     
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_acceso):
+        st.warning("⚠️ El token de acceso ha expirado. Intentando renovar...")
+        nuevo_token = renovar_token(st.session_state.refresh_token)
+        if nuevo_token:
+            st.session_state.token_acceso = nuevo_token
+            token_acceso = nuevo_token
+            st.success("✅ Token renovado exitosamente")
+        else:
+            st.error("❌ No se pudo renovar el token. Por favor, vuelva a autenticarse.")
+            return
+    
     # Obtener portafolio argentino
     portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
     
@@ -3954,22 +4154,31 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         st.warning("No se pudo obtener el portafolio de Argentina")
         return
     
-    # Filtrar solo acciones (excluir bonos, etc.)
-    acciones_ar = []
+    # Debug: mostrar estructura del portafolio para entender los datos
+    if st.session_state.get('debug_mode', False):
+        st.json(portafolio_ar)
+    
+    # Filtrar activos argentinos (acciones, bonos, letras, etc.)
+    activos_ar = []
     for activo in portafolio_ar.get('activos', []):
         titulo = activo.get('titulo', {})
         tipo = titulo.get('tipo', '')
         simbolo = titulo.get('simbolo', '')
+        descripcion = titulo.get('descripcion', 'Sin descripción')
         
-        # Filtrar solo acciones (excluir bonos, letras, etc.)
-        if tipo and 'accion' in str(tipo).lower():
+        # Incluir todos los activos argentinos (no solo acciones)
+        if simbolo and simbolo != 'N/A':
             # Crear objeto con datos estructurados
-            accion_info = {
+            activo_info = {
                 'simbolo': simbolo,
-                'descripcion': titulo.get('descripcion', 'Sin descripción'),
+                'descripcion': descripcion,
+                'tipo': tipo,
                 'cantidad': activo.get('cantidad', 0),
                 'precio': 0,
-                'valuacion': 0
+                'valuacion': 0,
+                'precio_compra': 0,
+                'variacion_diaria': 0,
+                'rendimiento': 0
             }
             
             # Obtener precio y valuación
@@ -3984,61 +4193,117 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
                     try:
                         val = float(activo[campo])
                         if val > 0:
-                            accion_info['valuacion'] = val
+                            activo_info['valuacion'] = val
                             break
                     except (ValueError, TypeError):
                         continue
             
-            # Si no hay valuación, calcular con precio y cantidad
-            if accion_info['valuacion'] == 0 and accion_info['cantidad']:
-                campos_precio = [
-                    'precioPromedio', 'precioCompra', 'precioActual', 'precio',
-                    'precioUnitario', 'ultimoPrecio', 'cotizacion'
-                ]
-                
-                for campo in campos_precio:
-                    if campo in activo and activo[campo] is not None:
-                        try:
-                            precio = float(activo[campo])
-                            if precio > 0:
-                                accion_info['precio'] = precio
-                                accion_info['valuacion'] = accion_info['cantidad'] * precio
-                                break
-                        except (ValueError, TypeError):
-                            continue
+            # Obtener precio de compra y otros datos
+            campos_precio = [
+                'precioPromedio', 'precioCompra', 'precioActual', 'precio',
+                'precioUnitario', 'ultimoPrecio', 'cotizacion'
+            ]
             
-            acciones_ar.append(accion_info)
+            for campo in campos_precio:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        precio = float(activo[campo])
+                        if precio > 0:
+                            activo_info['precio'] = precio
+                            activo_info['precio_compra'] = precio
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Obtener variación diaria y rendimiento
+            if 'variacionDiaria' in activo and activo['variacionDiaria'] is not None:
+                try:
+                    activo_info['variacion_diaria'] = float(activo['variacionDiaria'])
+                except (ValueError, TypeError):
+                    pass
+            
+            if 'rendimiento' in activo and activo['rendimiento'] is not None:
+                try:
+                    activo_info['rendimiento'] = float(activo['rendimiento'])
+                except (ValueError, TypeError):
+                    pass
+            
+            # Si no hay valuación, calcular con precio y cantidad
+            if activo_info['valuacion'] == 0 and activo_info['cantidad'] and activo_info['precio']:
+                activo_info['valuacion'] = activo_info['cantidad'] * activo_info['precio']
+            
+            activos_ar.append(activo_info)
     
-    if not acciones_ar:
-        st.info("No se encontraron acciones en el portafolio argentino")
+    if not activos_ar:
+        st.error("❌ No se encontraron activos en el portafolio argentino")
+        st.info("**Estructura del portafolio recibido:**")
+        st.json(portafolio_ar)
+        st.warning("""
+        **Posibles causas:**
+        - El portafolio está vacío
+        - Los activos no tienen la estructura esperada
+        - Problemas de autenticación o permisos
+        """)
         return
     
-    # Crear interfaz para seleccionar acción y calcular conversión
+    # Mostrar resumen de todos los activos argentinos
+    st.subheader("📊 Resumen de Activos Argentinos")
+    
+    # Crear tabla resumen de todos los activos
+    df_activos = pd.DataFrame(activos_ar)
+    if not df_activos.empty:
+        # Mostrar métricas clave
+        col1, col2, col3, col4 = st.columns(4)
+        
+        valor_total = df_activos['valuacion'].sum()
+        col1.metric("💰 Valor Total", f"${valor_total:,.2f}")
+        col2.metric("📈 Cantidad Activos", len(activos_ar))
+        col3.metric("📊 Rendimiento Promedio", f"{df_activos['rendimiento'].mean():.2f}%")
+        col4.metric("📉 Variación Promedio", f"{df_activos['variacion_diaria'].mean():.2f}%")
+        
+        # Tabla de activos
+        st.markdown("#### 📋 Lista de Activos Disponibles")
+        df_display = df_activos[['simbolo', 'descripcion', 'cantidad', 'precio', 'valuacion', 'rendimiento', 'variacion_diaria']].copy()
+        df_display.columns = ['Símbolo', 'Descripción', 'Cantidad', 'Precio', 'Valuación', 'Rendimiento %', 'Var. Diaria %']
+        df_display['Valuación'] = df_display['Valuación'].apply(lambda x: f"${x:,.2f}")
+        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}")
+        df_display['Rendimiento %'] = df_display['Rendimiento %'].apply(lambda x: f"{x:+.2f}%")
+        df_display['Var. Diaria %'] = df_display['Var. Diaria %'].apply(lambda x: f"{x:+.2f}%")
+        
+        st.dataframe(df_display, use_container_width=True)
+    
+    # Crear interfaz para seleccionar activo y calcular conversión
+    st.markdown("---")
+    st.subheader("💱 Análisis de Conversión a Dólares")
+    
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("📊 Selección de Acción")
+        st.subheader("📊 Selección de Activo")
         
-        # Selector de acción
-        opciones_acciones = [f"{accion['simbolo']} - {accion['descripcion']}" 
-                           for accion in acciones_ar]
-        accion_seleccionada = st.selectbox(
-            "Seleccione la acción a analizar:",
-            options=opciones_acciones,
+        # Selector de activo
+        opciones_activos = [f"{activo['simbolo']} - {activo['descripcion']}" 
+                           for activo in activos_ar]
+        activo_seleccionado = st.selectbox(
+            "Seleccione el activo a analizar:",
+            options=opciones_activos,
             index=0
         )
         
-        # Obtener datos de la acción seleccionada
-        accion_idx = opciones_acciones.index(accion_seleccionada)
-        accion_data = acciones_ar[accion_idx]
+        # Obtener datos del activo seleccionado
+        activo_idx = opciones_activos.index(activo_seleccionado)
+        activo_data = activos_ar[activo_idx]
         
-        # Mostrar información de la acción
+        # Mostrar información del activo
         st.info(f"""
-        **Acción seleccionada:** {accion_data['simbolo']}
-        - **Descripción:** {accion_data['descripcion']}
-        - **Cantidad:** {accion_data['cantidad']:,.0f}
-        - **Precio actual:** ${accion_data['precio']:,.2f}
-        - **Valuación actual:** ${accion_data['valuacion']:,.2f}
+        **Activo seleccionado:** {activo_data['simbolo']}
+        - **Descripción:** {activo_data['descripcion']}
+        - **Tipo:** {activo_data['tipo'] or 'N/A'}
+        - **Cantidad:** {activo_data['cantidad']:,.0f}
+        - **Precio actual:** ${activo_data['precio']:,.2f}
+        - **Valuación actual:** ${activo_data['valuacion']:,.2f}
+        - **Rendimiento:** {activo_data['rendimiento']:+.2f}%
+        - **Variación diaria:** {activo_data['variacion_diaria']:+.2f}%
         """)
         
         # Inputs para el cálculo
@@ -4047,7 +4312,7 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         precio_venta_ars = st.number_input(
             "Precio de venta en ARS:",
             min_value=0.01,
-            value=float(accion_data['precio'] if accion_data['precio'] > 0 else accion_data['valuacion'] / accion_data['cantidad'] if accion_data['cantidad'] > 0 else 0),
+            value=float(activo_data['precio'] if activo_data['precio'] > 0 else activo_data['valuacion'] / activo_data['cantidad'] if activo_data['cantidad'] > 0 else 0),
             step=0.01,
             format="%.2f"
         )
@@ -4086,14 +4351,14 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         st.subheader("📈 Resultados")
         
         # Validar que tenemos datos válidos para el cálculo
-        if accion_data['cantidad'] <= 0 or accion_data['valuacion'] <= 0:
-            st.error("❌ No hay datos suficientes para realizar el cálculo. Verifique que la acción tenga cantidad y valuación válidas.")
+        if activo_data['cantidad'] <= 0 or activo_data['valuacion'] <= 0:
+            st.error("❌ No hay datos suficientes para realizar el cálculo. Verifique que el activo tenga cantidad y valuación válidas.")
             return
         
         # Calcular resultados
-        cantidad = float(accion_data['cantidad'])
-        precio_compra = float(accion_data['precio']) if accion_data['precio'] > 0 else accion_data['valuacion'] / accion_data['cantidad']
-        valuacion_actual = float(accion_data['valuacion'])
+        cantidad = float(activo_data['cantidad'])
+        precio_compra = float(activo_data['precio']) if activo_data['precio'] > 0 else activo_data['valuacion'] / activo_data['cantidad']
+        valuacion_actual = float(activo_data['valuacion'])
         
         # Calcular venta en ARS
         venta_ars = cantidad * precio_venta_ars
@@ -4274,6 +4539,17 @@ def main():
                         st.warning("⚠️ Complete todos los campos")
         else:
             st.success("✅ Conectado a IOL")
+            
+            # Botón para renovar token manualmente
+            if st.button("🔄 Renovar Token", help="Renueva el token de acceso si ha expirado"):
+                nuevo_token = renovar_token(st.session_state.refresh_token)
+                if nuevo_token:
+                    st.session_state.token_acceso = nuevo_token
+                    st.success("✅ Token renovado exitosamente")
+                    st.rerun()
+                else:
+                    st.error("❌ No se pudo renovar el token")
+            
             st.divider()
             
             st.subheader("Configuración de Fechas")
