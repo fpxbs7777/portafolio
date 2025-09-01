@@ -3956,9 +3956,58 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     
     # Filtrar solo acciones (excluir bonos, etc.)
     acciones_ar = []
-    for activo in portafolio_ar:
-        if activo.get('tipo') and 'accion' in str(activo.get('tipo')).lower():
-            acciones_ar.append(activo)
+    for activo in portafolio_ar.get('activos', []):
+        titulo = activo.get('titulo', {})
+        tipo = titulo.get('tipo', '')
+        simbolo = titulo.get('simbolo', '')
+        
+        # Filtrar solo acciones (excluir bonos, letras, etc.)
+        if tipo and 'accion' in str(tipo).lower():
+            # Crear objeto con datos estructurados
+            accion_info = {
+                'simbolo': simbolo,
+                'descripcion': titulo.get('descripcion', 'Sin descripción'),
+                'cantidad': activo.get('cantidad', 0),
+                'precio': 0,
+                'valuacion': 0
+            }
+            
+            # Obtener precio y valuación
+            campos_valuacion = [
+                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
+                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
+                'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
+            ]
+            
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            accion_info['valuacion'] = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Si no hay valuación, calcular con precio y cantidad
+            if accion_info['valuacion'] == 0 and accion_info['cantidad']:
+                campos_precio = [
+                    'precioPromedio', 'precioCompra', 'precioActual', 'precio',
+                    'precioUnitario', 'ultimoPrecio', 'cotizacion'
+                ]
+                
+                for campo in campos_precio:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            precio = float(activo[campo])
+                            if precio > 0:
+                                accion_info['precio'] = precio
+                                accion_info['valuacion'] = accion_info['cantidad'] * precio
+                                break
+                        except (ValueError, TypeError):
+                            continue
+            
+            acciones_ar.append(accion_info)
     
     if not acciones_ar:
         st.info("No se encontraron acciones en el portafolio argentino")
@@ -3971,8 +4020,8 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         st.subheader("📊 Selección de Acción")
         
         # Selector de acción
-        opciones_acciones = [f"{activo.get('simbolo', 'N/A')} - {activo.get('descripcion', 'N/A')}" 
-                           for activo in acciones_ar]
+        opciones_acciones = [f"{accion['simbolo']} - {accion['descripcion']}" 
+                           for accion in acciones_ar]
         accion_seleccionada = st.selectbox(
             "Seleccione la acción a analizar:",
             options=opciones_acciones,
@@ -3985,11 +4034,11 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         
         # Mostrar información de la acción
         st.info(f"""
-        **Acción seleccionada:** {accion_data.get('simbolo', 'N/A')}
-        - **Descripción:** {accion_data.get('descripcion', 'N/A')}
-        - **Cantidad:** {accion_data.get('cantidad', 0):,.0f}
-        - **Precio actual:** ${accion_data.get('precio', 0):,.2f}
-        - **Valuación actual:** ${accion_data.get('valuacion', 0):,.2f}
+        **Acción seleccionada:** {accion_data['simbolo']}
+        - **Descripción:** {accion_data['descripcion']}
+        - **Cantidad:** {accion_data['cantidad']:,.0f}
+        - **Precio actual:** ${accion_data['precio']:,.2f}
+        - **Valuación actual:** ${accion_data['valuacion']:,.2f}
         """)
         
         # Inputs para el cálculo
@@ -3998,7 +4047,7 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         precio_venta_ars = st.number_input(
             "Precio de venta en ARS:",
             min_value=0.01,
-            value=float(accion_data.get('precio', 0)),
+            value=float(accion_data['precio'] if accion_data['precio'] > 0 else accion_data['valuacion'] / accion_data['cantidad'] if accion_data['cantidad'] > 0 else 0),
             step=0.01,
             format="%.2f"
         )
@@ -4036,10 +4085,15 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     with col2:
         st.subheader("📈 Resultados")
         
+        # Validar que tenemos datos válidos para el cálculo
+        if accion_data['cantidad'] <= 0 or accion_data['valuacion'] <= 0:
+            st.error("❌ No hay datos suficientes para realizar el cálculo. Verifique que la acción tenga cantidad y valuación válidas.")
+            return
+        
         # Calcular resultados
-        cantidad = float(accion_data.get('cantidad', 0))
-        precio_compra = float(accion_data.get('precio', 0))
-        valuacion_actual = cantidad * precio_compra
+        cantidad = float(accion_data['cantidad'])
+        precio_compra = float(accion_data['precio']) if accion_data['precio'] > 0 else accion_data['valuacion'] / accion_data['cantidad']
+        valuacion_actual = float(accion_data['valuacion'])
         
         # Calcular venta en ARS
         venta_ars = cantidad * precio_venta_ars
@@ -4066,22 +4120,22 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
             f"{ganancia_usd:+,.2f} USD"
         )
         
-        # Mostrar porcentaje de ganancia/pérdida
-        if valuacion_actual > 0:
-            porcentaje_ars = (ganancia_ars / valuacion_actual) * 100
-            porcentaje_usd = (ganancia_usd / (valuacion_actual / tipo_cambio)) * 100
-            
-            st.metric(
-                "📊 Rendimiento ARS",
-                f"{porcentaje_ars:+.2f}%",
-                f"{ganancia_ars:+,.2f} ARS"
-            )
-            
-            st.metric(
-                "📊 Rendimiento USD",
-                f"{porcentaje_usd:+.2f}%",
-                f"{ganancia_usd:+,.2f} USD"
-            )
+        # Calcular porcentajes de ganancia/pérdida
+        porcentaje_ars = (ganancia_ars / valuacion_actual) * 100 if valuacion_actual > 0 else 0
+        porcentaje_usd = (ganancia_usd / (valuacion_actual / tipo_cambio)) * 100 if valuacion_actual > 0 else 0
+        
+        # Mostrar métricas
+        st.metric(
+            "📊 Rendimiento ARS",
+            f"{porcentaje_ars:+.2f}%",
+            f"{ganancia_ars:+,.2f} ARS"
+        )
+        
+        st.metric(
+            "📊 Rendimiento USD",
+            f"{porcentaje_usd:+.2f}%",
+            f"{ganancia_usd:+,.2f} USD"
+        )
     
     # Análisis adicional
     st.markdown("---")
