@@ -166,12 +166,11 @@ def necesita_ajuste_por_100(simbolo, tipo_valor) -> bool:
     """Determina si un instrumento necesita el ajuste de división por 100.
     
     REGLAS DE VALUACIÓN:
-    - Letras del Tesoro (S10N5, S30S5, etc.): NO se divide por 100
-    - Bonos tradicionales (GD30, GD35, etc.): SÍ se divide por 100
+    - Letras del Tesoro (S10N5, S30S5, etc.): SÍ se divide por 100 (cotizan por cada $100 nominal)
+    - Bonos tradicionales (GD30, GD35, etc.): SÍ se divide por 100 (cotizan por cada $100 nominal)
     - Acciones y otros instrumentos: NO se divide por 100
     
-    El ajuste por 100 es necesario porque los bonos cotizan por cada $100 nominal,
-    mientras que las letras del tesoro cotizan por su valor nominal completo.
+    El ajuste por 100 es necesario porque tanto bonos como letras del tesoro cotizan por cada $100 nominal.
     """
     try:
         if not tipo_valor:
@@ -180,11 +179,11 @@ def necesita_ajuste_por_100(simbolo, tipo_valor) -> bool:
         texto = str(tipo_valor).lower()
         simbolo_lower = str(simbolo).lower()
         
-        # Letras del tesoro NO necesitan ajuste por 100
+        # Letras del tesoro SÍ necesitan ajuste por 100 (cotizan por cada $100 nominal)
         if ("letra" in texto or "lt" in texto or 
             "s10n5" in simbolo_lower or "s30s5" in simbolo_lower or
             "s10" in simbolo_lower or "s30" in simbolo_lower):
-            return False
+            return True
         
         # Solo bonos tradicionales necesitan ajuste por 100
         return any(pal in texto for pal in ["bono", "titul", "public"])
@@ -640,6 +639,398 @@ def mostrar_tasas_caucion(token_portador):
         st.error(f"Error al mostrar las tasas de caución: {str(e)}")
         st.exception(e)  # Mostrar el traceback completo para depuración
 
+def obtener_rendimiento_historico_portafolio(token_portador, id_cliente=None, fecha_desde=None, fecha_hasta=None):
+    """
+    Obtiene el rendimiento histórico del portafolio calculando la evolución del valor total.
+    
+    Args:
+        token_portador (str): Token de autenticación
+        id_cliente (str, optional): ID del cliente (para asesores)
+        fecha_desde (str): Fecha de inicio (formato ISO, default: 30 días atrás)
+        fecha_hasta (str): Fecha de fin (formato ISO, default: hoy)
+        
+    Returns:
+        dict: Diccionario con el rendimiento histórico o None en caso de error
+    """
+    from datetime import datetime, timedelta
+    
+    # Si no se especifican fechas, usar últimos 30 días
+    if not fecha_hasta:
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    if not fecha_desde:
+        fecha_desde = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    try:
+        # 1. Obtener estado de cuenta actual
+        estado_actual = obtener_estado_cuenta(token_portador, id_cliente)
+        if not estado_actual:
+            st.warning("No se pudo obtener el estado de cuenta actual")
+            return None
+        
+        # 2. Obtener movimientos en el período
+        if id_cliente:
+            # Para asesores, usar endpoint de movimientos
+            movimientos = obtener_movimientos_asesor(
+                token_portador, 
+                [id_cliente], 
+                fecha_desde, 
+                fecha_hasta
+            )
+        else:
+            # Para usuarios directos, intentar obtener movimientos del estado de cuenta
+            movimientos = estado_actual.get('movimientos', [])
+        
+        # 3. Calcular totales actuales
+        totales_actuales = obtener_totales_estado_cuenta(token_portador, id_cliente)
+        if not totales_actuales:
+            st.warning("No se pudieron calcular los totales actuales")
+            return None
+        
+        # 4. Calcular rendimiento
+        total_actual_ars = totales_actuales['total_ars_mep']
+        
+        # 5. Calcular valor inicial (aproximado restando movimientos)
+        valor_inicial_ars = total_actual_ars
+        if movimientos and isinstance(movimientos, list):
+            # Calcular el impacto neto de los movimientos
+            impacto_neto = 0
+            for mov in movimientos:
+                try:
+                    monto = float(mov.get('monto', 0))
+                    tipo = mov.get('tipo', '').lower()
+                    
+                    # Sumar compras, restar ventas
+                    if 'compra' in tipo:
+                        impacto_neto += monto
+                    elif 'venta' in tipo:
+                        impacto_neto -= monto
+                    # Los dividendos y cupones se suman
+                    elif any(pal in tipo for pal in ['dividendo', 'cupon', 'amortizacion']):
+                        impacto_neto += monto
+                except (ValueError, TypeError):
+                    continue
+            
+            valor_inicial_ars = total_actual_ars - impacto_neto
+        
+        # 6. Calcular métricas de rendimiento
+        if valor_inicial_ars > 0:
+            rendimiento_absoluto = total_actual_ars - valor_inicial_ars
+            rendimiento_porcentual = (rendimiento_absoluto / valor_inicial_ars) * 100
+        else:
+            rendimiento_absoluto = 0
+            rendimiento_porcentual = 0
+        
+        # 7. Calcular rendimiento diario promedio
+        try:
+            fecha_inicio = datetime.strptime(fecha_desde, '%Y-%m-%d')
+            fecha_fin = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+            dias_periodo = (fecha_fin - fecha_inicio).days
+            if dias_periodo > 0:
+                rendimiento_diario_promedio = rendimiento_porcentual / dias_periodo
+            else:
+                rendimiento_diario_promedio = 0
+        except:
+            rendimiento_diario_promedio = 0
+        
+        return {
+            'fecha_desde': fecha_desde,
+            'fecha_hasta': fecha_hasta,
+            'valor_inicial_ars': valor_inicial_ars,
+            'valor_actual_ars': total_actual_ars,
+            'rendimiento_absoluto': rendimiento_absoluto,
+            'rendimiento_porcentual': rendimiento_porcentual,
+            'rendimiento_diario_promedio': rendimiento_diario_promedio,
+            'total_ars': totales_actuales['total_ars'],
+            'total_usd': totales_actuales['total_usd'],
+            'tasa_mep': totales_actuales['mep'],
+            'cantidad_movimientos': len(movimientos) if movimientos else 0
+        }
+        
+    except Exception as e:
+        st.error(f"Error al calcular rendimiento histórico: {str(e)}")
+        return None
+
+def obtener_rendimiento_detallado_portafolio(token_portador, id_cliente=None):
+    """
+    Obtiene un análisis detallado del rendimiento del portafolio incluyendo
+    rendimiento por instrumento y comparación con benchmarks.
+    """
+    try:
+        # Obtener portafolio actual
+        portafolio_ars = obtener_portafolio(token_portador, id_cliente, 'Argentina')
+        portafolio_usd = obtener_portafolio(token_portador, id_cliente, 'Estados_Unidos')
+        
+        if not portafolio_ars and not portafolio_usd:
+            st.warning("No se pudo obtener información del portafolio")
+            return None
+        
+        # Calcular rendimiento total
+        rendimiento_total = obtener_rendimiento_historico_portafolio(
+            token_portador, id_cliente
+        )
+        
+        if not rendimiento_total:
+            return None
+        
+        # Analizar rendimiento por instrumento
+        rendimiento_por_instrumento = []
+        
+        # Procesar instrumentos argentinos
+        if portafolio_ars and 'activos' in portafolio_ars:
+            for activo in portafolio_ars['activos']:
+                for titulo in activo.get('titulos', []):
+                    simbolo = titulo.get('simbolo', 'N/A')
+                    cantidad = float(titulo.get('cantidad', 0))
+                    precio_actual = float(titulo.get('ultimoPrecio', 0))
+                    precio_promedio = float(titulo.get('precioPromedio', 0))
+                    
+                    if precio_promedio > 0 and cantidad > 0:
+                        valor_actual = cantidad * precio_actual
+                        valor_inicial = cantidad * precio_promedio
+                        rendimiento_instrumento = ((valor_actual - valor_inicial) / valor_inicial) * 100
+                        
+                        rendimiento_por_instrumento.append({
+                            'simbolo': simbolo,
+                            'tipo': 'ARS',
+                            'cantidad': cantidad,
+                            'precio_actual': precio_actual,
+                            'precio_promedio': precio_promedio,
+                            'valor_actual': valor_actual,
+                            'valor_inicial': valor_inicial,
+                            'rendimiento_porcentual': rendimiento_instrumento,
+                            'rendimiento_absoluto': valor_actual - valor_inicial
+                        })
+        
+        # Procesar instrumentos estadounidenses
+        if portafolio_usd and 'activos' in portafolio_usd:
+            for activo in portafolio_usd['activos']:
+                for titulo in activo.get('titulos', []):
+                    simbolo = titulo.get('simbolo', 'N/A')
+                    cantidad = float(titulo.get('cantidad', 0))
+                    precio_actual = float(titulo.get('ultimoPrecio', 0))
+                    precio_promedio = float(titulo.get('precioPromedio', 0))
+                    
+                    if precio_promedio > 0 and cantidad > 0:
+                        valor_actual = cantidad * precio_actual
+                        valor_inicial = cantidad * precio_promedio
+                        rendimiento_instrumento = ((valor_actual - valor_inicial) / valor_inicial) * 100
+                        rendimiento_por_instrumento.append({
+                            'simbolo': simbolo,
+                            'tipo': 'USD',
+                            'cantidad': cantidad,
+                            'precio_actual': precio_actual,
+                            'precio_promedio': precio_promedio,
+                            'valor_actual': valor_actual,
+                            'valor_inicial': valor_inicial,
+                            'rendimiento_porcentual': rendimiento_instrumento,
+                            'rendimiento_absoluto': valor_actual - valor_inicial
+                        })
+        
+        return {
+            'rendimiento_total': rendimiento_total,
+            'rendimiento_por_instrumento': rendimiento_por_instrumento,
+            'total_instrumentos': len(rendimiento_por_instrumento)
+        }
+        
+    except Exception as e:
+        st.error(f"Error al obtener rendimiento detallado: {str(e)}")
+        return None
+
+def mostrar_rendimiento_historico_portafolio(token_portador, id_cliente=None):
+    """
+    Muestra el rendimiento histórico del portafolio con métricas similares a la web de IOL
+    """
+    st.subheader("📈 Rendimiento Histórico del Portafolio")
+    
+    # Selector de período
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        periodos = {
+            "Últimos 7 días": 7,
+            "Últimos 30 días": 30,
+            "Últimos 90 días": 90,
+            "Último año": 365
+        }
+        periodo_seleccionado = st.selectbox("Período", list(periodos.keys()))
+        dias_periodo = periodos[periodo_seleccionado]
+    
+    with col2:
+        fecha_hasta = st.date_input("Fecha hasta", value=datetime.now().date())
+    
+    with col3:
+        if st.button("🔄 Calcular Rendimiento", type="primary"):
+            st.session_state.calcular_rendimiento = True
+    
+    # Calcular fechas
+    fecha_desde = (datetime.now() - timedelta(days=dias_periodo)).strftime('%Y-%m-%d')
+    fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d')
+    
+    # Calcular rendimiento si se solicitó
+    if st.session_state.get('calcular_rendimiento', False):
+        with st.spinner("Calculando rendimiento histórico..."):
+            rendimiento = obtener_rendimiento_historico_portafolio(
+                token_portador, id_cliente, fecha_desde, fecha_hasta_str
+            )
+            
+            if rendimiento:
+                # Mostrar métricas principales como en la web de IOL
+                st.markdown("### 📊 Métricas de Rendimiento")
+                
+                # Métricas en columnas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric(
+                        "Rendimiento Total",
+                        f"{rendimiento['rendimiento_porcentual']:.2f}%",
+                        delta=f"{rendimiento['rendimiento_porcentual']:.2f}%",
+                        delta_color="normal"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Rendimiento Diario Promedio",
+                        f"{rendimiento['rendimiento_diario_promedio']:.3f}%",
+                        delta=f"{rendimiento['rendimiento_diario_promedio']:.3f}%",
+                        delta_color="normal"
+                    )
+                
+                with col3:
+                    st.metric(
+                        "Valor Inicial",
+                        f"${rendimiento['valor_inicial_ars']:,.2f}",
+                        delta=None
+                    )
+                
+                with col4:
+                    st.metric(
+                        "Valor Actual",
+                        f"${rendimiento['valor_actual_ars']:,.2f}",
+                        delta=f"${rendimiento['rendimiento_absoluto']:,.2f}",
+                        delta_color="normal" if rendimiento['rendimiento_absoluto'] >= 0 else "inverse"
+                    )
+                
+                # Detalles adicionales
+                st.markdown("### 📋 Detalles del Período")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.info(f"**Período analizado:** {fecha_desde} a {fecha_hasta_str}")
+                    st.info(f"**Días del período:** {(datetime.strptime(fecha_hasta_str, '%Y-%m-%d') - datetime.strptime(fecha_desde, '%Y-%m-%d')).days}")
+                    st.info(f"**Movimientos procesados:** {rendimiento['cantidad_movimientos']}")
+                
+                with col2:
+                    st.info(f"**Total en pesos:** ${rendimiento['total_ars']:,.2f}")
+                    st.info(f"**Total en dólares:** ${rendimiento['total_usd']:,.2f}")
+                    st.info(f"**Tasa MEP:** ${rendimiento['tasa_mep']:,.2f}")
+                
+                # Gráfico de evolución (simulado)
+                st.markdown("### 📈 Evolución del Valor")
+                
+                # Crear datos simulados para el gráfico
+                fechas = pd.date_range(start=fecha_desde, end=fecha_hasta_str, freq='D')
+                valores = []
+                
+                # Simular evolución lineal (en un caso real, esto vendría de datos históricos)
+                valor_inicial = rendimiento['valor_inicial_ars']
+                valor_final = rendimiento['valor_actual_ars']
+                
+                for i, fecha in enumerate(fechas):
+                    if i == 0:
+                        valores.append(valor_inicial)
+                    elif i == len(fechas) - 1:
+                        valores.append(valor_final)
+                    else:
+                        # Interpolación lineal simple
+                        progreso = i / (len(fechas) - 1)
+                        valores.append(valor_inicial + (valor_final - valor_inicial) * progreso)
+                
+                # Crear DataFrame para el gráfico
+                df_evolucion = pd.DataFrame({
+                    'fecha': fechas,
+                    'valor': valores
+                })
+                
+                # Gráfico con Plotly
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=df_evolucion['fecha'],
+                    y=df_evolucion['valor'],
+                    mode='lines+markers',
+                    name='Valor del Portafolio',
+                    line=dict(color='#1f77b4', width=3),
+                    marker=dict(size=6, color='#1f77b4')
+                ))
+                
+                fig.update_layout(
+                    title='Evolución del Valor del Portafolio',
+                    xaxis_title='Fecha',
+                    yaxis_title='Valor (ARS)',
+                    template='plotly_white',
+                    height=400,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Análisis de rendimiento por instrumento
+                st.markdown("### 🔍 Análisis Detallado por Instrumento")
+                
+                rendimiento_detallado = obtener_rendimiento_detallado_portafolio(token_portador, id_cliente)
+                
+                if rendimiento_detallado and rendimiento_detallado['rendimiento_por_instrumento']:
+                    df_instrumentos = pd.DataFrame(rendimiento_detallado['rendimiento_por_instrumento'])
+                    
+                    # Ordenar por rendimiento
+                    df_instrumentos = df_instrumentos.sort_values('rendimiento_porcentual', ascending=False)
+                    
+                    # Mostrar tabla
+                    st.dataframe(
+                        df_instrumentos[['simbolo', 'tipo', 'rendimiento_porcentual', 'rendimiento_absoluto', 'valor_actual']]
+                        .rename(columns={
+                            'simbolo': 'Símbolo',
+                            'tipo': 'Moneda',
+                            'rendimiento_porcentual': 'Rendimiento %',
+                            'rendimiento_absoluto': 'Rendimiento $',
+                            'valor_actual': 'Valor Actual'
+                        }),
+                        use_container_width=True,
+                        height=300
+                    )
+                    
+                    # Gráfico de rendimiento por instrumento
+                    fig_barras = go.Figure()
+                    
+                    fig_barras.add_trace(go.Bar(
+                        x=df_instrumentos['simbolo'],
+                        y=df_instrumentos['rendimiento_porcentual'],
+                        name='Rendimiento %',
+                        marker_color=df_instrumentos['rendimiento_porcentual'].apply(
+                            lambda x: 'green' if x >= 0 else 'red'
+                        )
+                    ))
+                    
+                    fig_barras.update_layout(
+                        title='Rendimiento por Instrumento',
+                        xaxis_title='Instrumento',
+                        yaxis_title='Rendimiento (%)',
+                        template='plotly_white',
+                        height=400,
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig_barras, use_container_width=True)
+                else:
+                    st.warning("No se pudo obtener el análisis detallado por instrumento")
+                
+                # Resetear flag
+                st.session_state.calcular_rendimiento = False
+                
+            else:
+                st.error("No se pudo calcular el rendimiento histórico. Verifique los datos disponibles.")
+                st.session_state.calcular_rendimiento = False
+
 def parse_datetime_string(datetime_string):
     """
     Parsea una cadena de fecha/hora usando múltiples formatos
@@ -665,7 +1056,7 @@ def parse_datetime_string(datetime_string):
             else:
                 return pd.to_datetime(datetime_string, format=fmt)
         except Exception:
-            continue
+                    continue
 
     try:
         return pd.to_datetime(datetime_string, infer_datetime_format=True)
@@ -2113,6 +2504,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             descripcion = titulo.get('descripcion', 'Sin descripción')
             tipo = titulo.get('tipo', 'N/A')
             cantidad = activo.get('cantidad', 0)
+            
+            # DEBUG: Mostrar información para S10N5 y S30S5
+            if simbolo in ['S10N5', 'S30S5']:
+                st.info(f"🔍 DEBUG {simbolo}:")
+                st.info(f"  • Tipo: '{tipo}'")
+                st.info(f"  • Descripción: '{descripcion}'")
+                st.info(f"  • Cantidad: {cantidad}")
+                st.info(f"  • Necesita ajuste por 100: {necesita_ajuste_por_100(simbolo, tipo)}")
+            
             # Campos extra para tabla
             precio_promedio_compra = None
             variacion_diaria_pct = None
@@ -2174,8 +2574,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         # - Acciones y otros: cantidad × precio (sin división)
                         if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * precio_unitario) / 100.0
+                            ajuste_aplicado = "SÍ (÷100)"
                         else:
                             valuacion = cantidad_num * precio_unitario
+                            ajuste_aplicado = "NO"
+                        
+                        # DEBUG: Mostrar cálculo para S10N5 y S30S5
+                        if simbolo in ['S10N5', 'S30S5']:
+                            st.info(f"🔢 CÁLCULO {simbolo}:")
+                            st.info(f"  • Cantidad: {cantidad_num:,.0f}")
+                            st.info(f"  • Precio: ${precio_unitario:,.2f}")
+                            st.info(f"  • Ajuste por 100: {ajuste_aplicado}")
+                            st.info(f"  • Valuación calculada: ${valuacion:,.2f}")
                         
                         # Validar la valuación calculada
                         if st.session_state.get('debug_mode', False):
@@ -2204,8 +2614,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         # Aplicar la misma regla de valuación para precios de API
                         if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * ultimo_precio) / 100.0
+                            ajuste_api = "SÍ (÷100)"
                         else:
                             valuacion = cantidad_num * ultimo_precio
+                            ajuste_api = "NO"
+                        
+                        # DEBUG: Mostrar cálculo de API para S10N5 y S30S5
+                        if simbolo in ['S10N5', 'S30S5']:
+                            st.info(f"🔢 CÁLCULO API {simbolo}:")
+                            st.info(f"  • Cantidad: {cantidad_num:,.0f}")
+                            st.info(f"  • Precio API: ${ultimo_precio:,.2f}")
+                            st.info(f"  • Ajuste por 100: {ajuste_api}")
+                            st.info(f"  • Valuación calculada: ${valuacion:,.2f}")
                     except (ValueError, TypeError):
                         pass
             
@@ -3421,12 +3841,13 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
-        "🔄 Rebalanceo"
+        "🔄 Rebalanceo",
+        "💵 Conversión USD"
     ])
 
     with tab1:
@@ -3466,6 +3887,250 @@ def mostrar_analisis_portafolio():
     
     with tab5:
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
+    
+    with tab6:
+        mostrar_conversion_usd(token_acceso, id_cliente)
+
+
+def mostrar_conversion_usd(token_acceso, id_cliente):
+    """
+    Muestra la funcionalidad para calcular ganancias/pérdidas en dólares
+    al vender acciones argentinas y convertirlas a dólares (MELID, MELIC, etc.)
+    """
+    st.header("💵 Conversión a Dólares - Análisis de Ganancias/Pérdidas")
+    st.markdown("""
+    Calcula si estás ganando o perdiendo en términos de dólares cuando vendes acciones argentinas 
+    que se pueden convertir a dólares (MELID, MELIC, etc.).
+    """)
+    
+    # Obtener portafolio argentino
+    portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
+    
+    if not portafolio_ar:
+        st.warning("No se pudo obtener el portafolio de Argentina")
+        return
+    
+    # Filtrar solo acciones (excluir bonos, etc.)
+    acciones_ar = []
+    for activo in portafolio_ar:
+        if activo.get('tipo') and 'accion' in str(activo.get('tipo')).lower():
+            acciones_ar.append(activo)
+    
+    if not acciones_ar:
+        st.info("No se encontraron acciones en el portafolio argentino")
+        return
+    
+    # Crear interfaz para seleccionar acción y calcular conversión
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("📊 Selección de Acción")
+        
+        # Selector de acción
+        opciones_acciones = [f"{activo.get('simbolo', 'N/A')} - {activo.get('descripcion', 'N/A')}" 
+                           for activo in acciones_ar]
+        accion_seleccionada = st.selectbox(
+            "Seleccione la acción a analizar:",
+            options=opciones_acciones,
+            index=0
+        )
+        
+        # Obtener datos de la acción seleccionada
+        accion_idx = opciones_acciones.index(accion_seleccionada)
+        accion_data = acciones_ar[accion_idx]
+        
+        # Mostrar información de la acción
+        st.info(f"""
+        **Acción seleccionada:** {accion_data.get('simbolo', 'N/A')}
+        - **Descripción:** {accion_data.get('descripcion', 'N/A')}
+        - **Cantidad:** {accion_data.get('cantidad', 0):,.0f}
+        - **Precio actual:** ${accion_data.get('precio', 0):,.2f}
+        - **Valuación actual:** ${accion_data.get('valuacion', 0):,.2f}
+        """)
+        
+        # Inputs para el cálculo
+        st.subheader("💰 Parámetros de Conversión")
+        
+        precio_venta_ars = st.number_input(
+            "Precio de venta en ARS:",
+            min_value=0.01,
+            value=float(accion_data.get('precio', 0)),
+            step=0.01,
+            format="%.2f"
+        )
+        
+        # Selector de tipo de conversión
+        tipo_conversion = st.selectbox(
+            "Tipo de conversión:",
+            options=["MELID (Dólar MEP)", "MELIC (Dólar CCL)", "Dólar Blue", "Dólar Oficial"],
+            index=0
+        )
+        
+        # Input para tipo de cambio
+        if tipo_conversion == "MELID (Dólar MEP)":
+            tc_default = 1000  # Valor aproximado del dólar MEP
+            tc_help = "Ingrese el tipo de cambio MEP actual (ARS/USD)"
+        elif tipo_conversion == "MELIC (Dólar CCL)":
+            tc_default = 1100  # Valor aproximado del dólar CCL
+            tc_help = "Ingrese el tipo de cambio CCL actual (ARS/USD)"
+        elif tipo_conversion == "Dólar Blue":
+            tc_default = 1200  # Valor aproximado del dólar blue
+            tc_help = "Ingrese el tipo de cambio blue actual (ARS/USD)"
+        else:  # Dólar Oficial
+            tc_default = 350  # Valor aproximado del dólar oficial
+            tc_help = "Ingrese el tipo de cambio oficial actual (ARS/USD)"
+        
+        tipo_cambio = st.number_input(
+            f"Tipo de cambio {tipo_conversion.split(' ')[0]}:",
+            min_value=0.01,
+            value=tc_default,
+            step=0.01,
+            format="%.2f",
+            help=tc_help
+        )
+    
+    with col2:
+        st.subheader("📈 Resultados")
+        
+        # Calcular resultados
+        cantidad = float(accion_data.get('cantidad', 0))
+        precio_compra = float(accion_data.get('precio', 0))
+        valuacion_actual = cantidad * precio_compra
+        
+        # Calcular venta en ARS
+        venta_ars = cantidad * precio_venta_ars
+        
+        # Calcular conversión a USD
+        venta_usd = venta_ars / tipo_cambio
+        
+        # Calcular ganancia/pérdida en ARS
+        ganancia_ars = venta_ars - valuacion_actual
+        
+        # Calcular ganancia/pérdida en USD
+        ganancia_usd = venta_usd - (valuacion_actual / tipo_cambio)
+        
+        # Mostrar métricas
+        st.metric(
+            "💰 Venta en ARS",
+            f"${venta_ars:,.2f}",
+            f"{ganancia_ars:+,.2f} ARS"
+        )
+        
+        st.metric(
+            "💵 Venta en USD",
+            f"${venta_usd:,.2f}",
+            f"{ganancia_usd:+,.2f} USD"
+        )
+        
+        # Mostrar porcentaje de ganancia/pérdida
+        if valuacion_actual > 0:
+            porcentaje_ars = (ganancia_ars / valuacion_actual) * 100
+            porcentaje_usd = (ganancia_usd / (valuacion_actual / tipo_cambio)) * 100
+            
+            st.metric(
+                "📊 Rendimiento ARS",
+                f"{porcentaje_ars:+.2f}%",
+                f"{ganancia_ars:+,.2f} ARS"
+            )
+            
+            st.metric(
+                "📊 Rendimiento USD",
+                f"{porcentaje_usd:+.2f}%",
+                f"{ganancia_usd:+,.2f} USD"
+            )
+    
+    # Análisis adicional
+    st.markdown("---")
+    st.subheader("🔍 Análisis Detallado")
+    
+    col_an1, col_an2 = st.columns(2)
+    
+    with col_an1:
+        st.markdown("**📋 Resumen de la operación:**")
+        st.info(f"""
+        - **Inversión original:** ${valuacion_actual:,.2f} ARS
+        - **Venta proyectada:** ${venta_ars:,.2f} ARS
+        - **Ganancia/Pérdida ARS:** {ganancia_ars:+,.2f} ARS ({porcentaje_ars:+.2f}%)
+        - **Conversión a USD:** ${venta_usd:,.2f} USD
+        - **Ganancia/Pérdida USD:** {ganancia_usd:+,.2f} USD ({porcentaje_usd:+.2f}%)
+        """)
+    
+    with col_an2:
+        st.markdown("**💡 Recomendaciones:**")
+        
+        if ganancia_usd > 0:
+            st.success(f"✅ **Ganancia en USD:** Estás ganando ${ganancia_usd:,.2f} USD")
+            if ganancia_ars < 0:
+                st.warning("⚠️ **Pérdida en ARS:** Aunque pierdes en pesos, ganas en dólares")
+        elif ganancia_usd < 0:
+            st.error(f"❌ **Pérdida en USD:** Estás perdiendo ${abs(ganancia_usd):,.2f} USD")
+            if ganancia_ars > 0:
+                st.info("ℹ️ **Ganancia en ARS:** Aunque ganas en pesos, pierdes en dólares")
+        else:
+            st.info("ℹ️ **Equilibrio:** No hay ganancia ni pérdida en USD")
+        
+        # Análisis del tipo de cambio
+        if tipo_cambio > 1000:
+            st.info("💱 **Dólar alto:** Favorable para vender acciones argentinas")
+        else:
+            st.info("💱 **Dólar bajo:** Considera esperar o usar otro tipo de cambio")
+    
+    # Gráfico de comparación
+    st.markdown("---")
+    st.subheader("📊 Visualización de Resultados")
+    
+    # Crear datos para el gráfico
+    categorias = ['Inversión Original', 'Venta Proyectada']
+    valores_ars = [valuacion_actual, venta_ars]
+    valores_usd = [valuacion_actual / tipo_cambio, venta_usd]
+    
+    # Crear gráfico de barras
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        name='ARS',
+        x=categorias,
+        y=valores_ars,
+        marker_color=['#1f77b4', '#ff7f0e'],
+        text=[f'${v:,.0f}' for v in valores_ars],
+        textposition='auto',
+    ))
+    
+    fig.add_trace(go.Bar(
+        name='USD',
+        x=categorias,
+        y=valores_usd,
+        marker_color=['#2ca02c', '#d62728'],
+        text=[f'${v:,.2f}' for v in valores_usd],
+        textposition='auto',
+        yaxis='y2'
+    ))
+    
+    fig.update_layout(
+        title="Comparación: Inversión Original vs Venta Proyectada",
+        xaxis_title="",
+        yaxis_title="Valor en ARS",
+        yaxis2=dict(
+            title="Valor en USD",
+            overlaying="y",
+            side="right"
+        ),
+        barmode='group',
+        height=400,
+        showlegend=True
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Notas importantes
+    st.markdown("---")
+    st.markdown("""
+    **📝 Notas importantes:**
+    - Los cálculos son estimativos y no incluyen comisiones
+    - El tipo de cambio puede variar significativamente
+    - Considera el impacto fiscal de la operación
+    - MELID y MELIC son instrumentos de conversión de pesos a dólares
+    """)
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -3587,7 +4252,7 @@ def main():
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Tasas de caución", "Panel del asesor"),
+                ("Inicio", "Análisis de portafolio", "Rendimiento histórico", "Tasas de caución", "Panel del asesor"),
                 index=0,
             )
 
@@ -3597,6 +4262,11 @@ def main():
             elif opcion == "Análisis de portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_portafolio()
+                else:
+                    st.info("Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "Rendimiento histórico":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_rendimiento_historico_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
                 else:
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "Tasas de caución":
