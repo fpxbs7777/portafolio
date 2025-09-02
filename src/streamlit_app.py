@@ -567,25 +567,59 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
                             st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
                             st.info("3. La aplicación usará datos simulados como alternativa")
             
-            # Intentar método alternativo usando estado de cuenta
+            # Intentar método alternativo usando endpoint de asesor
             print(f"🔄 Intentando método alternativo para {pais}...")
-            return obtener_portafolio_alternativo(token_portador, pais)
+            return obtener_portafolio_alternativo_asesor(token_portador, pais)
         elif r.status_code == 403:
             print(f"❌ Error 403: Prohibido para {pais}")
             print(f"📝 Respuesta del servidor: {r.text}")
-            return None
+            return obtener_portafolio_alternativo_asesor(token_portador, pais)
         else:
             print(f"❌ Error HTTP {r.status_code} para {pais}")
             print(f"📝 Respuesta del servidor: {r.text}")
-        return None
+            return obtener_portafolio_alternativo_asesor(token_portador, pais)
     except requests.exceptions.Timeout:
         print(f"⏰ Timeout al obtener portafolio de {pais}")
-        return None
+        return obtener_portafolio_alternativo_asesor(token_portador, pais)
     except requests.exceptions.RequestException as e:
         print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
-        return None
+        return obtener_portafolio_alternativo_asesor(token_portador, pais)
     except Exception as e:
         print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
+        return obtener_portafolio_alternativo_asesor(token_portador, pais)
+
+def obtener_portafolio_alternativo_asesor(token_portador: str, pais: str):
+    """
+    Método alternativo para obtener información del portafolio usando el endpoint de asesor
+    cuando el endpoint principal falla.
+    """
+    print(f"🔄 Usando método alternativo de asesor para obtener portafolio de {pais}")
+    
+    # Obtener cliente seleccionado
+    cliente_actual = st.session_state.get('cliente_seleccionado')
+    if not cliente_actual:
+        print("❌ No hay cliente seleccionado")
+        return None
+    
+    id_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id'))
+    if not id_cliente:
+        print("❌ No se pudo obtener ID del cliente")
+        return None
+    
+    # Mapear país para el endpoint de asesor
+    pais_asesor = 'Argentina' if pais.lower() in ['argentina', 'ar', 'arg'] else 'Estados Unidos'
+    
+    try:
+        # Usar el endpoint de asesor
+        portafolio = obtener_portafolio(token_portador, id_cliente, pais_asesor)
+        if portafolio and 'activos' in portafolio:
+            print(f"✅ Portafolio obtenido con método de asesor para {pais}: {len(portafolio['activos'])} activos")
+            return portafolio
+        else:
+            print(f"❌ No se encontraron activos con método de asesor para {pais}")
+            return None
+    except Exception as e:
+        print(f"❌ Error en método alternativo de asesor para {pais}: {e}")
         return None
 
 def obtener_portafolio_alternativo(token_portador: str, pais: str):
@@ -4556,11 +4590,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     </style>
     """, unsafe_allow_html=True)
     
-    # Header principal
+    # Header principal (simplificado)
     st.markdown("""
     <div class="portfolio-header">
-        <h1>📊 Resumen del Portafolio</h1>
-        <p>Análisis integral de activos argentinos y estadounidenses</p>
+        <h1>📊 Análisis del Portafolio</h1>
+        <p>Métricas unificadas y predicciones avanzadas</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -4873,53 +4907,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         id_cliente_actual = cliente_actual.get('numeroCliente', cliente_actual.get('id')) if cliente_actual else None
         totales_cta = obtener_totales_estado_cuenta(token_portador, id_cliente_actual)
         
-        # SECCIÓN 0: RESUMEN EJECUTIVO (RESULTADO CORRECTO)
-        if metricas and 'metricas_globales' in metricas:
-            st.markdown("### 🎯 Resumen Ejecutivo - Resultado Correcto")
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; color: white; margin-bottom: 20px;">
-            <h3 style="color: white; text-align: center;">📊 MÉTRICAS UNIFICADAS Y CONFIABLES</h3>
-            <p style="text-align: center; font-size: 16px;">Todos los cálculos provienen de la misma fuente: <strong>calcular_metricas_portafolio_unificada()</strong></p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); color: white;">
-                    <h3>💰 Valor Total</h3>
-                    <h2>${metricas['metricas_globales']['valor_total']:,.2f}</h2>
-                    <small>ARS + USD a MEP</small>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;">
-                    <h3>📈 Retorno Esperado</h3>
-                    <h2>{metricas['metricas_globales']['retorno_ponderado']:+.1f}%</h2>
-                    <small>Retorno ponderado anual</small>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); color: white;">
-                    <h3>⚠️ Riesgo Total</h3>
-                    <h2>{metricas['metricas_globales']['riesgo_total']:.1f}%</h2>
-                    <small>Volatilidad anual</small>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); color: white;">
-                    <h3>📊 Ratio Eficiencia</h3>
-                    <h2>{metricas['metricas_globales']['ratio_retorno_riesgo']:.2f}</h2>
-                    <small>Retorno/Riesgo</small>
-                </div>
-                """, unsafe_allow_html=True)
+
         
         # SECCIÓN 1: RESUMEN GENERAL
         st.markdown("### 📈 Resumen General")
@@ -6678,15 +6666,6 @@ def mostrar_analisis_portafolio():
                 st.session_state.refresh_token = None
                 return
         
-        # Mostrar estado de cuenta como alternativa si no hay portafolio
-        estado_cuenta = obtener_estado_cuenta(token_acceso)
-        
-        if estado_cuenta:
-            # Mostrar estado de cuenta sin detalles extensos
-            st.info("📊 Estado de cuenta disponible")
-        else:
-            st.warning("⚠️ No se pudo obtener el estado de cuenta")
-        
         # Intentar obtener portafolio
         portafolio = obtener_portafolio(token_acceso, id_cliente)
         if not portafolio:
@@ -6694,8 +6673,6 @@ def mostrar_analisis_portafolio():
             portafolio = obtener_portafolio_por_pais(token_acceso, 'argentina')
         
         if portafolio:
-            st.markdown("---")
-            st.subheader("📊 Resumen del Portafolio")
             mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
@@ -7154,29 +7131,44 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
             st.error("❌ No se pudo renovar el token. Por favor, vuelva a autenticarse.")
             return
     
-    # Obtener portafolio argentino
+    # Obtener portafolios de Argentina y Estados Unidos
     portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
+    portafolio_us = obtener_portafolio_por_pais(token_acceso, 'estados_unidos')
     
-    if not portafolio_ar:
-        st.error("❌ No se pudo obtener el portafolio de Argentina")
+    # Combinar portafolios
+    portafolio_combinado = {'activos': []}
+    
+    if portafolio_ar and 'activos' in portafolio_ar:
+        portafolio_combinado['activos'].extend(portafolio_ar['activos'])
+        print(f"✅ Portafolio argentino: {len(portafolio_ar['activos'])} activos")
+    
+    if portafolio_us and 'activos' in portafolio_us:
+        portafolio_combinado['activos'].extend(portafolio_us['activos'])
+        print(f"✅ Portafolio estadounidense: {len(portafolio_us['activos'])} activos")
+    
+    if not portafolio_combinado['activos']:
+        st.error("❌ No se pudieron obtener portafolios de Argentina ni Estados Unidos")
         st.info("💡 **Posibles causas:**")
         st.info("• Problemas de conectividad con la API")
         st.info("• Token de acceso expirado")
-        st.info("• Permisos insuficientes para acceder al portafolio")
-        st.info("• El portafolio argentino está vacío")
+        st.info("• Permisos insuficientes para acceder a los portafolios")
+        st.info("• Los portafolios están vacíos")
         return
+    
+    # Usar el portafolio combinado
+    portafolio_ar = portafolio_combinado
     
 
     
-    # Verificar si el portafolio tiene activos
+    # Verificar si el portafolio combinado tiene activos
     activos_raw = portafolio_ar.get('activos', [])
     if not activos_raw:
-        st.error("❌ No se encontraron activos en el portafolio argentino")
+        st.error("❌ No se encontraron activos en los portafolios combinados")
         st.info("**Estructura del portafolio recibido:**")
         st.json(portafolio_ar)
         st.warning("""
         **Posibles causas:**
-        - El portafolio argentino está realmente vacío
+        - Los portafolios están realmente vacíos
         - Los activos no tienen la estructura esperada
         - Problemas de autenticación o permisos
         - La API está devolviendo datos en un formato diferente
@@ -7185,15 +7177,23 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         # Intentar obtener portafolio con método alternativo
         st.info("🔄 **Intentando método alternativo...**")
         try:
-            # Intentar obtener portafolio usando el endpoint de asesor
-            portafolio_alternativo = obtener_portafolio(token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', ''), 'Argentina')
-            if portafolio_alternativo and portafolio_alternativo.get('activos'):
+            # Intentar obtener portafolios usando el endpoint de asesor
+            portafolio_ar_alt = obtener_portafolio(token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', ''), 'Argentina')
+            portafolio_us_alt = obtener_portafolio(token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', ''), 'Estados Unidos')
+            
+            portafolio_combinado_alt = {'activos': []}
+            if portafolio_ar_alt and portafolio_ar_alt.get('activos'):
+                portafolio_combinado_alt['activos'].extend(portafolio_ar_alt['activos'])
+            if portafolio_us_alt and portafolio_us_alt.get('activos'):
+                portafolio_combinado_alt['activos'].extend(portafolio_us_alt['activos'])
+            
+            if portafolio_combinado_alt['activos']:
                 st.success("✅ Se encontraron activos con método alternativo")
-                portafolio_ar = portafolio_alternativo
+                portafolio_ar = portafolio_combinado_alt
                 activos_raw = portafolio_ar.get('activos', [])
             else:
                 st.warning("⚠️ El método alternativo tampoco encontró activos")
-                st.info("💡 **Sugerencia:** Verifica que tengas activos en tu portafolio argentino en la plataforma de IOL")
+                st.info("💡 **Sugerencia:** Verifica que tengas activos en tus portafolios en la plataforma de IOL")
                 
                 # Crear datos de ejemplo para demostración
                 st.info("🎭 **Creando datos de ejemplo para demostración...**")
