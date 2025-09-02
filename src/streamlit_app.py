@@ -6322,13 +6322,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             col1.metric("Valor Total", f"${valor_total_unificado:,.0f}")
                             col2.metric("Retorno Ponderado", f"{retorno_ponderado_unificado:.1f}%")
                             col3.metric("Riesgo Total", f"{riesgo_total_unificado:.1f}%")
-                            col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
+                                                        col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
                             
-                                # Identificar instrumentos de renta fija
-                                instrumentos_renta_fija = []
-                                total_renta_fija = 0
-                                
-                                for activo in datos_activos:
+                            # Identificar instrumentos de renta fija
+                            instrumentos_renta_fija = []
+                            total_renta_fija = 0
+                            
+                            for activo in datos_activos:
                                     tipo = activo.get('Tipo', '').lower()
                                     simbolo = activo.get('Símbolo', '')
                                     valuacion = activo.get('Valuación', 0)
