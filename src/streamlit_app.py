@@ -5341,25 +5341,25 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             with col1:
                 st.metric(
                     "Concentración", 
-                    f"{concentracion_pct:.1f}%",
-                    delta=f"{concentracion_status}",
-                    delta_color="normal" if concentracion_status == "Baja" else "inverse"
+                    f"{concentracion:.1%}",
+                    delta="Baja" if concentracion < 0.3 else "Moderada" if concentracion < 0.6 else "Alta",
+                    delta_color="normal" if concentracion < 0.3 else "inverse"
                 )
             
             with col2:
                 st.metric(
                     "Volatilidad Anual", 
-                    f"{riesgo_total:.1f}%",
-                    delta=f"{riesgo_status}",
-                    delta_color="normal" if riesgo_status == "Bajo" else "inverse"
+                    f"{riesgo_total:.1%}",
+                    delta="Bajo" if riesgo_total < 0.15 else "Moderado" if riesgo_total < 0.25 else "Alto",
+                    delta_color="normal" if riesgo_total < 0.15 else "inverse"
                 )
             
             with col3:
                 st.metric(
                     "Retorno Esperado", 
-                    f"{retorno_ponderado:+.1f}%",
-                    delta=f"{retorno_status}",
-                    delta_color="normal" if retorno_status == "Positivo" else "inverse"
+                    f"{retorno_ponderado:+.1%}",
+                    delta="Positivo" if retorno_ponderado > 0 else "Negativo",
+                    delta_color="normal" if retorno_ponderado > 0 else "inverse"
                 )
             
             # Mostrar tabla detallada con explicaciones
@@ -7059,6 +7059,21 @@ def mostrar_analisis_portafolio():
         with st.spinner("Obteniendo portafolios combinados..."):
             portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
             portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
+            
+            # Mostrar información sobre el estado de los portafolios
+            if portafolio_ar and portafolio_ar.get('activos'):
+                st.success(f"✅ Portafolio Argentino: {len(portafolio_ar['activos'])} activos")
+            else:
+                st.warning("⚠️ No se pudo obtener el portafolio argentino")
+            
+            if portafolio_us and portafolio_us.get('activos'):
+                st.success(f"✅ Portafolio Estadounidense: {len(portafolio_us['activos'])} activos")
+            else:
+                st.info("ℹ️ **Portafolio Estadounidense**: No disponible o sin permisos")
+                st.info("💡 **Posibles causas:**")
+                st.info("• Las APIs no están habilitadas para portafolio EEUU")
+                st.info("• Necesitas permisos específicos para este endpoint")
+                st.info("• La aplicación usará solo el portafolio argentino")
             
             # Combinar portafolios
             portafolio_combinado = {'activos': []}
