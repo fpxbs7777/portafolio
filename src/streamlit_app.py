@@ -4242,6 +4242,10 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.error("❌ **No se pudieron obtener datos alternativos**")
         return
     
+    # Si hay activos, procesarlos normalmente
+    datos_activos = []
+    valor_total = 0
+    
     for activo in activos:
         try:
             titulo = activo.get('titulo', {})
