@@ -584,6 +584,110 @@ def normalizar_pais_para_endpoint(pais: str) -> str:
         return 'estados_Unidos'
     return pais
 
+def obtener_portafolio_correcto(token_portador: str):
+    """
+    Obtiene el portafolio completo usando el endpoint que SÍ funciona
+    """
+    print("🌍 Obteniendo portafolio completo...")
+    
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Endpoint que SÍ funciona
+    url = 'https://api.invertironline.com/api/v2/portafolio'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    print(f"🔍 Intentando obtener portafolio desde: {url}")
+    
+    try:
+        r = requests.get(url, headers=headers, timeout=20)
+        print(f"📡 Respuesta HTTP: {r.status_code}")
+        
+        if r.status_code == 200:
+            data = r.json()
+            print(f"✅ Portafolio obtenido exitosamente")
+            
+            # Verificar estructura de respuesta
+            if isinstance(data, dict) and 'activos' in data:
+                activos = data['activos']
+                print(f"📊 Total de activos encontrados: {len(activos)}")
+                
+                # Mostrar todos los activos para debug
+                for j, activo in enumerate(activos):
+                    titulo = activo.get('titulo', {})
+                    simbolo = titulo.get('simbolo', 'N/A')
+                    pais = titulo.get('pais', 'N/A')
+                    tipo = titulo.get('tipo', 'N/A')
+                    cantidad = activo.get('cantidad', 0)
+                    valorizado = activo.get('valorizado', 0)
+                    print(f"  📈 Activo {j+1}: {simbolo} - País: {pais} - Tipo: {tipo} - Cantidad: {cantidad} - Valorizado: ${valorizado:,.2f}")
+                
+                # Filtrar activos con cantidad > 0
+                activos_validos = [activo for activo in activos if activo.get('cantidad', 0) > 0]
+                print(f"📊 Activos con cantidad > 0: {len(activos_validos)}")
+                
+                # Separar activos por país
+                activos_argentinos = []
+                activos_estadounidenses = []
+                
+                for activo in activos_validos:
+                    titulo = activo.get('titulo', {})
+                    simbolo = titulo.get('simbolo', '')
+                    pais = titulo.get('pais', '')
+                    tipo = titulo.get('tipo', '')
+                    
+                    # Clasificar como EEUU si:
+                    # 1. El país está marcado como estados_Unidos
+                    # 2. Es un símbolo conocido de EEUU (ARKK, BBD, EWZ, FXI, YPF, etc.)
+                    # 3. La función de clasificación lo identifica como EEUU
+                    es_eeuu = (
+                        pais == 'estados_Unidos' or 
+                        simbolo in ['ARKK', 'BBD', 'EWZ', 'FXI', 'YPF', 'AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA'] or
+                        _es_activo_estadounidense(simbolo, tipo)
+                    )
+                    
+                    if es_eeuu:
+                        activos_estadounidenses.append(activo)
+                        print(f"🇺🇸 Identificado como EEUU: {simbolo}")
+                    else:
+                        activos_argentinos.append(activo)
+                        print(f"🇦🇷 Identificado como Argentina: {simbolo}")
+                
+                print(f"🇦🇷 Activos argentinos: {len(activos_argentinos)}")
+                print(f"🇺🇸 Activos estadounidenses: {len(activos_estadounidenses)}")
+                
+                # Crear estructura de respuesta
+                resultado = {
+                    'activos': activos_validos,
+                    'activos_argentinos': activos_argentinos,
+                    'activos_estadounidenses': activos_estadounidenses,
+                    'metodo': 'portafolio_completo'
+                }
+                
+                return resultado
+            else:
+                print(f"⚠️ Estructura de respuesta inesperada")
+                return data
+                
+        elif r.status_code == 401:
+            print(f"❌ Error 401: No autorizado para portafolio")
+            print(f"📝 Respuesta del servidor: {r.text}")
+            return None
+            
+        else:
+            print(f"❌ Error HTTP {r.status_code}")
+            print(f"📝 Respuesta del servidor: {r.text}")
+            return None
+            
+    except Exception as e:
+        print(f"💥 Error al obtener portafolio: {e}")
+        return None
+
 def obtener_portafolio_por_pais(token_portador: str, pais: str):
     """
     Obtiene el portafolio del usuario autenticado para el país indicado usando
@@ -1209,8 +1313,16 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
             return crear_movimientos_respaldo_minimo(fecha_desde, fecha_hasta)
         
         # Intentar obtener portafolio real para información más detallada
-        portafolio_ar = obtener_portafolio_por_pais(token_portador, 'argentina')
-        portafolio_us = obtener_portafolio_por_pais(token_portador, 'estados_unidos')
+        # Obtener portafolio para análisis
+        portafolio_completo = obtener_portafolio_correcto(token_portador)
+        if portafolio_completo:
+            activos_argentinos = portafolio_completo.get('activos_argentinos', [])
+            activos_estadounidenses = portafolio_completo.get('activos_estadounidenses', [])
+            portafolio_ar = {'activos': activos_argentinos}
+            portafolio_us = {'activos': activos_estadounidenses}
+        else:
+            portafolio_ar = {'activos': []}
+            portafolio_us = {'activos': []}
         
         # Crear movimientos basados en datos reales disponibles
         movimientos_simulados = {
@@ -6977,40 +7089,28 @@ def mostrar_analisis_portafolio():
         
         # Obtener portafolio combinado (Argentina + EEUU)
         with st.spinner("Obteniendo portafolios combinados..."):
-            # Primero intentar obtener portafolio EEUU desde el portafolio general
-            portafolio_us = obtener_portafolio_eeuu_desde_general(token_acceso)
+            # Usar el método correcto que obtiene todo el portafolio
+            portafolio_completo = obtener_portafolio_correcto(token_acceso)
             
-            if portafolio_us and portafolio_us.get('activos'):
-                st.success(f"✅ Portafolio Estadounidense: {len(portafolio_us['activos'])} activos")
-                st.info(f"🔍 Método utilizado: {portafolio_us.get('metodo', 'estándar')}")
+            if portafolio_completo and portafolio_completo.get('activos'):
+                st.success(f"✅ Portafolio Completo: {len(portafolio_completo['activos'])} activos")
+                st.info(f"🔍 Método utilizado: {portafolio_completo.get('metodo', 'estándar')}")
+                
+                # Separar activos por país
+                activos_argentinos = portafolio_completo.get('activos_argentinos', [])
+                activos_estadounidenses = portafolio_completo.get('activos_estadounidenses', [])
+                
+                st.success(f"🇦🇷 Activos Argentinos: {len(activos_argentinos)}")
+                st.success(f"🇺🇸 Activos Estadounidenses: {len(activos_estadounidenses)}")
+                
+                # Crear estructura para compatibilidad
+                portafolio_ar = {'activos': activos_argentinos}
+                portafolio_us = {'activos': activos_estadounidenses}
             else:
-                st.warning("⚠️ No se pudo obtener el portafolio estadounidense desde general")
-                # Fallback al método directo
-                portafolio_us = obtener_portafolio_eeuu_directo(token_acceso)
-                if portafolio_us and portafolio_us.get('activos'):
-                    st.success(f"✅ Portafolio Estadounidense (directo): {len(portafolio_us['activos'])} activos")
-                    st.info(f"🔍 Método utilizado: {portafolio_us.get('metodo', 'estándar')}")
-                else:
-                    # Fallback al método mejorado
-                    portafolio_us = obtener_portafolio_estados_unidos_mejorado(token_acceso)
-                    if portafolio_us and portafolio_us.get('activos'):
-                        metodo_us = portafolio_us.get('metodo', 'estándar')
-                        st.success(f"✅ Portafolio Estadounidense (fallback): {len(portafolio_us['activos'])} activos")
-                        st.info(f"🔍 Método utilizado: {metodo_us}")
-                    else:
-                        st.warning("⚠️ **Portafolio Estadounidense**: No disponible")
-                        st.info("💡 **La aplicación intentó múltiples métodos:**")
-                        st.info("• Filtrado desde portafolio general")
-                        st.info("• Endpoints directos EEUU")
-                        st.info("• Métodos de fallback")
-                        st.info("• Ningún método funcionó")
-            
-            # Obtener portafolio argentino
-            portafolio_ar = obtener_portafolio_por_pais(token_acceso, "argentina")
-            if portafolio_ar and portafolio_ar.get('activos'):
-                st.success(f"✅ Portafolio Argentino: {len(portafolio_ar['activos'])} activos")
-            else:
-                st.warning("⚠️ No se pudo obtener el portafolio argentino")
+                st.warning("⚠️ No se pudo obtener el portafolio completo")
+                # Fallback a métodos anteriores
+                portafolio_ar = {'activos': []}
+                portafolio_us = {'activos': []}
             
             # Combinar portafolios
             portafolio_combinado = {'activos': []}
@@ -8216,10 +8316,11 @@ def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
     # Método 1: Endpoint estándar (puede fallar con 401)
     print("📊 Método 1: Endpoint estándar /api/v2/portafolio/estados_Unidos")
     try:
-        resultado = obtener_portafolio_por_pais(token_portador, "estados_Unidos")
-        if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
+        # Usar el método correcto en lugar del que falla
+        resultado = obtener_portafolio_correcto(token_portador)
+        if resultado and 'activos_estadounidenses' in resultado and len(resultado['activos_estadounidenses']) > 0:
             print("✅ Método 1 exitoso")
-            return resultado
+            return {'pais': 'estados_Unidos', 'activos': resultado['activos_estadounidenses'], 'metodo': 'filtrado_desde_completo'}
         else:
             print("⚠️ Método 1: No se encontraron activos válidos")
     except Exception as e:
