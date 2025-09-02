@@ -185,7 +185,11 @@ def necesita_ajuste_por_100(simbolo, tipo_valor) -> bool:
             return True
         
         # Solo bonos tradicionales necesitan ajuste por 100
-        return any(pal in texto for pal in ["bono", "titul", "public"])
+        if ("bono" in texto or "titul" in texto or "public" in texto or
+            "al30" in simbolo_lower or "gd30" in simbolo_lower or "gd35" in simbolo_lower):
+            return True
+        
+        return False
     except Exception:
         return False
 
@@ -4686,7 +4690,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                     try:
                         val = float(activo[campo])
                         if val > 0:
-                            valuacion = val
+                            # Aplicar ajuste por 100 si es necesario para títulos públicos
+                            if necesita_ajuste_por_100(simbolo, tipo):
+                                valuacion = val / 100.0
+                                st.text(f"Ajuste aplicado para {simbolo}: ${val:,.2f} → ${valuacion:,.2f}")
+                            else:
+                                valuacion = val
                             break
                     except (ValueError, TypeError):
                         continue
@@ -4723,6 +4732,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * precio_unitario) / 100.0
                             ajuste_aplicado = "SÍ (÷100)"
+                            st.text(f"🔧 Ajuste por 100 aplicado para {simbolo}: ${cantidad_num * precio_unitario:,.2f} → ${valuacion:,.2f}")
                         else:
                             valuacion = cantidad_num * precio_unitario
                             ajuste_aplicado = "NO"
@@ -4755,6 +4765,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * ultimo_precio) / 100.0
                             ajuste_api = "SÍ (÷100)"
+                            st.text(f"🔧 Ajuste por 100 (API) para {simbolo}: ${cantidad_num * ultimo_precio:,.2f} → ${valuacion:,.2f}")
                         else:
                             valuacion = cantidad_num * ultimo_precio
                             ajuste_api = "NO"
@@ -6560,7 +6571,7 @@ def mostrar_analisis_portafolio():
                 portafolio_combinado['activos'].extend(portafolio_us['activos'])
         
         if portafolio_combinado and portafolio_combinado.get('activos'):
-            mostrar_resumen_portafolio(portafolio_combinado, token_acceso)
+            mostrar_resumen_portafolio(portafolio_final, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio combinado")
     
@@ -6839,17 +6850,17 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         st.info("• Los portafolios están vacíos")
         return
     
-    # Usar el portafolio combinado
-    portafolio_ar = portafolio_combinado
+    # Usar el portafolio combinado directamente
+    portafolio_final = portafolio_combinado
     
 
     
     # Verificar si el portafolio combinado tiene activos
-    activos_raw = portafolio_ar.get('activos', [])
+    activos_raw = portafolio_final.get('activos', [])
     if not activos_raw:
         st.error("❌ No se encontraron activos en los portafolios combinados")
         st.info("**Estructura del portafolio recibido:**")
-        st.json(portafolio_ar)
+        st.json(portafolio_final)
         st.warning("""
         **Posibles causas:**
         - Los portafolios están realmente vacíos
