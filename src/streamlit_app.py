@@ -8435,4 +8435,5 @@ def mostrar_distribucion_activos_mejorada():
     - Considera verificar la información con tu broker
     """)
 
-// ... existing code ...
+if __name__ == "__main__":
+    main()
