@@ -4923,6 +4923,177 @@ def mostrar_resumen_estado_cuenta(estado_cuenta):
     Los valores mostrados representan el saldo total de cada cuenta, incluyendo títulos valorizados y disponible.
     """)
 
+def procesar_datos_historicos_portafolio(datos_texto):
+    """
+    Procesa datos históricos del portafolio en formato de texto tabulado.
+    Formato esperado:
+    2025-09-02	TOTAL_inversio	posicion_total	1	$199,079.15	peso_Argentino	Posición total en inversion_Argentina_Pesos
+    """
+    try:
+        # Parsear los datos de texto
+        lineas = datos_texto.strip().split('\n')
+        datos_procesados = []
+        
+        for linea in lineas:
+            if not linea.strip():
+                continue
+                
+            # Separar por tabulaciones
+            campos = linea.split('\t')
+            if len(campos) >= 7:
+                fecha = campos[0]
+                tipo_operacion = campos[1]
+                concepto = campos[2]
+                cantidad = float(campos[3]) if campos[3].replace('.', '').replace(',', '').isdigit() else 0
+                valor_str = campos[4].replace('$', '').replace(',', '')
+                valor = float(valor_str) if valor_str.replace('.', '').isdigit() else 0
+                moneda = campos[5]
+                descripcion = campos[6]
+                
+                datos_procesados.append({
+                    'fecha': fecha,
+                    'tipo_operacion': tipo_operacion,
+                    'concepto': concepto,
+                    'cantidad': cantidad,
+                    'valor': valor,
+                    'moneda': moneda,
+                    'descripcion': descripcion
+                })
+        
+        return datos_procesados
+    except Exception as e:
+        st.error(f"Error procesando datos históricos: {str(e)}")
+        return []
+
+def mostrar_analisis_historico_portafolio(datos_historicos):
+    """
+    Muestra análisis y gráficos de los datos históricos del portafolio
+    """
+    if not datos_historicos:
+        st.warning("No hay datos históricos para mostrar")
+        return
+    
+    st.markdown("#### 📈 Análisis Histórico del Portafolio")
+    
+    # Convertir a DataFrame
+    df_historico = pd.DataFrame(datos_historicos)
+    
+    # Separar datos por moneda
+    datos_ars = df_historico[df_historico['moneda'] == 'peso_Argentino']
+    datos_usd = df_historico[df_historico['moneda'] == 'dolar_Estadounidense']
+    
+    # Crear gráficos de composición
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**🇦🇷 Portafolio en Pesos Argentinos**")
+        if not datos_ars.empty:
+            # Crear gráfico de torta para ARS
+            fig_ars_hist = go.Figure(data=[go.Pie(
+                labels=[f"{row['concepto']} - {row['descripcion']}" for _, row in datos_ars.iterrows()],
+                values=datos_ars['valor'],
+                textinfo='label+percent+value',
+                texttemplate='%{label}<br>%{percent}<br>$%{value:,.2f}',
+                hole=0.4,
+                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+            )])
+            fig_ars_hist.update_layout(
+                title=f"Composición ARS Histórica - Total: ${datos_ars['valor'].sum():,.2f}",
+                height=400
+            )
+            st.plotly_chart(fig_ars_hist, use_container_width=True)
+            
+            # Mostrar tabla de datos ARS
+            df_ars_display = datos_ars[['concepto', 'valor', 'descripcion']].copy()
+            df_ars_display['Valor ($)'] = df_ars_display['valor'].apply(lambda x: f"${x:,.2f}")
+            df_ars_display['Peso (%)'] = (df_ars_display['valor'] / df_ars_display['valor'].sum() * 100).apply(lambda x: f"{x:.2f}%")
+            st.dataframe(
+                df_ars_display[['concepto', 'Valor ($)', 'Peso (%)', 'descripcion']],
+                use_container_width=True,
+                height=200
+            )
+        else:
+            st.info("No hay datos históricos en pesos argentinos")
+    
+    with col2:
+        st.markdown("**🇺🇸 Portafolio en Dólares Estadounidenses**")
+        if not datos_usd.empty:
+            # Crear gráfico de torta para USD
+            fig_usd_hist = go.Figure(data=[go.Pie(
+                labels=[f"{row['concepto']} - {row['descripcion']}" for _, row in datos_usd.iterrows()],
+                values=datos_usd['valor'],
+                textinfo='label+percent+value',
+                texttemplate='%{label}<br>%{percent}<br>$%{value:,.2f}',
+                hole=0.4,
+                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+            )])
+            fig_usd_hist.update_layout(
+                title=f"Composición USD Histórica - Total: ${datos_usd['valor'].sum():,.2f}",
+                height=400
+            )
+            st.plotly_chart(fig_usd_hist, use_container_width=True)
+            
+            # Mostrar tabla de datos USD
+            df_usd_display = datos_usd[['concepto', 'valor', 'descripcion']].copy()
+            df_usd_display['Valor ($)'] = df_usd_display['valor'].apply(lambda x: f"${x:,.2f}")
+            df_usd_display['Peso (%)'] = (df_usd_display['valor'] / df_usd_display['valor'].sum() * 100).apply(lambda x: f"{x:.2f}%")
+            st.dataframe(
+                df_usd_display[['concepto', 'Valor ($)', 'Peso (%)', 'descripcion']],
+                use_container_width=True,
+                height=200
+            )
+        else:
+            st.info("No hay datos históricos en dólares estadounidenses")
+    
+    # Mostrar distribución general por moneda
+    if not datos_ars.empty or not datos_usd.empty:
+        st.markdown("#### 🌍 Distribución Histórica por Moneda")
+        total_ars_hist = datos_ars['valor'].sum() if not datos_ars.empty else 0
+        total_usd_hist = datos_usd['valor'].sum() if not datos_usd.empty else 0
+        
+        if total_ars_hist > 0 or total_usd_hist > 0:
+            fig_distribucion_hist = go.Figure(data=[go.Pie(
+                labels=['Pesos Argentinos (ARS)', 'Dólares Estadounidenses (USD)'],
+                values=[total_ars_hist, total_usd_hist],
+                textinfo='label+percent+value',
+                texttemplate='%{label}<br>%{percent}<br>$%{value:,.2f}',
+                hole=0.4,
+                marker=dict(colors=['#10b981', '#3b82f6'])
+            )])
+            fig_distribucion_hist.update_layout(
+                title="Distribución Histórica Total por Moneda",
+                height=400
+            )
+            st.plotly_chart(fig_distribucion_hist, use_container_width=True)
+    
+    # Mostrar resumen de métricas
+    st.markdown("#### 📊 Resumen de Métricas Históricas")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_general = df_historico['valor'].sum()
+        st.metric("Valor Total Histórico", f"${total_general:,.2f}")
+    
+    with col2:
+        if not datos_ars.empty:
+            st.metric("Total ARS", f"${datos_ars['valor'].sum():,.2f}")
+        else:
+            st.metric("Total ARS", "$0.00")
+    
+    with col3:
+        if not datos_usd.empty:
+            st.metric("Total USD", f"${datos_usd['valor'].sum():,.2f}")
+        else:
+            st.metric("Total USD", "$0.00")
+    
+    with col4:
+        if total_general > 0:
+            peso_ars = datos_ars['valor'].sum() / total_general * 100 if not datos_ars.empty else 0
+            peso_usd = datos_usd['valor'].sum() / total_general * 100 if not datos_usd.empty else 0
+            st.metric("Distribución", f"ARS: {peso_ars:.1f}% | USD: {peso_usd:.1f}%")
+        else:
+            st.metric("Distribución", "N/A")
+
 def _es_activo_estadounidense(simbolo, tipo_activo):
     """
     Determina si un activo es estadounidense basado en su símbolo y tipo.
@@ -6324,6 +6495,125 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             col3.metric("Riesgo Total", f"{riesgo_total_unificado:.1f}%")
                             col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
                             
+                            # Análisis de composición de portafolios por moneda
+                            st.markdown("#### 📊 Composición de Portafolios por Moneda")
+                            
+                            # Separar activos por moneda
+                            activos_ars = []
+                            activos_usd = []
+                            
+                            for activo in datos_activos:
+                                simbolo = activo.get('Símbolo', '')
+                                tipo = activo.get('Tipo', '')
+                                valuacion = activo.get('Valuación', 0)
+                                
+                                # Determinar si es activo argentino o estadounidense
+                                if _es_activo_estadounidense(simbolo, tipo):
+                                    activos_usd.append({
+                                        'simbolo': simbolo,
+                                        'tipo': tipo,
+                                        'valuacion': valuacion,
+                                        'peso': valuacion / valor_total_unificado if valor_total_unificado > 0 else 0
+                                    })
+                                else:
+                                    activos_ars.append({
+                                        'simbolo': simbolo,
+                                        'tipo': tipo,
+                                        'valuacion': valuacion,
+                                        'peso': valuacion / valor_total_unificado if valor_total_unificado > 0 else 0
+                                    })
+                            
+                            # Crear gráficos de torta para ambos portafolios
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                if activos_ars:
+                                    total_ars = sum(activo['valuacion'] for activo in activos_ars)
+                                    st.markdown("**🇦🇷 Portafolio en Pesos Argentinos**")
+                                    
+                                    # Crear gráfico de torta para ARS
+                                    fig_ars = go.Figure(data=[go.Pie(
+                                        labels=[f"{activo['simbolo']} ({activo['tipo']})" for activo in activos_ars],
+                                        values=[activo['valuacion'] for activo in activos_ars],
+                                        textinfo='label+percent+value',
+                                        texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+                                        hole=0.4,
+                                        marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#A8E6CF', '#FFB3BA'])
+                                    )])
+                                    fig_ars.update_layout(
+                                        title=f"Composición ARS - Total: ${total_ars:,.2f}",
+                                        height=400,
+                                        showlegend=True
+                                    )
+                                    st.plotly_chart(fig_ars, use_container_width=True)
+                                    
+                                    # Mostrar tabla de activos ARS
+                                    if len(activos_ars) > 0:
+                                        df_ars = pd.DataFrame(activos_ars)
+                                        df_ars['Peso (%)'] = df_ars['peso'] * 100
+                                        df_ars['Valuación ($)'] = df_ars['valuacion'].apply(lambda x: f"${x:,.2f}")
+                                        st.dataframe(
+                                            df_ars[['simbolo', 'tipo', 'Valuación ($)', 'Peso (%)']],
+                                            use_container_width=True,
+                                            height=200
+                                        )
+                                else:
+                                    st.info("No hay activos en pesos argentinos")
+                            
+                            with col2:
+                                if activos_usd:
+                                    total_usd = sum(activo['valuacion'] for activo in activos_usd)
+                                    st.markdown("**🇺🇸 Portafolio en Dólares Estadounidenses**")
+                                    
+                                    # Crear gráfico de torta para USD
+                                    fig_usd = go.Figure(data=[go.Pie(
+                                        labels=[f"{activo['simbolo']} ({activo['tipo']})" for activo in activos_usd],
+                                        values=[activo['valuacion'] for activo in activos_usd],
+                                        textinfo='label+percent+value',
+                                        texttemplate='%{label}<br>%{percent}<br>$%{value:,.2f}',
+                                        hole=0.4,
+                                        marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#A8E6CF', '#FFB3BA'])
+                                    )])
+                                    fig_usd.update_layout(
+                                        title=f"Composición USD - Total: ${total_usd:,.2f}",
+                                        height=400,
+                                        showlegend=True
+                                    )
+                                    st.plotly_chart(fig_usd, use_container_width=True)
+                                    
+                                    # Mostrar tabla de activos USD
+                                    if len(activos_usd) > 0:
+                                        df_usd = pd.DataFrame(activos_usd)
+                                        df_usd['Peso (%)'] = df_usd['peso'] * 100
+                                        df_usd['Valuación ($)'] = df_usd['valuacion'].apply(lambda x: f"${x:,.2f}")
+                                        st.dataframe(
+                                            df_usd[['simbolo', 'tipo', 'Valuación ($)', 'Peso (%)']],
+                                            use_container_width=True,
+                                            height=200
+                                        )
+                                else:
+                                    st.info("No hay activos en dólares estadounidenses")
+                            
+                            # Mostrar distribución general por moneda
+                            if activos_ars or activos_usd:
+                                st.markdown("#### 🌍 Distribución General por Moneda")
+                                total_ars = sum(activo['valuacion'] for activo in activos_ars)
+                                total_usd = sum(activo['valuacion'] for activo in activos_usd)
+                                
+                                fig_distribucion = go.Figure(data=[go.Pie(
+                                    labels=['Pesos Argentinos (ARS)', 'Dólares Estadounidenses (USD)'],
+                                    values=[total_ars, total_usd],
+                                    textinfo='label+percent+value',
+                                    texttemplate='%{label}<br>%{percent}<br>$%{value:,.2f}',
+                                    hole=0.4,
+                                    marker=dict(colors=['#10b981', '#3b82f6'])
+                                )])
+                                fig_distribucion.update_layout(
+                                    title="Distribución Total por Moneda",
+                                    height=400
+                                )
+                                st.plotly_chart(fig_distribucion, use_container_width=True)
+                            
                             # Identificar instrumentos de renta fija
                             instrumentos_renta_fija = []
                             total_renta_fija = 0
@@ -6354,361 +6644,361 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                     total_renta_fija += valuacion
                             
                             if instrumentos_renta_fija:
-                                    # Mostrar tabla de instrumentos de renta fija
-                                    df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
-                                    df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
-                                    df_renta_fija['Valuación ($)'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
-                                    
-                                    st.dataframe(
-                                        df_renta_fija[['simbolo', 'tipo', 'Valuación ($)', 'Peso (%)']],
-                                        use_container_width=True,
-                                        height=200
-                                    )
-                                    
-                                    # Calcular rendimiento extra asegurado
-                                    peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
-                                    
-                                    # Estimación de rendimiento extra (basado en tasas típicas)
-                                    rendimiento_extra_estimado = {
-                                        'FCI': 0.08,  # 8% anual típico para FCIs
-                                        'Bono': 0.12,  # 12% anual típico para bonos
-                                        'Titulo': 0.10,  # 10% anual típico para títulos públicos
-                                        'Letra': 0.15   # 15% anual típico para letras
-                                    }
-                                    
-                                    rendimiento_extra_total = 0
-                                    for instrumento in instrumentos_renta_fija:
-                                        tipo_instrumento = instrumento['tipo'].lower()
-                                        peso_instrumento = instrumento['peso']
-                                        
-                                        # Determinar tipo de rendimiento
-                                        if 'fci' in tipo_instrumento or 'fondo' in tipo_instrumento:
-                                            rendimiento = rendimiento_extra_estimado['FCI']
-                                        elif 'bono' in tipo_instrumento:
-                                            rendimiento = rendimiento_extra_estimado['Bono']
-                                        elif 'titulo' in tipo_instrumento or 'publico' in tipo_instrumento:
-                                            rendimiento = rendimiento_extra_estimado['Titulo']
-                                        elif 'letra' in tipo_instrumento:
-                                            rendimiento = rendimiento_extra_estimado['Letra']
-                                        else:
-                                            rendimiento = rendimiento_extra_estimado['FCI']  # Default
-                                        
-                                        rendimiento_extra_total += rendimiento * peso_instrumento
-                                    
-                                    # Ocultar métricas de rendimiento extra por solicitud
-                                    
-                                    # Gráfico de composición por tipo de instrumento
-                                    if len(instrumentos_renta_fija) > 1:
-                                        fig_renta_fija = go.Figure(data=[go.Pie(
-                                            labels=[f"{row['simbolo']} ({row['tipo']})" for _, row in df_renta_fija.iterrows()],
-                                            values=df_renta_fija['valuacion'],
-                                            textinfo='label+percent+value',
-                                            texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
-                                            hole=0.4,
-                                            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                                        )])
-                                        fig_renta_fija.update_layout(
-                                            title="Composición de Instrumentos de Renta Fija",
-                                            height=400
-                                        )
-                                        st.plotly_chart(fig_renta_fija, use_container_width=True)
+                                # Mostrar tabla de instrumentos de renta fija
+                                df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
+                                df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
+                                df_renta_fija['Valuación ($)'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
                                 
-                        try:
-                            # Análisis de retorno esperado usando histograma y Markov Chain
-                            st.markdown("#### Análisis de Retorno Esperado (Histograma + Markov Chain)")
-                            
-                            # Calcular retornos en USD para diferentes horizontes
-                            horizontes_analisis = [1, 7, 30, 90, 180, 365]
-                            retornos_ars_por_horizonte = {}
-                            retornos_usd_por_horizonte = {}
-                            
-                            # Calcular retornos en USD
-                            tasa_mep = obtener_tasa_mep_al30(token_portador) or 0
-                            if tasa_mep <= 0:
-                                # Fallback conservador si no puede obtenerse MEP
-                                tasa_mep = 1000.0
-                            df_portfolio_usd = df_portfolio['Portfolio_Total'] / tasa_mep
-                            df_portfolio_returns_usd = df_portfolio_usd.pct_change().dropna()
-                            
-                            for horizonte in horizontes_analisis:
-                                if len(df_portfolio_returns) >= horizonte:
-                                    # Retorno en ARS
-                                    retorno_ars = (1 + df_portfolio_returns.tail(horizonte)).prod() - 1
-                                    retornos_ars_por_horizonte[horizonte] = retorno_ars
-                                    
-                                    # Retorno en USD
-                                    retorno_usd = (1 + df_portfolio_returns_usd.tail(horizonte)).prod() - 1
-                                    retornos_usd_por_horizonte[horizonte] = retorno_usd
-                            
-                            if retornos_ars_por_horizonte and retornos_usd_por_horizonte:
-                                # Crear gráfico de retornos por horizonte (ARS y USD)
-                                fig_horizontes = go.Figure()
-                                
-                                horizontes = list(retornos_ars_por_horizonte.keys())
-                                retornos_ars = list(retornos_ars_por_horizonte.values())
-                                retornos_usd = list(retornos_usd_por_horizonte.values())
-                                
-                                etiquetas_x = [f"{h} días" for h in horizontes]
-                                # Barras para ARS
-                                fig_horizontes.add_trace(go.Bar(
-                                    x=etiquetas_x,
-                                    y=retornos_ars,
-                                    name="Retorno ARS",
-                                    marker_color="#10b981",
-                                    hovertemplate="ARS: %{y:.2%}<extra></extra>",
-                                    text=[f"{r:.2%}" for r in retornos_ars],
-                                    textposition='auto'
-                                ))
-                                # Barras para USD
-                                fig_horizontes.add_trace(go.Bar(
-                                    x=etiquetas_x,
-                                    y=retornos_usd,
-                                    name="Retorno USD",
-                                    marker_color="#3b82f6",
-                                    hovertemplate="USD: %{y:.2%}<extra></extra>",
-                                    text=[f"{r:.2%}" for r in retornos_usd],
-                                    textposition='auto'
-                                ))
-                                
-                                fig_horizontes.add_hline(y=0, line_dash="dash", line_color="#9ca3af")
-                                fig_horizontes.update_layout(
-                                    title="Retornos acumulados por horizonte de inversión (ARS y USD)",
-                                    xaxis_title="Horizonte de inversión",
-                                    yaxis_title="Retorno acumulado",
-                                    height=420,
-                                    template='plotly_dark',
-                                    barmode='group',
-                                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-                                    margin=dict(t=60, r=20, b=40, l=50)
+                                st.dataframe(
+                                    df_renta_fija[['simbolo', 'tipo', 'Valuación ($)', 'Peso (%)']],
+                                    use_container_width=True,
+                                    height=200
                                 )
                                 
-                                st.plotly_chart(fig_horizontes, use_container_width=True)
+                                # Calcular rendimiento extra asegurado
+                                peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
                                 
-                                # ANÁLISIS AVANZADO CON MARKOV CHAIN
-                                st.markdown("##### Predicción Avanzada con Markov Chain")
+                                # Estimación de rendimiento extra (basado en tasas típicas)
+                                rendimiento_extra_estimado = {
+                                    'FCI': 0.08,  # 8% anual típico para FCIs
+                                    'Bono': 0.12,  # 12% anual típico para bonos
+                                    'Titulo': 0.10,  # 10% anual típico para títulos públicos
+                                    'Letra': 0.15   # 15% anual típico para letras
+                                }
                                 
-                                # Preparar datos para Markov Chain
-                                returns_data = df_portfolio_returns.values
-                                
-                                # Crear estados discretos para Markov Chain
-                                n_states = 10
-                                returns_min = np.min(returns_data)
-                                returns_max = np.max(returns_data)
-                                state_bounds = np.linspace(returns_min, returns_max, n_states + 1)
-                                
-                                # Asignar estados a cada retorno
-                                states = np.digitize(returns_data, state_bounds) - 1
-                                states = np.clip(states, 0, n_states - 1)
-                                
-                                # Construir matriz de transición
-                                transition_matrix = np.zeros((n_states, n_states))
-                                for i in range(len(states) - 1):
-                                    current_state = states[i]
-                                    next_state = states[i + 1]
-                                    transition_matrix[current_state][next_state] += 1
-                                
-                                # Normalizar la matriz de transición
-                                row_sums = transition_matrix.sum(axis=1)
-                                transition_matrix = np.divide(transition_matrix, row_sums[:, np.newaxis], 
-                                                            where=row_sums[:, np.newaxis] != 0)
-                                
-                                # Calcular distribución estacionaria
-                                eigenvals, eigenvecs = np.linalg.eig(transition_matrix.T)
-                                stationary_dist = np.real(eigenvecs[:, np.argmax(np.real(eigenvals))])
-                                stationary_dist = stationary_dist / np.sum(stationary_dist)
-                                
-                                # Calcular valores esperados por estado
-                                state_centers = (state_bounds[:-1] + state_bounds[1:]) / 2
-                                expected_return = np.sum(stationary_dist * state_centers)
-                                
-                                # Usar el retorno ponderado unificado como referencia
-                                if metricas and 'metricas_globales' in metricas:
-                                    retorno_referencia = metricas['metricas_globales']['retorno_ponderado'] / 100  # Convertir a decimal
-                                    # Ajustar el expected_return para que sea más realista
-                                    expected_return = retorno_referencia * 0.8 + expected_return * 0.2  # Peso 80% al retorno real, 20% al Markov
-                                
-                                # Simular trayectorias futuras
-                                n_simulations = 1000
-                                n_steps = 30  # 30 días hacia adelante
-                                
-                                simulated_paths = []
-                                for _ in range(n_simulations):
-                                    # Empezar desde el estado actual
-                                    current_state = states[-1] if len(states) > 0 else 0
-                                    path = [current_state]
+                                rendimiento_extra_total = 0
+                                for instrumento in instrumentos_renta_fija:
+                                    tipo_instrumento = instrumento['tipo'].lower()
+                                    peso_instrumento = instrumento['peso']
                                     
-                                    for _ in range(n_steps):
-                                        # Transición según la matriz
-                                        if np.sum(transition_matrix[current_state]) > 0:
-                                            next_state = np.random.choice(n_states, p=transition_matrix[current_state])
-                                        else:
-                                            next_state = current_state
-                                        path.append(next_state)
-                                        current_state = next_state
+                                    # Determinar tipo de rendimiento
+                                    if 'fci' in tipo_instrumento or 'fondo' in tipo_instrumento:
+                                        rendimiento = rendimiento_extra_estimado['FCI']
+                                    elif 'bono' in tipo_instrumento:
+                                        rendimiento = rendimiento_extra_estimado['Bono']
+                                    elif 'titulo' in tipo_instrumento or 'publico' in tipo_instrumento:
+                                        rendimiento = rendimiento_extra_estimado['Titulo']
+                                    elif 'letra' in tipo_instrumento:
+                                        rendimiento = rendimiento_extra_estimado['Letra']
+                                    else:
+                                        rendimiento = rendimiento_extra_estimado['FCI']  # Default
                                     
-                                    # Convertir estados a retornos
-                                    path_returns = [state_centers[s] for s in path]
-                                    simulated_paths.append(path_returns)
+                                    rendimiento_extra_total += rendimiento * peso_instrumento
                                 
-                                # Calcular estadísticas de las simulaciones
-                                simulated_paths = np.array(simulated_paths)
-                                cumulative_returns = np.cumprod(1 + simulated_paths, axis=1) - 1
+                                # Ocultar métricas de rendimiento extra por solicitud
                                 
-                                # Ajustar los percentiles para que sean más realistas
-                                if metricas and 'metricas_globales' in metricas:
-                                    retorno_referencia = metricas['metricas_globales']['retorno_ponderado'] / 100
-                                    riesgo_referencia = metricas['metricas_globales']['riesgo_total'] / 100
-                                    
-                                    # Calcular percentiles basados en distribución normal más realista
-                                    from scipy.stats import norm
-                                    percentiles = [5, 25, 50, 75, 95]
-                                    return_percentiles = []
-                                    
-                                    for p in percentiles:
-                                        if p == 50:  # Mediana
-                                            return_percentiles.append(retorno_referencia * 30)  # 30 días
-                                        else:
-                                            # Usar distribución normal con el retorno y riesgo reales
-                                            z_score = norm.ppf(p/100)
-                                            return_percentiles.append((retorno_referencia + z_score * riesgo_referencia) * 30)
-                                else:
-                                    # Fallback a percentiles originales
-                                    return_percentiles = np.percentile(cumulative_returns[:, -1], percentiles)
-                                
-                                # Crear gráfico de distribución de predicciones
-                                fig_prediction = go.Figure()
-                                
-                                # Histograma de retornos simulados
-                                fig_prediction.add_trace(go.Histogram(
-                                    x=cumulative_returns[:, -1],
-                                    nbinsx=50,
-                                    name="Distribución de predicciones",
-                                    marker_color='#8b5cf6',
-                                    opacity=0.7
-                                ))
-                                
-                                # Líneas de percentiles
-                                colors = ['#ef4444', '#f59e0b', '#10b981', '#f59e0b', '#ef4444']
-                                for i, p in enumerate(percentiles):
-                                    fig_prediction.add_vline(
-                                        x=return_percentiles[i],
-                                        line_dash="dash",
-                                        line_color=colors[i],
-                                        annotation_text=f"{p}%: {return_percentiles[i]:.2%}"
+                                # Gráfico de composición por tipo de instrumento
+                                if len(instrumentos_renta_fija) > 1:
+                                    fig_renta_fija = go.Figure(data=[go.Pie(
+                                        labels=[f"{row['simbolo']} ({row['tipo']})" for _, row in df_renta_fija.iterrows()],
+                                        values=df_renta_fija['valuacion'],
+                                        textinfo='label+percent+value',
+                                        texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+                                        hole=0.4,
+                                        marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                    )])
+                                    fig_renta_fija.update_layout(
+                                        title="Composición de Instrumentos de Renta Fija",
+                                        height=400
                                     )
+                                    st.plotly_chart(fig_renta_fija, use_container_width=True)
                                 
-                                fig_prediction.update_layout(
-                                    title="Distribución de Retornos Esperados (30 días) - Simulación Markov Chain",
-                                    xaxis_title="Retorno acumulado esperado",
-                                    yaxis_title="Frecuencia",
-                                    height=400,
-                                    template='plotly_dark',
-                                    showlegend=False
-                                )
-                                
-                                st.plotly_chart(fig_prediction, use_container_width=True)
-                                
-                                # Mostrar métricas de predicción
-                                col1, col2, col3, col4 = st.columns(4)
-                                
-                                with col1:
-                                    st.metric("Retorno Esperado", f"{expected_return:.2%}")
-                                    st.text("Markov Chain")
-                                
-                                with col2:
-                                    st.metric("Mediana", f"{return_percentiles[2]:.2%}")
-                                    st.text("50% de probabilidad")
-                                
-                                with col3:
-                                    st.metric("Escenario Optimista", f"{return_percentiles[4]:.2%}")
-                                    st.text("95% de probabilidad")
-                                
-                                with col4:
-                                    st.metric("Escenario Pesimista", f"{return_percentiles[0]:.2%}")
-                                    st.text("5% de probabilidad")
-                                
-                                # Análisis de probabilidades
-                                st.markdown("##### Análisis de Probabilidades")
-                                
-                                # Calcular probabilidades de diferentes escenarios (usando valores unificados)
-                                if metricas and 'metricas_globales' in metricas:
-                                    retorno_referencia = metricas['metricas_globales']['retorno_ponderado'] / 100
-                                    riesgo_referencia = metricas['metricas_globales']['riesgo_total'] / 100
-                                    
-                                    # Usar distribución normal para calcular probabilidades más realistas
-                                    from scipy.stats import norm
-                                    
-                                    # Probabilidad de ganancia (retorno > 0)
-                                    prob_positive = (1 - norm.cdf(0, retorno_referencia * 30, riesgo_referencia * np.sqrt(30))) * 100
-                                    prob_negative = norm.cdf(0, retorno_referencia * 30, riesgo_referencia * np.sqrt(30)) * 100
-                                    
-                                    # Probabilidad de ganancia > 5%
-                                    prob_high_gain = (1 - norm.cdf(0.05, retorno_referencia * 30, riesgo_referencia * np.sqrt(30))) * 100
-                                    
-                                    # Probabilidad de pérdida > 5%
-                                    prob_high_loss = norm.cdf(-0.05, retorno_referencia * 30, riesgo_referencia * np.sqrt(30)) * 100
-                                else:
-                                    # Fallback a cálculos originales
-                                    prob_positive = np.mean(cumulative_returns[:, -1] > 0) * 100
-                                    prob_negative = np.mean(cumulative_returns[:, -1] < 0) * 100
-                                    prob_high_gain = np.mean(cumulative_returns[:, -1] > 0.05) * 100  # >5%
-                                    prob_high_loss = np.mean(cumulative_returns[:, -1] < -0.05) * 100  # <-5%
-                                
-                                col1, col2, col3, col4 = st.columns(4)
-                                
-                                with col1:
-                                    st.metric("Probabilidad de Ganancia", f"{prob_positive:.1f}%")
-                                
-                                with col2:
-                                    st.metric("Probabilidad de Pérdida", f"{prob_negative:.1f}%")
-                                
-                                with col3:
-                                    st.metric("Ganancia >5%", f"{prob_high_gain:.1f}%")
-                                
-                                with col4:
-                                    st.metric("Pérdida >5%", f"{prob_high_loss:.1f}%")
-                                
-                                # Información técnica del modelo unificado
-                                with st.expander("Información Técnica del Modelo"):
-                                    st.markdown("""
-                                    **Metodología Unificada:**
-                                    
-                                    **Fuente Única de Verdad:**
-                                    - Todos los cálculos se basan en la función `calcular_metricas_portafolio_unificada()`
-                                    - Valor total, retornos y riesgos se calculan una sola vez y se reutilizan
-                                    - Eliminación de inconsistencias entre diferentes secciones
-                                    
-                                    **Cálculos Principales:**
-                                    1. **Valor Total:** Suma ponderada de valuaciones actuales de todos los activos
-                                    2. **Retorno Ponderado:** Promedio ponderado de retornos individuales por peso en el portafolio
-                                    3. **Riesgo Total:** Volatilidad anual calculada con correlaciones entre activos
-                                    4. **Ratio Retorno/Riesgo:** Medida de eficiencia del portafolio
-                                    
-                                    **Markov Chain Mejorado:**
-                                    1. **Estados Discretos:** 10 estados basados en distribución histórica de retornos
-                                    2. **Matriz de Transición:** Probabilidades de cambio entre estados
-                                    3. **Ajuste Realista:** Combinación 80% datos reales + 20% predicción Markov
-                                    4. **Simulación Monte Carlo:** 1000 trayectorias de 30 días
-                                    
-                                    **Probabilidades Estadísticas:**
-                                    - Distribución normal basada en retorno y riesgo reales del portafolio
-                                    - Intervalos de confianza del 95% para escenarios optimista/pesimista
-                                    - Cálculo de probabilidades de ganancia/pérdida usando funciones de distribución
-                                    
-                                    **Ventajas del Modelo Unificado:**
-                                    - **Consistencia:** Todos los valores provienen de la misma fuente
-                                    - **Precisión:** Basado en datos reales de la API de InvertirOnline
-                                    - **Realismo:** Predicciones ajustadas a características específicas del portafolio
-                                    - **Transparencia:** Metodología clara y verificable
-                                    """)
+                try:
+                    # Análisis de retorno esperado usando histograma y Markov Chain
+                    st.markdown("#### Análisis de Retorno Esperado (Histograma + Markov Chain)")
+                    
+                    # Calcular retornos en USD para diferentes horizontes
+                    horizontes_analisis = [1, 7, 30, 90, 180, 365]
+                    retornos_ars_por_horizonte = {}
+                    retornos_usd_por_horizonte = {}
+                    
+                    # Calcular retornos en USD
+                    tasa_mep = obtener_tasa_mep_al30(token_portador) or 0
+                    if tasa_mep <= 0:
+                        # Fallback conservador si no puede obtenerse MEP
+                        tasa_mep = 1000.0
+                    df_portfolio_usd = df_portfolio['Portfolio_Total'] / tasa_mep
+                    df_portfolio_returns_usd = df_portfolio_usd.pct_change().dropna()
+                    
+                    for horizonte in horizontes_analisis:
+                        if len(df_portfolio_returns) >= horizonte:
+                            # Retorno en ARS
+                            retorno_ars = (1 + df_portfolio_returns.tail(horizonte)).prod() - 1
+                            retornos_ars_por_horizonte[horizonte] = retorno_ars
                             
+                            # Retorno en USD
+                            retorno_usd = (1 + df_portfolio_returns_usd.tail(horizonte)).prod() - 1
+                            retornos_usd_por_horizonte[horizonte] = retorno_usd
+                    
+                    if retornos_ars_por_horizonte and retornos_usd_por_horizonte:
+                        # Crear gráfico de retornos por horizonte (ARS y USD)
+                        fig_horizontes = go.Figure()
+                        
+                        horizontes = list(retornos_ars_por_horizonte.keys())
+                        retornos_ars = list(retornos_ars_por_horizonte.values())
+                        retornos_usd = list(retornos_usd_por_horizonte.values())
+                        
+                        etiquetas_x = [f"{h} días" for h in horizontes]
+                        # Barras para ARS
+                        fig_horizontes.add_trace(go.Bar(
+                            x=etiquetas_x,
+                            y=retornos_ars,
+                            name="Retorno ARS",
+                            marker_color="#10b981",
+                            hovertemplate="ARS: %{y:.2%}<extra></extra>",
+                            text=[f"{r:.2%}" for r in retornos_ars],
+                            textposition='auto'
+                        ))
+                        # Barras para USD
+                        fig_horizontes.add_trace(go.Bar(
+                            x=etiquetas_x,
+                            y=retornos_usd,
+                            name="Retorno USD",
+                            marker_color="#3b82f6",
+                            hovertemplate="USD: %{y:.2%}<extra></extra>",
+                            text=[f"{r:.2%}" for r in retornos_usd],
+                            textposition='auto'
+                        ))
+                        
+                        fig_horizontes.add_hline(y=0, line_dash="dash", line_color="#9ca3af")
+                        fig_horizontes.update_layout(
+                            title="Retornos acumulados por horizonte de inversión (ARS y USD)",
+                            xaxis_title="Horizonte de inversión",
+                            yaxis_title="Retorno acumulado",
+                            height=420,
+                            template='plotly_dark',
+                            barmode='group',
+                            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                            margin=dict(t=60, r=20, b=40, l=50)
+                        )
+                        
+                        st.plotly_chart(fig_horizontes, use_container_width=True)
+                        
+                        # ANÁLISIS AVANZADO CON MARKOV CHAIN
+                        st.markdown("##### Predicción Avanzada con Markov Chain")
+                        
+                        # Preparar datos para Markov Chain
+                        returns_data = df_portfolio_returns.values
+                        
+                        # Crear estados discretos para Markov Chain
+                        n_states = 10
+                        returns_min = np.min(returns_data)
+                        returns_max = np.max(returns_data)
+                        state_bounds = np.linspace(returns_min, returns_max, n_states + 1)
+                        
+                        # Asignar estados a cada retorno
+                        states = np.digitize(returns_data, state_bounds) - 1
+                        states = np.clip(states, 0, n_states - 1)
+                        
+                        # Construir matriz de transición
+                        transition_matrix = np.zeros((n_states, n_states))
+                        for i in range(len(states) - 1):
+                            current_state = states[i]
+                            next_state = states[i + 1]
+                            transition_matrix[current_state][next_state] += 1
+                            
+                            # Normalizar la matriz de transición
+                            row_sums = transition_matrix.sum(axis=1)
+                            transition_matrix = np.divide(transition_matrix, row_sums[:, np.newaxis], 
+                                                        where=row_sums[:, np.newaxis] != 0)
+                            
+                            # Calcular distribución estacionaria
+                            eigenvals, eigenvecs = np.linalg.eig(transition_matrix.T)
+                            stationary_dist = np.real(eigenvecs[:, np.argmax(np.real(eigenvals))])
+                            stationary_dist = stationary_dist / np.sum(stationary_dist)
+                            
+                            # Calcular valores esperados por estado
+                            state_centers = (state_bounds[:-1] + state_bounds[1:]) / 2
+                            expected_return = np.sum(stationary_dist * state_centers)
+                            
+                            # Usar el retorno ponderado unificado como referencia
+                            if metricas and 'metricas_globales' in metricas:
+                                retorno_referencia = metricas['metricas_globales']['retorno_ponderado'] / 100  # Convertir a decimal
+                                # Ajustar el expected_return para que sea más realista
+                                expected_return = retorno_referencia * 0.8 + expected_return * 0.2  # Peso 80% al retorno real, 20% al Markov
+                            
+                            # Simular trayectorias futuras
+                            n_simulations = 1000
+                            n_steps = 30  # 30 días hacia adelante
+                            
+                            simulated_paths = []
+                            for _ in range(n_simulations):
+                                # Empezar desde el estado actual
+                                current_state = states[-1] if len(states) > 0 else 0
+                                path = [current_state]
+                                
+                                for _ in range(n_steps):
+                                    # Transición según la matriz
+                                    if np.sum(transition_matrix[current_state]) > 0:
+                                        next_state = np.random.choice(n_states, p=transition_matrix[current_state])
+                                    else:
+                                        next_state = current_state
+                                    path.append(next_state)
+                                    current_state = next_state
+                                
+                                # Convertir estados a retornos
+                                path_returns = [state_centers[s] for s in path]
+                                simulated_paths.append(path_returns)
+                            
+                            # Calcular estadísticas de las simulaciones
+                            simulated_paths = np.array(simulated_paths)
+                            cumulative_returns = np.cumprod(1 + simulated_paths, axis=1) - 1
+                            
+                            # Ajustar los percentiles para que sean más realistas
+                            if metricas and 'metricas_globales' in metricas:
+                                retorno_referencia = metricas['metricas_globales']['retorno_ponderado'] / 100
+                                riesgo_referencia = metricas['metricas_globales']['riesgo_total'] / 100
+                                
+                                # Calcular percentiles basados en distribución normal más realista
+                                from scipy.stats import norm
+                                percentiles = [5, 25, 50, 75, 95]
+                                return_percentiles = []
+                                
+                                for p in percentiles:
+                                    if p == 50:  # Mediana
+                                        return_percentiles.append(retorno_referencia * 30)  # 30 días
+                                    else:
+                                        # Usar distribución normal con el retorno y riesgo reales
+                                        z_score = norm.ppf(p/100)
+                                        return_percentiles.append((retorno_referencia + z_score * riesgo_referencia) * 30)
                             else:
-                                st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
-                                pass
+                                # Fallback a percentiles originales
+                                return_percentiles = np.percentile(cumulative_returns[:, -1], percentiles)
+                            
+                            # Crear gráfico de distribución de predicciones
+                            fig_prediction = go.Figure()
+                            
+                            # Histograma de retornos simulados
+                            fig_prediction.add_trace(go.Histogram(
+                                x=cumulative_returns[:, -1],
+                                nbinsx=50,
+                                name="Distribución de predicciones",
+                                marker_color='#8b5cf6',
+                                opacity=0.7
+                            ))
+                            
+                            # Líneas de percentiles
+                            colors = ['#ef4444', '#f59e0b', '#10b981', '#f59e0b', '#ef4444']
+                            for i, p in enumerate(percentiles):
+                                fig_prediction.add_vline(
+                                    x=return_percentiles[i],
+                                    line_dash="dash",
+                                    line_color=colors[i],
+                                    annotation_text=f"{p}%: {return_percentiles[i]:.2%}"
+                                )
+                            
+                            fig_prediction.update_layout(
+                                title="Distribución de Retornos Esperados (30 días) - Simulación Markov Chain",
+                                xaxis_title="Retorno acumulado esperado",
+                                yaxis_title="Frecuencia",
+                                height=400,
+                                template='plotly_dark',
+                                showlegend=False
+                            )
+                            
+                            st.plotly_chart(fig_prediction, use_container_width=True)
+                            
+                            # Mostrar métricas de predicción
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("Retorno Esperado", f"{expected_return:.2%}")
+                                st.text("Markov Chain")
+                            
+                            with col2:
+                                st.metric("Mediana", f"{return_percentiles[2]:.2%}")
+                                st.text("50% de probabilidad")
+                            
+                            with col3:
+                                st.metric("Escenario Optimista", f"{return_percentiles[4]:.2%}")
+                                st.text("95% de probabilidad")
+                            
+                            with col4:
+                                st.metric("Escenario Pesimista", f"{return_percentiles[0]:.2%}")
+                                st.text("5% de probabilidad")
+                            
+                            # Análisis de probabilidades
+                            st.markdown("##### Análisis de Probabilidades")
+                            
+                            # Calcular probabilidades de diferentes escenarios (usando valores unificados)
+                            if metricas and 'metricas_globales' in metricas:
+                                retorno_referencia = metricas['metricas_globales']['retorno_ponderado'] / 100
+                                riesgo_referencia = metricas['metricas_globales']['riesgo_total'] / 100
+                                
+                                # Usar distribución normal para calcular probabilidades más realistas
+                                from scipy.stats import norm
+                                
+                                # Probabilidad de ganancia (retorno > 0)
+                                prob_positive = (1 - norm.cdf(0, retorno_referencia * 30, riesgo_referencia * np.sqrt(30))) * 100
+                                prob_negative = norm.cdf(0, retorno_referencia * 30, riesgo_referencia * np.sqrt(30)) * 100
+                                
+                                # Probabilidad de ganancia > 5%
+                                prob_high_gain = (1 - norm.cdf(0.05, retorno_referencia * 30, riesgo_referencia * np.sqrt(30))) * 100
+                                
+                                # Probabilidad de pérdida > 5%
+                                prob_high_loss = norm.cdf(-0.05, retorno_referencia * 30, riesgo_referencia * np.sqrt(30)) * 100
+                            else:
+                                # Fallback a cálculos originales
+                                prob_positive = np.mean(cumulative_returns[:, -1] > 0) * 100
+                                prob_negative = np.mean(cumulative_returns[:, -1] < 0) * 100
+                                prob_high_gain = np.mean(cumulative_returns[:, -1] > 0.05) * 100  # >5%
+                                prob_high_loss = np.mean(cumulative_returns[:, -1] < -0.05) * 100  # <-5%
+                            
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("Probabilidad de Ganancia", f"{prob_positive:.1f}%")
+                            
+                            with col2:
+                                st.metric("Probabilidad de Pérdida", f"{prob_negative:.1f}%")
+                            
+                            with col3:
+                                st.metric("Ganancia >5%", f"{prob_high_gain:.1f}%")
+                            
+                            with col4:
+                                st.metric("Pérdida >5%", f"{prob_high_loss:.1f}%")
+                            
+                            # Información técnica del modelo unificado
+                            with st.expander("Información Técnica del Modelo"):
+                                st.markdown("""
+                                **Metodología Unificada:**
+                                
+                                **Fuente Única de Verdad:**
+                                - Todos los cálculos se basan en la función `calcular_metricas_portafolio_unificada()`
+                                - Valor total, retornos y riesgos se calculan una sola vez y se reutilizan
+                                - Eliminación de inconsistencias entre diferentes secciones
+                                
+                                **Cálculos Principales:**
+                                1. **Valor Total:** Suma ponderada de valuaciones actuales de todos los activos
+                                2. **Retorno Ponderado:** Promedio ponderado de retornos individuales por peso en el portafolio
+                                3. **Riesgo Total:** Volatilidad anual calculada con correlaciones entre activos
+                                4. **Ratio Retorno/Riesgo:** Medida de eficiencia del portafolio
+                                
+                                **Markov Chain Mejorado:**
+                                1. **Estados Discretos:** 10 estados basados en distribución histórica de retornos
+                                2. **Matriz de Transición:** Probabilidades de cambio entre estados
+                                3. **Ajuste Realista:** Combinación 80% datos reales + 20% predicción Markov
+                                4. **Simulación Monte Carlo:** 1000 trayectorias de 30 días
+                                
+                                **Probabilidades Estadísticas:**
+                                - Distribución normal basada en retorno y riesgo reales del portafolio
+                                - Intervalos de confianza del 95% para escenarios optimista/pesimista
+                                - Cálculo de probabilidades de ganancia/pérdida usando funciones de distribución
+                                
+                                **Ventajas del Modelo Unificado:**
+                                - **Consistencia:** Todos los valores provienen de la misma fuente
+                                - **Precisión:** Basado en datos reales de la API de InvertirOnline
+                                - **Realismo:** Predicciones ajustadas a características específicas del portafolio
+                                - **Transparencia:** Metodología clara y verificable
+                                """)
+                        
+                        else:
+                            st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
+                            pass
                                     
-                        except Exception as e:
-                            st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
-                            st.exception(e)
+                except Exception as e:
+                    st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
+                    st.exception(e)
                 
             except Exception as e:
                 st.error(f"❌ Error generando histograma del portafolio: {str(e)}")
@@ -7346,14 +7636,15 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Rebalanceo",
         "💵 Conversión USD",
-        "🌍 Distribución Mejorada"
+        "🌍 Distribución Mejorada",
+        "📈 Datos Históricos"
     ])
 
     with tab1:
@@ -7554,6 +7845,77 @@ def mostrar_analisis_portafolio():
     
     with tab7:
         mostrar_distribucion_activos_mejorada()
+    
+    with tab8:
+        mostrar_datos_historicos_portafolio()
+
+
+def mostrar_datos_historicos_portafolio():
+    """
+    Muestra la funcionalidad para analizar datos históricos del portafolio
+    """
+    st.header("📈 Datos Históricos del Portafolio")
+    st.markdown("""
+    Analiza la composición histórica de tus portafolios en pesos argentinos y dólares estadounidenses.
+    Puedes pegar datos históricos en formato tabulado para generar gráficos de composición.
+    """)
+    
+    # Sección para datos históricos
+    st.markdown("### 📊 Análisis de Datos Históricos")
+    
+    # Text area para pegar datos históricos
+    datos_historicos_texto = st.text_area(
+        "Pega aquí los datos históricos del portafolio (formato tabulado):",
+        height=200,
+        placeholder="""Ejemplo de formato:
+2025-09-02	TOTAL_inversio	posicion_total	1	$199,079.15	peso_Argentino	Posición total en inversion_Argentina_Pesos
+2025-09-02	TITULOS_inversio	titulos_valorizados	1	$198,746.80	peso_Argentino	Títulos valorizados en inversion_Argentina_Pesos
+2025-09-02	TOTAL_inversio	posicion_total	1	$186.78	dolar_Estadounidense	Posición total en inversion_Estados_Unidos_Dolares
+2025-09-02	TITULOS_inversio	titulos_valorizados	1	$183.35	dolar_Estadounidense	Títulos valorizados en inversion_Estados_Unidos_Dolares
+2025-09-02	DISP_inversio	disponible	1	$3.43	dolar_Estadounidense	Disponible en inversion_Estados_Unidos_Dolares"""
+    )
+    
+    if datos_historicos_texto.strip():
+        # Procesar datos históricos
+        datos_procesados = procesar_datos_historicos_portafolio(datos_historicos_texto)
+        
+        if datos_procesados:
+            st.success(f"✅ Datos procesados exitosamente: {len(datos_procesados)} registros")
+            
+            # Mostrar análisis histórico
+            mostrar_analisis_historico_portafolio(datos_procesados)
+        else:
+            st.error("❌ Error al procesar los datos históricos. Verifica el formato.")
+    
+    # Sección para datos de ejemplo
+    st.markdown("### 📋 Datos de Ejemplo")
+    
+    # Mostrar datos de ejemplo que proporcionaste
+    datos_ejemplo = """2025-09-02	TOTAL_inversio	posicion_total	1	$199,079.15	peso_Argentino	Posición total en inversion_Argentina_Pesos
+2025-09-02	TITULOS_inversio	titulos_valorizados	1	$198,746.80	peso_Argentino	Títulos valorizados en inversion_Argentina_Pesos
+2025-09-02	TOTAL_inversio	posicion_total	1	$186.78	dolar_Estadounidense	Posición total en inversion_Estados_Unidos_Dolares
+2025-09-02	TITULOS_inversio	titulos_valorizados	1	$183.35	dolar_Estadounidense	Títulos valorizados en inversion_Estados_Unidos_Dolares
+2025-09-02	DISP_inversio	disponible	1	$3.43	dolar_Estadounidense	Disponible en inversion_Estados_Unidos_Dolares"""
+    
+    st.markdown("**Datos de ejemplo (copia y pega en el área de arriba):**")
+    st.code(datos_ejemplo, language="text")
+    
+    # Botón para cargar datos de ejemplo
+    if st.button("📊 Cargar Datos de Ejemplo"):
+        datos_procesados = procesar_datos_historicos_portafolio(datos_ejemplo)
+        if datos_procesados:
+            st.success(f"✅ Datos de ejemplo cargados: {len(datos_procesados)} registros")
+            mostrar_analisis_historico_portafolio(datos_procesados)
+    
+    # Información adicional
+    st.markdown("### ℹ️ Información")
+    st.info("""
+    **Formato esperado de datos:**
+    - Fecha | Tipo Operación | Concepto | Cantidad | Valor | Moneda | Descripción
+    - Los valores deben estar separados por tabulaciones (Tab)
+    - Los valores monetarios deben incluir el símbolo $ y pueden usar comas como separadores de miles
+    - Las monedas deben ser: 'peso_Argentino' o 'dolar_Estadounidense'
+    """)
 
 
 def mostrar_conversion_usd(token_acceso, id_cliente):
