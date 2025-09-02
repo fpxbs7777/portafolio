@@ -5423,7 +5423,7 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     
     # Filtrar activos argentinos (acciones, bonos, letras, etc.)
     activos_ar = []
-     for activo in activos_raw:
+    for activo in activos_raw:
          titulo = activo.get('titulo', {})
          tipo = titulo.get('tipo', '')
          simbolo = titulo.get('simbolo', '')
