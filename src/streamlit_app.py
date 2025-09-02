@@ -4984,11 +4984,18 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     # Si hay activos, procesarlos normalmente
     datos_activos = []
     valor_total = 0
+    simbolos_procesados = set()  # Para evitar duplicados
     
     for activo in activos:
         try:
             titulo = activo.get('titulo', {})
             simbolo = titulo.get('simbolo', 'N/A')
+            
+            # Verificar si ya procesamos este símbolo
+            if simbolo in simbolos_procesados:
+                continue
+            simbolos_procesados.add(simbolo)
+            
             descripcion = titulo.get('descripcion', 'Sin descripción')
             tipo = titulo.get('tipo', 'N/A')
             cantidad = activo.get('cantidad', 0)
@@ -5285,7 +5292,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             # Validar y ajustar valores para que sean realistas y coherentes
             riesgo_total = np.clip(metricas['metricas_globales']['riesgo_total'], 0.05, 0.50)  # Entre 5% y 50%
             retorno_ponderado = np.clip(metricas['metricas_globales']['retorno_ponderado'], -0.30, 0.30)  # Entre -30% y +30%
-            concentracion = np.clip(metricas['metricas_globales']['concentracion'], 0.0, 1.0)  # Entre 0% y 100%
+            concentracion = np.clip(metricas.get('concentracion', 0.5), 0.0, 1.0)  # Entre 0% y 100%
             
             # Calcular valores monetarios para el portafolio
             valor_total = metricas['metricas_globales']['valor_total']
