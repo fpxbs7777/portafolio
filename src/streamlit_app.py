@@ -4842,66 +4842,66 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                                 'peso': valuacion / valor_total if valor_total > 0 else 0
                                             })
                                             total_renta_fija += valuacion
+                                
+                                if instrumentos_renta_fija:
+                                    # Mostrar tabla de instrumentos de renta fija
+                                    df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
+                                    df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
+                                    df_renta_fija['Valuación ($)'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
                                     
-                                    if instrumentos_renta_fija:
-                                        # Mostrar tabla de instrumentos de renta fija
-                                        df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
-                                        df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
-                                        df_renta_fija['Valuación ($)'] = df_renta_fija['valuacion'].apply(lambda x: f"${x:,.2f}")
+                                    st.dataframe(
+                                        df_renta_fija[['simbolo', 'tipo', 'Valuación ($)', 'Peso (%)']],
+                                        use_container_width=True,
+                                        height=200
+                                    )
+                                    
+                                    # Calcular rendimiento extra asegurado
+                                    peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
+                                    
+                                    # Estimación de rendimiento extra (basado en tasas típicas)
+                                    rendimiento_extra_estimado = {
+                                        'FCI': 0.08,  # 8% anual típico para FCIs
+                                        'Bono': 0.12,  # 12% anual típico para bonos
+                                        'Titulo': 0.10,  # 10% anual típico para títulos públicos
+                                        'Letra': 0.15   # 15% anual típico para letras
+                                    }
+                                    
+                                    rendimiento_extra_total = 0
+                                    for instrumento in instrumentos_renta_fija:
+                                        tipo_instrumento = instrumento['tipo'].lower()
+                                        peso_instrumento = instrumento['peso']
                                         
-                                        st.dataframe(
-                                            df_renta_fija[['simbolo', 'tipo', 'Valuación ($)', 'Peso (%)']],
-                                            use_container_width=True,
-                                            height=200
+                                        # Determinar tipo de rendimiento
+                                        if 'fci' in tipo_instrumento or 'fondo' in tipo_instrumento:
+                                            rendimiento = rendimiento_extra_estimado['FCI']
+                                        elif 'bono' in tipo_instrumento:
+                                            rendimiento = rendimiento_extra_estimado['Bono']
+                                        elif 'titulo' in tipo_instrumento or 'publico' in tipo_instrumento:
+                                            rendimiento = rendimiento_extra_estimado['Titulo']
+                                        elif 'letra' in tipo_instrumento:
+                                            rendimiento = rendimiento_extra_estimado['Letra']
+                                        else:
+                                            rendimiento = rendimiento_extra_estimado['FCI']  # Default
+                                        
+                                        rendimiento_extra_total += rendimiento * peso_instrumento
+                                    
+                                    # Ocultar métricas de rendimiento extra por solicitud
+                                    
+                                    # Gráfico de composición por tipo de instrumento
+                                    if len(instrumentos_renta_fija) > 1:
+                                        fig_renta_fija = go.Figure(data=[go.Pie(
+                                            labels=[f"{row['simbolo']} ({row['tipo']})" for _, row in df_renta_fija.iterrows()],
+                                            values=df_renta_fija['valuacion'],
+                                            textinfo='label+percent+value',
+                                            texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
+                                            hole=0.4,
+                                            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+                                        )])
+                                        fig_renta_fija.update_layout(
+                                            title="Composición de Instrumentos de Renta Fija",
+                                            height=400
                                         )
-                                        
-                                        # Calcular rendimiento extra asegurado
-                                        peso_renta_fija = total_renta_fija / valor_total if valor_total > 0 else 0
-                                        
-                                        # Estimación de rendimiento extra (basado en tasas típicas)
-                                        rendimiento_extra_estimado = {
-                                            'FCI': 0.08,  # 8% anual típico para FCIs
-                                            'Bono': 0.12,  # 12% anual típico para bonos
-                                            'Titulo': 0.10,  # 10% anual típico para títulos públicos
-                                            'Letra': 0.15   # 15% anual típico para letras
-                                        }
-                                        
-                                        rendimiento_extra_total = 0
-                                        for instrumento in instrumentos_renta_fija:
-                                            tipo_instrumento = instrumento['tipo'].lower()
-                                            peso_instrumento = instrumento['peso']
-                                            
-                                            # Determinar tipo de rendimiento
-                                            if 'fci' in tipo_instrumento or 'fondo' in tipo_instrumento:
-                                                rendimiento = rendimiento_extra_estimado['FCI']
-                                            elif 'bono' in tipo_instrumento:
-                                                rendimiento = rendimiento_extra_estimado['Bono']
-                                            elif 'titulo' in tipo_instrumento or 'publico' in tipo_instrumento:
-                                                rendimiento = rendimiento_extra_estimado['Titulo']
-                                            elif 'letra' in tipo_instrumento:
-                                                rendimiento = rendimiento_extra_estimado['Letra']
-                                            else:
-                                                rendimiento = rendimiento_extra_estimado['FCI']  # Default
-                                            
-                                            rendimiento_extra_total += rendimiento * peso_instrumento
-                                        
-                                        # Ocultar métricas de rendimiento extra por solicitud
-                                        
-                                        # Gráfico de composición por tipo de instrumento
-                                        if len(instrumentos_renta_fija) > 1:
-                                            fig_renta_fija = go.Figure(data=[go.Pie(
-                                                labels=[f"{row['simbolo']} ({row['tipo']})" for _, row in df_renta_fija.iterrows()],
-                                                values=df_renta_fija['valuacion'],
-                                                textinfo='label+percent+value',
-                                                texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
-                                                hole=0.4,
-                                                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                                            )])
-                                            fig_renta_fija.update_layout(
-                                                title="Composición de Instrumentos de Renta Fija",
-                                                height=400
-                                            )
-                                            st.plotly_chart(fig_renta_fija, use_container_width=True)
+                                        st.plotly_chart(fig_renta_fija, use_container_width=True)
                                 
                                 # Análisis de retorno esperado por horizonte de inversión
                                 st.markdown("#### Análisis de retorno esperado")
