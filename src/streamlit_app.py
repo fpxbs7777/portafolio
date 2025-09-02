@@ -5717,24 +5717,388 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         except Exception:
             pass
 
-        # Gráficos
-        st.subheader("Distribución de activos")
+        # SECCIÓN COMBINADA: Distribución y Contribución de Activos
+        st.markdown("### 📊 Análisis de Distribución y Contribución de Activos")
         
-        if 'Tipo' in df_activos.columns and df_activos['Valuación'].sum() > 0:
-            tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
-            fig_pie = go.Figure(data=[go.Pie(
-                labels=tipo_stats['Tipo'],
-                values=tipo_stats['Valuación'],
-                textinfo='label+percent',
-                hole=0.4,
-                marker=dict(colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
-            )])
-            fig_pie.update_layout(
-                title="Distribución por tipo",
-                height=400,
-                template='plotly_dark'
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+        # Selector de tipo de visualización
+        tipo_visualizacion = st.selectbox(
+            "Seleccione el tipo de visualización:",
+            options=[
+                "🌍 Distribución por País",
+                "📈 Distribución por Tipo de Activo", 
+                "💰 Contribución al Valor Total",
+                "🎯 Análisis de Concentración",
+                "📊 Vista Combinada"
+            ],
+            index=0,
+            key="tipo_visualizacion"
+        )
+        
+        if tipo_visualizacion == "🌍 Distribución por País":
+            # Distribución por país
+            if 'pais_origen' in df_activos.columns:
+                distribucion_pais = df_activos['pais_origen'].value_counts()
+                
+                fig_pais = go.Figure(data=[go.Pie(
+                    labels=distribucion_pais.index,
+                    values=distribucion_pais.values,
+                    hole=0.4,
+                    textinfo='label+percent+value',
+                    texttemplate='%{label}<br>%{percent}<br>%{value} activos',
+                    marker=dict(
+                        colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57'],
+                        line=dict(color='#FFFFFF', width=2)
+                    )
+                )])
+                
+                fig_pais.update_layout(
+                    title=dict(
+                        text="🌍 Distribución de Activos por País",
+                        x=0.5,
+                        font=dict(size=20, color='#2C3E50')
+                    ),
+                    height=500,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                
+                st.plotly_chart(fig_pais, use_container_width=True)
+                
+                # Métricas por país
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Activos", len(df_activos))
+                with col2:
+                    st.metric("Países", len(distribucion_pais))
+                with col3:
+                    pais_principal = distribucion_pais.index[0] if len(distribucion_pais) > 0 else "N/A"
+                    st.metric("País Principal", pais_principal)
+        
+        elif tipo_visualizacion == "📈 Distribución por Tipo de Activo":
+            # Distribución por tipo de activo
+            if 'Tipo' in df_activos.columns:
+                tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
+                tipo_stats = tipo_stats.sort_values('Valuación', ascending=False)
+                
+                fig_tipo = go.Figure(data=[go.Bar(
+                    x=tipo_stats['Tipo'],
+                    y=tipo_stats['Valuación'],
+                    text=[f"${val:,.0f}" for val in tipo_stats['Valuación']],
+                    textposition='auto',
+                    marker=dict(
+                        color=tipo_stats['Valuación'],
+                        colorscale='Viridis',
+                        line=dict(color='#FFFFFF', width=1)
+                    )
+                )])
+                
+                fig_tipo.update_layout(
+                    title=dict(
+                        text="📈 Distribución por Tipo de Activo",
+                        x=0.5,
+                        font=dict(size=20, color='#2C3E50')
+                    ),
+                    xaxis=dict(
+                        title="Tipo de Activo",
+                        tickangle=45,
+                        tickfont=dict(size=12)
+                    ),
+                    yaxis=dict(
+                        title="Valor Total ($)",
+                        tickformat=",",
+                        tickprefix="$"
+                    ),
+                    height=500,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                
+                st.plotly_chart(fig_tipo, use_container_width=True)
+                
+                # Gráfico de dona complementario
+                fig_dona = go.Figure(data=[go.Pie(
+                    labels=tipo_stats['Tipo'],
+                    values=tipo_stats['Valuación'],
+                    hole=0.6,
+                    textinfo='label+percent',
+                    texttemplate='%{label}<br>%{percent}',
+                    marker=dict(
+                        colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'],
+                        line=dict(color='#FFFFFF', width=2)
+                    )
+                )])
+                
+                fig_dona.update_layout(
+                    title=dict(
+                        text="📊 Proporción por Tipo",
+                        x=0.5,
+                        font=dict(size=16, color='#2C3E50')
+                    ),
+                    height=400,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig_dona, use_container_width=True)
+        
+        elif tipo_visualizacion == "💰 Contribución al Valor Total":
+            # Contribución de activos al valor total
+            if len(datos_activos) > 0:
+                # Ordenar por valuación
+                datos_ordenados = sorted(datos_activos, key=lambda x: x['Valuación'], reverse=True)
+                
+                # Tomar los top 10 activos
+                top_activos = datos_ordenados[:10]
+                
+                fig_contribucion = go.Figure(data=[go.Bar(
+                    x=[activo['Símbolo'] for activo in top_activos],
+                    y=[activo['Valuación'] for activo in top_activos],
+                    text=[f"${activo['Valuación']:,.0f}" for activo in top_activos],
+                    textposition='auto',
+                    marker=dict(
+                        color=[activo['Valuación'] for activo in top_activos],
+                        colorscale='Plasma',
+                        line=dict(color='#FFFFFF', width=1)
+                    )
+                )])
+                
+                fig_contribucion.update_layout(
+                    title=dict(
+                        text="💰 Top 10 Activos por Contribución al Valor Total",
+                        x=0.5,
+                        font=dict(size=20, color='#2C3E50')
+                    ),
+                    xaxis=dict(
+                        title="Símbolo",
+                        tickangle=45,
+                        tickfont=dict(size=12)
+                    ),
+                    yaxis=dict(
+                        title="Valuación ($)",
+                        tickformat=",",
+                        tickprefix="$"
+                    ),
+                    height=500,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                
+                st.plotly_chart(fig_contribucion, use_container_width=True)
+                
+                # Gráfico de dona con porcentajes
+                total_valor = sum(activo['Valuación'] for activo in datos_activos)
+                porcentajes = [(activo['Valuación'] / total_valor * 100) for activo in top_activos]
+                
+                fig_dona_contrib = go.Figure(data=[go.Pie(
+                    labels=[f"{activo['Símbolo']}<br>{porcentaje:.1f}%" for activo, porcentaje in zip(top_activos, porcentajes)],
+                    values=[activo['Valuación'] for activo in top_activos],
+                    hole=0.5,
+                    textinfo='label',
+                    marker=dict(
+                        colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#A8E6CF', '#FFB3BA', '#FFD93D', '#6BCF7F'],
+                        line=dict(color='#FFFFFF', width=2)
+                    )
+                )])
+                
+                fig_dona_contrib.update_layout(
+                    title=dict(
+                        text="📊 Distribución de Contribución (%)",
+                        x=0.5,
+                        font=dict(size=16, color='#2C3E50')
+                    ),
+                    height=400,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig_dona_contrib, use_container_width=True)
+        
+        elif tipo_visualizacion == "🎯 Análisis de Concentración":
+            # Análisis de concentración del portafolio
+            if len(datos_activos) > 0:
+                # Calcular concentración
+                total_valor = sum(activo['Valuación'] for activo in datos_activos)
+                datos_ordenados = sorted(datos_activos, key=lambda x: x['Valuación'], reverse=True)
+                
+                # Calcular concentración acumulada
+                concentracion_acumulada = []
+                simbolos_acumulados = []
+                valor_acumulado = 0
+                
+                for i, activo in enumerate(datos_ordenados):
+                    valor_acumulado += activo['Valuación']
+                    concentracion_acumulada.append((valor_acumulado / total_valor) * 100)
+                    simbolos_acumulados.append(f"{i+1} activos")
+                
+                # Gráfico de concentración
+                fig_concentracion = go.Figure()
+                
+                fig_concentracion.add_trace(go.Scatter(
+                    x=simbolos_acumulados,
+                    y=concentracion_acumulada,
+                    mode='lines+markers',
+                    name='Concentración Acumulada',
+                    line=dict(color='#FF6B6B', width=3),
+                    marker=dict(size=8, color='#FF6B6B')
+                ))
+                
+                # Línea de referencia 80%
+                fig_concentracion.add_hline(
+                    y=80, 
+                    line_dash="dash", 
+                    line_color="red",
+                    annotation_text="80% de concentración"
+                )
+                
+                fig_concentracion.update_layout(
+                    title=dict(
+                        text="🎯 Análisis de Concentración del Portafolio",
+                        x=0.5,
+                        font=dict(size=20, color='#2C3E50')
+                    ),
+                    xaxis=dict(title="Número de Activos"),
+                    yaxis=dict(
+                        title="Concentración Acumulada (%)",
+                        tickformat=".0f",
+                        ticksuffix="%"
+                    ),
+                    height=500,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                
+                st.plotly_chart(fig_concentracion, use_container_width=True)
+                
+                # Métricas de concentración
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    concentracion_top1 = (datos_ordenados[0]['Valuación'] / total_valor * 100) if datos_ordenados else 0
+                    st.metric("Concentración Top 1", f"{concentracion_top1:.1f}%")
+                with col2:
+                    concentracion_top5 = sum(activo['Valuación'] for activo in datos_ordenados[:5]) / total_valor * 100
+                    st.metric("Concentración Top 5", f"{concentracion_top5:.1f}%")
+                with col3:
+                    concentracion_top10 = sum(activo['Valuación'] for activo in datos_ordenados[:10]) / total_valor * 100
+                    st.metric("Concentración Top 10", f"{concentracion_top10:.1f}%")
+        
+        elif tipo_visualizacion == "📊 Vista Combinada":
+            # Vista combinada con múltiples gráficos
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Gráfico de dona por país
+                if 'pais_origen' in df_activos.columns:
+                    distribucion_pais = df_activos['pais_origen'].value_counts()
+                    
+                    fig_pais_combo = go.Figure(data=[go.Pie(
+                        labels=distribucion_pais.index,
+                        values=distribucion_pais.values,
+                        hole=0.6,
+                        textinfo='label+percent',
+                        marker=dict(
+                            colors=['#FF6B6B', '#4ECDC4'],
+                            line=dict(color='#FFFFFF', width=2)
+                        )
+                    )])
+                    
+                    fig_pais_combo.update_layout(
+                        title=dict(
+                            text="🌍 Por País",
+                            x=0.5,
+                            font=dict(size=16, color='#2C3E50')
+                        ),
+                        height=300,
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig_pais_combo, use_container_width=True)
+            
+            with col2:
+                # Gráfico de barras por tipo
+                if 'Tipo' in df_activos.columns:
+                    tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
+                    tipo_stats = tipo_stats.sort_values('Valuación', ascending=False)
+                    
+                    fig_tipo_combo = go.Figure(data=[go.Bar(
+                        x=tipo_stats['Tipo'],
+                        y=tipo_stats['Valuación'],
+                        marker=dict(
+                            color='#4ECDC4',
+                            line=dict(color='#FFFFFF', width=1)
+                        )
+                    )])
+                    
+                    fig_tipo_combo.update_layout(
+                        title=dict(
+                            text="📈 Por Tipo",
+                            x=0.5,
+                            font=dict(size=16, color='#2C3E50')
+                        ),
+                        xaxis=dict(tickangle=45),
+                        yaxis=dict(tickformat=","),
+                        height=300,
+                        showlegend=False,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    
+                    st.plotly_chart(fig_tipo_combo, use_container_width=True)
+            
+            # Gráfico de contribución al valor total
+            if len(datos_activos) > 0:
+                datos_ordenados = sorted(datos_activos, key=lambda x: x['Valuación'], reverse=True)
+                top_activos = datos_ordenados[:8]  # Top 8 para mejor visualización
+                
+                fig_contrib_combo = go.Figure(data=[go.Bar(
+                    x=[activo['Símbolo'] for activo in top_activos],
+                    y=[activo['Valuación'] for activo in top_activos],
+                    text=[f"${activo['Valuación']:,.0f}" for activo in top_activos],
+                    textposition='auto',
+                    marker=dict(
+                        color='#FF6B6B',
+                        line=dict(color='#FFFFFF', width=1)
+                    )
+                )])
+                
+                fig_contrib_combo.update_layout(
+                    title=dict(
+                        text="💰 Top 8 Activos por Valor",
+                        x=0.5,
+                        font=dict(size=18, color='#2C3E50')
+                    ),
+                    xaxis=dict(tickangle=45),
+                    yaxis=dict(tickformat=","),
+                    height=400,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                
+                st.plotly_chart(fig_contrib_combo, use_container_width=True)
+        
+        # Métricas resumen
+        st.markdown("---")
+        st.markdown("#### 📋 Resumen de Métricas")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Activos", len(datos_activos))
+        with col2:
+            st.metric("Valor Total", f"${valor_total:,.0f}")
+        with col3:
+            tipos_unicos = df_activos['Tipo'].nunique() if 'Tipo' in df_activos.columns else 0
+            st.metric("Tipos de Activos", tipos_unicos)
+        with col4:
+            if 'pais_origen' in df_activos.columns:
+                paises_unicos = df_activos['pais_origen'].nunique()
+                st.metric("Países", paises_unicos)
+            else:
+                st.metric("Países", "N/A")
         
         # Histograma de retornos del portafolio
         st.subheader("Histograma de Retornos del Portafolio")
@@ -5939,115 +6303,35 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             
                             # Ocultadas: estadísticas del histograma y evolución temporal del portafolio
                             
-                            # Mostrar contribución de cada activo con retornos y riesgos individuales
-                            st.markdown("#### Contribución de activos al valor total")
+                            # Mostrar métricas globales del portafolio (usando valores unificados)
+                            st.markdown("#### Métricas Globales del Portafolio")
+                            col1, col2, col3, col4 = st.columns(4)
                             
-                            # Calcular retornos y riesgos individuales de cada activo
-                            contribucion_activos = {}
-                            retornos_individuales = {}
-                            riesgos_individuales = {}
+                            # Usar métricas unificadas como fuente única de verdad
+                            if metricas and 'metricas_globales' in metricas:
+                                valor_total_unificado = metricas['metricas_globales']['valor_total']
+                                retorno_ponderado_unificado = metricas['metricas_globales']['retorno_ponderado']
+                                riesgo_total_unificado = metricas['metricas_globales']['riesgo_total']
+                                ratio_unificado = metricas['metricas_globales']['ratio_retorno_riesgo']
+                            else:
+                                valor_total_unificado = valor_total_portfolio
+                                retorno_ponderado_unificado = retorno_portfolio
+                                riesgo_total_unificado = riesgo_portfolio
+                                ratio_unificado = retorno_portfolio/riesgo_portfolio if riesgo_portfolio > 0 else 0
                             
-                            for activo_info in activos_exitosos:
-                                simbolo = activo_info['simbolo']
-                                serie = activo_info['serie']
-                                
-                                # Usar la valuación real del activo
-                                valuacion_activo = 0
-                                for activo_original in datos_activos:
-                                    if activo_original['Símbolo'] == simbolo:
-                                        valuacion_activo = activo_original['Valuación']
-                                        contribucion_activos[simbolo] = valuacion_activo
-                                        break
-                                
-                                # Calcular retorno individual del activo
-                                if 'precio' in serie.columns and len(serie) > 1:
-                                    precios = serie['precio'].values
-                                    retorno_individual = ((precios[-1] / precios[0]) - 1) * 100
-                                    retornos_individuales[simbolo] = retorno_individual
-                                    
-                                    # Calcular riesgo individual (volatilidad)
-                                    retornos_diarios = np.diff(precios) / precios[:-1]
-                                    riesgo_individual = np.std(retornos_diarios) * np.sqrt(252) * 100  # Anualizado
-                                    riesgos_individuales[simbolo] = riesgo_individual
-                                else:
-                                    retornos_individuales[simbolo] = 0
-                                    riesgos_individuales[simbolo] = 0
+                            col1.metric("Valor Total", f"${valor_total_unificado:,.0f}")
+                            col2.metric("Retorno Ponderado", f"{retorno_ponderado_unificado:.1f}%")
+                            col3.metric("Riesgo Total", f"{riesgo_total_unificado:.1f}%")
+                            col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
                             
-                            if contribucion_activos:
-                                # Crear gráfico de contribución con información de retornos y riesgos
-                                fig_contribucion = go.Figure(data=[go.Pie(
-                                    labels=[f"{simbolo}<br>Ret: {retornos_individuales.get(simbolo, 0):.1f}%<br>Riesgo: {riesgos_individuales.get(simbolo, 0):.1f}%" 
-                                           for simbolo in contribucion_activos.keys()],
-                                    values=list(contribucion_activos.values()),
-                                    textinfo='label+percent+value',
-                                    texttemplate='%{label}<br>%{percent}<br>$%{value:,.0f}',
-                                    hole=0.4,
-                                    marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-                                )])
-                                
-                                # Calcular métricas globales del portafolio
-                                valor_total_portfolio = sum(contribucion_activos.values())
-                                pesos = {simbolo: valor / valor_total_portfolio for simbolo, valor in contribucion_activos.items()}
-                                
-                                # Retorno ponderado del portafolio
-                                retorno_portfolio = sum(pesos[simbolo] * retornos_individuales.get(simbolo, 0) 
-                                                      for simbolo in pesos.keys())
-                                
-                                # Riesgo del portafolio (simplificado - correlación asumida como 0.5)
-                                riesgo_portfolio = np.sqrt(sum(pesos[simbolo]**2 * riesgos_individuales.get(simbolo, 0)**2 
-                                                             for simbolo in pesos.keys()))
-                                
-                                fig_contribucion.update_layout(
-                                    title=f"Contribución de Activos al Valor Total del Portafolio<br>"
-                                          f"<sub>Retorno Global: {retorno_portfolio:.1f}% | Riesgo Global: {riesgo_portfolio:.1f}%</sub>",
-                                    height=500
-                                )
-                                
-                                st.plotly_chart(fig_contribucion, use_container_width=True)
-                                
-                                # Mostrar tabla resumen de métricas individuales y globales
-                                st.markdown("#### Métricas de Retorno y Riesgo por Activo")
-                                
-                                # Crear DataFrame para la tabla
-                                df_metricas = pd.DataFrame({
-                                    'Activo': list(contribucion_activos.keys()),
-                                    'Valuación ($)': [f"${valor:,.0f}" for valor in contribucion_activos.values()],
-                                    'Peso (%)': [f"{pesos[simbolo]*100:.1f}%" for simbolo in contribucion_activos.keys()],
-                                    'Retorno (%)': [f"{retornos_individuales.get(simbolo, 0):.1f}%" for simbolo in contribucion_activos.keys()],
-                                    'Riesgo (%)': [f"{riesgos_individuales.get(simbolo, 0):.1f}%" for simbolo in contribucion_activos.keys()]
-                                })
-                                
-                                st.dataframe(df_metricas, use_container_width=True)
-                                
-                                # Mostrar métricas globales del portafolio (usando valores unificados)
-                                st.markdown("#### Métricas Globales del Portafolio")
-                                col1, col2, col3, col4 = st.columns(4)
-                                
-                                # Usar métricas unificadas como fuente única de verdad
-                                if metricas and 'metricas_globales' in metricas:
-                                    valor_total_unificado = metricas['metricas_globales']['valor_total']
-                                    retorno_ponderado_unificado = metricas['metricas_globales']['retorno_ponderado']
-                                    riesgo_total_unificado = metricas['metricas_globales']['riesgo_total']
-                                    ratio_unificado = metricas['metricas_globales']['ratio_retorno_riesgo']
-                                else:
-                                    valor_total_unificado = valor_total_portfolio
-                                    retorno_ponderado_unificado = retorno_portfolio
-                                    riesgo_total_unificado = riesgo_portfolio
-                                    ratio_unificado = retorno_portfolio/riesgo_portfolio if riesgo_portfolio > 0 else 0
-                                
-                                col1.metric("Valor Total", f"${valor_total_unificado:,.0f}")
-                                col2.metric("Retorno Ponderado", f"{retorno_ponderado_unificado:.1f}%")
-                                col3.metric("Riesgo Total", f"{riesgo_total_unificado:.1f}%")
-                                col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
+                            # Identificar instrumentos de renta fija
+                            instrumentos_renta_fija = []
+                            total_renta_fija = 0
                             
-                                # Identificar instrumentos de renta fija
-                                instrumentos_renta_fija = []
-                                total_renta_fija = 0
-                                
-                                for activo in datos_activos:
-                                        tipo = activo.get('Tipo', '').lower()
-                                        simbolo = activo.get('Símbolo', '')
-                                        valuacion = activo.get('Valuación', 0)
+                            for activo in datos_activos:
+                                tipo = activo.get('Tipo', '').lower()
+                                simbolo = activo.get('Símbolo', '')
+                                valuacion = activo.get('Valuación', 0)
                                         
                                         # Identificar FCIs, bonos y otros instrumentos de renta fija
                                         if any(keyword in tipo for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra']):
