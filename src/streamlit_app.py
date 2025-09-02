@@ -254,7 +254,7 @@ def obtener_tokens(usuario, contraseña):
         print(f"📡 Respuesta de autenticación: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
-        respuesta_json = respuesta.json()
+            respuesta_json = respuesta.json()
             access_token = respuesta_json.get('access_token')
             refresh_token = respuesta_json.get('refresh_token')
             
@@ -430,6 +430,7 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
                             st.info("1. Verifica que tu cuenta tenga permisos de asesor")
                             st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
                             st.info("3. Usa la funcionalidad de portafolio directo en su lugar")
+            
             return None
         else:
             print(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text}")
