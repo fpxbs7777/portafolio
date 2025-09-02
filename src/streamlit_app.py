@@ -4212,20 +4212,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     
     activos = portafolio.get('activos', [])
     if not activos:
-        st.warning("⚠️ **No se encontraron activos en el portafolio**")
-        st.info("💡 **Posibles causas:**")
-        st.info("• El portafolio está vacío")
-        st.info("• La API está en mantenimiento")
-        st.info("• Problemas de conectividad")
-        
-        # Intentar obtener datos del estado de cuenta como alternativa
-        st.info("🔄 **Intentando obtener datos del estado de cuenta...**")
-        estado_cuenta = obtener_estado_cuenta(token_portador)
-        if estado_cuenta:
-            st.success("✅ **Datos obtenidos del estado de cuenta**")
-            mostrar_resumen_estado_cuenta(estado_cuenta)
-        else:
-            st.error("❌ **No se pudieron obtener datos alternativos**")
         return
     
     # Si hay activos, procesarlos normalmente
@@ -6664,7 +6650,7 @@ def main():
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Panel del asesor"),
+                ("Inicio", "Análisis de portafolio", "Panel del asesor", "Series históricas"),
                 index=0,
                 key="menu_principal"
             )
@@ -6679,6 +6665,13 @@ def main():
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "Panel del asesor":
                 mostrar_movimientos_asesor()
+            elif opcion == "Series históricas":
+                if st.session_state.cliente_seleccionado:
+                    cliente = st.session_state.cliente_seleccionado
+                    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+                    mostrar_series_historicas_movimientos(st.session_state.token_acceso, id_cliente)
+                else:
+                    st.info("Seleccione un cliente en la barra lateral para comenzar")
         else:
             st.info("Ingrese sus credenciales para comenzar")
             
@@ -6735,6 +6728,469 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+def obtener_series_historicas_movimientos(token_portador, id_cliente, fecha_desde, fecha_hasta, pais=None):
+    """
+    Obtiene series históricas de movimientos para un cliente específico
+    y los organiza por país (Argentina/EEUU)
+    """
+    try:
+        print(f"📊 Obteniendo series históricas de movimientos para cliente {id_cliente}")
+        
+        # Verificar token antes de proceder
+        if not verificar_token_valido(token_portador):
+            print("⚠️ Token no válido, intentando renovar...")
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    token_portador = nuevo_token
+                    print("✅ Token renovado exitosamente")
+                else:
+                    print("❌ No se pudo renovar el token")
+                    return None
+        
+        # Obtener movimientos para Argentina
+        movimientos_argentina = obtener_movimientos_asesor(
+            token_portador=token_portador,
+            clientes=[id_cliente],
+            fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
+            fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
+            tipo_fecha="fechaOperacion",
+            pais="Argentina" if pais is None or pais == "Argentina" else None,
+            moneda="peso_Argentino" if pais is None or pais == "Argentina" else None
+        )
+        
+        # Obtener movimientos para Estados Unidos
+        movimientos_eeuu = obtener_movimientos_asesor(
+            token_portador=token_portador,
+            clientes=[id_cliente],
+            fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
+            fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
+            tipo_fecha="fechaOperacion",
+            pais="Estados Unidos" if pais is None or pais == "Estados Unidos" else None,
+            moneda="dolar_Estadounidense" if pais is None or pais == "Estados Unidos" else None
+        )
+        
+        # Procesar movimientos de Argentina
+        series_argentina = procesar_movimientos_para_series(movimientos_argentina, "Argentina")
+        
+        # Procesar movimientos de Estados Unidos
+        series_eeuu = procesar_movimientos_para_series(movimientos_eeuu, "Estados Unidos")
+        
+        return {
+            'argentina': series_argentina,
+            'eeuu': series_eeuu,
+            'fecha_desde': fecha_desde,
+            'fecha_hasta': fecha_hasta
+        }
+        
+    except Exception as e:
+        print(f"💥 Error al obtener series históricas de movimientos: {e}")
+        return None
+
+def procesar_movimientos_para_series(movimientos, pais):
+    """
+    Procesa los movimientos para crear series históricas por tipo de operación
+    """
+    if not movimientos:
+        return {}
+    
+    try:
+        # Convertir a DataFrame si es necesario
+        if isinstance(movimientos, list):
+            df = pd.DataFrame(movimientos)
+        elif isinstance(movimientos, dict) and 'movimientos' in movimientos:
+            df = pd.DataFrame(movimientos['movimientos'])
+        else:
+            df = pd.DataFrame([movimientos])
+        
+        if df.empty:
+            return {}
+        
+        # Asegurar que tenemos la columna de fecha
+        if 'fechaOperacion' not in df.columns:
+            print(f"⚠️ No se encontró columna fechaOperacion en movimientos de {pais}")
+            return {}
+        
+        # Convertir fecha a datetime
+        df['fecha'] = pd.to_datetime(df['fechaOperacion'])
+        df = df.sort_values('fecha')
+        
+        # Agrupar por fecha y tipo de operación
+        series_por_tipo = {}
+        
+        # Series por tipo de operación
+        tipos_operacion = df['tipo'].unique() if 'tipo' in df.columns else ['operacion']
+        
+        for tipo in tipos_operacion:
+            df_tipo = df[df['tipo'] == tipo] if 'tipo' in df.columns else df
+            
+            if not df_tipo.empty:
+                # Agrupar por fecha y sumar valores
+                df_agrupado = df_tipo.groupby(df_tipo['fecha'].dt.date).agg({
+                    'valor': 'sum' if 'valor' in df_tipo.columns else 'count',
+                    'cantidad': 'sum' if 'cantidad' in df_tipo.columns else 'count',
+                    'precio': 'mean' if 'precio' in df_tipo.columns else 'count'
+                }).reset_index()
+                
+                df_agrupado['fecha'] = pd.to_datetime(df_agrupado['fecha'])
+                
+                series_por_tipo[f'series_{tipo}'] = {
+                    'fechas': df_agrupado['fecha'].tolist(),
+                    'valores': df_agrupado['valor'].tolist() if 'valor' in df_tipo.columns else df_agrupado['cantidad'].tolist(),
+                    'cantidades': df_agrupado['cantidad'].tolist() if 'cantidad' in df_tipo.columns else [],
+                    'precios': df_agrupado['precio'].tolist() if 'precio' in df_tipo.columns else []
+                }
+        
+        # Series acumulativas
+        if not df.empty:
+            df_acumulado = df.groupby(df['fecha'].dt.date).agg({
+                'valor': 'sum' if 'valor' in df.columns else 'count'
+            }).reset_index()
+            df_acumulado['fecha'] = pd.to_datetime(df_acumulado['fecha'])
+            df_acumulado['valor_acumulado'] = df_acumulado['valor'].cumsum()
+            
+            series_por_tipo['series_acumulada'] = {
+                'fechas': df_acumulado['fecha'].tolist(),
+                'valores': df_acumulado['valor'].tolist(),
+                'valores_acumulados': df_acumulado['valor_acumulado'].tolist()
+            }
+        
+        return series_por_tipo
+        
+    except Exception as e:
+        print(f"💥 Error al procesar movimientos para {pais}: {e}")
+        return {}
+
+def graficar_series_historicas_movimientos(series_data, token_portador):
+    """
+    Grafica las series históricas de movimientos para Argentina y EEUU
+    """
+    if not series_data:
+        st.warning("❌ No hay datos de series históricas para graficar")
+        return
+    
+    st.subheader("📈 Series Históricas de Movimientos")
+    
+    # Crear pestañas para cada país
+    tab_argentina, tab_eeuu, tab_comparacion = st.tabs(["🇦🇷 Argentina", "🇺🇸 Estados Unidos", "📊 Comparación"])
+    
+    with tab_argentina:
+        graficar_series_pais(series_data.get('argentina', {}), "Argentina", "🇦🇷")
+    
+    with tab_eeuu:
+        graficar_series_pais(series_data.get('eeuu', {}), "Estados Unidos", "🇺🇸")
+    
+    with tab_comparacion:
+        graficar_comparacion_series(series_data)
+
+def graficar_series_pais(series_pais, nombre_pais, emoji):
+    """
+    Grafica las series históricas para un país específico
+    """
+    if not series_pais:
+        st.info(f"📊 No hay datos de movimientos para {nombre_pais}")
+        return
+    
+    st.markdown(f"### {emoji} Series Históricas - {nombre_pais}")
+    
+    # Mostrar resumen de series disponibles
+    series_disponibles = list(series_pais.keys())
+    st.info(f"📋 Series disponibles: {', '.join(series_disponibles)}")
+    
+    # Gráfico de movimientos por tipo
+    if len(series_disponibles) > 1:
+        fig_tipos = go.Figure()
+        
+        colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+        
+        for i, (tipo, datos) in enumerate(series_pais.items()):
+            if tipo == 'series_acumulada':
+                continue
+                
+            if 'fechas' in datos and 'valores' in datos:
+                color = colores[i % len(colores)]
+                nombre_serie = tipo.replace('series_', '').replace('_', ' ').title()
+                
+                fig_tipos.add_trace(go.Scatter(
+                    x=datos['fechas'],
+                    y=datos['valores'],
+                    mode='lines+markers',
+                    name=nombre_serie,
+                    line=dict(color=color, width=2),
+                    marker=dict(size=6, color=color)
+                ))
+        
+        fig_tipos.update_layout(
+            title=f'Movimientos por Tipo - {nombre_pais}',
+            xaxis_title='Fecha',
+            yaxis_title='Valor',
+            template='plotly_white',
+            height=500,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig_tipos, use_container_width=True)
+    
+    # Gráfico de serie acumulativa
+    if 'series_acumulada' in series_pais:
+        datos_acum = series_pais['series_acumulada']
+        
+        if 'fechas' in datos_acum and 'valores_acumulados' in datos_acum:
+            fig_acum = go.Figure()
+            
+            fig_acum.add_trace(go.Scatter(
+                x=datos_acum['fechas'],
+                y=datos_acum['valores_acumulados'],
+                mode='lines+markers',
+                name='Valor Acumulado',
+                line=dict(color='#2ca02c', width=3),
+                marker=dict(size=8, color='#2ca02c'),
+                fill='tonexty'
+            ))
+            
+            fig_acum.update_layout(
+                title=f'Valor Acumulado de Movimientos - {nombre_pais}',
+                xaxis_title='Fecha',
+                yaxis_title='Valor Acumulado',
+                template='plotly_white',
+                height=500,
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_acum, use_container_width=True)
+    
+    # Tabla de resumen estadístico
+    st.markdown("#### 📊 Resumen Estadístico")
+    
+    datos_resumen = []
+    for tipo, datos in series_pais.items():
+        if 'valores' in datos and datos['valores']:
+            valores = [v for v in datos['valores'] if v is not None and not pd.isna(v)]
+            if valores:
+                datos_resumen.append({
+                    'Tipo': tipo.replace('series_', '').replace('_', ' ').title(),
+                    'Total Operaciones': len(valores),
+                    'Valor Total': sum(valores),
+                    'Valor Promedio': np.mean(valores),
+                    'Valor Máximo': max(valores),
+                    'Valor Mínimo': min(valores)
+                })
+    
+    if datos_resumen:
+        df_resumen = pd.DataFrame(datos_resumen)
+        
+        # Formatear valores monetarios
+        for col in ['Valor Total', 'Valor Promedio', 'Valor Máximo', 'Valor Mínimo']:
+            if col in df_resumen.columns:
+                df_resumen[col] = df_resumen[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        
+        st.dataframe(df_resumen, use_container_width=True)
+
+def graficar_comparacion_series(series_data):
+    """
+    Grafica la comparación entre series de Argentina y EEUU
+    """
+    st.markdown("### 📊 Comparación Argentina vs Estados Unidos")
+    
+    argentina = series_data.get('argentina', {})
+    eeuu = series_data.get('eeuu', {})
+    
+    if not argentina and not eeuu:
+        st.info("📊 No hay datos para comparar")
+        return
+    
+    # Comparación de series acumuladas
+    if 'series_acumulada' in argentina and 'series_acumulada' in eeuu:
+        fig_comparacion = go.Figure()
+        
+        # Argentina
+        datos_ar = argentina['series_acumulada']
+        if 'fechas' in datos_ar and 'valores_acumulados' in datos_ar:
+            fig_comparacion.add_trace(go.Scatter(
+                x=datos_ar['fechas'],
+                y=datos_ar['valores_acumulados'],
+                mode='lines+markers',
+                name='🇦🇷 Argentina',
+                line=dict(color='#1f77b4', width=3),
+                marker=dict(size=8, color='#1f77b4')
+            ))
+        
+        # Estados Unidos
+        datos_us = eeuu['series_acumulada']
+        if 'fechas' in datos_us and 'valores_acumulados' in datos_us:
+            fig_comparacion.add_trace(go.Scatter(
+                x=datos_us['fechas'],
+                y=datos_us['valores_acumulados'],
+                mode='lines+markers',
+                name='🇺🇸 Estados Unidos',
+                line=dict(color='#ff7f0e', width=3),
+                marker=dict(size=8, color='#ff7f0e')
+            ))
+        
+        fig_comparacion.update_layout(
+            title='Comparación de Valor Acumulado - Argentina vs Estados Unidos',
+            xaxis_title='Fecha',
+            yaxis_title='Valor Acumulado',
+            template='plotly_white',
+            height=600,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig_comparacion, use_container_width=True)
+    
+    # Métricas comparativas
+    st.markdown("#### 📈 Métricas Comparativas")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Calcular métricas para Argentina
+    total_ar = 0
+    operaciones_ar = 0
+    if argentina:
+        for tipo, datos in argentina.items():
+            if 'valores' in datos and datos['valores']:
+                valores = [v for v in datos['valores'] if v is not None and not pd.isna(v)]
+                total_ar += sum(valores)
+                operaciones_ar += len(valores)
+    
+    # Calcular métricas para EEUU
+    total_us = 0
+    operaciones_us = 0
+    if eeuu:
+        for tipo, datos in eeuu.items():
+            if 'valores' in datos and datos['valores']:
+                valores = [v for v in datos['valores'] if v is not None and not pd.isna(v)]
+                total_us += sum(valores)
+                operaciones_us += len(valores)
+    
+    col1.metric("🇦🇷 Total Argentina", f"${total_ar:,.2f}")
+    col2.metric("🇺🇸 Total EEUU", f"${total_us:,.2f}")
+    col3.metric("🇦🇷 Operaciones AR", operaciones_ar)
+    col4.metric("🇺🇸 Operaciones US", operaciones_us)
+    
+    # Análisis de distribución
+    if total_ar > 0 or total_us > 0:
+        total_global = total_ar + total_us
+        porcentaje_ar = (total_ar / total_global * 100) if total_global > 0 else 0
+        porcentaje_us = (total_us / total_global * 100) if total_global > 0 else 0
+        
+        st.markdown("#### 📊 Distribución por País")
+        
+        fig_distribucion = go.Figure(data=[go.Pie(
+            labels=['🇦🇷 Argentina', '🇺🇸 Estados Unidos'],
+            values=[total_ar, total_us],
+            hole=0.3,
+            marker_colors=['#1f77b4', '#ff7f0e']
+        )])
+        
+        fig_distribucion.update_layout(
+            title='Distribución de Movimientos por País',
+            height=400
+        )
+        
+        st.plotly_chart(fig_distribucion, use_container_width=True)
+        
+        # Mostrar porcentajes
+        col1, col2 = st.columns(2)
+        col1.metric("🇦🇷 % Argentina", f"{porcentaje_ar:.1f}%")
+        col2.metric("🇺🇸 % Estados Unidos", f"{porcentaje_us:.1f}%")
+
+def mostrar_series_historicas_movimientos(token_portador, id_cliente):
+    """
+    Función principal para mostrar las series históricas de movimientos
+    """
+    st.header("📈 Series Históricas de Movimientos")
+    st.markdown("""
+    Analiza la evolución temporal de los movimientos de tu portafolio,
+    separando por país (Argentina y Estados Unidos) y tipo de operación.
+    """)
+    
+    # Verificar token
+    if not verificar_token_valido(token_portador):
+        st.warning("⚠️ Token expirado. Renovando...")
+        nuevo_token = renovar_token(st.session_state.get('refresh_token'))
+        if nuevo_token:
+            st.session_state['token_acceso'] = nuevo_token
+            token_portador = nuevo_token
+            st.success("✅ Token renovado")
+        else:
+            st.error("❌ No se pudo renovar el token")
+            return
+    
+    # Configuración de fechas
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        fecha_desde = st.date_input(
+            "📅 Fecha Desde",
+            value=date.today() - timedelta(days=30),
+            max_value=date.today()
+        )
+    
+    with col2:
+        fecha_hasta = st.date_input(
+            "📅 Fecha Hasta",
+            value=date.today(),
+            max_value=date.today()
+        )
+    
+    with col3:
+        pais_filtro = st.selectbox(
+            "🌍 País",
+            options=["Todos", "Argentina", "Estados Unidos"],
+            help="Filtrar por país específico o ver todos"
+        )
+    
+    # Validar fechas
+    if fecha_desde > fecha_hasta:
+        st.error("❌ La fecha desde no puede ser mayor que la fecha hasta")
+        return
+    
+    # Botón para obtener datos
+    if st.button("🚀 Obtener Series Históricas", type="primary"):
+        with st.spinner("📊 Obteniendo series históricas de movimientos..."):
+            try:
+                # Determinar país para filtro
+                pais_param = None
+                if pais_filtro != "Todos":
+                    pais_param = pais_filtro
+                
+                # Obtener series históricas
+                series_data = obtener_series_historicas_movimientos(
+                    token_portador=token_portador,
+                    id_cliente=id_cliente,
+                    fecha_desde=fecha_desde,
+                    fecha_hasta=fecha_hasta,
+                    pais=pais_param
+                )
+                
+                if series_data:
+                    st.success(f"✅ Series históricas obtenidas para el período {fecha_desde} - {fecha_hasta}")
+                    
+                    # Mostrar información del período
+                    st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
+                    
+                    # Graficar las series
+                    graficar_series_historicas_movimientos(series_data, token_portador)
+                    
+                    # Mostrar datos raw para debugging
+                    with st.expander("🔍 Datos Raw (Debug)"):
+                        st.json(series_data)
+                        
+                else:
+                    st.error("❌ No se pudieron obtener las series históricas")
+                    st.info("💡 **Posibles causas:**")
+                    st.info("• No hay movimientos en el período seleccionado")
+                    st.info("• Problemas de conectividad con la API")
+                    st.info("• Permisos insuficientes para acceder a los movimientos")
+                    st.info("• Token de acceso expirado")
+                    
+            except Exception as e:
+                st.error(f"💥 Error al obtener series históricas: {e}")
+                st.exception(e)
 
 if __name__ == "__main__":
     main()
