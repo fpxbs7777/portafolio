@@ -404,6 +404,13 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
             return data
         elif respuesta.status_code == 401:
             print(f"❌ Error 401: No autorizado para estado de cuenta")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder al estado de cuenta")
+            st.info("💡 **Posibles causas:**")
+            st.info("• Tu cuenta no tiene permisos de asesor")
+            st.info("• El token de acceso ha expirado")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            st.info("• La API requiere autenticación especial para este endpoint")
+            
             # Intentar renovar token y reintentar una vez
             refresh_token = st.session_state.get('refresh_token')
             if refresh_token:
@@ -417,6 +424,12 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
                         if respuesta.status_code == 200:
                             print("✅ Estado de cuenta obtenido en reintento")
                             return respuesta.json()
+                        elif respuesta.status_code == 401:
+                            st.error("❌ **Persiste el problema de autorización**")
+                            st.info("🔐 **Solución recomendada:**")
+                            st.info("1. Verifica que tu cuenta tenga permisos de asesor")
+                            st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
+                            st.info("3. Usa la funcionalidad de portafolio directo en su lugar")
             return None
         else:
             print(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text}")
@@ -791,6 +804,13 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
             return data
         elif response.status_code == 401:
             print(f"❌ Error 401: No autorizado para movimientos")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a los movimientos")
+            st.info("💡 **Posibles causas:**")
+            st.info("• Tu cuenta no tiene permisos de asesor")
+            st.info("• El token de acceso ha expirado")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            st.info("• La API requiere autenticación especial para este endpoint")
+            
             # Intentar renovar token y reintentar una vez
             refresh_token = st.session_state.get('refresh_token')
             if refresh_token:
@@ -804,6 +824,12 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
                         if response.status_code == 200:
                             print("✅ Movimientos obtenidos en reintento")
                             return response.json()
+                        elif response.status_code == 401:
+                            st.error("❌ **Persiste el problema de autorización**")
+                            st.info("🔐 **Solución recomendada:**")
+                            st.info("1. Verifica que tu cuenta tenga permisos de asesor")
+                            st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
+                            st.info("3. La aplicación usará datos simulados como alternativa")
             return None
         else:
             print(f"❌ Error HTTP {response.status_code}: {response.text}")
@@ -1251,7 +1277,7 @@ def calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha
         
         # Calcular métricas de retorno y riesgo
         with st.spinner("🧮 Calculando métricas..."):
-            metricas = calcular_metricas_portafolio(series_historicas, activos_identificados)
+            metricas = calcular_metricas_portafolio_movimientos(series_historicas, activos_identificados)
         
         # Mostrar resultados
         mostrar_metricas_reales(metricas)
@@ -1549,7 +1575,7 @@ def crear_serie_simulada(simbolo, fecha_desde, fecha_hasta):
         print(f"❌ Error al crear serie simulada para {simbolo}: {e}")
         return None
 
-def calcular_metricas_portafolio(series_historicas, activos_identificados):
+def calcular_metricas_portafolio_movimientos(series_historicas, activos_identificados):
     """
     Calcula métricas de retorno y riesgo del portafolio
     """
@@ -5284,7 +5310,10 @@ def mostrar_analisis_portafolio():
             metodo = movimientos.get('metodo', 'API directa')
             if metodo in ['alternativo_estado_cuenta', 'respaldo_minimo', 'emergencia', 'ultimo_recurso']:
                 st.warning(f"⚠️ **Movimientos Obtenidos con Método Alternativo**: {metodo}")
-                st.info("💡 Los datos son simulados debido a limitaciones de acceso a la API de movimientos. Esto permite que la aplicación funcione, pero los análisis serán aproximados.")
+                st.info("💡 **Explicación:** Los datos son simulados debido a limitaciones de acceso a la API de movimientos.")
+                st.info("🔐 **Causa:** Tu cuenta no tiene permisos de asesor para acceder a los endpoints `/api/v2/estadocuenta` y `/api/v2/Asesor/Movimientos`")
+                st.info("✅ **Beneficio:** Esto permite que la aplicación funcione y muestre análisis aproximados")
+                st.info("📊 **Limitación:** Los análisis de retorno y riesgo serán aproximados, no exactos")
             else:
                 st.success(f"✅ Movimientos obtenidos exitosamente desde la API")
             
@@ -5863,6 +5892,19 @@ def main():
             if debug_mode != st.session_state.debug_mode:
                 st.session_state.debug_mode = debug_mode
                 st.rerun()
+            
+            # Nota sobre permisos de API
+            st.sidebar.markdown("---")
+            with st.sidebar.expander("🔐 Nota sobre Permisos API"):
+                st.info("""
+                **Algunas funcionalidades requieren permisos especiales:**
+                
+                • **Estado de cuenta detallado**: Requiere permisos de asesor
+                • **Movimientos históricos**: Requiere permisos de asesor
+                • **Análisis de retorno real**: Usa datos simulados si no hay permisos
+                
+                Si ves mensajes de "401 Authorization denied", la aplicación usará datos simulados como alternativa.
+                """)
             
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
