@@ -423,8 +423,8 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
                         respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
                         if respuesta.status_code == 200:
                             print("✅ Estado de cuenta obtenido en reintento")
-            return respuesta.json()
-        elif respuesta.status_code == 401:
+                            return respuesta.json()
+                        elif respuesta.status_code == 401:
                             st.error("❌ **Persiste el problema de autorización**")
                             st.info("🔐 **Solución recomendada:**")
                             st.info("1. Verifica que tu cuenta tenga permisos de asesor")
