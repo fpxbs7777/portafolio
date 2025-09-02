@@ -4828,69 +4828,69 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 tipo = titulo.get('tipo', 'N/A')
                 pais = titulo.get('pais', 'argentina')
                 mercado = titulo.get('mercado', 'BCBA')
-            
-            # Obtener valuación
-            valuacion = 0
-            campos_valuacion = [
-                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
-                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
-                'montoInvertido', 'valorMercado', 'valorTotal', 'importe', 'valorizado'
-            ]
-            
-            for campo in campos_valuacion:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        val = float(activo[campo])
-                        if val > 0:
-                            valuacion = val
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            # Si no hay valuación, usar valorizado
-            if valuacion == 0 and 'valorizado' in activo:
-                try:
-                    valuacion = float(activo['valorizado'])
-                except (ValueError, TypeError):
-                    pass
-            
-            # Clasificar activo
-            es_estadounidense = False
-            
-            # Primero verificar por país y mercado
-            if pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu']:
-                es_estadounidense = True
-            elif mercado.upper() in ['NYSE', 'NASDAQ', 'AMEX', 'OTC']:
-                es_estadounidense = True
-            else:
-                # Usar función de clasificación como respaldo
-                es_estadounidense = _es_activo_estadounidense(simbolo, tipo)
-            
-            # Crear objeto de activo
-            activo_info = {
-                'Símbolo': simbolo,
-                'Descripción': descripcion,
-                'Tipo': tipo,
-                'Cantidad': activo.get('cantidad', 0),
-                'Valuación': valuacion,
-                'UltimoPrecio': activo.get('ultimoPrecio', 0),
-                'PrecioPromedioCompra': activo.get('ppc', 0),
-                'VariacionDiariaPct': activo.get('variacionDiaria', 0),
-                'ActivosComp': activo.get('comprometido', 0),
-                'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
-            }
-            
-            # Agregar a la lista correspondiente
-            if es_estadounidense:
-                activos_eeuu.append(activo_info)
-                st.text(f"Clasificado como EEUU: {simbolo} - ${valuacion:,.2f}")
-            else:
-                activos_argentinos.append(activo_info)
-                st.text(f"Clasificado como Argentina: {simbolo} - ${valuacion:,.2f}")
                 
-        except Exception as e:
-            st.text(f"Error procesando activo: {e}")
-            continue
+                # Obtener valuación
+                valuacion = 0
+                campos_valuacion = [
+                    'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
+                    'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
+                    'montoInvertido', 'valorMercado', 'valorTotal', 'importe', 'valorizado'
+                ]
+                
+                for campo in campos_valuacion:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            val = float(activo[campo])
+                            if val > 0:
+                                valuacion = val
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                # Si no hay valuación, usar valorizado
+                if valuacion == 0 and 'valorizado' in activo:
+                    try:
+                        valuacion = float(activo['valorizado'])
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Clasificar activo
+                es_estadounidense = False
+                
+                # Primero verificar por país y mercado
+                if pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu']:
+                    es_estadounidense = True
+                elif mercado.upper() in ['NYSE', 'NASDAQ', 'AMEX', 'OTC']:
+                    es_estadounidense = True
+                else:
+                    # Usar función de clasificación como respaldo
+                    es_estadounidense = _es_activo_estadounidense(simbolo, tipo)
+                
+                # Crear objeto de activo
+                activo_info = {
+                    'Símbolo': simbolo,
+                    'Descripción': descripcion,
+                    'Tipo': tipo,
+                    'Cantidad': activo.get('cantidad', 0),
+                    'Valuación': valuacion,
+                    'UltimoPrecio': activo.get('ultimoPrecio', 0),
+                    'PrecioPromedioCompra': activo.get('ppc', 0),
+                    'VariacionDiariaPct': activo.get('variacionDiaria', 0),
+                    'ActivosComp': activo.get('comprometido', 0),
+                    'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
+                }
+                
+                # Agregar a la lista correspondiente
+                if es_estadounidense:
+                    activos_eeuu.append(activo_info)
+                    st.text(f"Clasificado como EEUU: {simbolo} - ${valuacion:,.2f}")
+                else:
+                    activos_argentinos.append(activo_info)
+                    st.text(f"Clasificado como Argentina: {simbolo} - ${valuacion:,.2f}")
+                    
+            except Exception as e:
+                st.text(f"Error procesando activo: {e}")
+                continue
         
         # Usar métricas unificadas como fuente única de verdad
         if metricas and 'metricas_globales' in metricas:
