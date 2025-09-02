@@ -607,11 +607,19 @@ def obtener_portafolio_alternativo_asesor(token_portador: str, pais: str):
         return None
     
     # Mapear país para el endpoint de asesor
-    pais_asesor = 'Argentina' if pais.lower() in ['argentina', 'ar', 'arg'] else 'Estados Unidos'
+    if pais.lower() in ['argentina', 'ar', 'arg']:
+        pais_asesor = 'Argentina'
+    elif pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu', 'us', 'usa']:
+        pais_asesor = 'Estados Unidos'
+    else:
+        print(f"❌ País no reconocido: {pais}")
+        return None
     
     try:
+        print(f"🔍 Intentando obtener portafolio de {pais_asesor} con endpoint de asesor")
         # Usar el endpoint de asesor
         portafolio = obtener_portafolio(token_portador, id_cliente, pais_asesor)
+        
         if portafolio and 'activos' in portafolio:
             print(f"✅ Portafolio obtenido con método de asesor para {pais}: {len(portafolio['activos'])} activos")
             return portafolio
@@ -4590,11 +4598,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     </style>
     """, unsafe_allow_html=True)
     
-    # Header principal (simplificado)
+    # Header principal (profesional y minimalista)
     st.markdown("""
-    <div class="portfolio-header">
-        <h1>📊 Análisis del Portafolio</h1>
-        <p>Métricas unificadas y predicciones avanzadas</p>
+    <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; margin-bottom: 20px;">
+        <h1 style="color: #333; font-size: 28px; margin: 0;">Análisis de Portafolio</h1>
+        <p style="color: #666; margin: 5px 0 0 0;">Métricas unificadas y análisis de riesgo</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -4910,165 +4918,97 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
 
         
         # SECCIÓN 1: RESUMEN GENERAL
-        st.markdown("### 📈 Resumen General")
+        st.markdown("### Resumen General")
         
-        # Métricas principales en cards estilizadas
+        # Métricas principales en formato simple
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>🏦 Total de Activos</h3>
-                <h2>{len(datos_activos)}</h2>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Total de Activos", len(datos_activos))
         
         with col2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>📊 Símbolos Únicos</h3>
-                <h2>{df_activos['Símbolo'].nunique()}</h2>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Símbolos Únicos", df_activos['Símbolo'].nunique())
         
         with col3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>📋 Tipos de Activos</h3>
-                <h2>{df_activos['Tipo'].nunique()}</h2>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Tipos de Activos", df_activos['Tipo'].nunique())
         
         with col4:
-            # Usar el valor total unificado
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>💰 Valor Total</h3>
-                <h2>${valor_total:,.2f}</h2>
-                <small>ARS + USD a MEP</small>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Valor Total", f"${valor_total:,.2f}")
         
         # SECCIÓN 2: DISTRIBUCIÓN POR MERCADO
-        st.markdown("### 🌍 Distribución por Mercado")
+        st.markdown("### Distribución por Mercado")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            # Obtener tipos de activos argentinos
             tipos_argentinos = list(set(activo['Tipo'] for activo in activos_argentinos))
             tipos_str = ", ".join(tipos_argentinos) if tipos_argentinos else "N/A"
             
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>🇦🇷 Mercado Argentino</h3>
-                <h2>{len(activos_argentinos)} activos</h2>
-                <h3>${valor_argentino:,.2f}</h3>
-                <small>{(valor_argentino/valor_total*100):.1f}% del total</small>
-                <br><small><strong>Tipos:</strong> {tipos_str}</small>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Mercado Argentino", f"{len(activos_argentinos)} activos")
+            st.metric("Valor", f"${valor_argentino:,.2f}")
+            st.metric("Porcentaje", f"{(valor_argentino/valor_total*100):.1f}%")
+            st.text(f"Tipos: {tipos_str}")
         
         with col2:
-            # Obtener tipos de activos estadounidenses
             tipos_eeuu = list(set(activo['Tipo'] for activo in activos_eeuu))
             tipos_str = ", ".join(tipos_eeuu) if tipos_eeuu else "N/A"
             
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>🇺🇸 Mercado Estadounidense</h3>
-                <h2>{len(activos_eeuu)} activos</h2>
-                <h3>${valor_eeuu:,.2f}</h3>
-                <small>{(valor_eeuu/valor_total*100):.1f}% del total</small>
-                <br><small><strong>Tipos:</strong> {tipos_str}</small>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Mercado Estadounidense", f"{len(activos_eeuu)} activos")
+            st.metric("Valor", f"${valor_eeuu:,.2f}")
+            st.metric("Porcentaje", f"{(valor_eeuu/valor_total*100):.1f}%")
+            st.text(f"Tipos: {tipos_str}")
         
         if metricas:
             # SECCIÓN 3: ANÁLISIS DE RIESGO
-            st.markdown("### ⚠️ Análisis de Riesgo")
+            st.markdown("### Análisis de Riesgo")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 concentracion_pct = metricas['concentracion'] * 100
-                st.markdown(f"""
-                <div class="risk-card">
-                    <h3>🎯 Concentración</h3>
-                    <h2>{concentracion_pct:.1f}%</h2>
-                    <small>Índice de Herfindahl normalizado</small>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Concentración", f"{concentracion_pct:.1f}%")
+                st.text("Índice de Herfindahl normalizado")
             
             with col2:
-                # Usar el riesgo total de las métricas unificadas
                 riesgo_total = metricas['metricas_globales']['riesgo_total']
-                st.markdown(f"""
-                <div class="risk-card">
-                    <h3>📈 Riesgo Total</h3>
-                    <h2>{riesgo_total:.1f}%</h2>
-                    <small>Volatilidad anual del portafolio</small>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Riesgo Total", f"{riesgo_total:.1f}%")
+                st.text("Volatilidad anual del portafolio")
             
             with col3:
                 if metricas['concentracion'] < 0.3:
-                    concentracion_status = "🟢 Baja"
+                    concentracion_status = "Baja"
                 elif metricas['concentracion'] < 0.6:
-                    concentracion_status = "🟡 Media"
+                    concentracion_status = "Media"
                 else:
-                    concentracion_status = "🔴 Alta"
+                    concentracion_status = "Alta"
                 
-                st.markdown(f"""
-                <div class="risk-card">
-                    <h3>📊 Nivel de Concentración</h3>
-                    <h2>{concentracion_status}</h2>
-                    <small>Evaluación de diversificación</small>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Nivel de Concentración", concentracion_status)
+                st.text("Evaluación de diversificación")
             
             # SECCIÓN 4: PROYECCIONES DE RENDIMIENTO
-            st.markdown("### 📊 Proyecciones de Rendimiento")
+            st.markdown("### Proyecciones de Rendimiento")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                # Usar el retorno ponderado de las métricas unificadas
                 retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
-                st.markdown(f"""
-                <div class="performance-card">
-                    <h3>🎯 Retorno Esperado Anual</h3>
-                    <h2>{retorno_ponderado:+.1f}%</h2>
-                    <small>Retorno ponderado del portafolio</small>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Retorno Esperado Anual", f"{retorno_ponderado:+.1f}%")
+                st.text("Retorno ponderado del portafolio")
             
             with col2:
-                # Calcular escenarios basados en el retorno ponderado y riesgo
                 retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
                 riesgo_total = metricas['metricas_globales']['riesgo_total']
-                optimista_pct = retorno_ponderado + (riesgo_total * 1.645)  # 95% confidence interval
-                st.markdown(f"""
-                <div class="performance-card">
-                    <h3>🚀 Escenario Optimista (95%)</h3>
-                    <h2>{optimista_pct:+.1f}%</h2>
-                    <small>Mejor escenario esperado</small>
-                </div>
-                """, unsafe_allow_html=True)
+                optimista_pct = retorno_ponderado + (riesgo_total * 1.645)
+                st.metric("Escenario Optimista (95%)", f"{optimista_pct:+.1f}%")
+                st.text("Mejor escenario esperado")
             
             with col3:
-                # Calcular escenario pesimista
-                pesimista_pct = retorno_ponderado - (riesgo_total * 1.645)  # 5% confidence interval
-                st.markdown(f"""
-                <div class="performance-card">
-                    <h3>📉 Escenario Pesimista (5%)</h3>
-                    <h2>{pesimista_pct:+.1f}%</h2>
-                    <small>Peor escenario esperado</small>
-                </div>
-                """, unsafe_allow_html=True)
+                pesimista_pct = retorno_ponderado - (riesgo_total * 1.645)
+                st.metric("Escenario Pesimista (5%)", f"{pesimista_pct:+.1f}%")
+                st.text("Peor escenario esperado")
             
             # SECCIÓN 5: PROBABILIDADES
-            st.markdown("### 🎲 Probabilidades")
+            st.markdown("### Probabilidades")
             
             # Calcular probabilidades basadas en distribución normal
             retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
@@ -5090,44 +5030,24 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.markdown(f"""
-                <div class="probability-card">
-                    <h3>📈 Ganancia</h3>
-                    <h2>{prob_ganancia:.1f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Ganancia", f"{prob_ganancia:.1f}%")
             
             with col2:
-                st.markdown(f"""
-                <div class="probability-card">
-                    <h3>📉 Pérdida</h3>
-                    <h2>{prob_perdida:.1f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Pérdida", f"{prob_perdida:.1f}%")
             
             with col3:
-                st.markdown(f"""
-                <div class="probability-card">
-                    <h3>🚀 Ganancia >10%</h3>
-                    <h2>{prob_ganancia_10:.1f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Ganancia >10%", f"{prob_ganancia_10:.1f}%")
             
             with col4:
-                st.markdown(f"""
-                <div class="probability-card">
-                    <h3>⚠️ Pérdida >10%</h3>
-                    <h2>{prob_perdida_10:.1f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("Pérdida >10%", f"{prob_perdida_10:.1f}%")
             
 
         
         # SECCIÓN 6: TABLA DE ACTIVOS DETALLADA
-        st.markdown("### 📋 Detalle de Activos")
+        st.markdown("### Detalle de Activos")
         
         # Crear tabs para separar activos argentinos y estadounidenses
-        tab1, tab2, tab3 = st.tabs(["🇦🇷 Activos Argentinos", "🇺🇸 Activos Estadounidenses", "📊 Vista General"])
+        tab1, tab2, tab3 = st.tabs(["Activos Argentinos", "Activos Estadounidenses", "Vista General"])
         
         try:
             df_tabla = pd.DataFrame(datos_activos)
@@ -5211,7 +5131,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         with col3:
                             st.metric("% del Portafolio", f"{(valor_argentino/valor_total*100):.1f}%")
                     else:
-                        st.info("No hay activos argentinos en el portafolio")
+                        st.text("No hay activos argentinos en el portafolio")
                 
                 # Tab 2: Activos Estadounidenses
                 with tab2:
@@ -5256,7 +5176,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         with col3:
                             st.metric("% del Portafolio", f"{(valor_eeuu/valor_total*100):.1f}%")
                     else:
-                        st.info("No hay activos estadounidenses en el portafolio")
+                        st.text("No hay activos estadounidenses en el portafolio")
                 
                 # Tab 3: Vista General
                 with tab3:
@@ -5295,7 +5215,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.plotly_chart(fig_pie, use_container_width=True)
         
         # Histograma de retornos del portafolio
-        st.subheader("📊 Histograma de Retornos del Portafolio")
+        st.subheader("Histograma de Retornos del Portafolio")
         
         # Configuración del horizonte de inversión
         horizonte_inversion = st.selectbox(
@@ -5317,7 +5237,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Intervalo de análisis fijo en diario
         intervalo_analisis = ("Diario", "D")
-        st.info("Análisis configurado con frecuencia diaria")
+        st.text("Análisis configurado con frecuencia diaria")
         
         # Extraer valores de las tuplas
         dias_analisis = horizonte_inversion[1]
@@ -5563,8 +5483,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 
                                 st.plotly_chart(fig_contribucion, use_container_width=True)
                                 
-                                # Mostrar tabla resumen de métricas individuales y globales
-                                st.markdown("#### 📊 Métricas de Retorno y Riesgo por Activo")
+                                                            # Mostrar tabla resumen de métricas individuales y globales
+                            st.markdown("#### Métricas de Retorno y Riesgo por Activo")
                                 
                                 # Crear DataFrame para la tabla
                                 df_metricas = pd.DataFrame({
@@ -5578,7 +5498,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 st.dataframe(df_metricas, use_container_width=True)
                                 
                                 # Mostrar métricas globales del portafolio (usando valores unificados)
-                                st.markdown("#### 🌍 Métricas Globales del Portafolio")
+                                st.markdown("#### Métricas Globales del Portafolio")
                                 col1, col2, col3, col4 = st.columns(4)
                                 
                                 # Usar métricas unificadas como fuente única de verdad
@@ -5689,7 +5609,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 
                         try:
                             # Análisis de retorno esperado usando histograma y Markov Chain
-                            st.markdown("#### 📈 Análisis de Retorno Esperado (Histograma + Markov Chain)")
+                            st.markdown("#### Análisis de Retorno Esperado (Histograma + Markov Chain)")
                             
                             # Calcular retornos en USD para diferentes horizontes
                             horizontes_analisis = [1, 7, 30, 90, 180, 365]
@@ -5759,7 +5679,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 st.plotly_chart(fig_horizontes, use_container_width=True)
                                 
                                 # ANÁLISIS AVANZADO CON MARKOV CHAIN
-                                st.markdown("##### 🔮 Predicción Avanzada con Markov Chain")
+                                st.markdown("##### Predicción Avanzada con Markov Chain")
                                 
                                 # Preparar datos para Markov Chain
                                 returns_data = df_portfolio_returns.values
@@ -5886,43 +5806,23 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 col1, col2, col3, col4 = st.columns(4)
                                 
                                 with col1:
-                                    st.markdown(f"""
-                                    <div class="metric-card">
-                                        <h3>📊 Retorno Esperado</h3>
-                                        <h2>{expected_return:.2%}</h2>
-                                        <small>Markov Chain</small>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Retorno Esperado", f"{expected_return:.2%}")
+                                    st.text("Markov Chain")
                                 
                                 with col2:
-                                    st.markdown(f"""
-                                    <div class="metric-card">
-                                        <h3>🎯 Mediana</h3>
-                                        <h2>{return_percentiles[2]:.2%}</h2>
-                                        <small>50% de probabilidad</small>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Mediana", f"{return_percentiles[2]:.2%}")
+                                    st.text("50% de probabilidad")
                                 
                                 with col3:
-                                    st.markdown(f"""
-                                    <div class="metric-card">
-                                        <h3>📈 Escenario Optimista</h3>
-                                        <h2>{return_percentiles[4]:.2%}</h2>
-                                        <small>95% de probabilidad</small>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Escenario Optimista", f"{return_percentiles[4]:.2%}")
+                                    st.text("95% de probabilidad")
                                 
                                 with col4:
-                                    st.markdown(f"""
-                                    <div class="metric-card">
-                                        <h3>📉 Escenario Pesimista</h3>
-                                        <h2>{return_percentiles[0]:.2%}</h2>
-                                        <small>5% de probabilidad</small>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Escenario Pesimista", f"{return_percentiles[0]:.2%}")
+                                    st.text("5% de probabilidad")
                                 
                                 # Análisis de probabilidades
-                                st.markdown("##### 📊 Análisis de Probabilidades")
+                                st.markdown("##### Análisis de Probabilidades")
                                 
                                 # Calcular probabilidades de diferentes escenarios (usando valores unificados)
                                 if metricas and 'metricas_globales' in metricas:
@@ -5951,65 +5851,45 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 col1, col2, col3, col4 = st.columns(4)
                                 
                                 with col1:
-                                    st.markdown(f"""
-                                    <div class="probability-card">
-                                        <h3>📈 Probabilidad de Ganancia</h3>
-                                        <h2>{prob_positive:.1f}%</h2>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Probabilidad de Ganancia", f"{prob_positive:.1f}%")
                                 
                                 with col2:
-                                    st.markdown(f"""
-                                    <div class="probability-card">
-                                        <h3>📉 Probabilidad de Pérdida</h3>
-                                        <h2>{prob_negative:.1f}%</h2>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Probabilidad de Pérdida", f"{prob_negative:.1f}%")
                                 
                                 with col3:
-                                    st.markdown(f"""
-                                    <div class="probability-card">
-                                        <h3>🚀 Ganancia >5%</h3>
-                                        <h2>{prob_high_gain:.1f}%</h2>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Ganancia >5%", f"{prob_high_gain:.1f}%")
                                 
                                 with col4:
-                                    st.markdown(f"""
-                                    <div class="probability-card">
-                                        <h3>⚠️ Pérdida >5%</h3>
-                                        <h2>{prob_high_loss:.1f}%</h2>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                    st.metric("Pérdida >5%", f"{prob_high_loss:.1f}%")
                                 
                                 # Información técnica del modelo unificado
-                                with st.expander("🔬 Información Técnica del Modelo Unificado"):
+                                with st.expander("Información Técnica del Modelo"):
                                     st.markdown("""
-                                    **🎯 Metodología Unificada:**
+                                    **Metodología Unificada:**
                                     
                                     **Fuente Única de Verdad:**
                                     - Todos los cálculos se basan en la función `calcular_metricas_portafolio_unificada()`
                                     - Valor total, retornos y riesgos se calculan una sola vez y se reutilizan
                                     - Eliminación de inconsistencias entre diferentes secciones
                                     
-                                    **📊 Cálculos Principales:**
+                                    **Cálculos Principales:**
                                     1. **Valor Total:** Suma ponderada de valuaciones actuales de todos los activos
                                     2. **Retorno Ponderado:** Promedio ponderado de retornos individuales por peso en el portafolio
                                     3. **Riesgo Total:** Volatilidad anual calculada con correlaciones entre activos
                                     4. **Ratio Retorno/Riesgo:** Medida de eficiencia del portafolio
                                     
-                                    **🔮 Markov Chain Mejorado:**
+                                    **Markov Chain Mejorado:**
                                     1. **Estados Discretos:** 10 estados basados en distribución histórica de retornos
                                     2. **Matriz de Transición:** Probabilidades de cambio entre estados
                                     3. **Ajuste Realista:** Combinación 80% datos reales + 20% predicción Markov
                                     4. **Simulación Monte Carlo:** 1000 trayectorias de 30 días
                                     
-                                    **📈 Probabilidades Estadísticas:**
+                                    **Probabilidades Estadísticas:**
                                     - Distribución normal basada en retorno y riesgo reales del portafolio
                                     - Intervalos de confianza del 95% para escenarios optimista/pesimista
                                     - Cálculo de probabilidades de ganancia/pérdida usando funciones de distribución
                                     
-                                    **✅ Ventajas del Modelo Unificado:**
+                                    **Ventajas del Modelo Unificado:**
                                     - **Consistencia:** Todos los valores provienen de la misma fuente
                                     - **Precisión:** Basado en datos reales de la API de InvertirOnline
                                     - **Realismo:** Predicciones ajustadas a características específicas del portafolio
@@ -7135,6 +7015,15 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
     portafolio_us = obtener_portafolio_por_pais(token_acceso, 'estados_unidos')
     
+    # Debug: Mostrar qué se obtuvo
+    st.text(f"Portafolio Argentina obtenido: {portafolio_ar is not None}")
+    st.text(f"Portafolio Estados Unidos obtenido: {portafolio_us is not None}")
+    
+    if portafolio_ar:
+        st.text(f"Activos Argentina: {len(portafolio_ar.get('activos', []))}")
+    if portafolio_us:
+        st.text(f"Activos Estados Unidos: {len(portafolio_us.get('activos', []))}")
+    
     # Combinar portafolios
     portafolio_combinado = {'activos': []}
     
@@ -7145,6 +7034,51 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     if portafolio_us and 'activos' in portafolio_us:
         portafolio_combinado['activos'].extend(portafolio_us['activos'])
         print(f"✅ Portafolio estadounidense: {len(portafolio_us['activos'])} activos")
+    
+    # Si no hay activos, intentar método de respaldo usando estado de cuenta
+    if not portafolio_combinado['activos']:
+        st.text("Intentando método de respaldo con estado de cuenta...")
+        
+        # Obtener estado de cuenta
+        estado_cuenta = obtener_estado_cuenta(token_acceso)
+        if estado_cuenta and 'cuentas' in estado_cuenta:
+            cuentas = estado_cuenta['cuentas']
+            
+            # Buscar cuentas estadounidenses
+            for cuenta in cuentas:
+                if cuenta.get('estado') == 'operable':
+                    tipo_cuenta = cuenta.get('tipo', '').lower()
+                    moneda = cuenta.get('moneda', '').lower()
+                    
+                    # Identificar cuentas estadounidenses
+                    if ('estados' in tipo_cuenta or 'dolar' in moneda or 'usd' in moneda) and cuenta.get('total', 0) > 0:
+                        st.text(f"Encontrada cuenta estadounidense: {tipo_cuenta} - {moneda}")
+                        
+                        # Crear activo simulado basado en la cuenta
+                        activo_us = {
+                            'titulo': {
+                                'simbolo': f"USD_{tipo_cuenta[:5].upper()}",
+                                'descripcion': f"Cuenta {tipo_cuenta}",
+                                'tipo': 'cuenta_usd',
+                                'pais': 'estados_Unidos',
+                                'mercado': 'NYSE',
+                                'moneda': 'dolar_Estadounidense'
+                            },
+                            'cantidad': 1,
+                            'valuacion': float(cuenta.get('total', 0)),
+                            'valorizado': float(cuenta.get('total', 0)),
+                            'ultimoPrecio': float(cuenta.get('total', 0)),
+                            'ppc': float(cuenta.get('total', 0)),
+                            'gananciaPorcentaje': 0,
+                            'gananciaDinero': 0,
+                            'variacionDiaria': 0,
+                            'comprometido': 0
+                        }
+                        
+                        portafolio_combinado['activos'].append(activo_us)
+                        st.text(f"Agregado activo estadounidense: ${activo_us['valuacion']:,.2f}")
+    
+    st.text(f"Total activos final: {len(portafolio_combinado['activos'])}")
     
     if not portafolio_combinado['activos']:
         st.error("❌ No se pudieron obtener portafolios de Argentina ni Estados Unidos")
