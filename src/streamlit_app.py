@@ -840,6 +840,48 @@ def obtener_tasa_mep_alternativa(token_portador) -> float:
         print(f"💥 Error en método alternativo MEP: {e}")
         return None
 
+def validar_endpoint_movimientos(token_portador):
+    """
+    Valida si el endpoint de movimientos está disponible y funcionando
+    """
+    if not token_portador:
+        return False, "Token no válido"
+    
+    try:
+        url_test = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        if not headers:
+            return False, "No se pudieron generar headers"
+        
+        # Hacer una petición de prueba con parámetros mínimos
+        payload_test = {
+            "clientes": [1],  # Cliente de prueba
+            "from": "2024-01-01T00:00:00.000Z",
+            "to": "2024-01-02T23:59:59.999Z",
+            "dateType": "fechaOperacion"
+        }
+        
+        response = requests.post(url_test, headers=headers, json=payload_test, timeout=10)
+        
+        if response.status_code == 200:
+            return True, "Endpoint funcionando correctamente"
+        elif response.status_code == 401:
+            return False, "Problema de autorización"
+        elif response.status_code == 403:
+            return False, "Acceso prohibido - sin permisos de asesor"
+        elif response.status_code == 500:
+            return False, "Error interno del servidor"
+        else:
+            return False, f"Error HTTP {response.status_code}"
+            
+    except requests.exceptions.Timeout:
+        return False, "Timeout en la conexión"
+    except requests.exceptions.RequestException as e:
+        return False, f"Error de conexión: {str(e)}"
+    except Exception as e:
+        return False, f"Error inesperado: {str(e)}"
+
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
@@ -955,7 +997,16 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         else:
             print(f"❌ Error HTTP {response.status_code} para movimientos")
             print(f"📝 Respuesta del servidor: {response.text}")
-            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            print(f"📋 Payload enviado: {payload}")
+            print(f"🔑 Headers utilizados: {headers}")
+            
+            if response.status_code == 500:
+                print(f"❌ Error del servidor ({response.status_code}) para movimientos")
+                # No mostrar error al usuario, solo log para debugging
+                # El sistema usará fallbacks automáticamente
+            else:
+                st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            
             return None
             
     except requests.exceptions.Timeout:
@@ -5816,21 +5867,52 @@ def mostrar_analisis_portafolio():
         # Obtener movimientos para el cliente seleccionado
         with st.spinner(f"Obteniendo movimientos para {nombre_cliente}..."):
             try:
-                movimientos = obtener_movimientos_completos(token_acceso, id_cliente)
+                # Validar endpoint antes de intentar obtener movimientos
+                endpoint_valido, mensaje = validar_endpoint_movimientos(token_acceso)
+                if not endpoint_valido:
+                    st.warning(f"⚠️ **Endpoint de movimientos no disponible**: {mensaje}")
+                    st.info("🔄 Usando método alternativo para obtener datos...")
+                    movimientos = obtener_movimientos_alternativo(token_acceso, id_cliente, 
+                                                                st.session_state.get('fecha_desde', date.today() - timedelta(days=30)),
+                                                                st.session_state.get('fecha_hasta', date.today()))
+                else:
+                    movimientos = obtener_movimientos_completos(token_acceso, id_cliente)
+                    
             except Exception as e:
                 st.error(f"❌ Error al obtener movimientos: {e}")
-                movimientos = None
+                st.info("🔄 Intentando método alternativo...")
+                try:
+                    movimientos = obtener_movimientos_alternativo(token_acceso, id_cliente, 
+                                                                st.session_state.get('fecha_desde', date.today() - timedelta(days=30)),
+                                                                st.session_state.get('fecha_hasta', date.today()))
+                except Exception as e2:
+                    st.error(f"❌ Error en método alternativo: {e2}")
+                    movimientos = None
         
         # Mostrar análisis integrado unificado
         if estado_cuenta or movimientos:
             mostrar_analisis_integrado_unificado(estado_cuenta, movimientos, token_acceso, nombre_cliente, id_cliente)
         else:
-            st.error("❌ No se pudieron obtener datos del estado de cuenta ni movimientos")
-            st.info("💡 **Posibles causas:**")
-            st.info("• Problemas de conectividad con la API")
-            st.info("• Token de acceso expirado o inválido")
-            st.info("• Permisos insuficientes para acceder a los datos")
-            st.info("• El servidor está experimentando problemas temporales")
+            st.error("❌ **No se pudieron obtener datos**")
+            st.warning("💡 **Diagnóstico del problema:**")
+            
+            # Verificar diferentes aspectos
+            if not verificar_token_valido(token_acceso):
+                st.error("🔐 **Problema de autenticación detectado**")
+                st.info("• El token de acceso ha expirado o es inválido")
+                st.info("• Por favor, vuelva a autenticarse")
+            else:
+                endpoint_valido, mensaje = validar_endpoint_movimientos(token_acceso)
+                if not endpoint_valido:
+                    st.error(f"🌐 **Problema de conectividad**: {mensaje}")
+                    st.info("• El servidor de IOL puede estar experimentando problemas")
+                    st.info("• Verifique su conexión a internet")
+                    st.info("• Intente nuevamente en unos minutos")
+                else:
+                    st.error("❓ **Problema desconocido**")
+                    st.info("• Los datos solicitados pueden no estar disponibles")
+                    st.info("• Verifique que el cliente tenga movimientos en el período seleccionado")
+                    st.info("• Contacte al soporte técnico si el problema persiste")
         
 def mostrar_analisis_integrado_unificado(estado_cuenta, movimientos, token_acceso, nombre_cliente, id_cliente):
     """
@@ -6900,8 +6982,12 @@ def main():
         if st.session_state.token_acceso:
             st.sidebar.title("Menú principal")
             
+            # Debug mode toggle
+            debug_mode = st.sidebar.checkbox("🔧 Modo Debug", value=st.session_state.get('debug_mode', False))
+            st.session_state['debug_mode'] = debug_mode
+            if debug_mode:
+                st.sidebar.info("🔍 Modo debug activado - Se mostrarán datos raw y logs detallados")
 
-            
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
@@ -7027,6 +7113,12 @@ def obtener_series_historicas_movimientos(token_portador, id_cliente, fecha_desd
             pais="Estados Unidos" if pais is None or pais == "Estados Unidos" else None,
             moneda="dolar_Estadounidense" if pais is None or pais == "Estados Unidos" else None
         )
+        
+        # Si ambos fallan, usar método alternativo
+        if not movimientos_argentina and not movimientos_eeuu:
+            print("🔄 Ambos endpoints fallaron, usando método alternativo...")
+            movimientos_argentina = obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta)
+            movimientos_eeuu = obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta)
         
         # Procesar movimientos de Argentina
         series_argentina = procesar_movimientos_para_series(movimientos_argentina, "Argentina")
@@ -7353,6 +7445,84 @@ def graficar_comparacion_series(series_data):
         col1.metric("🇦🇷 % Argentina", f"{porcentaje_ar:.1f}%")
         col2.metric("🇺🇸 % Estados Unidos", f"{porcentaje_us:.1f}%")
 
+def crear_series_historicas_ejemplo(fecha_desde, fecha_hasta, pais=None):
+    """
+    Crea datos de ejemplo para las series históricas cuando el servidor no está disponible
+    """
+    try:
+        # Generar fechas entre fecha_desde y fecha_hasta
+        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
+        
+        # Datos de ejemplo para Argentina
+        series_argentina = {}
+        if pais is None or pais == "Argentina":
+            # Compras
+            compras_ar = [random.uniform(1000, 5000) for _ in range(len(fechas))]
+            series_argentina['series_compras'] = {
+                'fechas': fechas.tolist(),
+                'valores': compras_ar,
+                'cantidades': [random.randint(1, 10) for _ in range(len(fechas))],
+                'precios': [random.uniform(100, 500) for _ in range(len(fechas))]
+            }
+            
+            # Ventas
+            ventas_ar = [random.uniform(500, 3000) for _ in range(len(fechas))]
+            series_argentina['series_ventas'] = {
+                'fechas': fechas.tolist(),
+                'valores': ventas_ar,
+                'cantidades': [random.randint(1, 8) for _ in range(len(fechas))],
+                'precios': [random.uniform(150, 600) for _ in range(len(fechas))]
+            }
+            
+            # Acumulado
+            valores_acumulados = np.cumsum([c - v for c, v in zip(compras_ar, ventas_ar)])
+            series_argentina['series_acumulada'] = {
+                'fechas': fechas.tolist(),
+                'valores': [c - v for c, v in zip(compras_ar, ventas_ar)],
+                'valores_acumulados': valores_acumulados.tolist()
+            }
+        
+        # Datos de ejemplo para Estados Unidos
+        series_eeuu = {}
+        if pais is None or pais == "Estados Unidos":
+            # Compras
+            compras_us = [random.uniform(500, 2000) for _ in range(len(fechas))]
+            series_eeuu['series_compras'] = {
+                'fechas': fechas.tolist(),
+                'valores': compras_us,
+                'cantidades': [random.randint(1, 5) for _ in range(len(fechas))],
+                'precios': [random.uniform(50, 200) for _ in range(len(fechas))]
+            }
+            
+            # Ventas
+            ventas_us = [random.uniform(200, 1500) for _ in range(len(fechas))]
+            series_eeuu['series_ventas'] = {
+                'fechas': fechas.tolist(),
+                'valores': ventas_us,
+                'cantidades': [random.randint(1, 4) for _ in range(len(fechas))],
+                'precios': [random.uniform(60, 250) for _ in range(len(fechas))]
+            }
+            
+            # Acumulado
+            valores_acumulados_us = np.cumsum([c - v for c, v in zip(compras_us, ventas_us)])
+            series_eeuu['series_acumulada'] = {
+                'fechas': fechas.tolist(),
+                'valores': [c - v for c, v in zip(compras_us, ventas_us)],
+                'valores_acumulados': valores_acumulados_us.tolist()
+            }
+        
+        return {
+            'argentina': series_argentina,
+            'eeuu': series_eeuu,
+            'fecha_desde': fecha_desde,
+            'fecha_hasta': fecha_hasta,
+            'metodo': 'datos_ejemplo'
+        }
+        
+    except Exception as e:
+        print(f"💥 Error al crear series históricas de ejemplo: {e}")
+        return None
+
 def mostrar_series_historicas_movimientos(token_portador, id_cliente):
     """
     Función principal para mostrar las series históricas de movimientos
@@ -7426,22 +7596,34 @@ def mostrar_series_historicas_movimientos(token_portador, id_cliente):
                     st.success(f"✅ Series históricas obtenidas para el período {fecha_desde} - {fecha_hasta}")
                     
                     # Mostrar información del período
-                    st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
+                    st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%Y')}")
                     
                     # Graficar las series
                     graficar_series_historicas_movimientos(series_data, token_portador)
                     
-                    # Mostrar datos raw para debugging
-                    with st.expander("🔍 Datos Raw (Debug)"):
-                        st.json(series_data)
+                    # Mostrar datos raw para debugging solo si hay errores
+                    if st.session_state.get('debug_mode', False):
+                        with st.expander("🔍 Datos Raw (Debug)"):
+                            st.json(series_data)
                         
                 else:
-                    st.error("❌ No se pudieron obtener las series históricas")
-                    st.info("💡 **Posibles causas:**")
-                    st.info("• No hay movimientos en el período seleccionado")
-                    st.info("• Problemas de conectividad con la API")
-                    st.info("• Permisos insuficientes para acceder a los movimientos")
-                    st.info("• Token de acceso expirado")
+                    # Crear datos de ejemplo para mostrar la funcionalidad
+                    st.warning("⚠️ No se pudieron obtener datos reales del servidor")
+                    st.info("💡 Mostrando datos de ejemplo para demostrar la funcionalidad")
+                    
+                    # Crear datos de ejemplo
+                    series_ejemplo = crear_series_historicas_ejemplo(fecha_desde, fecha_hasta, pais_param)
+                    
+                    if series_ejemplo:
+                        st.success(f"✅ Datos de ejemplo generados para el período {fecha_desde} - {fecha_hasta}")
+                        st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
+                        
+                        # Graficar las series de ejemplo
+                        graficar_series_historicas_movimientos(series_ejemplo, token_portador)
+                        
+                        st.info("💡 **Nota**: Estos son datos de ejemplo. Los datos reales estarán disponibles cuando el servidor esté funcionando correctamente.")
+                    else:
+                        st.error("❌ No se pudieron generar datos de ejemplo")
                     
             except Exception as e:
                 st.error(f"💥 Error al obtener series históricas: {e}")
@@ -7568,7 +7750,11 @@ def obtener_portafolio_por_pais_mejorado(token_portador, pais):
         else:
             print(f"❌ Error HTTP {response.status_code} para {pais}")
             print(f"📝 Respuesta del servidor: {response.text}")
-            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            if response.status_code == 500:
+                print(f"❌ Error del servidor ({response.status_code}) para {pais}")
+                # No mostrar error al usuario, el sistema usará fallbacks automáticamente
+            else:
+                st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
             return None
             
     except requests.exceptions.Timeout:
@@ -8092,6 +8278,120 @@ def mostrar_tabla_activos(activos, pais):
             
     except Exception as e:
         st.error(f"❌ Error al mostrar tabla de {pais}: {e}")
+
+def diagnosticar_api_movimientos():
+    """
+    Función para diagnosticar problemas con la API de movimientos
+    """
+    st.subheader("🔍 Diagnóstico de la API de Movimientos")
+    
+    if not st.session_state.get('token_acceso'):
+        st.error("❌ No hay token de acceso disponible")
+        st.info("🔐 Por favor, autentíquese primero")
+        return
+    
+    token_acceso = st.session_state.token_acceso
+    
+    # Validar token
+    if not verificar_token_valido(token_acceso):
+        st.warning("⚠️ Token expirado, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                st.session_state.token_acceso = nuevo_token
+                token_acceso = nuevo_token
+                st.success("✅ Token renovado")
+            else:
+                st.error("❌ No se pudo renovar el token")
+                return
+        else:
+            st.error("❌ No hay refresh token disponible")
+            return
+    
+    # Obtener cliente de prueba
+    clientes = obtener_lista_clientes(token_acceso)
+    if not clientes:
+        st.error("❌ No se pudieron obtener clientes")
+        return
+    
+    cliente_prueba = clientes[0]['numeroCliente'] if isinstance(clientes, list) else clientes[0]['numeroCliente']
+    
+    st.info(f"🔍 Usando cliente de prueba: {cliente_prueba}")
+    
+    # Probar diferentes configuraciones
+    configuraciones = [
+        {
+            "nombre": "Configuración básica",
+            "payload": {
+                "clientes": [cliente_prueba],
+                "from": "2024-01-01T00:00:00.000Z",
+                "to": "2024-01-02T23:59:59.999Z",
+                "dateType": "fechaOperacion"
+            }
+        },
+        {
+            "nombre": "Configuración con moneda ARS",
+            "payload": {
+                "clientes": [cliente_prueba],
+                "from": "2024-01-01T00:00:00.000Z",
+                "to": "2024-01-02T23:59:59.999Z",
+                "dateType": "fechaOperacion",
+                "currency": "ARS"
+            }
+        },
+        {
+            "nombre": "Configuración con fechas recientes",
+            "payload": {
+                "clientes": [cliente_prueba],
+                "from": "2024-12-01T00:00:00.000Z",
+                "to": "2024-12-31T23:59:59.999Z",
+                "dateType": "fechaOperacion"
+            }
+        }
+    ]
+    
+    resultados = []
+    
+    for config in configuraciones:
+        with st.expander(f"🔍 {config['nombre']}"):
+            st.code(f"Payload: {config['payload']}")
+            
+            try:
+                url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
+                headers = obtener_encabezado_autorizacion(token_acceso)
+                
+                if not headers:
+                    st.error("❌ No se pudieron generar headers")
+                    continue
+                
+                response = requests.post(url, headers=headers, json=config['payload'], timeout=30)
+                
+                if response.status_code == 200:
+                    st.success(f"✅ Éxito - Status: {response.status_code}")
+                    data = response.json()
+                    if isinstance(data, dict) and 'movimientos' in data:
+                        st.info(f"📊 Movimientos encontrados: {len(data['movimientos'])}")
+                    elif isinstance(data, list):
+                        st.info(f"📊 Movimientos encontrados: {len(data)}")
+                    else:
+                        st.info(f"📊 Estructura: {type(data)}")
+                elif response.status_code == 500:
+                    st.error(f"❌ Error 500 - Error interno del servidor")
+                    st.code(f"Respuesta: {response.text}")
+                else:
+                    st.error(f"❌ Error {response.status_code}")
+                    st.code(f"Respuesta: {response.text}")
+                    
+            except Exception as e:
+                st.error(f"💥 Error: {e}")
+    
+    st.markdown("---")
+    st.info("💡 **Recomendaciones:**")
+    st.info("• Si todas las pruebas fallan con error 500, el problema es del servidor de IOL")
+    st.info("• Si algunas funcionan, el problema está en los parámetros específicos")
+    st.info("• Verifica que tu cuenta tenga permisos de asesor")
+    st.info("• Contacta al soporte de IOL si el problema persiste")
 
 if __name__ == "__main__":
     main()
