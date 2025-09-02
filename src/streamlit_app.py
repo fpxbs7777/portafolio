@@ -4193,7 +4193,60 @@ def mostrar_resumen_estado_cuenta(estado_cuenta):
     """)
 
 def mostrar_resumen_portafolio(portafolio, token_portador):
-    st.markdown("### Resumen del Portafolio")
+    """
+    Muestra un resumen profesional y organizado del portafolio
+    incluyendo tanto activos argentinos como estadounidenses
+    """
+    
+    # Configurar el estilo de la página
+    st.markdown("""
+    <style>
+    .portfolio-header {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid #667eea;
+    }
+    .risk-card {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+    }
+    .performance-card {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+    }
+    .probability-card {
+        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header principal
+    st.markdown("""
+    <div class="portfolio-header">
+        <h1>📊 Resumen del Portafolio</h1>
+        <p>Análisis integral de activos argentinos y estadounidenses</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Verificar si el portafolio tiene un mensaje de mantenimiento
     if isinstance(portafolio, dict) and 'message' in portafolio:
@@ -4393,113 +4446,359 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Información General
-        cols = st.columns(4)
-        cols[0].metric("Total de activos", len(datos_activos))
-        cols[1].metric("Símbolos únicos", df_activos['Símbolo'].nunique())
-        cols[2].metric("Tipos de activos", df_activos['Tipo'].nunique())
-        # Recalcular valor total basado en Estado de cuenta + MEP si disponible
+        # Separar activos por mercado (Argentina vs Estados Unidos)
+        activos_argentinos = []
+        activos_eeuu = []
+        
+        for activo in datos_activos:
+            simbolo = activo['Símbolo']
+            # Identificar activos estadounidenses (generalmente terminan en .O o son símbolos de 1-5 letras)
+            if any(simbolo.endswith(suffix) for suffix in ['.O', '.N', '.A', '.B', '.C', '.D']) or \
+               (len(simbolo) <= 5 and simbolo.isalpha() and not simbolo.startswith('AL') and not simbolo.startswith('GD')):
+                activos_eeuu.append(activo)
+            else:
+                activos_argentinos.append(activo)
+        
+        # Calcular totales por mercado
+        valor_argentino = sum(activo['Valuación'] for activo in activos_argentinos)
+        valor_eeuu = sum(activo['Valuación'] for activo in activos_eeuu)
+        
+        # Obtener totales del estado de cuenta
         cliente_actual = st.session_state.get('cliente_seleccionado')
         id_cliente_actual = cliente_actual.get('numeroCliente', cliente_actual.get('id')) if cliente_actual else None
         totales_cta = obtener_totales_estado_cuenta(token_portador, id_cliente_actual)
-        if totales_cta and totales_cta.get('total_ars_mep'):
-            cols[3].metric("Valor total (ARS + USD a MEP)", f"${totales_cta['total_ars_mep']:,.2f}")
-        else:
-            cols[3].metric("Valor total (estimado por valuación)", f"${valor_total:,.2f}")
+        
+        # SECCIÓN 1: RESUMEN GENERAL
+        st.markdown("### 📈 Resumen General")
+        
+        # Métricas principales en cards estilizadas
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>🏦 Total de Activos</h3>
+                <h2>{len(datos_activos)}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>📊 Símbolos Únicos</h3>
+                <h2>{df_activos['Símbolo'].nunique()}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>📋 Tipos de Activos</h3>
+                <h2>{df_activos['Tipo'].nunique()}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            valor_total_display = totales_cta.get('total_ars_mep', valor_total) if totales_cta else valor_total
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>💰 Valor Total</h3>
+                <h2>${valor_total_display:,.2f}</h2>
+                <small>ARS + USD a MEP</small>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # SECCIÓN 2: DISTRIBUCIÓN POR MERCADO
+        st.markdown("### 🌍 Distribución por Mercado")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>🇦🇷 Mercado Argentino</h3>
+                <h2>{len(activos_argentinos)} activos</h2>
+                <h3>${valor_argentino:,.2f}</h3>
+                <small>{(valor_argentino/valor_total*100):.1f}% del total</small>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>🇺🇸 Mercado Estadounidense</h3>
+                <h2>{len(activos_eeuu)} activos</h2>
+                <h3>${valor_eeuu:,.2f}</h3>
+                <small>{(valor_eeuu/valor_total*100):.1f}% del total</small>
+            </div>
+            """, unsafe_allow_html=True)
         
         if metricas:
-            # Métricas de riesgo
-            st.subheader("Análisis de riesgo")
-            cols = st.columns(3)
+            # SECCIÓN 3: ANÁLISIS DE RIESGO
+            st.markdown("### ⚠️ Análisis de Riesgo")
             
-            # Mostrar concentración como porcentaje
-            concentracion_pct = metricas['concentracion'] * 100
-            cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.1f}%",
-                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+            col1, col2, col3 = st.columns(3)
             
-            # Mostrar volatilidad como porcentaje anual
-            volatilidad_pct = metricas['std_dev_activo'] * 100
-            cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.1f}%",
-                         help="Riesgo medido como desviación estándar de retornos anuales")
+            with col1:
+                concentracion_pct = metricas['concentracion'] * 100
+                st.markdown(f"""
+                <div class="risk-card">
+                    <h3>🎯 Concentración</h3>
+                    <h2>{concentracion_pct:.1f}%</h2>
+                    <small>Índice de Herfindahl normalizado</small>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Nivel de concentración
-            if metricas['concentracion'] < 0.3:
-                concentracion_status = "Baja"
-            elif metricas['concentracion'] < 0.6:
-                concentracion_status = "Media"
-            else:
-                concentracion_status = "Alta"
-            cols[2].metric("Nivel de concentración", concentracion_status)
+            with col2:
+                volatilidad_pct = metricas['std_dev_activo'] * 100
+                st.markdown(f"""
+                <div class="risk-card">
+                    <h3>📈 Volatilidad Anual</h3>
+                    <h2>{volatilidad_pct:.1f}%</h2>
+                    <small>Desviación estándar de retornos</small>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Proyecciones
-            st.subheader("Proyecciones de rendimiento")
-            cols = st.columns(3)
+            with col3:
+                if metricas['concentracion'] < 0.3:
+                    concentracion_status = "🟢 Baja"
+                elif metricas['concentracion'] < 0.6:
+                    concentracion_status = "🟡 Media"
+                else:
+                    concentracion_status = "🔴 Alta"
+                
+                st.markdown(f"""
+                <div class="risk-card">
+                    <h3>📊 Nivel de Concentración</h3>
+                    <h2>{concentracion_status}</h2>
+                    <small>Evaluación de diversificación</small>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Mostrar retornos como porcentaje del portafolio
-            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-            cols[0].metric("Retorno Esperado Anual", 
-                         f"{retorno_anual_pct:+.1f}%",
-                         help="Retorno anual esperado basado en datos históricos")
+            # SECCIÓN 4: PROYECCIONES DE RENDIMIENTO
+            st.markdown("### 📊 Proyecciones de Rendimiento")
             
-            # Mostrar escenarios como porcentaje del portafolio
-            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
-            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+            col1, col2, col3 = st.columns(3)
             
-            cols[1].metric("Escenario Optimista (95%)", 
-                         f"{optimista_pct:+.1f}%",
-                         help="Mejor escenario con 95% de confianza")
-            cols[2].metric("Escenario Pesimista (5%)", 
-                         f"{pesimista_pct:+.1f}%",
-                         help="Peor escenario con 5% de confianza")
+            with col1:
+                retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+                st.markdown(f"""
+                <div class="performance-card">
+                    <h3>🎯 Retorno Esperado Anual</h3>
+                    <h2>{retorno_anual_pct:+.1f}%</h2>
+                    <small>Basado en datos históricos</small>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Probabilidades
-            st.subheader("Probabilidades")
-            cols = st.columns(4)
+            with col2:
+                optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+                st.markdown(f"""
+                <div class="performance-card">
+                    <h3>🚀 Escenario Optimista (95%)</h3>
+                    <h2>{optimista_pct:+.1f}%</h2>
+                    <small>Mejor escenario esperado</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+                st.markdown(f"""
+                <div class="performance-card">
+                    <h3>📉 Escenario Pesimista (5%)</h3>
+                    <h2>{pesimista_pct:+.1f}%</h2>
+                    <small>Peor escenario esperado</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # SECCIÓN 5: PROBABILIDADES
+            st.markdown("### 🎲 Probabilidades")
+            
             probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.markdown(f"""
+                <div class="probability-card">
+                    <h3>📈 Ganancia</h3>
+                    <h2>{probs['ganancia']*100:.1f}%</h2>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div class="probability-card">
+                    <h3>📉 Pérdida</h3>
+                    <h2>{probs['perdida']*100:.1f}%</h2>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div class="probability-card">
+                    <h3>🚀 Ganancia >10%</h3>
+                    <h2>{probs['ganancia_mayor_10']*100:.1f}%</h2>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown(f"""
+                <div class="probability-card">
+                    <h3>⚠️ Pérdida >10%</h3>
+                    <h2>{probs['perdida_mayor_10']*100:.1f}%</h2>
+                </div>
+                """, unsafe_allow_html=True)
             
 
         
-        # Tabla de activos con columnas clave
+        # SECCIÓN 6: TABLA DE ACTIVOS DETALLADA
+        st.markdown("### 📋 Detalle de Activos")
+        
+        # Crear tabs para separar activos argentinos y estadounidenses
+        tab1, tab2, tab3 = st.tabs(["🇦🇷 Activos Argentinos", "🇺🇸 Activos Estadounidenses", "📊 Vista General"])
+        
         try:
             df_tabla = pd.DataFrame(datos_activos)
             if not df_tabla.empty:
                 # Columnas visibles y orden
                 columnas = [
-                    'Símbolo', 'Descripción', 'Cantidad', 'ActivosComp',
+                    'Símbolo', 'Descripción', 'Tipo', 'Cantidad', 'ActivosComp',
                     'VariacionDiariaPct', 'UltimoPrecio', 'PrecioPromedioCompra',
                     'Valuación'
                 ]
                 columnas_disponibles = [c for c in columnas if c in df_tabla.columns]
                 df_view = df_tabla[columnas_disponibles].copy()
+                
                 # Formatos
                 if 'VariacionDiariaPct' in df_view.columns:
                     df_view['VariacionDiariaPct'] = df_view['VariacionDiariaPct'].apply(
-                        lambda x: f"{x:+.3f} %" if pd.notna(x) else "")
+                        lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
                 if 'UltimoPrecio' in df_view.columns:
                     df_view['UltimoPrecio'] = df_view['UltimoPrecio'].apply(
-                        lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+                        lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
                 if 'PrecioPromedioCompra' in df_view.columns:
                     df_view['PrecioPromedioCompra'] = df_view['PrecioPromedioCompra'].apply(
-                        lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+                        lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
                 if 'Valuación' in df_view.columns:
                     df_view['Valuación'] = df_view['Valuación'].apply(
-                        lambda x: f"$ {x:,.0f}" if isinstance(x, (int, float)) else str(x))
-                # Renombrar encabezados al estilo solicitado
+                        lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else str(x))
+                
+                # Renombrar encabezados
                 df_view = df_view.rename(columns={
-                    'ActivosComp': 'Activos comp.',
-                    'VariacionDiariaPct': 'Variación diaria',
-                    'UltimoPrecio': 'Último precio',
-                    'PrecioPromedioCompra': 'Precio promedio de compra',
-                    'Valuación': 'Valorizado',
-                    'Ajuste100': 'Ajuste ÷100'
+                    'Símbolo': 'Símbolo',
+                    'Descripción': 'Descripción',
+                    'Tipo': 'Tipo',
+                    'Cantidad': 'Cantidad',
+                    'ActivosComp': 'Activos Comp.',
+                    'VariacionDiariaPct': 'Var. Diaria',
+                    'UltimoPrecio': 'Último Precio',
+                    'PrecioPromedioCompra': 'Precio Prom.',
+                    'Valuación': 'Valorización'
                 })
-                st.dataframe(df_view, use_container_width=True)
+                
+                # Tab 1: Activos Argentinos
+                with tab1:
+                    if activos_argentinos:
+                        df_argentinos = pd.DataFrame(activos_argentinos)
+                        df_argentinos_view = df_argentinos[columnas_disponibles].copy()
+                        
+                        # Aplicar formatos
+                        if 'VariacionDiariaPct' in df_argentinos_view.columns:
+                            df_argentinos_view['VariacionDiariaPct'] = df_argentinos_view['VariacionDiariaPct'].apply(
+                                lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
+                        if 'UltimoPrecio' in df_argentinos_view.columns:
+                            df_argentinos_view['UltimoPrecio'] = df_argentinos_view['UltimoPrecio'].apply(
+                                lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+                        if 'PrecioPromedioCompra' in df_argentinos_view.columns:
+                            df_argentinos_view['PrecioPromedioCompra'] = df_argentinos_view['PrecioPromedioCompra'].apply(
+                                lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+                        if 'Valuación' in df_argentinos_view.columns:
+                            df_argentinos_view['Valuación'] = df_argentinos_view['Valuación'].apply(
+                                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else str(x))
+                        
+                        df_argentinos_view = df_argentinos_view.rename(columns={
+                            'Símbolo': 'Símbolo',
+                            'Descripción': 'Descripción',
+                            'Tipo': 'Tipo',
+                            'Cantidad': 'Cantidad',
+                            'ActivosComp': 'Activos Comp.',
+                            'VariacionDiariaPct': 'Var. Diaria',
+                            'UltimoPrecio': 'Último Precio',
+                            'PrecioPromedioCompra': 'Precio Prom.',
+                            'Valuación': 'Valorización'
+                        })
+                        
+                        st.dataframe(df_argentinos_view, use_container_width=True, height=400)
+                        
+                        # Resumen de activos argentinos
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Activos", len(activos_argentinos))
+                        with col2:
+                            st.metric("Valor Total", f"${valor_argentino:,.2f}")
+                        with col3:
+                            st.metric("% del Portafolio", f"{(valor_argentino/valor_total*100):.1f}%")
+                    else:
+                        st.info("No hay activos argentinos en el portafolio")
+                
+                # Tab 2: Activos Estadounidenses
+                with tab2:
+                    if activos_eeuu:
+                        df_eeuu = pd.DataFrame(activos_eeuu)
+                        df_eeuu_view = df_eeuu[columnas_disponibles].copy()
+                        
+                        # Aplicar formatos
+                        if 'VariacionDiariaPct' in df_eeuu_view.columns:
+                            df_eeuu_view['VariacionDiariaPct'] = df_eeuu_view['VariacionDiariaPct'].apply(
+                                lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
+                        if 'UltimoPrecio' in df_eeuu_view.columns:
+                            df_eeuu_view['UltimoPrecio'] = df_eeuu_view['UltimoPrecio'].apply(
+                                lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+                        if 'PrecioPromedioCompra' in df_eeuu_view.columns:
+                            df_eeuu_view['PrecioPromedioCompra'] = df_eeuu_view['PrecioPromedioCompra'].apply(
+                                lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+                        if 'Valuación' in df_eeuu_view.columns:
+                            df_eeuu_view['Valuación'] = df_eeuu_view['Valuación'].apply(
+                                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else str(x))
+                        
+                        df_eeuu_view = df_eeuu_view.rename(columns={
+                            'Símbolo': 'Símbolo',
+                            'Descripción': 'Descripción',
+                            'Tipo': 'Tipo',
+                            'Cantidad': 'Cantidad',
+                            'ActivosComp': 'Activos Comp.',
+                            'VariacionDiariaPct': 'Var. Diaria',
+                            'UltimoPrecio': 'Último Precio',
+                            'PrecioPromedioCompra': 'Precio Prom.',
+                            'Valuación': 'Valorización'
+                        })
+                        
+                        st.dataframe(df_eeuu_view, use_container_width=True, height=400)
+                        
+                        # Resumen de activos estadounidenses
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Activos", len(activos_eeuu))
+                        with col2:
+                            st.metric("Valor Total", f"${valor_eeuu:,.2f}")
+                        with col3:
+                            st.metric("% del Portafolio", f"{(valor_eeuu/valor_total*100):.1f}%")
+                    else:
+                        st.info("No hay activos estadounidenses en el portafolio")
+                
+                # Tab 3: Vista General
+                with tab3:
+                    st.dataframe(df_view, use_container_width=True, height=400)
+                    
+                    # Resumen general
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Activos", len(datos_activos))
+                    with col2:
+                        st.metric("Valor Total", f"${valor_total:,.2f}")
+                    with col3:
+                        st.metric("Activos ARG", len(activos_argentinos))
+                    with col4:
+                        st.metric("Activos USA", len(activos_eeuu))
         except Exception:
             pass
 
