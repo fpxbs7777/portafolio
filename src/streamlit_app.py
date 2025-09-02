@@ -549,7 +549,7 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
                         r = requests.get(url, headers=headers, timeout=20)
                         if r.status_code == 200:
                             print("✅ Portafolio obtenido en reintento")
-            return r.json()
+                            return r.json()
                         elif r.status_code == 401:
                             st.error("❌ **Persiste el problema de autorización**")
                             st.info("🔐 **Solución recomendada:**")
