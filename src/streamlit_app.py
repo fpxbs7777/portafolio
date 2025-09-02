@@ -1763,6 +1763,1181 @@ def obtener_tasa_mep_alternativa(token_portador) -> float:
         print(f"💥 Error en método alternativo MEP: {e}")
         return None
 
+def obtener_test_inversor(token_portador):
+    """
+    Obtiene las preguntas y opciones del test de perfil de inversor desde la API de Asesores.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        
+    Returns:
+        dict: Datos del test de inversor con todas las preguntas y opciones
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    try:
+        print("🔍 Obteniendo test de perfil de inversor...")
+        response = requests.get(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta test inversor: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Test de inversor obtenido exitosamente")
+            return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para test de inversor")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder al test de inversor")
+            st.info("💡 **Posibles causas:**")
+            st.info("• Tu cuenta no tiene permisos de asesor")
+            st.info("• El token de acceso ha expirado")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.get(url, headers=headers, timeout=30)
+                        if response.status_code == 200:
+                            print("✅ Test obtenido en reintento")
+                            return response.json()
+            
+            return None
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para test de inversor")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para acceder al test de inversor")
+            return None
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para test de inversor")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', f'Error HTTP {response.status_code}')
+            except:
+                error_msg = f'Error HTTP {response.status_code}'
+            
+            st.error(f"Error {response.status_code} al obtener test de inversor: {error_msg}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout al obtener test de inversor")
+        st.error("⏰ **Timeout**: La solicitud tardó demasiado en completarse")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print("🌐 Error de conexión al obtener test de inversor")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API de IOL")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener test de inversor: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def enviar_test_inversor(token_portador, respuesta_inversor, id_cliente_asesorado=None):
+    """
+    Envía las respuestas del test de perfil de inversor y obtiene el perfil sugerido.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        respuesta_inversor (dict): Respuestas del test de inversor
+        id_cliente_asesorado (int, optional): ID del cliente asesorado específico
+        
+    Returns:
+        dict: Perfil sugerido basado en las respuestas del test
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return {
+            "ok": False,
+            "messages": [{"title": "Error", "description": "Token de acceso no válido"}]
+        }
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return {
+                    "ok": False,
+                    "messages": [{"title": "Error", "description": "No se pudo renovar el token de acceso"}]
+                }
+        else:
+            print("❌ No hay refresh_token disponible")
+            return {
+                "ok": False,
+                "messages": [{"title": "Error", "description": "No hay refresh token disponible"}]
+            }
+    
+    # Construir URL según si se especifica un cliente específico
+    if id_cliente_asesorado:
+        url = f"https://api.invertironline.com/api/v2/asesores/test-inversor/{id_cliente_asesorado}"
+    else:
+        url = "https://api.invertironline.com/api/v2/asesores/test-inversor"
+    
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return {
+            "ok": False,
+            "messages": [{"title": "Error", "description": "No se pudieron generar headers de autorización"}]
+        }
+    
+    try:
+        print(f"🔍 Enviando test de inversor{' para cliente ' + str(id_cliente_asesorado) if id_cliente_asesorado else ''}...")
+        print(f"📋 Respuestas: {respuesta_inversor}")
+        response = requests.post(url, headers=headers, json=respuesta_inversor, timeout=30)
+        print(f"📡 Respuesta test: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Test enviado exitosamente")
+            return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para enviar test")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para enviar el test de inversor")
+            st.info("💡 **Posibles causas:**")
+            st.info("• Tu cuenta no tiene permisos de asesor")
+            st.info("• El token de acceso ha expirado")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.post(url, headers=headers, json=respuesta_inversor, timeout=30)
+                        if response.status_code == 200:
+                            print("✅ Test enviado en reintento")
+                            return response.json()
+            
+            return {
+                "ok": False,
+                "messages": [{"title": "Error de Autorización", "description": "No tienes permisos para enviar el test"}]
+            }
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para enviar test")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para enviar el test de inversor")
+            return {
+                "ok": False,
+                "messages": [{"title": "Acceso Prohibido", "description": "No tienes permisos para enviar el test"}]
+            }
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para enviar test")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', f'Error HTTP {response.status_code}')
+            except:
+                error_msg = f'Error HTTP {response.status_code}'
+            
+            st.error(f"Error {response.status_code} al enviar test: {error_msg}")
+            return {
+                "ok": False,
+                "messages": [{"title": f"Error {response.status_code}", "description": error_msg}]
+            }
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout al enviar test")
+        st.error("⏰ **Timeout**: El envío del test tardó demasiado en completarse")
+        return {
+            "ok": False,
+            "messages": [{"title": "Timeout", "description": "El envío del test tardó demasiado en completarse"}]
+        }
+        
+    except requests.exceptions.ConnectionError:
+        print("🌐 Error de conexión al enviar test")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API de IOL")
+        return {
+            "ok": False,
+            "messages": [{"title": "Error de Conexión", "description": "No se pudo conectar con la API de IOL"}]
+        }
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al enviar test: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return {
+            "ok": False,
+            "messages": [{"title": "Error Inesperado", "description": str(e)}]
+        }
+
+def mostrar_test_inversor_interactivo(token_portador):
+    """
+    Muestra una interfaz interactiva para completar el test de perfil de inversor.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+    """
+    st.subheader("📊 Test de Perfil de Inversor")
+    
+    # Obtener las preguntas del test
+    test_data = obtener_test_inversor(token_portador)
+    
+    if not test_data:
+        st.error("❌ No se pudieron obtener las preguntas del test de inversor")
+        return
+    
+    # Inicializar respuestas en session state si no existen
+    if 'respuestas_test_inversor' not in st.session_state:
+        st.session_state.respuestas_test_inversor = {}
+    
+    # Formulario para las respuestas
+    with st.form("test_inversor_form"):
+        st.write("Complete las siguientes preguntas para determinar su perfil de inversor:")
+        
+        # Instrumentos invertidos anteriormente
+        if 'instrumentosInvertidosAnteriormente' in test_data:
+            seccion = test_data['instrumentosInvertidosAnteriormente']
+            st.write(f"**{seccion['pregunta']}**")
+            instrumentos = seccion['instrumentos']
+            opciones_instrumentos = [f"{inst['id']}: {inst['nombre']}" for inst in instrumentos]
+            instrumentos_seleccionados = st.multiselect(
+                "Seleccione los instrumentos en los que ha invertido anteriormente:",
+                opciones_instrumentos,
+                key="instrumentos_invertidos"
+            )
+            st.session_state.respuestas_test_inversor['instrumentosInvertidosAnteriormente'] = [
+                int(opc.split(':')[0]) for opc in instrumentos_seleccionados
+            ]
+        
+        # Niveles de conocimiento de instrumentos
+        if 'nivelesConocimientoInstrumentos' in test_data:
+            seccion = test_data['nivelesConocimientoInstrumentos']
+            st.write(f"**{seccion['pregunta']}**")
+            niveles = seccion['niveles']
+            for nivel in niveles:
+                st.write(f"**{nivel['nombre']}:**")
+                opciones = [f"{opc['id']}: {opc['nombre']}" for opc in nivel['opciones']]
+                opcion_elegida = st.selectbox(
+                    f"Seleccione su nivel de conocimiento en {nivel['nombre']}:",
+                    opciones,
+                    key=f"nivel_{nivel['id']}"
+                )
+                nivel_id = int(opcion_elegida.split(':')[0])
+                if 'nivelesConocimientoInstrumentos' not in st.session_state.respuestas_test_inversor:
+                    st.session_state.respuestas_test_inversor['nivelesConocimientoInstrumentos'] = []
+                st.session_state.respuestas_test_inversor['nivelesConocimientoInstrumentos'].append(nivel_id)
+        
+        # Plazos de inversión
+        if 'plazosInversion' in test_data:
+            seccion = test_data['plazosInversion']
+            st.write(f"**{seccion['pregunta']}**")
+            plazos = seccion['plazos']
+            opciones_plazos = [f"{plazo['id']}: {plazo['nombre']}" for plazo in plazos]
+            plazo_elegido = st.selectbox(
+                "Seleccione su plazo de inversión preferido:",
+                opciones_plazos,
+                key="plazo_inversion"
+            )
+            st.session_state.respuestas_test_inversor['idPlazoElegido'] = int(plazo_elegido.split(':')[0])
+        
+        # Edad
+        if 'edadesPosibles' in test_data:
+            seccion = test_data['edadesPosibles']
+            st.write(f"**{seccion['pregunta']}**")
+            edades = seccion['edades']
+            opciones_edades = [f"{edad['id']}: {edad['nombre']}" for edad in edades]
+            edad_elegida = st.selectbox(
+                "Seleccione su rango de edad:",
+                opciones_edades,
+                key="edad"
+            )
+            st.session_state.respuestas_test_inversor['idEdadElegida'] = int(edad_elegida.split(':')[0])
+        
+        # Objetivos de inversión
+        if 'objetivosInversion' in test_data:
+            seccion = test_data['objetivosInversion']
+            st.write(f"**{seccion['pregunta']}**")
+            objetivos = seccion['objetivos']
+            opciones_objetivos = [f"{obj['id']}: {obj['nombre']}" for obj in objetivos]
+            objetivo_elegido = st.selectbox(
+                "Seleccione su objetivo principal de inversión:",
+                opciones_objetivos,
+                key="objetivo_inversion"
+            )
+            st.session_state.respuestas_test_inversor['idObjetivoInversionElegida'] = int(objetivo_elegido.split(':')[0])
+        
+        # Pólizas de seguro
+        if 'polizasSeguro' in test_data:
+            seccion = test_data['polizasSeguro']
+            st.write(f"**{seccion['pregunta']}**")
+            polizas = seccion['polizas']
+            opciones_polizas = [f"{poliza['id']}: {poliza['nombre']}" for poliza in polizas]
+            poliza_elegida = st.selectbox(
+                "Seleccione su situación respecto a pólizas de seguro:",
+                opciones_polizas,
+                key="poliza_seguro"
+            )
+            st.session_state.respuestas_test_inversor['idPolizaElegida'] = int(poliza_elegida.split(':')[0])
+        
+        # Capacidad de ahorro
+        if 'capacidadesAhorro' in test_data:
+            seccion = test_data['capacidadesAhorro']
+            st.write(f"**{seccion['pregunta']}**")
+            capacidades = seccion['capacidadesAhorro']
+            opciones_capacidades = [f"{cap['id']}: {cap['nombre']}" for cap in capacidades]
+            capacidad_elegida = st.selectbox(
+                "Seleccione su capacidad de ahorro mensual:",
+                opciones_capacidades,
+                key="capacidad_ahorro"
+            )
+            st.session_state.respuestas_test_inversor['idCapacidadAhorroElegida'] = int(capacidad_elegida.split(':')[0])
+        
+        # Porcentaje del patrimonio dedicado
+        if 'porcentajesPatrimonioDedicado' in test_data:
+            seccion = test_data['porcentajesPatrimonioDedicado']
+            st.write(f"**{seccion['pregunta']}**")
+            porcentajes = seccion['porcentajesPatrimonioDedicado']
+            opciones_porcentajes = [f"{porc['id']}: {porc['nombre']}" for porc in porcentajes]
+            porcentaje_elegido = st.selectbox(
+                "Seleccione qué porcentaje de su patrimonio dedicaría a inversiones:",
+                opciones_porcentajes,
+                key="porcentaje_patrimonio"
+            )
+            st.session_state.respuestas_test_inversor['idPorcentajePatrimonioDedicado'] = int(porcentaje_elegido.split(':')[0])
+        
+        # Opción para enviar email al cliente
+        enviar_email = st.checkbox("Enviar resultado por email al cliente", value=True, key="enviar_email_cliente")
+        st.session_state.respuestas_test_inversor['enviarEmailCliente'] = enviar_email
+        
+        # Botón para enviar el test
+        submitted = st.form_submit_button("📊 Obtener Perfil Sugerido")
+        
+        if submitted:
+            # Enviar respuestas y obtener perfil sugerido
+            resultado = enviar_test_inversor(token_portador, st.session_state.respuestas_test_inversor)
+            
+            if resultado and resultado.get('ok', False):
+                st.success("✅ Test completado exitosamente")
+                
+                # Mostrar perfil sugerido
+                if 'perfilSugerido' in resultado:
+                    perfil = resultado['perfilSugerido']
+                    st.subheader(f"🎯 Perfil Sugerido: {perfil['nombre']}")
+                    st.write(f"**Descripción:** {perfil['detalle']}")
+                    
+                    # Mostrar composición del perfil
+                    if 'perfilComposiciones' in perfil:
+                        st.write("**Composición del Perfil:**")
+                        composiciones = perfil['perfilComposiciones']
+                        
+                        # Crear gráfico de torta
+                        fig = go.Figure(data=[go.Pie(
+                            labels=[comp['nombre'] for comp in composiciones],
+                            values=[comp['porcentaje'] for comp in composiciones],
+                            hole=0.3,
+                            marker_colors=['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+                        )])
+                        
+                        fig.update_layout(
+                            title="Distribución del Perfil de Inversión",
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tabla de composiciones
+                        df_composiciones = pd.DataFrame(composiciones)
+                        st.dataframe(df_composiciones, use_container_width=True)
+                
+                # Mostrar mensajes adicionales
+                if 'messages' in resultado:
+                    for msg in resultado['messages']:
+                        st.info(f"ℹ️ {msg['title']}: {msg['description']}")
+            else:
+                st.error("❌ Error al procesar el test")
+                if resultado and 'messages' in resultado:
+                    for msg in resultado['messages']:
+                                                 st.error(f"❌ {msg['title']}: {msg['description']}")
+
+def obtener_estado_cuenta_v2(token_portador):
+    """
+    Obtiene el estado de cuenta actualizado desde la API v2 de IOL.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        
+    Returns:
+        dict: Estado de cuenta con cuentas, estadísticas y total en pesos
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    url = "https://api.invertironline.com/api/v2/estadocuenta"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    try:
+        print("🔍 Obteniendo estado de cuenta v2...")
+        response = requests.get(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta estado cuenta: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Estado de cuenta obtenido exitosamente")
+            return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para estado de cuenta")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder al estado de cuenta")
+            st.info("💡 **Posibles causas:**")
+            st.info("• El token de acceso ha expirado")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.get(url, headers=headers, timeout=30)
+                        if response.status_code == 200:
+                            print("✅ Estado de cuenta obtenido en reintento")
+                            return response.json()
+            
+            return None
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para estado de cuenta")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para acceder al estado de cuenta")
+            return None
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para estado de cuenta")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', f'Error HTTP {response.status_code}')
+            except:
+                error_msg = f'Error HTTP {response.status_code}'
+            
+            st.error(f"Error {response.status_code} al obtener estado de cuenta: {error_msg}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout al obtener estado de cuenta")
+        st.error("⏰ **Timeout**: La solicitud tardó demasiado en completarse")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print("🌐 Error de conexión al obtener estado de cuenta")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API de IOL")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener estado de cuenta: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def obtener_portafolio_pais_v2(token_portador, pais):
+    """
+    Obtiene el portafolio de un país específico desde la API v2 de IOL.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        pais (str): País del portafolio (ej: 'argentina', 'estados_Unidos')
+        
+    Returns:
+        dict: Portafolio con activos del país especificado
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    # Normalizar país para el endpoint
+    pais_norm = normalizar_pais_para_endpoint(pais)
+    url = f"https://api.invertironline.com/api/v2/portafolio/{pais_norm}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    try:
+        print(f"🔍 Obteniendo portafolio de {pais_norm}...")
+        response = requests.get(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta portafolio {pais_norm}: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Portafolio {pais_norm} obtenido exitosamente")
+            
+            # Filtrar solo activos con cantidad > 0
+            if 'activos' in data:
+                activos_validos = [activo for activo in data['activos'] if activo.get('cantidad', 0) > 0]
+                data['activos'] = activos_validos
+                print(f"✅ Portafolio {pais_norm}: {len(activos_validos)} activos válidos")
+            
+            return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para portafolio {pais_norm}")
+            st.warning(f"⚠️ **Problema de Autorización**: No tienes permisos para acceder al portafolio de {pais_norm}")
+            st.info("💡 **Posibles causas:**")
+            st.info("• El token de acceso ha expirado")
+            st.info("• No tienes activos en este país")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.get(url, headers=headers, timeout=30)
+                        if response.status_code == 200:
+                            print("✅ Portafolio obtenido en reintento")
+                            return response.json()
+            
+            return None
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para portafolio {pais_norm}")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para acceder al portafolio de {pais_norm}")
+            return None
+        
+        elif response.status_code == 404:
+            print(f"❌ Portafolio {pais_norm} no encontrado")
+            st.warning(f"⚠️ **No Encontrado**: No hay portafolio disponible para {pais_norm}")
+            return None
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para portafolio {pais_norm}")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', f'Error HTTP {response.status_code}')
+            except:
+                error_msg = f'Error HTTP {response.status_code}'
+            
+            st.error(f"Error {response.status_code} al obtener portafolio de {pais_norm}: {error_msg}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener portafolio {pais_norm}")
+        st.error("⏰ **Timeout**: La solicitud tardó demasiado en completarse")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print(f"🌐 Error de conexión al obtener portafolio {pais_norm}")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API de IOL")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener portafolio {pais_norm}: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def obtener_operacion_v2(token_portador, numero_operacion):
+    """
+    Obtiene los detalles de una operación específica desde la API v2 de IOL.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        numero_operacion (int): Número de la operación
+        
+    Returns:
+        dict: Detalles completos de la operación
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    url = f"https://api.invertironline.com/api/v2/operaciones/{numero_operacion}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    try:
+        print(f"🔍 Obteniendo operación {numero_operacion}...")
+        response = requests.get(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta operación: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Operación {numero_operacion} obtenida exitosamente")
+            return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para operación {numero_operacion}")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a esta operación")
+            st.info("💡 **Posibles causas:**")
+            st.info("• El token de acceso ha expirado")
+            st.info("• La operación no pertenece a tu cuenta")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.get(url, headers=headers, timeout=30)
+                        if response.status_code == 200:
+                            print("✅ Operación obtenida en reintento")
+                            return response.json()
+            
+            return None
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para operación {numero_operacion}")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para acceder a la operación {numero_operacion}")
+            return None
+        
+        elif response.status_code == 404:
+            print(f"❌ Operación {numero_operacion} no encontrada")
+            st.warning(f"⚠️ **No Encontrado**: La operación {numero_operacion} no existe")
+            return None
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para operación {numero_operacion}")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', f'Error HTTP {response.status_code}')
+            except:
+                error_msg = f'Error HTTP {response.status_code}'
+            
+            st.error(f"Error {response.status_code} al obtener operación {numero_operacion}: {error_msg}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener operación {numero_operacion}")
+        st.error("⏰ **Timeout**: La solicitud tardó demasiado en completarse")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print(f"🌐 Error de conexión al obtener operación {numero_operacion}")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API de IOL")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener operación {numero_operacion}: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def cancelar_operacion_v2(token_portador, numero_operacion):
+    """
+    Cancela una operación específica desde la API v2 de IOL.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        numero_operacion (int): Número de la operación a cancelar
+        
+    Returns:
+        bool: True si la cancelación fue exitosa, False en caso contrario
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return False
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return False
+        else:
+            print("❌ No hay refresh_token disponible")
+            return False
+    
+    url = f"https://api.invertironline.com/api/v2/operaciones/{numero_operacion}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return False
+    
+    try:
+        print(f"🔍 Cancelando operación {numero_operacion}...")
+        response = requests.delete(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta cancelación: {response.status_code}")
+        
+        if response.status_code == 200:
+            print(f"✅ Operación {numero_operacion} cancelada exitosamente")
+            st.success(f"✅ Operación {numero_operacion} cancelada exitosamente")
+            return True
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para cancelar operación {numero_operacion}")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para cancelar esta operación")
+            st.info("💡 **Posibles causas:**")
+            st.info("• El token de acceso ha expirado")
+            st.info("• La operación no pertenece a tu cuenta")
+            st.info("• La operación ya no puede ser cancelada")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.delete(url, headers=headers, timeout=30)
+                        if response.status_code == 200:
+                            print("✅ Operación cancelada en reintento")
+                            st.success(f"✅ Operación {numero_operacion} cancelada exitosamente")
+                            return True
+            
+            return False
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para cancelar operación {numero_operacion}")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para cancelar la operación {numero_operacion}")
+            return False
+        
+        elif response.status_code == 404:
+            print(f"❌ Operación {numero_operacion} no encontrada")
+            st.warning(f"⚠️ **No Encontrado**: La operación {numero_operacion} no existe")
+            return False
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para cancelar operación {numero_operacion}")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', f'Error HTTP {response.status_code}')
+            except:
+                error_msg = f'Error HTTP {response.status_code}'
+            
+            st.error(f"Error {response.status_code} al cancelar operación {numero_operacion}: {error_msg}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al cancelar operación {numero_operacion}")
+        st.error("⏰ **Timeout**: La solicitud tardó demasiado en completarse")
+        return False
+        
+    except requests.exceptions.ConnectionError:
+        print(f"🌐 Error de conexión al cancelar operación {numero_operacion}")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API de IOL")
+        return False
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al cancelar operación {numero_operacion}: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return False
+
+def obtener_operaciones_v2(token_portador, numero=None, estado="todas", fecha_desde=None, fecha_hasta=None, pais=None):
+    """
+    Obtiene la lista de operaciones con filtros desde la API v2 de IOL.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        numero (int, optional): Número específico de operación
+        estado (str): Estado de las operaciones ('todas', 'pendientes', 'terminadas', 'canceladas')
+        fecha_desde (str, optional): Fecha desde (formato: YYYY-MM-DD)
+        fecha_hasta (str, optional): Fecha hasta (formato: YYYY-MM-DD)
+        pais (str, optional): País de las operaciones
+        
+    Returns:
+        list: Lista de operaciones que coinciden con los filtros
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    url = "https://api.invertironline.com/api/v2/operaciones"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    # Construir parámetros de filtro
+    params = {}
+    if numero:
+        params['filtro.numero'] = numero
+    if estado:
+        params['filtro.estado'] = estado
+    if fecha_desde:
+        params['filtro.fechaDesde'] = fecha_desde
+    if fecha_hasta:
+        params['filtro.fechaHasta'] = fecha_hasta
+    if pais:
+        params['filtro.pais'] = pais
+    
+    try:
+        print(f"🔍 Obteniendo operaciones con filtros: {params}")
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        print(f"📡 Respuesta operaciones: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Operaciones obtenidas exitosamente: {len(data) if isinstance(data, list) else 'N/A'}")
+            return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para obtener operaciones")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a las operaciones")
+            st.info("💡 **Posibles causas:**")
+            st.info("• El token de acceso ha expirado")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.get(url, headers=headers, params=params, timeout=30)
+                        if response.status_code == 200:
+                            print("✅ Operaciones obtenidas en reintento")
+                            return response.json()
+            
+            return None
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para obtener operaciones")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para acceder a las operaciones")
+            return None
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para obtener operaciones")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', f'Error HTTP {response.status_code}')
+            except:
+                error_msg = f'Error HTTP {response.status_code}'
+            
+            st.error(f"Error {response.status_code} al obtener operaciones: {error_msg}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout al obtener operaciones")
+        st.error("⏰ **Timeout**: La solicitud tardó demasiado en completarse")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print("🌐 Error de conexión al obtener operaciones")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API de IOL")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener operaciones: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def mostrar_estado_cuenta_v2(token_portador):
+    """
+    Muestra el estado de cuenta en una interfaz interactiva usando la API v2.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+    """
+    st.subheader("💰 Estado de Cuenta")
+    
+    # Obtener estado de cuenta
+    estado_cuenta = obtener_estado_cuenta_v2(token_portador)
+    
+    if not estado_cuenta:
+        st.error("❌ No se pudo obtener el estado de cuenta")
+        return
+    
+    # Mostrar total en pesos
+    if 'totalEnPesos' in estado_cuenta:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                "Total en Pesos",
+                f"${estado_cuenta['totalEnPesos']:,.2f}",
+                help="Total general de la cuenta en pesos argentinos"
+            )
+    
+    # Mostrar cuentas
+    if 'cuentas' in estado_cuenta and estado_cuenta['cuentas']:
+        st.write("### 📊 Cuentas")
+        
+        for cuenta in estado_cuenta['cuentas']:
+            with st.expander(f"Cuenta {cuenta.get('numero', 'N/A')} - {cuenta.get('tipo', 'N/A')}"):
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Disponible", f"${cuenta.get('disponible', 0):,.2f}")
+                with col2:
+                    st.metric("Comprometido", f"${cuenta.get('comprometido', 0):,.2f}")
+                with col3:
+                    st.metric("Saldo", f"${cuenta.get('saldo', 0):,.2f}")
+                with col4:
+                    st.metric("Total", f"${cuenta.get('total', 0):,.2f}")
+                
+                # Mostrar saldos por liquidación
+                if 'saldos' in cuenta and cuenta['saldos']:
+                    st.write("**Saldos por Liquidación:**")
+                    for saldo in cuenta['saldos']:
+                        st.write(f"- {saldo.get('liquidacion', 'N/A')}: ${saldo.get('saldo', 0):,.2f}")
+                
+                # Mostrar estado
+                estado = cuenta.get('estado', 'N/A')
+                if estado == 'operable':
+                    st.success("✅ Cuenta operable")
+                else:
+                    st.warning(f"⚠️ Estado: {estado}")
+    
+    # Mostrar estadísticas
+    if 'estadisticas' in estado_cuenta and estado_cuenta['estadisticas']:
+        st.write("### 📈 Estadísticas")
+        
+        df_stats = pd.DataFrame(estado_cuenta['estadisticas'])
+        st.dataframe(df_stats, use_container_width=True)
+        
+        # Gráfico de estadísticas
+        if len(estado_cuenta['estadisticas']) > 0:
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=[stat['descripcion'] for stat in estado_cuenta['estadisticas']],
+                    y=[stat['cantidad'] for stat in estado_cuenta['estadisticas']],
+                    name='Cantidad',
+                    marker_color='#3b82f6'
+                ),
+                go.Bar(
+                    x=[stat['descripcion'] for stat in estado_cuenta['estadisticas']],
+                    y=[stat['volumen'] for stat in estado_cuenta['estadisticas']],
+                    name='Volumen',
+                    marker_color='#10b981'
+                )
+            ])
+            
+            fig.update_layout(
+                title="Estadísticas de Operaciones",
+                barmode='group',
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+
+def mostrar_operaciones_v2(token_portador):
+    """
+    Muestra las operaciones en una interfaz interactiva usando la API v2.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+    """
+    st.subheader("📋 Operaciones")
+    
+    # Filtros
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        numero_operacion = st.number_input("Número de Operación", min_value=0, value=0, step=1)
+        estado = st.selectbox("Estado", ["todas", "pendientes", "terminadas", "canceladas"])
+    
+    with col2:
+        fecha_desde = st.date_input("Fecha Desde", value=datetime.now() - timedelta(days=30))
+        fecha_hasta = st.date_input("Fecha Hasta", value=datetime.now())
+    
+    with col3:
+        pais = st.selectbox("País", ["", "argentina", "estados_Unidos"])
+    
+    # Botón para obtener operaciones
+    if st.button("🔍 Buscar Operaciones"):
+        # Convertir fechas a string
+        fecha_desde_str = fecha_desde.strftime('%Y-%m-%d') if fecha_desde else None
+        fecha_hasta_str = fecha_hasta.strftime('%Y-%m-%d') if fecha_hasta else None
+        
+        # Obtener operaciones
+        operaciones = obtener_operaciones_v2(
+            token_portador=token_portador,
+            numero=numero_operacion if numero_operacion > 0 else None,
+            estado=estado,
+            fecha_desde=fecha_desde_str,
+            fecha_hasta=fecha_hasta_str,
+            pais=pais if pais else None
+        )
+        
+        if operaciones and len(operaciones) > 0:
+            st.success(f"✅ Se encontraron {len(operaciones)} operaciones")
+            
+            # Convertir a DataFrame para mejor visualización
+            df_operaciones = pd.DataFrame(operaciones)
+            
+            # Formatear fechas
+            if 'fechaOrden' in df_operaciones.columns:
+                df_operaciones['fechaOrden'] = pd.to_datetime(df_operaciones['fechaOrden']).dt.strftime('%d/%m/%Y %H:%M')
+            if 'fechaOperada' in df_operaciones.columns:
+                df_operaciones['fechaOperada'] = pd.to_datetime(df_operaciones['fechaOperada']).dt.strftime('%d/%m/%Y %H:%M')
+            
+            # Mostrar tabla
+            st.dataframe(df_operaciones, use_container_width=True)
+            
+            # Botón para descargar
+            csv = df_operaciones.to_csv(index=False)
+            st.download_button(
+                label="📥 Descargar CSV",
+                data=csv,
+                file_name=f"operaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+            
+            # Mostrar detalles de operación específica
+            if len(operaciones) == 1:
+                st.write("### 📄 Detalles de la Operación")
+                operacion = operaciones[0]
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Número:** {operacion.get('numero', 'N/A')}")
+                    st.write(f"**Tipo:** {operacion.get('tipo', 'N/A')}")
+                    st.write(f"**Estado:** {operacion.get('estado', 'N/A')}")
+                    st.write(f"**Mercado:** {operacion.get('mercado', 'N/A')}")
+                
+                with col2:
+                    st.write(f"**Símbolo:** {operacion.get('simbolo', 'N/A')}")
+                    st.write(f"**Cantidad:** {operacion.get('cantidad', 'N/A')}")
+                    st.write(f"**Precio:** ${operacion.get('precio', 0):,.2f}")
+                    st.write(f"**Monto:** ${operacion.get('monto', 0):,.2f}")
+                
+                # Botón para cancelar operación
+                if operacion.get('estado') == 'pendiente':
+                    if st.button("❌ Cancelar Operación"):
+                        if cancelar_operacion_v2(token_portador, operacion['numero']):
+                            st.success("✅ Operación cancelada exitosamente")
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo cancelar la operación")
+            
+        elif operaciones is not None:
+            st.info("ℹ️ No se encontraron operaciones con los filtros especificados")
+        else:
+            st.error("❌ Error al obtener las operaciones")
+
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
@@ -11912,6 +13087,539 @@ def mostrar_detalle_operaciones(df):
         )
     else:
         st.warning("No hay columnas relevantes para mostrar en la tabla")
+
+# ============================================================================
+# FUNCIONES PARA OPERAR (CPD, COMPRA/VENTA, FCI)
+# ============================================================================
+
+def verificar_puede_operar_cpd(token_portador):
+    """
+    Verifica si se puede operar CPD
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/CPD/PuedeOperar"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('operatoriaHabilitada', False)
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para verificar operación CPD")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al verificar operación CPD: {e}")
+        return None
+
+def obtener_subastas_cpd(token_portador, estado, segmento):
+    """
+    Obtiene las subastas CPD disponibles
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = f"https://api.invertironline.com/api/v2/operar/CPD/{estado}/{segmento}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para obtener subastas CPD")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al obtener subastas CPD: {e}")
+        return None
+
+def obtener_comisiones_cpd(token_portador, importe, plazo, tasa):
+    """
+    Obtiene las comisiones para operación CPD
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = f"https://api.invertironline.com/api/v2/operar/CPD/Comisiones/{importe}/{plazo}/{tasa}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para obtener comisiones CPD")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al obtener comisiones CPD: {e}")
+        return None
+
+def operar_cpd(token_portador, id_subasta, tasa, fuente="compra_Venta_Por_Web"):
+    """
+    Realiza una operación CPD
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/CPD"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "idSubasta": id_subasta,
+        "tasa": tasa,
+        "fuente": fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('idTransaccion')
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para operar CPD")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al operar CPD: {e}")
+        return None
+
+def obtener_token_operacion(token_portador, mercado, simbolo, cantidad, monto):
+    """
+    Obtiene un token para operación
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/Token"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "monto": monto
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'token': data.get('token'),
+                'expiration': data.get('expiration')
+            }
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para obtener token de operación")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al obtener token de operación: {e}")
+        return None
+
+def vender_especie(token_portador, mercado, simbolo, cantidad, precio, validez, 
+                   tipo_orden="precioLimite", plazo="t0", id_fuente=0):
+    """
+    Vende una especie
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/Vender"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "validez": validez,
+        "tipoOrden": tipo_orden,
+        "plazo": plazo,
+        "idFuente": id_fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('ok', False)
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para vender especie")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al vender especie: {e}")
+        return None
+
+def comprar_especie(token_portador, mercado, simbolo, cantidad, precio, plazo="t0", 
+                    validez=None, tipo_orden="precioLimite", monto=0, id_fuente=0):
+    """
+    Compra una especie
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/Comprar"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "plazo": plazo,
+        "tipoOrden": tipo_orden,
+        "monto": monto,
+        "idFuente": id_fuente
+    }
+    
+    if validez:
+        payload["validez"] = validez
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('ok', False)
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para comprar especie")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al comprar especie: {e}")
+        return None
+
+def rescatar_fci(token_portador, simbolo, cantidad, solo_validar=True):
+    """
+    Rescata un FCI
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/rescate/fci"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "soloValidar": solo_validar
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('ok', False)
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para rescatar FCI")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al rescatar FCI: {e}")
+        return None
+
+def vender_especie_d(token_portador, mercado, simbolo, cantidad, precio, validez,
+                     id_cuenta_bancaria=0, tipo_orden="precioLimite", plazo="t0", id_fuente=0):
+    """
+    Vende una especie con cuenta bancaria específica
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/VenderEspecieD"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "validez": validez,
+        "idCuentaBancaria": id_cuenta_bancaria,
+        "tipoOrden": tipo_orden,
+        "plazo": plazo,
+        "idFuente": id_fuente
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('ok', False)
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para vender especie con cuenta específica")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al vender especie con cuenta específica: {e}")
+        return None
+
+def comprar_especie_d(token_portador, mercado, simbolo, cantidad, precio, plazo="t0",
+                      validez=None, tipo_orden="precioLimite", monto=0, id_fuente=0):
+    """
+    Compra una especie con cuenta específica
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/ComprarEspecieD"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "mercado": mercado,
+        "simbolo": simbolo,
+        "cantidad": cantidad,
+        "precio": precio,
+        "plazo": plazo,
+        "tipoOrden": tipo_orden,
+        "monto": monto,
+        "idFuente": id_fuente
+    }
+    
+    if validez:
+        payload["validez"] = validez
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('ok', False)
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para comprar especie con cuenta específica")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al comprar especie con cuenta específica: {e}")
+        return None
+
+def suscribir_fci(token_portador, simbolo, monto, solo_validar=True):
+    """
+    Suscribe un FCI
+    """
+    if not token_portador:
+        st.error("❌ Token de acceso no válido")
+        return None
+    
+    url = "https://api.invertironline.com/api/v2/operar/suscripcion/fci"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    payload = {
+        "simbolo": simbolo,
+        "monto": monto,
+        "soloValidar": solo_validar
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('ok', False)
+        elif response.status_code == 401:
+            st.warning("⚠️ No autorizado para suscribir FCI")
+            return None
+        else:
+            st.error(f"❌ Error {response.status_code}: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.error(f"💥 Error al suscribir FCI: {e}")
+        return None
+
+# ============================================================================
+# INTERFACES DE USUARIO PARA OPERAR
+# ============================================================================
+
+def mostrar_interfaz_operar_cpd(token_portador):
+    """
+    Interfaz para operar CPD
+    """
+    st.subheader("🏦 Operar CPD")
+    
+    # Verificar si se puede operar
+    puede_operar = verificar_puede_operar_cpd(token_portador)
+    if puede_operar is None:
+        st.error("❌ No se pudo verificar si se puede operar CPD")
+        return
+    elif not puede_operar:
+        st.warning("⚠️ La operatoria CPD no está habilitada")
+        return
+    
+    st.success("✅ Operatoria CPD habilitada")
+    
+    # Formulario para operar CPD
+    with st.form("form_cpd"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            estado = st.text_input("Estado", value="ERGDF")
+            segmento = st.text_input("Segmento", value="FDGFDGV")
+            id_subasta = st.number_input("ID Subasta", min_value=0, value=0)
+        
+        with col2:
+            tasa = st.number_input("Tasa (%)", min_value=0.0, value=0.0, step=0.1)
+            importe = st.number_input("Importe", min_value=0.0, value=1000.0)
+            plazo = st.number_input("Plazo (días)", min_value=1, value=30)
+        
+        submitted = st.form_submit_button("🚀 Operar CPD")
+        
+        if submitted:
+            # Obtener comisiones
+            comisiones = obtener_comisiones_cpd(token_portador, importe, plazo, tasa)
+            if comisiones:
+                st.info("📊 Comisiones calculadas:")
+                st.json(comisiones)
+            
+            # Realizar operación
+            resultado = operar_cpd(token_portador, id_subasta, tasa)
+            if resultado:
+                st.success(f"✅ Operación CPD exitosa. ID Transacción: {resultado}")
+            else:
+                st.error("❌ Error al realizar operación CPD")
+
+def mostrar_interfaz_compra_venta(token_portador):
+    """
+    Interfaz para compra/venta de especies
+    """
+    st.subheader("📈 Compra/Venta de Especies")
+    
+    # Pestañas para diferentes tipos de operación
+    tab1, tab2, tab3 = st.tabs(["🛒 Comprar", "💰 Vender", "🏦 FCI"])
+    
+    with tab1:
+        st.write("### Comprar Especie")
+        with st.form("form_comprar"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                mercado = st.selectbox("Mercado", ["bCBA", "bMERVAL", "bROFEX"])
+                simbolo = st.text_input("Símbolo")
+                cantidad = st.number_input("Cantidad", min_value=1, value=100)
+            
+            with col2:
+                precio = st.number_input("Precio", min_value=0.0, value=0.0, step=0.01)
+                plazo = st.selectbox("Plazo", ["t0", "t1", "t2"])
+                tipo_orden = st.selectbox("Tipo Orden", ["precioLimite", "mercado"])
+            
+            submitted = st.form_submit_button("🛒 Comprar")
+            
+            if submitted:
+                resultado = comprar_especie(token_portador, mercado, simbolo, cantidad, precio, plazo, tipo_orden=tipo_orden)
+                if resultado:
+                    st.success("✅ Compra realizada exitosamente")
+                else:
+                    st.error("❌ Error al realizar compra")
+    
+    with tab2:
+        st.write("### Vender Especie")
+        with st.form("form_vender"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                mercado = st.selectbox("Mercado", ["bCBA", "bMERVAL", "bROFEX"], key="vender_mercado")
+                simbolo = st.text_input("Símbolo", key="vender_simbolo")
+                cantidad = st.number_input("Cantidad", min_value=1, value=100, key="vender_cantidad")
+            
+            with col2:
+                precio = st.number_input("Precio", min_value=0.0, value=0.0, step=0.01, key="vender_precio")
+                plazo = st.selectbox("Plazo", ["t0", "t1", "t2"], key="vender_plazo")
+                tipo_orden = st.selectbox("Tipo Orden", ["precioLimite", "mercado"], key="vender_tipo")
+            
+            submitted = st.form_submit_button("💰 Vender")
+            
+            if submitted:
+                validez = datetime.now().isoformat() + "Z"
+                resultado = vender_especie(token_portador, mercado, simbolo, cantidad, precio, validez, tipo_orden, plazo)
+                if resultado:
+                    st.success("✅ Venta realizada exitosamente")
+                else:
+                    st.error("❌ Error al realizar venta")
+    
+    with tab3:
+        st.write("### Operar FCI")
+        with st.form("form_fci"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                operacion_fci = st.selectbox("Operación FCI", ["Suscribir", "Rescatar"])
+                simbolo = st.text_input("Símbolo FCI", key="fci_simbolo")
+            
+            with col2:
+                if operacion_fci == "Suscribir":
+                    monto = st.number_input("Monto", min_value=0.0, value=1000.0)
+                    submitted = st.form_submit_button("📈 Suscribir FCI")
+                    
+                    if submitted:
+                        resultado = suscribir_fci(token_portador, simbolo, monto)
+                        if resultado:
+                            st.success("✅ Suscripción FCI realizada exitosamente")
+                        else:
+                            st.error("❌ Error al suscribir FCI")
+                else:
+                    cantidad = st.number_input("Cantidad", min_value=0.0, value=100.0)
+                    submitted = st.form_submit_button("💰 Rescatar FCI")
+                    
+                    if submitted:
+                        resultado = rescatar_fci(token_portador, simbolo, cantidad)
+                        if resultado:
+                            st.success("✅ Rescate FCI realizado exitosamente")
+                        else:
+                            st.error("❌ Error al rescatar FCI")
 
 if __name__ == "__main__":
     main()
