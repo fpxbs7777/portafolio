@@ -1510,7 +1510,7 @@ def mostrar_movimientos_y_analisis(movimientos, token_portador):
         st.info(f"📅 Analizando período: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
         
         # Botón para calcular métricas reales
-        if st.button("🚀 Calcular Retorno y Riesgo Real", type="primary"):
+        if st.button("🚀 Calcular Retorno y Riesgo Real", key="calculate_real_return_risk", type="primary"):
             with st.spinner("Calculando métricas reales..."):
                 calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha_hasta)
     except Exception as e:
@@ -1587,7 +1587,7 @@ def calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha
                     st.write("- Refresh token disponible:", "✅" if st.session_state.get('refresh_token') else "❌")
                     
                     # Botón para intentar renovar token
-                    if st.button("🔄 Intentar Renovar Token"):
+                    if st.button("🔄 Intentar Renovar Token", key="try_renew_token"):
                         with st.spinner("Renovando token..."):
                             nuevo_token = renovar_token()
                             if nuevo_token:
@@ -1598,7 +1598,7 @@ def calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha
             
             # Mostrar opción para usar datos simulados
             st.info("🎭 **Alternativa:** La aplicación puede crear series simuladas para análisis básicos")
-            if st.button("🎭 Crear Series Simuladas"):
+            if st.button("🎭 Crear Series Simuladas", key="create_simulated_series"):
                 with st.spinner("Creando series simuladas..."):
                     series_simuladas = {}
                     for simbolo in activos_identificados.keys():
@@ -2449,14 +2449,14 @@ def mostrar_rendimiento_historico_portafolio(token_portador, id_cliente=None):
             "Últimos 90 días": 90,
             "Último año": 365
         }
-        periodo_seleccionado = st.selectbox("Período", list(periodos.keys()))
+        periodo_seleccionado = st.selectbox("Período", list(periodos.keys()), key="periodo_rendimiento")
         dias_periodo = periodos[periodo_seleccionado]
     
     with col2:
         fecha_hasta = st.date_input("Fecha hasta", value=datetime.now().date())
     
     with col3:
-        if st.button("🔄 Calcular Rendimiento", type="primary"):
+        if st.button("🔄 Calcular Rendimiento", key="calculate_performance", type="primary"):
             st.session_state.calcular_rendimiento = True
     
     # Calcular fechas
@@ -4417,6 +4417,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             ],
             format_func=lambda x: x[0],
             index=3,  # Por defecto 180 días
+            key="horizonte_inversion",
             help="Seleccione el período de tiempo para el análisis de retornos"
         )
         
@@ -5029,7 +5030,7 @@ def mostrar_cotizaciones_mercado(token_acceso):
                         st.error("❌ No se pudo obtener la cotización MEP")
     
     with st.expander("🏦 Tasas de Caución", expanded=True):
-        if st.button("🔄 Actualizar Tasas"):
+        if st.button("🔄 Actualizar Tasas", key="update_rates"):
             with st.spinner("Consultando tasas de caución..."):
                 tasas_caucion = obtener_tasas_caucion(token_acceso)
             
@@ -5094,7 +5095,8 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                 'min-variance-l1': 'Mínima Varianza L1',
                 'min-variance-l2': 'Mínima Varianza L2',
                 'long-only': 'Solo Posiciones Largas'
-            }[x]
+            }[x],
+            key="estrategia_optimizacion"
         )
     
     with col2:
@@ -5105,13 +5107,13 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
         )
     
     with col3:
-        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True)
+        show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier")
     
     col1, col2 = st.columns(2)
     with col1:
-        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", type="primary")
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", key="execute_optimization", type="primary")
     with col2:
-        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente")
+        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", key="calculate_efficient_frontier")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
@@ -5336,7 +5338,8 @@ def mostrar_analisis_tecnico(token_acceso, id_cliente):
     
     simbolo_seleccionado = st.selectbox(
         "Seleccione un activo para análisis técnico:",
-        options=simbolos
+        options=simbolos,
+        key="simbolo_analisis_tecnico"
     )
     
     if simbolo_seleccionado:
@@ -5434,12 +5437,14 @@ def mostrar_movimientos_asesor():
             tipo_fecha = st.selectbox(
                 "Tipo de fecha",
                 ["fechaOperacion", "fechaLiquidacion"],
-                index=0
+                index=0,
+                key="tipo_fecha_movimientos"
             )
             estado = st.selectbox(
                 "Estado",
                 ["", "Pendiente", "Aprobado", "Rechazado"],
-                index=0
+                index=0,
+                key="estado_movimientos"
             )
         with col2:
             tipo_operacion = st.text_input("Tipo de operación")
@@ -5668,7 +5673,7 @@ def mostrar_analisis_portafolio():
             """)
             
             # Botón para reintentar
-            if st.button("🔄 Reintentar Obtención de Movimientos", type="primary"):
+            if st.button("🔄 Reintentar Obtención de Movimientos", key="retry_movements", type="primary"):
                 st.rerun()
     
     with tab3:
@@ -5847,7 +5852,8 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         activo_seleccionado = st.selectbox(
             "Seleccione el activo a analizar:",
             options=opciones_activos,
-            index=0
+            index=0,
+            key="activo_conversion_usd"
         )
         
         # Obtener datos del activo seleccionado
@@ -5881,7 +5887,8 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         tipo_conversion = st.selectbox(
             "Tipo de conversión:",
             options=["MELID (Dólar MEP)", "MELIC (Dólar CCL)", "Dólar Blue", "Dólar Oficial"],
-            index=0
+            index=0,
+            key="tipo_conversion_usd"
         )
         
         # Input para tipo de cambio
@@ -6101,7 +6108,7 @@ def main():
             st.success("✅ Conectado a IOL")
             
             # Botón para renovar token manualmente
-            if st.button("🔄 Renovar Token", help="Renueva el token de acceso si ha expirado"):
+            if st.button("🔄 Renovar Token", key="renew_token_main", help="Renueva el token de acceso si ha expirado"):
                 with st.spinner("🔄 Renovando token..."):
                     nuevo_token = renovar_token(st.session_state.refresh_token)
                     if nuevo_token:
@@ -6114,7 +6121,7 @@ def main():
                         st.warning("💡 Intente autenticarse nuevamente")
             
             # Mostrar resumen del estado de cuenta
-            if st.button("💰 Ver Estado de Cuenta", help="Muestra un resumen del estado de cuenta actual"):
+            if st.button("💰 Ver Estado de Cuenta", key="view_account_status", help="Muestra un resumen del estado de cuenta actual"):
                 estado_cuenta = obtener_estado_cuenta(token_acceso)
                 if estado_cuenta:
                     mostrar_resumen_estado_cuenta_sidebar(estado_cuenta)
@@ -6193,7 +6200,8 @@ def main():
                     "Seleccione un cliente:",
                     options=cliente_ids,
                     format_func=lambda x: cliente_nombres[cliente_ids.index(x)] if x in cliente_ids else "Cliente",
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    key="cliente_seleccionado_main"
                 )
                 
                 st.session_state.cliente_seleccionado = next(
@@ -6201,7 +6209,7 @@ def main():
                     None
                 )
                 
-                if st.button("🔄 Actualizar lista de clientes", use_container_width=True):
+                if st.button("🔄 Actualizar lista de clientes", key="update_client_list", use_container_width=True):
                     with st.spinner("Actualizando..."):
                         nuevos_clientes = obtener_lista_clientes(st.session_state.token_acceso)
                         st.session_state.clientes = nuevos_clientes
@@ -6228,6 +6236,7 @@ def main():
                 "Seleccione una opción:",
                 ("Inicio", "Análisis de portafolio", "Rendimiento histórico", "Tasas de caución", "Panel del asesor"),
                 index=0,
+                key="menu_principal"
             )
 
             # Mostrar la página seleccionada
