@@ -4903,81 +4903,82 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         )
                                         st.plotly_chart(fig_renta_fija, use_container_width=True)
                                 
-                                # Análisis de retorno esperado por horizonte de inversión
-                                st.markdown("#### Análisis de retorno esperado")
-                                
-                                # Calcular retornos en USD para diferentes horizontes
-                                horizontes_analisis = [1, 7, 30, 90, 180, 365]
-                                retornos_ars_por_horizonte = {}
-                                retornos_usd_por_horizonte = {}
-                                
-                                # Calcular retornos en USD
-                                tasa_mep = obtener_tasa_mep_al30(token_portador) or 0
-                                if tasa_mep <= 0:
-                                    # Fallback conservador si no puede obtenerse MEP
-                                    tasa_mep = 1000.0
-                                df_portfolio_usd = df_portfolio['Portfolio_Total'] / tasa_mep
-                                df_portfolio_returns_usd = df_portfolio_usd.pct_change().dropna()
-                                
-                                for horizonte in horizontes_analisis:
-                                    if len(df_portfolio_returns) >= horizonte:
-                                        # Retorno en ARS
-                                        retorno_ars = (1 + df_portfolio_returns.tail(horizonte)).prod() - 1
-                                        retornos_ars_por_horizonte[horizonte] = retorno_ars
+                                try:
+                                    # Análisis de retorno esperado por horizonte de inversión
+                                    st.markdown("#### Análisis de retorno esperado")
+                                    
+                                    # Calcular retornos en USD para diferentes horizontes
+                                    horizontes_analisis = [1, 7, 30, 90, 180, 365]
+                                    retornos_ars_por_horizonte = {}
+                                    retornos_usd_por_horizonte = {}
+                                    
+                                    # Calcular retornos en USD
+                                    tasa_mep = obtener_tasa_mep_al30(token_portador) or 0
+                                    if tasa_mep <= 0:
+                                        # Fallback conservador si no puede obtenerse MEP
+                                        tasa_mep = 1000.0
+                                    df_portfolio_usd = df_portfolio['Portfolio_Total'] / tasa_mep
+                                    df_portfolio_returns_usd = df_portfolio_usd.pct_change().dropna()
+                                    
+                                    for horizonte in horizontes_analisis:
+                                        if len(df_portfolio_returns) >= horizonte:
+                                            # Retorno en ARS
+                                            retorno_ars = (1 + df_portfolio_returns.tail(horizonte)).prod() - 1
+                                            retornos_ars_por_horizonte[horizonte] = retorno_ars
+                                            
+                                            # Retorno en USD
+                                            retorno_usd = (1 + df_portfolio_returns_usd.tail(horizonte)).prod() - 1
+                                            retornos_usd_por_horizonte[horizonte] = retorno_usd
+                                    
+                                    if retornos_ars_por_horizonte and retornos_usd_por_horizonte:
+                                        # Crear gráfico de retornos por horizonte (ARS y USD)
+                                        fig_horizontes = go.Figure()
                                         
-                                        # Retorno en USD
-                                        retorno_usd = (1 + df_portfolio_returns_usd.tail(horizonte)).prod() - 1
-                                        retornos_usd_por_horizonte[horizonte] = retorno_usd
-                                
-                                if retornos_ars_por_horizonte and retornos_usd_por_horizonte:
-                                    # Crear gráfico de retornos por horizonte (ARS y USD)
-                                    fig_horizontes = go.Figure()
+                                        horizontes = list(retornos_ars_por_horizonte.keys())
+                                        retornos_ars = list(retornos_ars_por_horizonte.values())
+                                        retornos_usd = list(retornos_usd_por_horizonte.values())
+                                        
+                                        etiquetas_x = [f"{h} días" for h in horizontes]
+                                        # Barras para ARS
+                                        fig_horizontes.add_trace(go.Bar(
+                                            x=etiquetas_x,
+                                            y=retornos_ars,
+                                            name="Retorno ARS",
+                                            marker_color="#10b981",
+                                            hovertemplate="ARS: %{y:.2%}<extra></extra>",
+                                            text=[f"{r:.2%}" for r in retornos_ars],
+                                            textposition='auto'
+                                        ))
+                                        # Barras para USD
+                                        fig_horizontes.add_trace(go.Bar(
+                                            x=etiquetas_x,
+                                            y=retornos_usd,
+                                            name="Retorno USD",
+                                            marker_color="#3b82f6",
+                                            hovertemplate="USD: %{y:.2%}<extra></extra>",
+                                            text=[f"{r:.2%}" for r in retornos_usd],
+                                            textposition='auto'
+                                        ))
+                                        
+                                        fig_horizontes.add_hline(y=0, line_dash="dash", line_color="#9ca3af")
+                                        fig_horizontes.update_layout(
+                                            title="Retornos acumulados por horizonte de inversión (ARS y USD)",
+                                            xaxis_title="Horizonte de inversión",
+                                            yaxis_title="Retorno acumulado",
+                                            height=420,
+                                            template='plotly_dark',
+                                            barmode='group',
+                                            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                                            margin=dict(t=60, r=20, b=40, l=50)
+                                        )
+                                        
+                                        st.plotly_chart(fig_horizontes, use_container_width=True)
+                                        
+                                        # Se removieron métricas y proyecciones de retorno esperado y recomendaciones
                                     
-                                    horizontes = list(retornos_ars_por_horizonte.keys())
-                                    retornos_ars = list(retornos_ars_por_horizonte.values())
-                                    retornos_usd = list(retornos_usd_por_horizonte.values())
-                                    
-                                    etiquetas_x = [f"{h} días" for h in horizontes]
-                                    # Barras para ARS
-                                    fig_horizontes.add_trace(go.Bar(
-                                        x=etiquetas_x,
-                                        y=retornos_ars,
-                                        name="Retorno ARS",
-                                        marker_color="#10b981",
-                                        hovertemplate="ARS: %{y:.2%}<extra></extra>",
-                                        text=[f"{r:.2%}" for r in retornos_ars],
-                                        textposition='auto'
-                                    ))
-                                    # Barras para USD
-                                    fig_horizontes.add_trace(go.Bar(
-                                        x=etiquetas_x,
-                                        y=retornos_usd,
-                                        name="Retorno USD",
-                                        marker_color="#3b82f6",
-                                        hovertemplate="USD: %{y:.2%}<extra></extra>",
-                                        text=[f"{r:.2%}" for r in retornos_usd],
-                                        textposition='auto'
-                                    ))
-                                    
-                                    fig_horizontes.add_hline(y=0, line_dash="dash", line_color="#9ca3af")
-                                    fig_horizontes.update_layout(
-                                        title="Retornos acumulados por horizonte de inversión (ARS y USD)",
-                                        xaxis_title="Horizonte de inversión",
-                                        yaxis_title="Retorno acumulado",
-                                        height=420,
-                                        template='plotly_dark',
-                                        barmode='group',
-                                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-                                        margin=dict(t=60, r=20, b=40, l=50)
-                                    )
-                                    
-                                    st.plotly_chart(fig_horizontes, use_container_width=True)
-                                    
-                                    # Se removieron métricas y proyecciones de retorno esperado y recomendaciones
-                                
-                                else:
-                                    st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
-                                    pass
+                                    else:
+                                        st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
+                                        pass
                                     
                             except Exception as e:
                                 st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
