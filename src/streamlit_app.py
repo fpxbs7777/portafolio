@@ -4814,19 +4814,11 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 col3.metric("Riesgo Total", f"{riesgo_portfolio:.1f}%")
                                 col4.metric("Ratio Retorno/Riesgo", f"{retorno_portfolio/riesgo_portfolio:.2f}" if riesgo_portfolio > 0 else "N/A")
                             
-
-                                    
-                                    # Se removió análisis de la distribución por solicitud
-                                    
-                                    # Se removió evolución/estadísticas del valor real y tasa MEP utilizada por solicitud
-                                    
-                                    # Se removió análisis de rendimiento extra asegurado por solicitud
-                                    
-                                    # Identificar instrumentos de renta fija
-                                    instrumentos_renta_fija = []
-                                    total_renta_fija = 0
-                                    
-                                    for activo in datos_activos:
+                                # Identificar instrumentos de renta fija
+                                instrumentos_renta_fija = []
+                                total_renta_fija = 0
+                                
+                                for activo in datos_activos:
                                         tipo = activo.get('Tipo', '').lower()
                                         simbolo = activo.get('Símbolo', '')
                                         valuacion = activo.get('Valuación', 0)
@@ -4910,8 +4902,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                                 height=400
                                             )
                                             st.plotly_chart(fig_renta_fija, use_container_width=True)
-                                        
-
                                 
                                 # Análisis de retorno esperado por horizonte de inversión
                                 st.markdown("#### Análisis de retorno esperado")
