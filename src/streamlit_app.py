@@ -7850,6 +7850,164 @@ def mostrar_analisis_portafolio():
         mostrar_datos_historicos_portafolio()
 
 
+def obtener_historico_movimientos_portafolio(token_portador, id_cliente, dias_atras=30):
+    """
+    Obtiene el histórico de movimientos del portafolio para análisis temporal
+    """
+    try:
+        # Calcular fechas
+        fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+        fecha_desde = (datetime.now() - timedelta(days=dias_atras)).strftime('%Y-%m-%d')
+        
+        print(f"📅 Obteniendo histórico de movimientos desde {fecha_desde} hasta {fecha_hasta}")
+        
+        # Obtener movimientos usando la función existente
+        movimientos = obtener_movimientos_completos(token_portador, id_cliente)
+        
+        if movimientos and 'movimientos' in movimientos and movimientos['movimientos']:
+            print(f"✅ Histórico obtenido: {len(movimientos['movimientos'])} movimientos")
+            return movimientos
+        else:
+            print("⚠️ No se pudieron obtener movimientos históricos")
+            return None
+            
+    except Exception as e:
+        print(f"💥 Error obteniendo histórico de movimientos: {e}")
+        return None
+
+def mostrar_historico_movimientos(movimientos_data):
+    """
+    Muestra el histórico de movimientos con análisis temporal
+    """
+    if not movimientos_data or 'movimientos' not in movimientos_data:
+        st.warning("No hay datos de movimientos históricos disponibles")
+        return
+    
+    movimientos = movimientos_data['movimientos']
+    if not movimientos:
+        st.warning("No se encontraron movimientos en el período")
+        return
+    
+    st.markdown("#### 📈 Histórico de Movimientos del Portafolio")
+    
+    # Convertir a DataFrame
+    df_movimientos = pd.DataFrame(movimientos)
+    
+    # Convertir fechas
+    if 'fecha' in df_movimientos.columns:
+        df_movimientos['fecha'] = pd.to_datetime(df_movimientos['fecha'], errors='coerce')
+        df_movimientos = df_movimientos.sort_values('fecha')
+    
+    # Mostrar resumen
+    st.success(f"✅ Se encontraron {len(df_movimientos)} movimientos")
+    
+    # Filtros de fecha
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_min = df_movimientos['fecha'].min() if 'fecha' in df_movimientos.columns else None
+        fecha_max = df_movimientos['fecha'].max() if 'fecha' in df_movimientos.columns else None
+        
+        if fecha_min and fecha_max:
+            st.info(f"📅 Período: {fecha_min.strftime('%d/%m/%Y')} - {fecha_max.strftime('%d/%m/%Y')}")
+    
+    with col2:
+        if 'tipo' in df_movimientos.columns:
+            tipos_unicos = df_movimientos['tipo'].nunique()
+            st.info(f"📊 Tipos de operaciones: {tipos_unicos}")
+    
+    # Gráfico de movimientos por fecha
+    if 'fecha' in df_movimientos.columns and 'monto' in df_movimientos.columns:
+        st.markdown("#### 📊 Evolución Temporal de Movimientos")
+        
+        # Agrupar por fecha
+        df_por_fecha = df_movimientos.groupby('fecha').agg({
+            'monto': 'sum',
+            'tipo': 'count'
+        }).reset_index()
+        df_por_fecha.columns = ['fecha', 'monto_total', 'cantidad_operaciones']
+        
+        # Gráfico de evolución
+        fig_evolucion = go.Figure()
+        
+        # Línea de montos
+        fig_evolucion.add_trace(go.Scatter(
+            x=df_por_fecha['fecha'],
+            y=df_por_fecha['monto_total'],
+            mode='lines+markers',
+            name='Monto Total',
+            line=dict(color='#3b82f6', width=3),
+            marker=dict(size=8)
+        ))
+        
+        fig_evolucion.update_layout(
+            title="Evolución de Movimientos por Fecha",
+            xaxis_title="Fecha",
+            yaxis_title="Monto Total ($)",
+            height=400,
+            template='plotly_dark'
+        )
+        
+        st.plotly_chart(fig_evolucion, use_container_width=True)
+    
+    # Análisis por tipo de operación
+    if 'tipo' in df_movimientos.columns:
+        st.markdown("#### 📋 Análisis por Tipo de Operación")
+        
+        # Contar por tipo
+        tipos_operacion = df_movimientos['tipo'].value_counts()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Gráfico de torta por tipo
+            fig_tipos = go.Figure(data=[go.Pie(
+                labels=tipos_operacion.index,
+                values=tipos_operacion.values,
+                textinfo='label+percent+value',
+                hole=0.4,
+                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
+            )])
+            fig_tipos.update_layout(
+                title="Distribución por Tipo de Operación",
+                height=400
+            )
+            st.plotly_chart(fig_tipos, use_container_width=True)
+        
+        with col2:
+            # Tabla de tipos
+            df_tipos = pd.DataFrame({
+                'Tipo': tipos_operacion.index,
+                'Cantidad': tipos_operacion.values,
+                'Porcentaje': (tipos_operacion.values / len(df_movimientos) * 100).round(2)
+            })
+            st.dataframe(df_tipos, use_container_width=True)
+    
+    # Tabla de movimientos detallada
+    st.markdown("#### 📄 Movimientos Detallados")
+    
+    # Seleccionar columnas relevantes
+    columnas_mostrar = ['fecha', 'tipo', 'simbolo', 'descripcion', 'monto', 'cantidad']
+    columnas_disponibles = [col for col in columnas_mostrar if col in df_movimientos.columns]
+    
+    if columnas_disponibles:
+        df_mostrar = df_movimientos[columnas_disponibles].copy()
+        
+        # Formatear fechas
+        if 'fecha' in df_mostrar.columns:
+            df_mostrar['fecha'] = df_mostrar['fecha'].dt.strftime('%d/%m/%Y')
+        
+        # Formatear montos
+        if 'monto' in df_mostrar.columns:
+            df_mostrar['monto'] = df_mostrar['monto'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        
+        # Formatear cantidades
+        if 'cantidad' in df_mostrar.columns:
+            df_mostrar['cantidad'] = df_mostrar['cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+        
+        st.dataframe(df_mostrar, use_container_width=True, height=300)
+    else:
+        st.info("No hay columnas disponibles para mostrar en la tabla detallada")
+
 def mostrar_datos_historicos_portafolio():
     """
     Muestra la funcionalidad para analizar datos históricos del portafolio
@@ -7860,62 +8018,133 @@ def mostrar_datos_historicos_portafolio():
     Puedes pegar datos históricos en formato tabulado para generar gráficos de composición.
     """)
     
-    # Sección para datos históricos
-    st.markdown("### 📊 Análisis de Datos Históricos")
+    # Obtener token y cliente
+    token_acceso = st.session_state.get('token_acceso')
+    cliente_actual = st.session_state.get('cliente_seleccionado')
     
-    # Text area para pegar datos históricos
-    datos_historicos_texto = st.text_area(
-        "Pega aquí los datos históricos del portafolio (formato tabulado):",
-        height=200,
-        placeholder="""Ejemplo de formato:
+    if not token_acceso:
+        st.error("❌ No hay token de acceso disponible")
+        return
+    
+    if not cliente_actual:
+        st.error("❌ No hay cliente seleccionado")
+        return
+    
+    id_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id'))
+    nombre_cliente = cliente_actual.get('apellidoYNombre', cliente_actual.get('nombre', 'Cliente'))
+    
+    # Crear tabs para diferentes tipos de análisis
+    tab_historico_api, tab_datos_manuales = st.tabs([
+        "🔗 Histórico desde API", 
+        "📋 Datos Manuales"
+    ])
+    
+    with tab_historico_api:
+        st.markdown("### 🔗 Histórico de Movimientos desde API")
+        st.info(f"Obteniendo datos históricos para: {nombre_cliente}")
+        
+        # Selector de período
+        col1, col2 = st.columns(2)
+        with col1:
+            dias_atras = st.selectbox(
+                "Período de análisis:",
+                [7, 15, 30, 60, 90, 180, 365],
+                index=2,  # 30 días por defecto
+                help="Selecciona cuántos días hacia atrás quieres analizar"
+            )
+        
+        with col2:
+            if st.button("🔄 Obtener Histórico de Movimientos", type="primary"):
+                with st.spinner(f"Obteniendo movimientos de los últimos {dias_atras} días..."):
+                    # Obtener histórico de movimientos
+                    movimientos_historicos = obtener_historico_movimientos_portafolio(token_acceso, id_cliente, dias_atras)
+                    
+                    if movimientos_historicos:
+                        st.success(f"✅ Histórico obtenido exitosamente")
+                        st.session_state['movimientos_historicos'] = movimientos_historicos
+                    else:
+                        st.error("❌ No se pudieron obtener movimientos históricos")
+                        st.info("💡 Posibles causas:")
+                        st.info("• La API no está disponible")
+                        st.info("• No hay movimientos en el período seleccionado")
+                        st.info("• Problemas de autorización")
+        
+        # Mostrar histórico si está disponible
+        if 'movimientos_historicos' in st.session_state:
+            mostrar_historico_movimientos(st.session_state['movimientos_historicos'])
+        
+        # Información adicional sobre la API
+        st.markdown("### ℹ️ Información sobre la API")
+        st.info("""
+        **Datos obtenidos desde la API de IOL:**
+        - Movimientos reales de tu cuenta
+        - Operaciones de compra/venta
+        - Transferencias y depósitos
+        - Dividendos y cupones
+        - Comisiones y gastos
+        
+        **Nota:** Los datos se obtienen en tiempo real desde los servidores de IOL.
+        """)
+    
+    with tab_datos_manuales:
+        st.markdown("### 📋 Datos Históricos Manuales")
+        st.markdown("""
+        Pega aquí datos históricos en formato tabulado para generar gráficos de composición.
+        """)
+        
+        # Text area para pegar datos históricos
+        datos_historicos_texto = st.text_area(
+            "Pega aquí los datos históricos del portafolio (formato tabulado):",
+            height=200,
+            placeholder="""Ejemplo de formato:
 2025-09-02	TOTAL_inversio	posicion_total	1	$199,079.15	peso_Argentino	Posición total en inversion_Argentina_Pesos
 2025-09-02	TITULOS_inversio	titulos_valorizados	1	$198,746.80	peso_Argentino	Títulos valorizados en inversion_Argentina_Pesos
 2025-09-02	TOTAL_inversio	posicion_total	1	$186.78	dolar_Estadounidense	Posición total en inversion_Estados_Unidos_Dolares
 2025-09-02	TITULOS_inversio	titulos_valorizados	1	$183.35	dolar_Estadounidense	Títulos valorizados en inversion_Estados_Unidos_Dolares
 2025-09-02	DISP_inversio	disponible	1	$3.43	dolar_Estadounidense	Disponible en inversion_Estados_Unidos_Dolares"""
-    )
-    
-    if datos_historicos_texto.strip():
-        # Procesar datos históricos
-        datos_procesados = procesar_datos_historicos_portafolio(datos_historicos_texto)
+        )
         
-        if datos_procesados:
-            st.success(f"✅ Datos procesados exitosamente: {len(datos_procesados)} registros")
+        if datos_historicos_texto.strip():
+            # Procesar datos históricos
+            datos_procesados = procesar_datos_historicos_portafolio(datos_historicos_texto)
             
-            # Mostrar análisis histórico
-            mostrar_analisis_historico_portafolio(datos_procesados)
-        else:
-            st.error("❌ Error al procesar los datos históricos. Verifica el formato.")
-    
-    # Sección para datos de ejemplo
-    st.markdown("### 📋 Datos de Ejemplo")
-    
-    # Mostrar datos de ejemplo que proporcionaste
-    datos_ejemplo = """2025-09-02	TOTAL_inversio	posicion_total	1	$199,079.15	peso_Argentino	Posición total en inversion_Argentina_Pesos
+            if datos_procesados:
+                st.success(f"✅ Datos procesados exitosamente: {len(datos_procesados)} registros")
+                
+                # Mostrar análisis histórico
+                mostrar_analisis_historico_portafolio(datos_procesados)
+            else:
+                st.error("❌ Error al procesar los datos históricos. Verifica el formato.")
+        
+        # Sección para datos de ejemplo
+        st.markdown("### 📋 Datos de Ejemplo")
+        
+        # Mostrar datos de ejemplo que proporcionaste
+        datos_ejemplo = """2025-09-02	TOTAL_inversio	posicion_total	1	$199,079.15	peso_Argentino	Posición total en inversion_Argentina_Pesos
 2025-09-02	TITULOS_inversio	titulos_valorizados	1	$198,746.80	peso_Argentino	Títulos valorizados en inversion_Argentina_Pesos
 2025-09-02	TOTAL_inversio	posicion_total	1	$186.78	dolar_Estadounidense	Posición total en inversion_Estados_Unidos_Dolares
 2025-09-02	TITULOS_inversio	titulos_valorizados	1	$183.35	dolar_Estadounidense	Títulos valorizados en inversion_Estados_Unidos_Dolares
 2025-09-02	DISP_inversio	disponible	1	$3.43	dolar_Estadounidense	Disponible en inversion_Estados_Unidos_Dolares"""
-    
-    st.markdown("**Datos de ejemplo (copia y pega en el área de arriba):**")
-    st.code(datos_ejemplo, language="text")
-    
-    # Botón para cargar datos de ejemplo
-    if st.button("📊 Cargar Datos de Ejemplo"):
-        datos_procesados = procesar_datos_historicos_portafolio(datos_ejemplo)
-        if datos_procesados:
-            st.success(f"✅ Datos de ejemplo cargados: {len(datos_procesados)} registros")
-            mostrar_analisis_historico_portafolio(datos_procesados)
-    
-    # Información adicional
-    st.markdown("### ℹ️ Información")
-    st.info("""
-    **Formato esperado de datos:**
-    - Fecha | Tipo Operación | Concepto | Cantidad | Valor | Moneda | Descripción
-    - Los valores deben estar separados por tabulaciones (Tab)
-    - Los valores monetarios deben incluir el símbolo $ y pueden usar comas como separadores de miles
-    - Las monedas deben ser: 'peso_Argentino' o 'dolar_Estadounidense'
-    """)
+        
+        st.markdown("**Datos de ejemplo (copia y pega en el área de arriba):**")
+        st.code(datos_ejemplo, language="text")
+        
+        # Botón para cargar datos de ejemplo
+        if st.button("📊 Cargar Datos de Ejemplo"):
+            datos_procesados = procesar_datos_historicos_portafolio(datos_ejemplo)
+            if datos_procesados:
+                st.success(f"✅ Datos de ejemplo cargados: {len(datos_procesados)} registros")
+                mostrar_analisis_historico_portafolio(datos_procesados)
+        
+        # Información adicional
+        st.markdown("### ℹ️ Información")
+        st.info("""
+        **Formato esperado de datos:**
+        - Fecha | Tipo Operación | Concepto | Cantidad | Valor | Moneda | Descripción
+        - Los valores deben estar separados por tabulaciones (Tab)
+        - Los valores monetarios deben incluir el símbolo $ y pueden usar comas como separadores de miles
+        - Las monedas deben ser: 'peso_Argentino' o 'dolar_Estadounidense'
+        """)
 
 
 def mostrar_conversion_usd(token_acceso, id_cliente):
