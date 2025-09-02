@@ -584,32 +584,141 @@ def normalizar_pais_para_endpoint(pais: str) -> str:
         return 'estados_Unidos'
     return pais
 
+def manejar_error_autorizacion_portafolio(token_portador, pais, error_msg=""):
+    """
+    Maneja errores de autorización específicos para el portafolio
+    """
+    print(f"🚨 Error de autorización para portafolio {pais}: {error_msg}")
+    
+    # Intentar renovar el token
+    refresh_token = st.session_state.get('refresh_token')
+    if refresh_token:
+        print("🔄 Intentando renovar token...")
+        nuevo_token = renovar_token(refresh_token)
+        if nuevo_token:
+            st.session_state.token_acceso = nuevo_token
+            print("✅ Token renovado exitosamente")
+            return True
+        else:
+            print("❌ No se pudo renovar el token")
+    
+    # Mostrar mensajes informativos al usuario
+    st.error(f"❌ **Error de Autorización** para portafolio {pais}")
+    st.warning("""
+    **Posibles soluciones:**
+    1. **Reinicia la sesión**: Ve a la página de login y vuelve a autenticarte
+    2. **Verifica permisos**: Asegúrate de tener acceso al portafolio de este país
+    3. **Contacta soporte**: Si el problema persiste, contacta a IOL
+    """)
+    
+    return False
+
+def obtener_portafolio_con_manejo_errores(token_portador, pais):
+    """
+    Obtiene el portafolio con manejo robusto de errores de autorización
+    """
+    try:
+        print(f"🔍 Obteniendo portafolio de {pais}...")
+        
+        # Normalizar país
+        pais_norm = normalizar_pais(pais)
+        url = f'https://api.invertironline.com/api/v2/portafolio/{pais_norm}'
+        
+        # Generar headers
+        encabezados = generar_headers_autorizacion(token_portador)
+        if not encabezados:
+            print("❌ No se pudieron generar headers de autorización")
+            return None
+        
+        # Realizar request
+        response = requests.get(url, headers=encabezados, timeout=30)
+        print(f"📡 Respuesta portafolio {pais}: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'activos' in data:
+                activos_validos = [activo for activo in data['activos'] if activo.get('cantidad', 0) > 0]
+                data['activos'] = activos_validos
+                print(f"✅ Portafolio {pais} obtenido: {len(activos_validos)} activos")
+                return data
+            else:
+                print(f"⚠️ Portafolio {pais} vacío o sin estructura válida")
+                return {'activos': [], 'metodo': 'vacio'}
+        
+        elif response.status_code == 401:
+            # Error de autorización
+            if manejar_error_autorizacion_portafolio(token_portador, pais, "Token expirado o inválido"):
+                # Reintentar con el nuevo token
+                return obtener_portafolio_con_manejo_errores(st.session_state.token_acceso, pais)
+            return None
+        
+        elif response.status_code == 403:
+            print(f"❌ Acceso prohibido para portafolio {pais}")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para el portafolio de {pais}")
+            return None
+        
+        else:
+            print(f"❌ Error HTTP {response.status_code} para portafolio {pais}")
+            st.error(f"Error {response.status_code} al obtener portafolio de {pais}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener portafolio de {pais}")
+        st.warning(f"⏰ Timeout al obtener portafolio de {pais}")
+        return None
+        
+    except requests.exceptions.ConnectionError as e:
+        print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
+        st.error(f"🌐 Error de conexión al obtener portafolio de {pais}")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
+        st.error(f"💥 Error inesperado al obtener portafolio de {pais}")
+        return None
+
 def obtener_portafolio_correcto(token_portador: str):
     """
     Obtiene el portafolio completo usando el endpoint que SÍ funciona
     """
-    print("🌍 Obteniendo portafolio completo...")
-    
-    if not token_portador:
-        print("❌ Error: Token de acceso no válido")
-        return None
-    
-    # Endpoint que SÍ funciona
-    url = 'https://api.invertironline.com/api/v2/portafolio'
-    
-    headers = {
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {token_portador}'
-    }
-    
-    print(f"🔍 Intentando obtener portafolio desde: {url}")
-    
     try:
-        r = requests.get(url, headers=headers, timeout=20)
-        print(f"📡 Respuesta HTTP: {r.status_code}")
+        print("🌍 Obteniendo portafolio completo...")
         
-        if r.status_code == 200:
-            data = r.json()
+        # Verificar token
+        if not verificar_token_valido(token_portador):
+            print("⚠️ Token inválido, intentando renovar...")
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state.token_acceso = nuevo_token
+                    token_portador = nuevo_token
+                    print("✅ Token renovado exitosamente")
+                else:
+                    print("❌ No se pudo renovar el token")
+                    return None
+        
+        if not token_portador:
+            print("❌ Error: Token de acceso no válido")
+            return None
+        
+        # Endpoint que SÍ funciona
+        url = 'https://api.invertironline.com/api/v2/portafolio'
+        
+        # Generar headers con la función mejorada
+        encabezados = generar_headers_autorizacion(token_portador)
+        if not encabezados:
+            print("❌ No se pudieron generar headers de autorización")
+            return None
+        
+        print(f"🔍 Intentando obtener portafolio desde: {url}")
+        
+        # Realizar request
+        response = requests.get(url, headers=encabezados, timeout=30)
+        print(f"📡 Respuesta HTTP: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
             print(f"✅ Portafolio obtenido exitosamente")
             
             # Verificar estructura de respuesta
@@ -674,15 +783,40 @@ def obtener_portafolio_correcto(token_portador: str):
                 print(f"⚠️ Estructura de respuesta inesperada")
                 return data
                 
-        elif r.status_code == 401:
+        elif response.status_code == 401:
             print(f"❌ Error 401: No autorizado para portafolio")
-            print(f"📝 Respuesta del servidor: {r.text}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            
+            # Usar el nuevo manejo de errores
+            if manejar_error_autorizacion_portafolio(token_portador, "general", "Token expirado"):
+                return obtener_portafolio_correcto(st.session_state.token_acceso)
+            return None
+            
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Acceso prohibido para portafolio")
+            st.warning("⚠️ **Acceso Prohibido**: No tienes permisos para acceder al portafolio")
             return None
             
         else:
-            print(f"❌ Error HTTP {r.status_code}")
-            print(f"📝 Respuesta del servidor: {r.text}")
+            print(f"❌ Error HTTP {response.status_code}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"Error {response.status_code} al obtener portafolio")
             return None
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout al obtener portafolio")
+        st.warning("⏰ Timeout al obtener portafolio")
+        return None
+        
+    except requests.exceptions.ConnectionError as e:
+        print(f"🌐 Error de conexión al obtener portafolio: {e}")
+        st.error("🌐 Error de conexión al obtener portafolio")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener portafolio: {e}")
+        st.error("💥 Error inesperado al obtener portafolio")
+        return None
             
     except Exception as e:
         print(f"💥 Error al obtener portafolio: {e}")
@@ -7598,6 +7732,74 @@ def mostrar_movimientos_asesor():
                     st.info("• Permisos insuficientes para acceder a los movimientos")
                     st.info("• Los filtros aplicados no devuelven resultados")
 
+def mostrar_diagnostico_autorizacion():
+    """
+    Muestra información de diagnóstico para problemas de autorización
+    """
+    st.markdown("### 🔍 Diagnóstico de Autorización")
+    
+    # Verificar estado del token
+    token_acceso = st.session_state.get('token_acceso')
+    refresh_token = st.session_state.get('refresh_token')
+    cliente = st.session_state.get('cliente_seleccionado')
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 📋 Estado Actual")
+        
+        if token_acceso:
+            st.success("✅ Token de acceso disponible")
+            # Verificar si el token es válido
+            if verificar_token_valido(token_acceso):
+                st.success("✅ Token válido")
+            else:
+                st.error("❌ Token expirado")
+        else:
+            st.error("❌ No hay token de acceso")
+        
+        if refresh_token:
+            st.success("✅ Refresh token disponible")
+        else:
+            st.error("❌ No hay refresh token")
+        
+        if cliente:
+            st.success(f"✅ Cliente seleccionado: {cliente.get('apellidoYNombre', 'N/A')}")
+        else:
+            st.error("❌ No hay cliente seleccionado")
+    
+    with col2:
+        st.markdown("#### 🔧 Soluciones")
+        
+        st.info("""
+        **Si tienes problemas de autorización:**
+        
+        1. **Reinicia la sesión**:
+           - Ve a la página de login
+           - Vuelve a autenticarte
+           - Selecciona tu cliente
+        
+        2. **Verifica permisos**:
+           - Asegúrate de tener acceso al portafolio
+           - Contacta a IOL si es necesario
+        
+        3. **Problemas técnicos**:
+           - Intenta en otro navegador
+           - Limpia caché y cookies
+        """)
+    
+    # Botón para renovar token manualmente
+    if refresh_token:
+        if st.button("🔄 Renovar Token Manualmente"):
+            with st.spinner("Renovando token..."):
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state.token_acceso = nuevo_token
+                    st.success("✅ Token renovado exitosamente")
+                    st.rerun()
+                else:
+                    st.error("❌ No se pudo renovar el token")
+
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
     token_acceso = st.session_state.token_acceso
@@ -7636,7 +7838,7 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
@@ -7644,7 +7846,8 @@ def mostrar_analisis_portafolio():
         "🔄 Rebalanceo",
         "💵 Conversión USD",
         "🌍 Distribución Mejorada",
-        "📈 Datos Históricos"
+        "📈 Datos Históricos",
+        "🔍 Diagnóstico"
     ])
 
     with tab1:
@@ -7848,6 +8051,9 @@ def mostrar_analisis_portafolio():
     
     with tab8:
         mostrar_datos_historicos_portafolio()
+    
+    with tab9:
+        mostrar_diagnostico_autorizacion()
 
 
 def obtener_historico_movimientos_portafolio(token_portador, id_cliente, dias_atras=30):
