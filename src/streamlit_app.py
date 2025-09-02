@@ -707,115 +707,105 @@ def obtener_portafolio_correcto(token_portador: str):
             print("❌ Error: Token de acceso no válido")
             return None
         
-        # Intentar múltiples endpoints para mayor robustez
-        endpoints = [
-            'https://api.invertironline.com/api/v2/portafolio',
-            'https://api.invertironline.com/api/v2/portafolio/argentina',
-            'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+        # Intentar obtener portafolios por país usando los endpoints correctos
+        print("🔍 Obteniendo portafolios por país usando endpoints correctos...")
+        
+        # Endpoints correctos según la documentación de la API
+        endpoints_paises = [
+            ('argentina', 'https://api.invertironline.com/api/v2/portafolio/argentina'),
+            ('estados_Unidos', 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos')
         ]
         
-        for i, url in enumerate(endpoints, 1):
-            print(f"🔍 Intentando endpoint {i}: {url}")
+        activos_argentinos = []
+        activos_estadounidenses = []
+        metodos_utilizados = []
+        
+        for pais, url in endpoints_paises:
+            print(f"🔍 Intentando obtener portafolio de {pais}: {url}")
             
             # Generar headers con la función correcta
             encabezados = obtener_encabezado_autorizacion(token_portador)
             if not encabezados:
-                print("❌ No se pudieron generar headers de autorización")
+                print(f"❌ No se pudieron generar headers de autorización para {pais}")
                 continue
             
             try:
                 # Realizar request con timeout más corto
                 response = requests.get(url, headers=encabezados, timeout=15)
-                print(f"📡 Respuesta HTTP: {response.status_code}")
+                print(f"📡 Respuesta HTTP para {pais}: {response.status_code}")
                 
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"✅ Portafolio obtenido exitosamente desde endpoint {i}")
+                    print(f"✅ Portafolio de {pais} obtenido exitosamente")
                     
                     # Verificar estructura de respuesta
                     if isinstance(data, dict) and 'activos' in data:
                         activos = data['activos']
-                        print(f"📊 Total de activos encontrados: {len(activos)}")
+                        print(f"📊 Total de activos encontrados en {pais}: {len(activos)}")
                         
                         # Filtrar activos con cantidad > 0
                         activos_validos = [activo for activo in activos if activo.get('cantidad', 0) > 0]
-                        print(f"📊 Activos con cantidad > 0: {len(activos_validos)}")
+                        print(f"📊 Activos con cantidad > 0 en {pais}: {len(activos_validos)}")
                         
-                        # Separar activos por país
-                        activos_argentinos = []
-                        activos_estadounidenses = []
-                        
-                        for activo in activos_validos:
-                            titulo = activo.get('titulo', {})
-                            simbolo = titulo.get('simbolo', '')
-                            pais = titulo.get('pais', '')
-                            tipo = titulo.get('tipo', '')
-                            
-                            # Clasificar como EEUU si:
-                            # 1. El país está marcado como estados_Unidos
-                            # 2. Es un símbolo conocido de EEUU
-                            # 3. La función de clasificación lo identifica como EEUU
-                            es_eeuu = (
-                                pais == 'estados_Unidos' or 
-                                simbolo in ['ARKK', 'BBD', 'EWZ', 'FXI', 'YPF', 'AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA'] or
-                                _es_activo_estadounidense(simbolo, tipo)
-                            )
-                            
-                            if es_eeuu:
-                                activos_estadounidenses.append(activo)
-                                print(f"🇺🇸 Identificado como EEUU: {simbolo}")
-                            else:
-                                activos_argentinos.append(activo)
-                                print(f"🇦🇷 Identificado como Argentina: {simbolo}")
+                        # Asignar activos al país correspondiente
+                        if pais == 'argentina':
+                            activos_argentinos = activos_validos
+                            metodos_utilizados.append(f'endpoint_{pais}')
+                        elif pais == 'estados_Unidos':
+                            activos_estadounidenses = activos_validos
+                            metodos_utilizados.append(f'endpoint_{pais}')
                         
                         print(f"🇦🇷 Activos argentinos: {len(activos_argentinos)}")
                         print(f"🇺🇸 Activos estadounidenses: {len(activos_estadounidenses)}")
-                        
-                        # Crear estructura de respuesta
-                        resultado = {
-                            'activos': activos_validos,
-                            'activos_argentinos': activos_argentinos,
-                            'activos_estadounidenses': activos_estadounidenses,
-                            'metodo': f'endpoint_{i}'
-                        }
-                        
-                        return resultado
                     else:
-                        print(f"⚠️ Estructura de respuesta inesperada en endpoint {i}")
+                        print(f"⚠️ Estructura de respuesta inesperada para {pais}")
                         continue
                         
                 elif response.status_code == 401:
-                    print(f"❌ Error 401: No autorizado para endpoint {i}")
+                    print(f"❌ Error 401: No autorizado para {pais}")
                     print(f"📝 Respuesta del servidor: {response.text}")
                     continue
                     
                 elif response.status_code == 403:
-                    print(f"❌ Error 403: Acceso prohibido para endpoint {i}")
+                    print(f"❌ Error 403: Acceso prohibido para {pais}")
                     continue
                     
                 elif response.status_code == 500:
-                    print(f"❌ Error 500: Error interno del servidor para endpoint {i}")
+                    print(f"❌ Error 500: Error interno del servidor para {pais}")
                     print(f"📝 Respuesta del servidor: {response.text}")
-                    st.warning(f"⚠️ **Error del Servidor**: El servidor de IOL está experimentando problemas temporales (Error 500)")
+                    st.warning(f"⚠️ **Error del Servidor**: El servidor de IOL está experimentando problemas temporales (Error 500) para {pais}")
                     st.info("💡 **Solución**: Intente nuevamente en unos minutos o use la funcionalidad de estado de cuenta")
                     continue
                     
                 else:
-                    print(f"❌ Error HTTP {response.status_code} para endpoint {i}")
+                    print(f"❌ Error HTTP {response.status_code} para {pais}")
                     print(f"📝 Respuesta del servidor: {response.text}")
                     continue
                     
             except requests.exceptions.Timeout:
-                print(f"⏰ Timeout al obtener portafolio desde endpoint {i}")
+                print(f"⏰ Timeout al obtener portafolio de {pais}")
                 continue
                 
             except requests.exceptions.ConnectionError as e:
-                print(f"🌐 Error de conexión al obtener portafolio desde endpoint {i}: {e}")
+                print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
                 continue
                 
             except Exception as e:
-                print(f"💥 Error inesperado al obtener portafolio desde endpoint {i}: {e}")
+                print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
                 continue
+        
+        # Combinar todos los activos
+        todos_los_activos = activos_argentinos + activos_estadounidenses
+        
+        if todos_los_activos:
+            print(f"✅ Portafolio combinado obtenido: {len(todos_los_activos)} activos totales")
+            resultado = {
+                'activos': todos_los_activos,
+                'activos_argentinos': activos_argentinos,
+                'activos_estadounidenses': activos_estadounidenses,
+                'metodo': '+'.join(metodos_utilizados) if metodos_utilizados else 'endpoints_paises'
+            }
+            return resultado
         
         # Si llegamos aquí, ningún endpoint funcionó
         print("❌ Ningún endpoint funcionó para obtener el portafolio")
