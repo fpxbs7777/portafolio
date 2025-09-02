@@ -4532,6 +4532,14 @@ def _es_activo_estadounidense(simbolo, tipo_activo):
     if simbolo in activos_argentinos_conocidos:
         return False
     
+    # Activos estadounidenses conocidos (basados en los datos reales del cliente)
+    activos_estadounidenses_conocidos = [
+        'ARKK', 'BBD', 'EWZ', 'FXI', 'YPF', 'AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA',
+        'SPY', 'QQQ', 'IWM', 'VTI', 'VOO', 'VEA', 'VWO', 'EFA', 'EEM', 'AGG'
+    ]
+    if simbolo in activos_estadounidenses_conocidos:
+        return True
+    
     # Activos que terminan en sufijos estadounidenses
     sufijos_eeuu = ['.O', '.N', '.A', '.B', '.C', '.D', '.US', '.USO']
     if any(simbolo.endswith(suffix) for suffix in sufijos_eeuu):
@@ -4805,42 +4813,81 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Usar la función unificada para cálculos consistentes
         metricas = calcular_metricas_portafolio_unificada(portafolio_dict, valor_total, token_portador)
         
-        # Separar activos por mercado usando información real de la API
-        activos_argentinos = []
-        activos_eeuu = []
-        
-        for activo in datos_activos:
-            simbolo = activo['Símbolo']
-            tipo_activo = activo['Tipo']
+            # Procesar activos y clasificarlos correctamente
+    activos_argentinos = []
+    activos_eeuu = []
+    
+    for activo in activos_raw:
+        try:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            descripcion = titulo.get('descripcion', 'Sin descripción')
+            tipo = titulo.get('tipo', 'N/A')
+            pais = titulo.get('pais', 'argentina')
+            mercado = titulo.get('mercado', 'BCBA')
             
-            # Buscar el activo original en el portafolio para obtener el mercado real
-            mercado_real = None
-            for activo_original in activos:
-                if activo_original.get('titulo', {}).get('simbolo') == simbolo:
-                    mercado_real = activo_original.get('titulo', {}).get('mercado', 'BCBA')
-                    break
+            # Obtener valuación
+            valuacion = 0
+            campos_valuacion = [
+                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
+                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
+                'montoInvertido', 'valorMercado', 'valorTotal', 'importe', 'valorizado'
+            ]
             
-            # Clasificar basado en el mercado real y tipo de activo
-            if mercado_real:
-                # Mercados argentinos: BCBA, BYMA, ROFEX, MAE, etc.
-                if mercado_real in ['BCBA', 'BYMA', 'ROFEX', 'MAE', 'MATBA', 'BMA']:
-                    activos_argentinos.append(activo)
-                # Mercados estadounidenses: NASDAQ, NYSE, etc.
-                elif mercado_real in ['NASDAQ', 'NYSE', 'AMEX', 'OTC', 'PINK']:
-                    activos_eeuu.append(activo)
-                # Si no está en la lista, usar lógica de respaldo
-                else:
-                    # Lógica de respaldo basada en el símbolo y tipo
-                    if _es_activo_estadounidense(simbolo, tipo_activo):
-                        activos_eeuu.append(activo)
-                    else:
-                        activos_argentinos.append(activo)
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Si no hay valuación, usar valorizado
+            if valuacion == 0 and 'valorizado' in activo:
+                try:
+                    valuacion = float(activo['valorizado'])
+                except (ValueError, TypeError):
+                    pass
+            
+            # Clasificar activo
+            es_estadounidense = False
+            
+            # Primero verificar por país y mercado
+            if pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu']:
+                es_estadounidense = True
+            elif mercado.upper() in ['NYSE', 'NASDAQ', 'AMEX', 'OTC']:
+                es_estadounidense = True
             else:
-                # Si no se encuentra el mercado, usar lógica de respaldo
-                if _es_activo_estadounidense(simbolo, tipo_activo):
-                    activos_eeuu.append(activo)
-                else:
-                    activos_argentinos.append(activo)
+                # Usar función de clasificación como respaldo
+                es_estadounidense = _es_activo_estadounidense(simbolo, tipo)
+            
+            # Crear objeto de activo
+            activo_info = {
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': activo.get('cantidad', 0),
+                'Valuación': valuacion,
+                'UltimoPrecio': activo.get('ultimoPrecio', 0),
+                'PrecioPromedioCompra': activo.get('ppc', 0),
+                'VariacionDiariaPct': activo.get('variacionDiaria', 0),
+                'ActivosComp': activo.get('comprometido', 0),
+                'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
+            }
+            
+            # Agregar a la lista correspondiente
+            if es_estadounidense:
+                activos_eeuu.append(activo_info)
+                st.text(f"Clasificado como EEUU: {simbolo} - ${valuacion:,.2f}")
+            else:
+                activos_argentinos.append(activo_info)
+                st.text(f"Clasificado como Argentina: {simbolo} - ${valuacion:,.2f}")
+                
+        except Exception as e:
+            st.text(f"Error procesando activo: {e}")
+            continue
         
         # Usar métricas unificadas como fuente única de verdad
         if metricas and 'metricas_globales' in metricas:
@@ -7011,9 +7058,23 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
             st.error("❌ No se pudo renovar el token. Por favor, vuelva a autenticarse.")
             return
     
-    # Obtener portafolios de Argentina y Estados Unidos
-    portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
-    portafolio_us = obtener_portafolio_por_pais(token_acceso, 'estados_unidos')
+    # Obtener portafolios usando endpoint de asesor (que funciona)
+    st.text("Obteniendo portafolios con endpoint de asesor...")
+    
+    # Obtener cliente seleccionado
+    cliente_actual = st.session_state.get('cliente_seleccionado')
+    if not cliente_actual:
+        st.error("No hay cliente seleccionado")
+        return
+    
+    id_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id'))
+    if not id_cliente:
+        st.error("No se pudo obtener ID del cliente")
+        return
+    
+    # Obtener portafolios usando endpoint de asesor
+    portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+    portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
     
     # Debug: Mostrar qué se obtuvo
     st.text(f"Portafolio Argentina obtenido: {portafolio_ar is not None}")
