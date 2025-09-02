@@ -4614,7 +4614,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("""
     <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; margin-bottom: 20px;">
         <h1 style="color: #333; font-size: 28px; margin: 0;">Análisis de Portafolio</h1>
-        <p style="color: #666; margin: 5px 0 0 0;">Métricas unificadas y análisis de riesgo</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -4732,7 +4731,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * precio_unitario) / 100.0
                             ajuste_aplicado = "SÍ (÷100)"
-                            st.text(f"🔧 Ajuste por 100 aplicado para {simbolo}: ${cantidad_num * precio_unitario:,.2f} → ${valuacion:,.2f}")
                         else:
                             valuacion = cantidad_num * precio_unitario
                             ajuste_aplicado = "NO"
@@ -4765,7 +4763,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         if necesita_ajuste_por_100(simbolo, tipo):
                             valuacion = (cantidad_num * ultimo_precio) / 100.0
                             ajuste_api = "SÍ (÷100)"
-                            st.text(f"🔧 Ajuste por 100 (API) para {simbolo}: ${cantidad_num * ultimo_precio:,.2f} → ${valuacion:,.2f}")
                         else:
                             valuacion = cantidad_num * ultimo_precio
                             ajuste_api = "NO"
@@ -4839,10 +4836,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             # Agregar a la lista correspondiente
             if es_estadounidense:
                 activos_eeuu.append(activo_data)
-                st.text(f"Clasificado como EEUU: {simbolo} - ${activo_data['Valuación']:,.2f}")
             else:
                 activos_argentinos.append(activo_data)
-                st.text(f"Clasificado como Argentina: {simbolo} - ${activo_data['Valuación']:,.2f}")
         
         # Usar métricas unificadas como fuente única de verdad
         if metricas and 'metricas_globales' in metricas:
@@ -4954,55 +4949,214 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         if metricas:
             # SECCIÓN 3: ANÁLISIS DE RIESGO
-            st.markdown("### Análisis de Riesgo")
+            st.markdown("### 📊 Análisis de Riesgo y Diversificación")
             
+            # Crear DataFrame con métricas de riesgo y sus explicaciones
+            riesgo_data = []
+            
+            # Concentración
+            concentracion_pct = metricas['concentracion'] * 100
+            if metricas['concentracion'] < 0.3:
+                concentracion_status = "Baja"
+                concentracion_color = "🟢"
+            elif metricas['concentracion'] < 0.6:
+                concentracion_status = "Media"
+                concentracion_color = "🟡"
+            else:
+                concentracion_status = "Alta"
+                concentracion_color = "🔴"
+            
+            riesgo_data.append({
+                'Métrica': 'Concentración del Portafolio',
+                'Valor': f"{concentracion_pct:.1f}%",
+                'Estado': f"{concentracion_color} {concentracion_status}",
+                'Descripción': 'Índice de Herfindahl normalizado que mide la concentración de inversiones. Valores bajos indican mejor diversificación.',
+                'Interpretación': 'Menor concentración = Mayor diversificación = Menor riesgo'
+            })
+            
+            # Riesgo Total (Volatilidad)
+            riesgo_total = metricas['metricas_globales']['retorno_ponderado']
+            if riesgo_total < 10:
+                riesgo_status = "Bajo"
+                riesgo_color = "🟢"
+            elif riesgo_total < 20:
+                riesgo_status = "Moderado"
+                riesgo_color = "🟡"
+            else:
+                riesgo_status = "Alto"
+                riesgo_color = "🔴"
+            
+            riesgo_data.append({
+                'Métrica': 'Volatilidad Anual',
+                'Valor': f"{riesgo_total:.1f}%",
+                'Estado': f"{riesgo_color} {riesgo_status}",
+                'Descripción': 'Medida de la variabilidad de los retornos del portafolio en un año. Indica qué tan volátil es la inversión.',
+                'Interpretación': 'Menor volatilidad = Mayor estabilidad = Menor riesgo de pérdidas'
+            })
+            
+            # Retorno Esperado
+            retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
+            if retorno_ponderado > 0:
+                retorno_status = "Positivo"
+                retorno_color = "🟢"
+            else:
+                retorno_status = "Negativo"
+                retorno_color = "🔴"
+            
+            riesgo_data.append({
+                'Métrica': 'Retorno Esperado Anual',
+                'Valor': f"{retorno_ponderado:+.1f}%",
+                'Estado': f"{retorno_color} {retorno_status}",
+                'Descripción': 'Retorno promedio esperado del portafolio basado en la ponderación de cada activo.',
+                'Interpretación': 'Retorno positivo = Ganancia esperada, Retorno negativo = Pérdida esperada'
+            })
+            
+            # Ratio de Sharpe (si está disponible)
+            if 'sharpe_ratio' in metricas['metricas_globales']:
+                sharpe = metricas['metricas_globales']['sharpe_ratio']
+                if sharpe > 1:
+                    sharpe_status = "Excelente"
+                    sharpe_color = "🟢"
+                elif sharpe > 0.5:
+                    sharpe_status = "Bueno"
+                    sharpe_color = "🟡"
+                else:
+                    sharpe_status = "Bajo"
+                    sharpe_color = "🔴"
+                
+                riesgo_data.append({
+                    'Métrica': 'Ratio de Sharpe',
+                    'Valor': f"{sharpe:.2f}",
+                    'Estado': f"{sharpe_color} {sharpe_status}",
+                    'Descripción': 'Mide el retorno ajustado por riesgo. Valores > 1 indican buen rendimiento ajustado por riesgo.',
+                    'Interpretación': 'Mayor ratio = Mejor rendimiento ajustado por riesgo'
+                })
+            
+            # Crear DataFrame y mostrarlo
+            df_riesgo = pd.DataFrame(riesgo_data)
+            
+            # Mostrar métricas principales en cards
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                concentracion_pct = metricas['concentracion'] * 100
-                st.metric("Concentración", f"{concentracion_pct:.1f}%")
-                st.text("Índice de Herfindahl normalizado")
+                st.metric(
+                    "Concentración", 
+                    f"{concentracion_pct:.1f}%",
+                    delta=f"{concentracion_status}",
+                    delta_color="normal" if concentracion_status == "Baja" else "inverse"
+                )
             
             with col2:
-                riesgo_total = metricas['metricas_globales']['riesgo_total']
-                st.metric("Riesgo Total", f"{riesgo_total:.1f}%")
-                st.text("Volatilidad anual del portafolio")
+                st.metric(
+                    "Volatilidad Anual", 
+                    f"{riesgo_total:.1f}%",
+                    delta=f"{riesgo_status}",
+                    delta_color="normal" if riesgo_status == "Bajo" else "inverse"
+                )
             
             with col3:
-                if metricas['concentracion'] < 0.3:
-                    concentracion_status = "Baja"
-                elif metricas['concentracion'] < 0.6:
-                    concentracion_status = "Media"
-                else:
-                    concentracion_status = "Alta"
-                
-                st.metric("Nivel de Concentración", concentracion_status)
-                st.text("Evaluación de diversificación")
+                st.metric(
+                    "Retorno Esperado", 
+                    f"{retorno_ponderado:+.1f}%",
+                    delta=f"{retorno_status}",
+                    delta_color="normal" if retorno_status == "Positivo" else "inverse"
+                )
+            
+            # Mostrar tabla detallada con explicaciones
+            st.markdown("#### 📋 Detalle de Métricas de Riesgo")
+            st.dataframe(
+                df_riesgo[['Métrica', 'Valor', 'Estado', 'Descripción', 'Interpretación']],
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Agregar información adicional sobre interpretación
+            st.markdown("---")
+            st.markdown("""
+            **💡 Guía de Interpretación:**
+            - **🟢 Verde**: Indicadores positivos o de bajo riesgo
+            - **🟡 Amarillo**: Indicadores moderados o de atención
+            - **🔴 Rojo**: Indicadores de alto riesgo o negativos
+            """)
             
             # SECCIÓN 4: PROYECCIONES DE RENDIMIENTO
-            st.markdown("### Proyecciones de Rendimiento")
+            st.markdown("### 📈 Proyecciones de Rendimiento y Escenarios")
             
+            # Crear DataFrame con proyecciones
+            proyecciones_data = []
+            
+            retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
+            riesgo_total = metricas['metricas_globales']['riesgo_total']
+            
+            # Escenario Optimista (95% de confianza)
+            optimista_pct = retorno_ponderado + (riesgo_total * 1.645)
+            proyecciones_data.append({
+                'Escenario': 'Optimista (95% confianza)',
+                'Retorno Esperado': f"{optimista_pct:+.1f}%",
+                'Probabilidad': '5%',
+                'Descripción': 'Mejor escenario esperado con 95% de confianza estadística',
+                'Interpretación': 'Retorno máximo probable en condiciones favorables'
+            })
+            
+            # Retorno Esperado Base
+            proyecciones_data.append({
+                'Escenario': 'Retorno Esperado Base',
+                'Retorno Esperado': f"{retorno_ponderado:+.1f}%",
+                'Probabilidad': '50%',
+                'Descripción': 'Retorno promedio esperado del portafolio',
+                'Interpretación': 'Resultado más probable en condiciones normales'
+            })
+            
+            # Escenario Pesimista (5% de confianza)
+            pesimista_pct = retorno_ponderado - (riesgo_total * 1.645)
+            proyecciones_data.append({
+                'Escenario': 'Pesimista (5% confianza)',
+                'Retorno Esperado': f"{pesimista_pct:+.1f}%",
+                'Probabilidad': '5%',
+                'Descripción': 'Peor escenario esperado con 95% de confianza estadística',
+                'Interpretación': 'Retorno mínimo probable en condiciones adversas'
+            })
+            
+            # Crear DataFrame y mostrarlo
+            df_proyecciones = pd.DataFrame(proyecciones_data)
+            
+            # Mostrar métricas principales en cards
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
-                st.metric("Retorno Esperado Anual", f"{retorno_ponderado:+.1f}%")
-                st.text("Retorno ponderado del portafolio")
+                st.metric(
+                    "Escenario Optimista", 
+                    f"{optimista_pct:+.1f}%",
+                    delta="95% confianza",
+                    delta_color="normal"
+                )
             
             with col2:
-                retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
-                riesgo_total = metricas['metricas_globales']['riesgo_total']
-                optimista_pct = retorno_ponderado + (riesgo_total * 1.645)
-                st.metric("Escenario Optimista (95%)", f"{optimista_pct:+.1f}%")
-                st.text("Mejor escenario esperado")
+                st.metric(
+                    "Retorno Esperado", 
+                    f"{retorno_ponderado:+.1f}%",
+                    delta="50% probabilidad",
+                    delta_color="normal"
+                )
             
             with col3:
-                pesimista_pct = retorno_ponderado - (riesgo_total * 1.645)
-                st.metric("Escenario Pesimista (5%)", f"{pesimista_pct:+.1f}%")
-                st.text("Peor escenario esperado")
+                st.metric(
+                    "Escenario Pesimista", 
+                    f"{pesimista_pct:+.1f}%",
+                    delta="5% confianza",
+                    delta_color="inverse"
+                )
+            
+            # Mostrar tabla detallada
+            st.markdown("#### 📊 Detalle de Proyecciones")
+            st.dataframe(
+                df_proyecciones[['Escenario', 'Retorno Esperado', 'Probabilidad', 'Descripción', 'Interpretación']],
+                use_container_width=True,
+                hide_index=True
+            )
             
             # SECCIÓN 5: PROBABILIDADES
-            st.markdown("### Probabilidades")
+            st.markdown("### 🎯 Análisis de Probabilidades")
             
             # Calcular probabilidades basadas en distribución normal
             retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
@@ -5021,6 +5175,41 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             # Probabilidad de pérdida > 10%
             prob_perdida_10 = norm.cdf(-10, retorno_ponderado, riesgo_total) * 100
             
+            # Crear DataFrame con probabilidades
+            probabilidades_data = []
+            
+            probabilidades_data.append({
+                'Evento': 'Probabilidad de Ganancia',
+                'Probabilidad': f"{prob_ganancia:.1f}%",
+                'Descripción': 'Probabilidad de obtener un retorno positivo',
+                'Interpretación': 'Mayor probabilidad = Mayor confianza en ganancias'
+            })
+            
+            probabilidades_data.append({
+                'Evento': 'Probabilidad de Pérdida',
+                'Probabilidad': f"{prob_perdida:.1f}%",
+                'Descripción': 'Probabilidad de obtener un retorno negativo',
+                'Interpretación': 'Menor probabilidad = Menor riesgo de pérdidas'
+            })
+            
+            probabilidades_data.append({
+                'Evento': 'Ganancia > 10%',
+                'Probabilidad': f"{prob_ganancia_10:.1f}%",
+                'Descripción': 'Probabilidad de obtener ganancias superiores al 10%',
+                'Interpretación': 'Indica potencial de ganancias significativas'
+            })
+            
+            probabilidades_data.append({
+                'Evento': 'Pérdida > 10%',
+                'Probabilidad': f"{prob_perdida_10:.1f}%",
+                'Descripción': 'Probabilidad de sufrir pérdidas superiores al 10%',
+                'Interpretación': 'Indica riesgo de pérdidas significativas'
+            })
+            
+            # Crear DataFrame y mostrarlo
+            df_probabilidades = pd.DataFrame(probabilidades_data)
+            
+            # Mostrar métricas principales en cards
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
@@ -5034,6 +5223,14 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             
             with col4:
                 st.metric("Pérdida >10%", f"{prob_perdida_10:.1f}%")
+            
+            # Mostrar tabla detallada
+            st.markdown("#### 📊 Detalle de Probabilidades")
+            st.dataframe(
+                df_probabilidades[['Evento', 'Probabilidad', 'Descripción', 'Interpretación']],
+                use_container_width=True,
+                hide_index=True
+            )
             
 
         
