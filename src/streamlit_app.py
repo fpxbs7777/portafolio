@@ -7192,6 +7192,37 @@ def mostrar_series_historicas_movimientos(token_portador, id_cliente):
                 st.error(f"💥 Error al obtener series históricas: {e}")
                 st.exception(e)
 
+def mostrar_info_origen_datos(portafolio_argentina, portafolio_eeuu):
+    """
+    Muestra información sobre el origen de los datos del portafolio
+    """
+    metodos_argentina = portafolio_argentina.get('metodo', 'desconocido') if portafolio_argentina else 'error'
+    metodos_eeuu = portafolio_eeuu.get('metodo', 'desconocido') if portafolio_eeuu else 'error'
+    
+    # Determinar si se usaron datos alternativos
+    uso_alternativo = False
+    if metodos_argentina in ['alternativo_estado_cuenta', 'simulado'] or metodos_eeuu in ['alternativo_estado_cuenta', 'simulado']:
+        uso_alternativo = True
+    
+    if uso_alternativo:
+        st.info("📊 **Información sobre los datos mostrados:**")
+        
+        if metodos_argentina == 'simulado':
+            st.warning("🇦🇷 **Argentina**: Datos simulados (API no disponible)")
+        elif metodos_argentina == 'alternativo_estado_cuenta':
+            st.success("🇦🇷 **Argentina**: Datos del estado de cuenta")
+        else:
+            st.success("🇦🇷 **Argentina**: Datos directos de la API")
+        
+        if metodos_eeuu == 'simulado':
+            st.warning("🇺🇸 **Estados Unidos**: Datos simulados (API no disponible)")
+        elif metodos_eeuu == 'alternativo_estado_cuenta':
+            st.success("🇺🇸 **Estados Unidos**: Datos del estado de cuenta")
+        else:
+            st.success("🇺🇸 **Estados Unidos**: Datos directos de la API")
+        
+        st.info("💡 **Nota**: Los datos alternativos permiten que la aplicación funcione, pero pueden no reflejar la posición exacta actual.")
+
 def obtener_portafolio_por_pais_mejorado(token_portador, pais):
     """
     Obtiene el portafolio usando el nuevo endpoint /api/v2/portafolio/{pais}
@@ -7227,26 +7258,243 @@ def obtener_portafolio_por_pais_mejorado(token_portador, pais):
         elif response.status_code == 401:
             print(f"❌ Error 401: No autorizado para {pais}")
             print(f"📝 Respuesta del servidor: {response.text}")
-            return None
+            # Intentar método alternativo
+            return obtener_portafolio_alternativo_mejorado(token_portador, pais)
             
         elif response.status_code == 403:
             print(f"❌ Error 403: Prohibido para {pais}")
-            return None
+            # Intentar método alternativo
+            return obtener_portafolio_alternativo_mejorado(token_portador, pais)
             
         else:
             print(f"❌ Error HTTP {response.status_code} para {pais}")
             print(f"📝 Respuesta del servidor: {response.text}")
-            return None
+            # Intentar método alternativo
+            return obtener_portafolio_alternativo_mejorado(token_portador, pais)
             
     except requests.exceptions.Timeout:
         print(f"⏰ Timeout al obtener portafolio de {pais}")
-        return None
+        return obtener_portafolio_alternativo_mejorado(token_portador, pais)
     except requests.exceptions.RequestException as e:
         print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
-        return None
+        return obtener_portafolio_alternativo_mejorado(token_portador, pais)
     except Exception as e:
         print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
-        return None
+        return obtener_portafolio_alternativo_mejorado(token_portador, pais)
+
+def obtener_portafolio_alternativo_mejorado(token_portador, pais):
+    """
+    Método alternativo para obtener datos del portafolio cuando el endpoint principal falla
+    """
+    try:
+        print(f"🔄 Usando método alternativo para {pais}")
+        
+        # Intentar obtener datos del estado de cuenta
+        estado_cuenta = obtener_estado_cuenta(token_portador)
+        if not estado_cuenta:
+            print(f"❌ No se pudo obtener estado de cuenta para {pais}")
+            return crear_portafolio_simulado(pais)
+        
+        # Crear portafolio basado en estado de cuenta
+        portafolio_alternativo = {
+            'pais': pais,
+            'activos': [],
+            'metodo': 'alternativo_estado_cuenta'
+        }
+        
+        # Extraer información de las cuentas
+        cuentas = estado_cuenta.get('cuentas', [])
+        for cuenta in cuentas:
+            if cuenta.get('estado') == 'operable':
+                tipo_cuenta = cuenta.get('tipo', '')
+                moneda = cuenta.get('moneda', '').lower()
+                total = float(cuenta.get('total', 0))
+                titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
+                disponible = float(cuenta.get('disponible', 0))
+                
+                # Filtrar por país basado en la moneda y tipo de cuenta
+                es_pais_correcto = False
+                if pais.lower() in ['argentina', 'argentina']:
+                    es_pais_correcto = 'peso' in moneda or 'argentina' in tipo_cuenta.lower()
+                elif pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu']:
+                    es_pais_correcto = 'dolar' in moneda or 'estados' in tipo_cuenta.lower()
+                
+                if es_pais_correcto and (total > 0 or titulos_valorizados > 0):
+                    # Crear activos basados en datos reales
+                    if titulos_valorizados > 0:
+                        activo_titulos = {
+                            'cantidad': 1,
+                            'valorizado': titulos_valorizados,
+                            'ultimoPrecio': titulos_valorizados,
+                            'ppc': titulos_valorizados,
+                            'comprometido': 0,
+                            'variacionDiaria': 0,
+                            'gananciaPorcentaje': 0,
+                            'gananciaDinero': 0,
+                            'puntosVariacion': 0,
+                            'titulo': {
+                                'simbolo': f"TITULOS_{moneda[:3].upper()}",
+                                'descripcion': f"Títulos Valorizados - {tipo_cuenta}",
+                                'pais': pais,
+                                'mercado': 'BCBA' if 'peso' in moneda else 'NYSE',
+                                'tipo': 'acciones' if 'peso' in moneda else 'stocks',
+                                'plazo': 't0',
+                                'moneda': moneda
+                            },
+                            'parking': {
+                                'disponibleInmediato': 0
+                            }
+                        }
+                        portafolio_alternativo['activos'].append(activo_titulos)
+                    
+                    if disponible > 0:
+                        activo_disponible = {
+                            'cantidad': 1,
+                            'valorizado': disponible,
+                            'ultimoPrecio': disponible,
+                            'ppc': disponible,
+                            'comprometido': 0,
+                            'variacionDiaria': 0,
+                            'gananciaPorcentaje': 0,
+                            'gananciaDinero': 0,
+                            'puntosVariacion': 0,
+                            'titulo': {
+                                'simbolo': f"DISP_{moneda[:3].upper()}",
+                                'descripcion': f"Disponible - {tipo_cuenta}",
+                                'pais': pais,
+                                'mercado': 'BCBA' if 'peso' in moneda else 'NYSE',
+                                'tipo': 'efectivo',
+                                'plazo': 't0',
+                                'moneda': moneda
+                            },
+                            'parking': {
+                                'disponibleInmediato': disponible
+                            }
+                        }
+                        portafolio_alternativo['activos'].append(activo_disponible)
+        
+        if not portafolio_alternativo['activos']:
+            print(f"⚠️ No se encontraron activos para {pais} en el estado de cuenta")
+            return crear_portafolio_simulado(pais)
+        
+        print(f"✅ Portafolio alternativo creado para {pais}: {len(portafolio_alternativo['activos'])} activos")
+        return portafolio_alternativo
+        
+    except Exception as e:
+        print(f"💥 Error en método alternativo para {pais}: {e}")
+        return crear_portafolio_simulado(pais)
+
+def crear_portafolio_simulado(pais):
+    """
+    Crea un portafolio simulado cuando no se pueden obtener datos reales
+    """
+    print(f"🎭 Creando portafolio simulado para {pais}")
+    
+    # Activos simulados más realistas
+    if pais.lower() in ['argentina', 'argentina']:
+        activos_simulados = [
+            {
+                'cantidad': 100,
+                'valorizado': 50000,
+                'ultimoPrecio': 500,
+                'ppc': 480,
+                'comprometido': 0,
+                'variacionDiaria': 2.5,
+                'gananciaPorcentaje': 4.2,
+                'gananciaDinero': 2000,
+                'puntosVariacion': 12,
+                'titulo': {
+                    'simbolo': 'GGAL',
+                    'descripcion': 'Grupo Galicia S.A.',
+                    'pais': 'Argentina',
+                    'mercado': 'BCBA',
+                    'tipo': 'acciones',
+                    'plazo': 't0',
+                    'moneda': 'peso_Argentino'
+                },
+                'parking': {
+                    'disponibleInmediato': 0
+                }
+            },
+            {
+                'cantidad': 50,
+                'valorizado': 25000,
+                'ultimoPrecio': 500,
+                'ppc': 520,
+                'comprometido': 0,
+                'variacionDiaria': -1.8,
+                'gananciaPorcentaje': -3.8,
+                'gananciaDinero': -1000,
+                'puntosVariacion': -9,
+                'titulo': {
+                    'simbolo': 'YPF',
+                    'descripcion': 'YPF S.A.',
+                    'pais': 'Argentina',
+                    'mercado': 'BCBA',
+                    'tipo': 'acciones',
+                    'plazo': 't0',
+                    'moneda': 'peso_Argentino'
+                },
+                'parking': {
+                    'disponibleInmediato': 0
+                }
+            }
+        ]
+    else:  # Estados Unidos
+        activos_simulados = [
+            {
+                'cantidad': 10,
+                'valorizado': 1500,
+                'ultimoPrecio': 150,
+                'ppc': 145,
+                'comprometido': 0,
+                'variacionDiaria': 3.3,
+                'gananciaPorcentaje': 3.4,
+                'gananciaDinero': 50,
+                'puntosVariacion': 5,
+                'titulo': {
+                    'simbolo': 'AAPL',
+                    'descripcion': 'Apple Inc.',
+                    'pais': 'Estados Unidos',
+                    'mercado': 'NYSE',
+                    'tipo': 'stocks',
+                    'plazo': 't0',
+                    'moneda': 'dolar_Estadounidense'
+                },
+                'parking': {
+                    'disponibleInmediato': 0
+                }
+            },
+            {
+                'cantidad': 5,
+                'valorizado': 2500,
+                'ultimoPrecio': 500,
+                'ppc': 480,
+                'comprometido': 0,
+                'variacionDiaria': 4.2,
+                'gananciaPorcentaje': 4.2,
+                'gananciaDinero': 100,
+                'puntosVariacion': 20,
+                'titulo': {
+                    'simbolo': 'GOOGL',
+                    'descripcion': 'Alphabet Inc.',
+                    'pais': 'Estados Unidos',
+                    'mercado': 'NYSE',
+                    'tipo': 'stocks',
+                    'plazo': 't0',
+                    'moneda': 'dolar_Estadounidense'
+                },
+                'parking': {
+                    'disponibleInmediato': 0
+                }
+            }
+        ]
+    
+    return {
+        'pais': pais,
+        'activos': activos_simulados,
+        'metodo': 'simulado'
+    }
 
 def mostrar_resumen_portafolio_mejorado(token_portador, id_cliente=None):
     """
@@ -7271,6 +7519,9 @@ def mostrar_resumen_portafolio_mejorado(token_portador, id_cliente=None):
     with st.spinner("📊 Obteniendo portafolios..."):
         portafolio_argentina = obtener_portafolio_por_pais_mejorado(token_portador, 'argentina')
         portafolio_eeuu = obtener_portafolio_por_pais_mejorado(token_portador, 'estados_unidos')
+    
+    # Mostrar información sobre el origen de los datos
+    mostrar_info_origen_datos(portafolio_argentina, portafolio_eeuu)
     
     # Procesar datos de Argentina
     datos_argentina = procesar_portafolio_pais(portafolio_argentina, "Argentina", token_portador)
