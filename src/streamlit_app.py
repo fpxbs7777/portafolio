@@ -7031,13 +7031,14 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
         "💱 Cotizaciones",
         "🔄 Rebalanceo",
-        "💵 Conversión USD"
+        "💵 Conversión USD",
+        "🌍 Distribución Mejorada"
     ])
 
     with tab1:
@@ -7058,7 +7059,9 @@ def mostrar_analisis_portafolio():
         # Obtener portafolio combinado (Argentina + EEUU)
         with st.spinner("Obteniendo portafolios combinados..."):
             portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
-            portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
+            
+            # Usar la función mejorada para obtener portafolio estadounidense
+            portafolio_us = obtener_portafolio_estados_unidos_mejorado(token_acceso)
             
             # Mostrar información sobre el estado de los portafolios
             if portafolio_ar and portafolio_ar.get('activos'):
@@ -7067,13 +7070,26 @@ def mostrar_analisis_portafolio():
                 st.warning("⚠️ No se pudo obtener el portafolio argentino")
             
             if portafolio_us and portafolio_us.get('activos'):
+                metodo_us = portafolio_us.get('metodo', 'estándar')
                 st.success(f"✅ Portafolio Estadounidense: {len(portafolio_us['activos'])} activos")
+                st.info(f"🔍 Método utilizado: {metodo_us}")
+                
+                # Mostrar información adicional según el método
+                if metodo_us == 'simulado_ejemplo':
+                    st.warning("⚠️ **Datos Simulados**: Los activos estadounidenses mostrados son simulados debido a limitaciones de acceso")
+                    st.info("💡 **Para obtener datos reales:**")
+                    st.info("• Contacta a IOL para habilitar APIs de portafolio EEUU")
+                    st.info("• Verifica que tu cuenta tenga permisos para este endpoint")
+                elif metodo_us == 'extraido_estado_cuenta':
+                    st.success("✅ **Datos Reales**: Extraídos desde el estado de cuenta")
             else:
-                st.info("ℹ️ **Portafolio Estadounidense**: No disponible o sin permisos")
-                st.info("💡 **Posibles causas:**")
-                st.info("• Las APIs no están habilitadas para portafolio EEUU")
-                st.info("• Necesitas permisos específicos para este endpoint")
-                st.info("• La aplicación usará solo el portafolio argentino")
+                st.warning("⚠️ **Portafolio Estadounidense**: No disponible")
+                st.info("💡 **La aplicación intentó múltiples métodos:**")
+                st.info("• Endpoint estándar (401 - Sin autorización)")
+                st.info("• Endpoint de asesor")
+                st.info("• Extracción desde estado de cuenta")
+                st.info("• Datos simulados")
+                st.info("• Ningún método funcionó")
             
             # Combinar portafolios
             portafolio_combinado = {'activos': []}
@@ -7230,6 +7246,9 @@ def mostrar_analisis_portafolio():
     
     with tab6:
         mostrar_conversion_usd(token_acceso, id_cliente)
+    
+    with tab7:
+        mostrar_distribucion_activos_mejorada()
 
 
 def mostrar_conversion_usd(token_acceso, id_cliente):
