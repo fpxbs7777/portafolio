@@ -840,48 +840,6 @@ def obtener_tasa_mep_alternativa(token_portador) -> float:
         print(f"💥 Error en método alternativo MEP: {e}")
         return None
 
-def validar_endpoint_movimientos(token_portador):
-    """
-    Valida si el endpoint de movimientos está disponible y funcionando
-    """
-    if not token_portador:
-        return False, "Token no válido"
-    
-    try:
-        url_test = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
-        headers = obtener_encabezado_autorizacion(token_portador)
-        
-        if not headers:
-            return False, "No se pudieron generar headers"
-        
-        # Hacer una petición de prueba con parámetros mínimos
-        payload_test = {
-            "clientes": [1],  # Cliente de prueba
-            "from": "2024-01-01T00:00:00.000Z",
-            "to": "2024-01-02T23:59:59.999Z",
-            "dateType": "fechaOperacion"
-        }
-        
-        response = requests.post(url_test, headers=headers, json=payload_test, timeout=10)
-        
-        if response.status_code == 200:
-            return True, "Endpoint funcionando correctamente"
-        elif response.status_code == 401:
-            return False, "Problema de autorización"
-        elif response.status_code == 403:
-            return False, "Acceso prohibido - sin permisos de asesor"
-        elif response.status_code == 500:
-            return False, "Error interno del servidor"
-        else:
-            return False, f"Error HTTP {response.status_code}"
-            
-    except requests.exceptions.Timeout:
-        return False, "Timeout en la conexión"
-    except requests.exceptions.RequestException as e:
-        return False, f"Error de conexión: {str(e)}"
-    except Exception as e:
-        return False, f"Error inesperado: {str(e)}"
-
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
@@ -997,16 +955,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         else:
             print(f"❌ Error HTTP {response.status_code} para movimientos")
             print(f"📝 Respuesta del servidor: {response.text}")
-            print(f"📋 Payload enviado: {payload}")
-            print(f"🔑 Headers utilizados: {headers}")
-            
-            if response.status_code == 500:
-                print(f"❌ Error del servidor ({response.status_code}) para movimientos")
-                # No mostrar error al usuario, solo log para debugging
-                # El sistema usará fallbacks automáticamente
-            else:
-                st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
-            
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
             return None
             
     except requests.exceptions.Timeout:
@@ -1094,182 +1043,6 @@ def obtener_movimientos_completos(token_portador, id_cliente):
             ]
         }
 
-def obtener_movimientos_con_series_historicas(token_portador, id_cliente, fecha_desde, fecha_hasta):
-    """
-    Obtiene movimientos reales basados en series históricas de los activos del portafolio
-    """
-    print("📈 Obteniendo movimientos con series históricas reales")
-    
-    try:
-        # Obtener estado de cuenta y portafolio
-        estado_cuenta = obtener_estado_cuenta(token_portador, id_cliente)
-        if not estado_cuenta:
-            print("❌ No se pudo obtener estado de cuenta")
-            return None
-        
-        # Obtener portafolio detallado
-        portafolio_ar = obtener_portafolio_por_pais(token_portador, 'argentina')
-        portafolio_us = obtener_portafolio_por_pais(token_portador, 'estadosUnidos')
-        
-        movimientos_reales = {
-            'metodo': 'series_historicas_reales',
-            'fecha_desde': fecha_desde.isoformat(),
-            'fecha_hasta': fecha_hasta.isoformat(),
-            'movimientos': []
-        }
-        
-        # Procesar activos argentinos con series históricas
-        if portafolio_ar and 'activos' in portafolio_ar:
-            print("🇦🇷 Procesando activos argentinos...")
-            for activo in portafolio_ar['activos']:
-                try:
-                    titulo = activo.get('titulo', {})
-                    simbolo = titulo.get('simbolo', '')
-                    descripcion = titulo.get('descripcion', '')
-                    cantidad = activo.get('cantidad', 0)
-                    
-                    if simbolo and simbolo != 'N/A' and cantidad > 0:
-                        # Obtener serie histórica del activo
-                        serie_historica = obtener_serie_historica(
-                            token_portador, 
-                            simbolo, 
-                            'bCBA',  # Mercado argentino
-                            fecha_desde.strftime('%Y-%m-%d'),
-                            fecha_hasta.strftime('%Y-%m-%d'),
-                            'SinAjustar'
-                        )
-                        
-                        if serie_historica and len(serie_historica) > 0:
-                            # Crear movimientos basados en la serie histórica
-                            for i, (fecha, precio) in enumerate(zip(serie_historica['fechas'], serie_historica['precios'])):
-                                if i < 10:  # Limitar a los últimos 10 puntos para no saturar
-                                    movimiento = {
-                                        'fechaOperacion': fecha.strftime('%Y-%m-%d'),
-                                        'simbolo': simbolo,
-                                        'tipo': 'posicion_historica',
-                                        'cantidad': cantidad,
-                                        'precio': precio,
-                                        'moneda': 'peso_Argentino',
-                                        'descripcion': f"Posición histórica en {descripcion}",
-                                        'valor': cantidad * precio,
-                                        'tipoCuenta': 'inversion_Argentina_Pesos',
-                                        'estado': 'CONFIRMADO',
-                                        'pais': 'argentina'
-                                    }
-                                    movimientos_reales['movimientos'].append(movimiento)
-                        else:
-                            # Si no hay serie histórica, crear movimiento con precio actual
-                            valuacion = activo.get('valuacion', 0)
-                            if valuacion > 0:
-                                movimiento = {
-                                    'fechaOperacion': fecha_hasta.strftime('%Y-%m-%d'),
-                                    'simbolo': simbolo,
-                                    'tipo': 'posicion_actual',
-                                    'cantidad': cantidad,
-                                    'precio': valuacion / cantidad if cantidad > 0 else 0,
-                                    'moneda': 'peso_Argentino',
-                                    'descripcion': f"Posición actual en {descripcion}",
-                                    'valor': valuacion,
-                                    'tipoCuenta': 'inversion_Argentina_Pesos',
-                                    'estado': 'CONFIRMADO',
-                                    'pais': 'argentina'
-                                }
-                                movimientos_reales['movimientos'].append(movimiento)
-                                
-                except Exception as e:
-                    print(f"⚠️ Error procesando activo argentino {simbolo}: {e}")
-                    continue
-        
-        # Procesar activos estadounidenses con series históricas
-        if portafolio_us and 'activos' in portafolio_us:
-            print("🇺🇸 Procesando activos estadounidenses...")
-            for activo in portafolio_us['activos']:
-                try:
-                    titulo = activo.get('titulo', {})
-                    simbolo = titulo.get('simbolo', '')
-                    descripcion = titulo.get('descripcion', '')
-                    cantidad = activo.get('cantidad', 0)
-                    
-                    if simbolo and simbolo != 'N/A' and cantidad > 0:
-                        # Obtener serie histórica del activo
-                        serie_historica = obtener_serie_historica(
-                            token_portador, 
-                            simbolo, 
-                            'nYSE',  # Mercado estadounidense
-                            fecha_desde.strftime('%Y-%m-%d'),
-                            fecha_hasta.strftime('%Y-%m-%d'),
-                            'SinAjustar'
-                        )
-                        
-                        if serie_historica and len(serie_historica) > 0:
-                            # Crear movimientos basados en la serie histórica
-                            for i, (fecha, precio) in enumerate(zip(serie_historica['fechas'], serie_historica['precios'])):
-                                if i < 10:  # Limitar a los últimos 10 puntos
-                                    movimiento = {
-                                        'fechaOperacion': fecha.strftime('%Y-%m-%d'),
-                                        'simbolo': simbolo,
-                                        'tipo': 'posicion_historica',
-                                        'cantidad': cantidad,
-                                        'precio': precio,
-                                        'moneda': 'dolar_Estadounidense',
-                                        'descripcion': f"Posición histórica en {descripcion}",
-                                        'valor': cantidad * precio,
-                                        'tipoCuenta': 'inversion_EstadosUnidos_Dolares',
-                                        'estado': 'CONFIRMADO',
-                                        'pais': 'estadosUnidos'
-                                    }
-                                    movimientos_reales['movimientos'].append(movimiento)
-                        else:
-                            # Si no hay serie histórica, crear movimiento con precio actual
-                            valuacion = activo.get('valuacion', 0)
-                            if valuacion > 0:
-                                movimiento = {
-                                    'fechaOperacion': fecha_hasta.strftime('%Y-%m-%d'),
-                                    'simbolo': simbolo,
-                                    'tipo': 'posicion_actual',
-                                    'cantidad': cantidad,
-                                    'precio': valuacion / cantidad if cantidad > 0 else 0,
-                                    'moneda': 'dolar_Estadounidense',
-                                    'descripcion': f"Posición actual en {descripcion}",
-                                    'valor': valuacion,
-                                    'tipoCuenta': 'inversion_EstadosUnidos_Dolares',
-                                    'estado': 'CONFIRMADO',
-                                    'pais': 'estadosUnidos'
-                                }
-                                movimientos_reales['movimientos'].append(movimiento)
-                                
-                except Exception as e:
-                    print(f"⚠️ Error procesando activo estadounidense {simbolo}: {e}")
-                    continue
-        
-        # Agregar movimientos de saldos disponibles
-        if estado_cuenta and 'cuentas' in estado_cuenta:
-            for cuenta in estado_cuenta['cuentas']:
-                if cuenta.get('estado') == 'operable':
-                    disponible = float(cuenta.get('disponible', 0))
-                    if disponible > 0:
-                        movimiento_disponible = {
-                            'fechaOperacion': fecha_hasta.strftime('%Y-%m-%d'),
-                            'simbolo': 'DISPONIBLE',
-                            'tipo': 'saldo_disponible',
-                            'cantidad': 1,
-                            'precio': disponible,
-                            'moneda': cuenta.get('moneda', 'peso_Argentino'),
-                            'descripcion': f"Saldo disponible en {cuenta.get('tipo', '')}",
-                            'valor': disponible,
-                            'tipoCuenta': cuenta.get('tipo', 'inversion_Argentina_Pesos'),
-                            'estado': 'CONFIRMADO',
-                            'pais': 'argentina' if 'peso' in cuenta.get('moneda', '').lower() else 'estadosUnidos'
-                        }
-                        movimientos_reales['movimientos'].append(movimiento_disponible)
-        
-        print(f"✅ Movimientos con series históricas creados: {len(movimientos_reales['movimientos'])} entradas")
-        return movimientos_reales
-        
-    except Exception as e:
-        print(f"💥 Error al obtener movimientos con series históricas: {e}")
-        return None
-
 def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta):
     """
     Método alternativo para obtener movimientos cuando el endpoint de asesor falla.
@@ -1286,7 +1059,7 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
         
         # Intentar obtener portafolio real para información más detallada
         portafolio_ar = obtener_portafolio_por_pais(token_portador, 'argentina')
-        portafolio_us = obtener_portafolio_por_pais(token_portador, 'estadosUnidos')
+        portafolio_us = obtener_portafolio_por_pais(token_portador, 'estados_unidos')
         
         # Crear movimientos basados en datos reales disponibles
         movimientos_simulados = {
@@ -1351,6 +1124,76 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
                         'tipoCuenta': tipo_cuenta
                     }
                     movimientos_simulados['movimientos'].append(movimiento_disponible)
+        
+        # Agregar activos del portafolio argentino si están disponibles
+        if portafolio_ar and 'activos' in portafolio_ar:
+            for activo in portafolio_ar['activos']:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', '')
+                descripcion = titulo.get('descripcion', '')
+                cantidad = activo.get('cantidad', 0)
+                
+                if simbolo and simbolo != 'N/A' and cantidad > 0:
+                    # Buscar valuación del activo
+                    valuacion = 0
+                    for campo in ['valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal', 'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido', 'valorMercado', 'valorTotal', 'importe']:
+                        if campo in activo and activo[campo] is not None:
+                            try:
+                                val = float(activo[campo])
+                                if val > 0:
+                                    valuacion = val
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    if valuacion > 0:
+                        movimiento_activo = {
+                            'fechaOperacion': fecha_hasta.isoformat(),
+                            'simbolo': simbolo,
+                            'tipo': 'activo_portafolio',
+                            'cantidad': cantidad,
+                            'precio': valuacion / cantidad if cantidad > 0 else 0,
+                            'moneda': 'peso_Argentino',
+                            'descripcion': f"{descripcion} ({simbolo})",
+                            'valor': valuacion,
+                            'tipoCuenta': 'inversion_Argentina_Pesos'
+                        }
+                        movimientos_simulados['movimientos'].append(movimiento_activo)
+        
+        # Agregar activos del portafolio estadounidense si están disponibles
+        if portafolio_us and 'activos' in portafolio_us:
+            for activo in portafolio_us['activos']:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', '')
+                descripcion = titulo.get('descripcion', '')
+                cantidad = activo.get('cantidad', 0)
+                
+                if simbolo and simbolo != 'N/A' and cantidad > 0:
+                    # Buscar valuación del activo
+                    valuacion = 0
+                    for campo in ['valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal', 'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual', 'montoInvertido', 'valorMercado', 'valorTotal', 'importe']:
+                        if campo in activo and activo[campo] is not None:
+                            try:
+                                val = float(activo[campo])
+                                if val > 0:
+                                    valuacion = val
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    if valuacion > 0:
+                        movimiento_activo = {
+                            'fechaOperacion': fecha_hasta.isoformat(),
+                            'simbolo': simbolo,
+                            'tipo': 'activo_portafolio_us',
+                            'cantidad': cantidad,
+                            'precio': valuacion / cantidad if cantidad > 0 else 0,
+                            'moneda': 'dolar_Estadounidense',
+                            'descripcion': f"{descripcion} ({simbolo})",
+                            'valor': valuacion,
+                            'tipoCuenta': 'inversion_Estados_Unidos_Dolares'
+                        }
+                        movimientos_simulados['movimientos'].append(movimiento_activo)
         
         # Si no hay movimientos, crear al menos uno de respaldo
         if not movimientos_simulados['movimientos']:
@@ -4369,6 +4212,20 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
     
     activos = portafolio.get('activos', [])
     if not activos:
+        st.warning("⚠️ **No se encontraron activos en el portafolio**")
+        st.info("💡 **Posibles causas:**")
+        st.info("• El portafolio está vacío")
+        st.info("• La API está en mantenimiento")
+        st.info("• Problemas de conectividad")
+        
+        # Intentar obtener datos del estado de cuenta como alternativa
+        st.info("🔄 **Intentando obtener datos del estado de cuenta...**")
+        estado_cuenta = obtener_estado_cuenta(token_portador)
+        if estado_cuenta:
+            st.success("✅ **Datos obtenidos del estado de cuenta**")
+            mostrar_resumen_estado_cuenta(estado_cuenta)
+        else:
+            st.error("❌ **No se pudieron obtener datos alternativos**")
         return
     
     # Si hay activos, procesarlos normalmente
@@ -5275,14 +5132,18 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     with col2:
         target_return = st.number_input(
             "Retorno Objetivo (anual):",
-            min_value=0.0, max_value=None, value=0.08, step=0.01,
-            help="Solo aplica para estrategia Markowitz (sin límite máximo)"
+            min_value=0.0, max_value=1.0, value=0.08, step=0.01,
+            help="Solo aplica para estrategia Markowitz"
         )
     
     with col3:
         show_frontier = st.checkbox("Mostrar Frontera Eficiente", value=True, key="show_frontier")
     
-    ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", key="execute_optimization", type="primary")
+    col1, col2 = st.columns(2)
+    with col1:
+        ejecutar_optimizacion = st.button("🚀 Ejecutar Optimización", key="execute_optimization", type="primary")
+    with col2:
+        ejecutar_frontier = st.button("📈 Calcular Frontera Eficiente", key="calculate_efficient_frontier")
     
     if ejecutar_optimizacion:
         with st.spinner("Ejecutando optimización..."):
@@ -5359,130 +5220,6 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
                             )
                             st.plotly_chart(fig_pie, use_container_width=True)
                         
-                        # MOSTRAR FRONTERA EFICIENTE AUTOMÁTICAMENTE
-                        if show_frontier:
-                            st.markdown("#### 📈 Frontera Eficiente y Comparación de Portafolios")
-                            with st.spinner("Calculando frontera eficiente y comparando portafolios..."):
-                                try:
-                                    # Calcular frontera eficiente
-                                    portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
-                                        target_return=target_return, include_min_variance=True
-                                    )
-                                    
-                                    if portfolios and returns and volatilities:
-                                        # Crear gráfico de frontera eficiente con portafolio actual
-                                        fig = go.Figure()
-                                        
-                                        # Línea de frontera eficiente
-                                        fig.add_trace(go.Scatter(
-                                            x=volatilities, y=returns,
-                                            mode='lines+markers',
-                                            name='Frontera Eficiente',
-                                            line=dict(color='#0d6efd', width=3),
-                                            marker=dict(size=6)
-                                        ))
-                                        
-                                        # Portafolios especiales
-                                        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#FFA500']
-                                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target', 'Portafolio Actual']
-                                        
-                                        for i, (label, portfolio) in enumerate(portfolios.items()):
-                                            if portfolio is not None:
-                                                fig.add_trace(go.Scatter(
-                                                    x=[portfolio.volatility_annual], 
-                                                    y=[portfolio.return_annual],
-                                                    mode='markers',
-                                                    name=labels[i] if i < len(labels) else label,
-                                                    marker=dict(size=12, color=colors[i % len(colors)])
-                                                ))
-                                        
-                                        # Agregar portafolio actual si está disponible
-                                        if hasattr(manager_inst, 'current_portfolio') and manager_inst.current_portfolio:
-                                            current_port = manager_inst.current_portfolio
-                                            fig.add_trace(go.Scatter(
-                                                x=[current_port.volatility_annual], 
-                                                y=[current_port.return_annual],
-                                                mode='markers',
-                                                name='Portafolio Actual',
-                                                marker=dict(size=15, color='#FFA500', symbol='star')
-                                            ))
-                                        
-                                        fig.update_layout(
-                                            title='Frontera Eficiente vs Portafolio Actual',
-                                            xaxis_title='Volatilidad Anual',
-                                            yaxis_title='Retorno Anual',
-                                            showlegend=True,
-                                            template='plotly_white',
-                                            height=600
-                                        )
-                                        
-                                        st.plotly_chart(fig, use_container_width=True)
-                                        
-                                        # Tabla comparativa de portafolios incluyendo el actual
-                                        st.markdown("#### 📊 Comparación Completa de Estrategias")
-                                        comparison_data = []
-                                        
-                                        # Agregar portafolio actual si está disponible
-                                        if hasattr(manager_inst, 'current_portfolio') and manager_inst.current_portfolio:
-                                            current_port = manager_inst.current_portfolio
-                                            comparison_data.append({
-                                                'Estrategia': 'Portafolio Actual',
-                                                'Retorno Anual': f"{current_port.return_annual:.2%}",
-                                                'Volatilidad Anual': f"{current_port.volatility_annual:.2%}",
-                                                'Sharpe Ratio': f"{current_port.sharpe_ratio:.4f}",
-                                                'VaR 95%': f"{current_port.var_95:.4f}",
-                                                'Skewness': f"{current_port.skewness:.4f}",
-                                                'Kurtosis': f"{current_port.kurtosis:.4f}"
-                                            })
-                                        
-                                        # Agregar portafolios optimizados
-                                        for label, portfolio in portfolios.items():
-                                            if portfolio is not None:
-                                                comparison_data.append({
-                                                    'Estrategia': label,
-                                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
-                                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
-                                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
-                                                    'VaR 95%': f"{portfolio.var_95:.4f}",
-                                                    'Skewness': f"{portfolio.skewness:.4f}",
-                                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
-                                                })
-                                        
-                                        if comparison_data:
-                                            df_comparison = pd.DataFrame(comparison_data)
-                                            st.dataframe(df_comparison, use_container_width=True)
-                                            
-                                            # Análisis de mejora potencial
-                                            if hasattr(manager_inst, 'current_portfolio') and manager_inst.current_portfolio:
-                                                st.markdown("#### 💡 Análisis de Mejora Potencial")
-                                                current_port = manager_inst.current_portfolio
-                                                
-                                                # Encontrar el mejor portafolio optimizado
-                                                best_optimized = None
-                                                best_sharpe = -999
-                                                
-                                                for portfolio in portfolios.values():
-                                                    if portfolio is not None and portfolio.sharpe_ratio > best_sharpe:
-                                                        best_sharpe = portfolio.sharpe_ratio
-                                                        best_optimized = portfolio
-                                                
-                                                if best_optimized:
-                                                    improvement_return = ((best_optimized.return_annual - current_port.return_annual) / current_port.return_annual) * 100
-                                                    improvement_risk = ((current_port.volatility_annual - best_optimized.volatility_annual) / current_port.volatility_annual) * 100
-                                                    improvement_sharpe = ((best_optimized.sharpe_ratio - current_port.sharpe_ratio) / current_port.sharpe_ratio) * 100
-                                                    
-                                                    col1, col2, col3 = st.columns(3)
-                                                    with col1:
-                                                        st.metric("Mejora en Retorno", f"{improvement_return:+.1f}%")
-                                                    with col2:
-                                                        st.metric("Reducción de Riesgo", f"{improvement_risk:+.1f}%")
-                                                    with col3:
-                                                        st.metric("Mejora Sharpe Ratio", f"{improvement_sharpe:+.1f}%")
-                                    else:
-                                        st.warning("⚠️ No se pudo calcular la frontera eficiente")
-                                except Exception as e:
-                                    st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
-                        
                     else:
                         st.error("❌ Error en la optimización")
                 else:
@@ -5491,7 +5228,82 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
             except Exception as e:
                 st.error(f"❌ Error durante la optimización: {str(e)}")
     
-    # Eliminar la sección del botón de frontera eficiente ya que ahora se muestra automáticamente
+    if ejecutar_frontier and show_frontier:
+        with st.spinner("Calculando frontera eficiente..."):
+            try:
+                manager_inst = PortfolioManager(activos_para_optimizacion, token_acceso, fecha_desde, fecha_hasta)
+                
+                if manager_inst.load_data():
+                    portfolios, returns, volatilities = manager_inst.compute_efficient_frontier(
+                        target_return=target_return, include_min_variance=True
+                    )
+                    
+                    if portfolios and returns and volatilities:
+                        st.success("✅ Frontera eficiente calculada")
+                        
+                        # Crear gráfico de frontera eficiente
+                        fig = go.Figure()
+                        
+                        # Línea de frontera eficiente
+                        fig.add_trace(go.Scatter(
+                            x=volatilities, y=returns,
+                            mode='lines+markers',
+                            name='Frontera Eficiente',
+                            line=dict(color='#0d6efd', width=3),
+                            marker=dict(size=6)
+                        ))
+                        
+                        # Portafolios especiales
+                        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
+                        labels = ['Min Var L1', 'Min Var L2', 'Pesos Iguales', 'Solo Largos', 'Markowitz', 'Markowitz Target']
+                        
+                        for i, (label, portfolio) in enumerate(portfolios.items()):
+                            if portfolio is not None:
+                                fig.add_trace(go.Scatter(
+                                    x=[portfolio.volatility_annual], 
+                                    y=[portfolio.return_annual],
+                                    mode='markers',
+                                    name=labels[i] if i < len(labels) else label,
+                                    marker=dict(size=12, color=colors[i % len(colors)])
+                                ))
+                        
+                        fig.update_layout(
+                            title='Frontera Eficiente del Portafolio',
+                            xaxis_title='Volatilidad Anual',
+                            yaxis_title='Retorno Anual',
+                            showlegend=True,
+                            template='plotly_white',
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tabla comparativa de portafolios
+                        st.markdown("#### 📊 Comparación de Estrategias")
+                        comparison_data = []
+                        for label, portfolio in portfolios.items():
+                            if portfolio is not None:
+                                comparison_data.append({
+                                    'Estrategia': label,
+                                    'Retorno Anual': f"{portfolio.return_annual:.2%}",
+                                    'Volatilidad Anual': f"{portfolio.volatility_annual:.2%}",
+                                    'Sharpe Ratio': f"{portfolio.sharpe_ratio:.4f}",
+                                    'VaR 95%': f"{portfolio.var_95:.4f}",
+                                    'Skewness': f"{portfolio.skewness:.4f}",
+                                    'Kurtosis': f"{portfolio.kurtosis:.4f}"
+                                })
+                        
+                        if comparison_data:
+                            df_comparison = pd.DataFrame(comparison_data)
+                            st.dataframe(df_comparison, use_container_width=True)
+                    
+                    else:
+                        st.error("❌ No se pudo calcular la frontera eficiente")
+                else:
+                    st.error("❌ No se pudieron cargar los datos históricos")
+                    
+            except Exception as e:
+                st.error(f"❌ Error calculando frontera eficiente: {str(e)}")
     
     # Información adicional extendida
     with st.expander("ℹ️ Información sobre las Estrategias"):
@@ -5531,197 +5343,87 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
-    # Verificar token antes de proceder
-    if not verificar_token_valido(token_acceso):
-        st.warning("⚠️ Token expirado. Renovando...")
-        nuevo_token = renovar_token(st.session_state.get('refresh_token'))
-        if nuevo_token:
-            st.session_state['token_acceso'] = nuevo_token
-            token_acceso = nuevo_token
-            st.success("✅ Token renovado")
-        else:
-            st.error("❌ No se pudo renovar el token")
-            return
+    with st.spinner("Obteniendo portafolio..."):
+        portafolio = obtener_portafolio(token_acceso, id_cliente)
     
-    # Obtener portafolios de ambos países
-    with st.spinner("📊 Obteniendo portafolios para análisis técnico..."):
-        portafolio_argentina = obtener_portafolio_por_pais_mejorado(token_acceso, 'argentina')
-        portafolio_eeuu = obtener_portafolio_por_pais_mejorado(token_acceso, 'estados_unidos')
-    
-    # Procesar activos de Argentina
-    activos_argentina = []
-    if portafolio_argentina and 'activos' in portafolio_argentina:
-        for activo in portafolio_argentina['activos']:
-            if activo.get('cantidad', 0) > 0:
-                titulo = activo.get('titulo', {})
-                activos_argentina.append({
-                    'simbolo': titulo.get('simbolo', ''),
-                    'descripcion': titulo.get('descripcion', ''),
-                    'pais': 'Argentina',
-                    'cantidad': activo.get('cantidad', 0),
-                    'valorizado': activo.get('valorizado', 0),
-                    'variacionDiaria': activo.get('variacionDiaria', 0),
-                    'gananciaPorcentaje': activo.get('gananciaPorcentaje', 0)
-                })
-    
-    # Procesar activos de Estados Unidos
-    activos_eeuu = []
-    if portafolio_eeuu and 'activos' in portafolio_eeuu:
-        for activo in portafolio_eeuu['activos']:
-            if activo.get('cantidad', 0) > 0:
-                titulo = activo.get('titulo', {})
-                activos_eeuu.append({
-                    'simbolo': titulo.get('simbolo', ''),
-                    'descripcion': titulo.get('descripcion', ''),
-                    'pais': 'Estados Unidos',
-                    'cantidad': activo.get('cantidad', 0),
-                    'valorizado': activo.get('valorizado', 0),
-                    'variacionDiaria': activo.get('variacionDiaria', 0),
-                    'gananciaPorcentaje': activo.get('gananciaPorcentaje', 0)
-                })
-    
-    # Combinar todos los activos
-    todos_los_activos = activos_argentina + activos_eeuu
-    
-    if not todos_los_activos:
-        st.warning("❌ No se encontraron activos en los portafolios")
-        st.info("💡 **Posibles causas:**")
-        st.info("• Los portafolios están vacíos")
-        st.info("• Problemas de conectividad con la API")
-        st.info("• Permisos insuficientes para acceder a los portafolios")
+    if not portafolio:
+        st.warning("No se pudo obtener el portafolio del cliente")
         return
     
-    # Mostrar resumen de activos disponibles
-    st.info(f"📊 **Activos disponibles para análisis técnico:** {len(todos_los_activos)}")
+    activos = portafolio.get('activos', [])
+    if not activos:
+        st.warning("El portafolio está vacío")
+        return
     
-    # Crear pestañas para cada país
-    tab_argentina, tab_eeuu, tab_todos = st.tabs(["🇦🇷 Argentina", "🇺🇸 Estados Unidos", "🌍 Todos"])
+    simbolos = []
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', '')
+        if simbolo:
+            simbolos.append(simbolo)
     
-    with tab_argentina:
-        if activos_argentina:
-            st.subheader("🇦🇷 Activos Argentina")
-            mostrar_lista_activos_analisis(activos_argentina, "Argentina")
-        else:
-            st.info("📊 No hay activos en el portafolio de Argentina")
+    if not simbolos:
+        st.warning("No se encontraron símbolos válidos")
+        return
     
-    with tab_eeuu:
-        if activos_eeuu:
-            st.subheader("🇺🇸 Activos Estados Unidos")
-            mostrar_lista_activos_analisis(activos_eeuu, "Estados Unidos")
-        else:
-            st.info("📊 No hay activos en el portafolio de Estados Unidos")
+    simbolo_seleccionado = st.selectbox(
+        "Seleccione un activo para análisis técnico:",
+        options=simbolos,
+        key="simbolo_analisis_tecnico"
+    )
     
-    with tab_todos:
-        if todos_los_activos:
-            st.subheader("🌍 Todos los Activos")
-            mostrar_lista_activos_analisis(todos_los_activos, "Todos")
-        else:
-            st.info("📊 No hay activos disponibles")
-
-def mostrar_lista_activos_analisis(activos, pais):
-    """
-    Muestra la lista de activos para análisis técnico
-    """
-    # Crear DataFrame para mostrar activos
-    df_activos = pd.DataFrame(activos)
-    
-    if not df_activos.empty:
-        # Formatear columnas
-        df_activos['Valorizado'] = df_activos['valorizado'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-        df_activos['Variación Diaria'] = df_activos['variacionDiaria'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "0.00%")
-        df_activos['Ganancia %'] = df_activos['gananciaPorcentaje'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "0.00%")
+    if simbolo_seleccionado:
+        st.info(f"Mostrando gráfico para: {simbolo_seleccionado}")
         
-        # Renombrar columnas
-        df_activos = df_activos.rename(columns={
-            'simbolo': 'Símbolo',
-            'descripcion': 'Descripción',
-            'cantidad': 'Cantidad'
-        })
-        
-        # Mostrar tabla
-        st.dataframe(df_activos[['Símbolo', 'Descripción', 'Cantidad', 'Valorizado', 'Variación Diaria', 'Ganancia %']], 
-                    use_container_width=True)
-        
-        # Selector de activo para análisis técnico
-        simbolos_disponibles = df_activos['Símbolo'].tolist()
-        
-        if simbolos_disponibles:
-            simbolo_seleccionado = st.selectbox(
-                f"Seleccione un activo de {pais} para análisis técnico:",
-                options=simbolos_disponibles,
-                key=f"simbolo_analisis_{pais}"
-            )
-            
-            if simbolo_seleccionado:
-                mostrar_grafico_tradingview(simbolo_seleccionado, pais)
-        else:
-            st.warning("No hay símbolos disponibles para análisis")
-    else:
-        st.info("No hay activos para mostrar")
-
-def mostrar_grafico_tradingview(simbolo, pais):
-    """
-    Muestra el gráfico de TradingView para un símbolo específico
-    """
-    st.info(f"📈 Mostrando gráfico para: {simbolo} ({pais})")
-    
-    # Determinar el mercado según el país
-    if pais == "Argentina":
-        mercado = "BCBA"
-        timezone = "America/Argentina/Buenos_Aires"
-    else:
-        mercado = "NYSE"  # Por defecto para US
-        timezone = "America/New_York"
-    
-    # Widget de TradingView
-    tv_widget = f"""
-    <div id="tradingview_{simbolo}" style="height:650px"></div>
-    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script type="text/javascript">
-    new TradingView.widget({{
-      "container_id": "tradingview_{simbolo}",
-      "width": "100%",
-      "height": 650,
-      "symbol": "{simbolo}",
-      "interval": "D",
-      "timezone": "{timezone}",
-      "theme": "light",
-      "style": "1",
-      "locale": "es",
-      "toolbar_bg": "#f4f7f9",
-      "enable_publishing": false,
-      "allow_symbol_change": true,
-      "hide_side_toolbar": false,
-      "studies": [
-        "MACD@tv-basicstudies",
-        "RSI@tv-basicstudies",
-        "StochasticRSI@tv-basicstudies",
-        "Volume@tv-basicstudies",
-        "Moving Average@tv-basicstudies"
-      ],
-      "drawings_access": {{
-        "type": "black",
-        "tools": [
-          {{"name": "Trend Line"}},
-          {{"name": "Horizontal Line"}},
-          {{"name": "Fibonacci Retracement"}},
-          {{"name": "Rectangle"}},
-          {{"name": "Text"}}
-        ]
-      }},
-      "enabled_features": [
-        "study_templates",
-        "header_indicators",
-        "header_compare",
-        "header_screenshot",
-        "header_fullscreen_button",
-        "header_settings",
-        "header_symbol_search"
-      ]
-    }});
-    </script>
-    """
-    components.html(tv_widget, height=680)
+        # Widget de TradingView
+        tv_widget = f"""
+        <div id="tradingview_{simbolo_seleccionado}" style="height:650px"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+          "container_id": "tradingview_{simbolo_seleccionado}",
+          "width": "100%",
+          "height": 650,
+          "symbol": "{simbolo_seleccionado}",
+          "interval": "D",
+          "timezone": "America/Argentina/Buenos_Aires",
+          "theme": "light",
+          "style": "1",
+          "locale": "es",
+          "toolbar_bg": "#f4f7f9",
+          "enable_publishing": false,
+          "allow_symbol_change": true,
+          "hide_side_toolbar": false,
+          "studies": [
+            "MACD@tv-basicstudies",
+            "RSI@tv-basicstudies",
+            "StochasticRSI@tv-basicstudies",
+            "Volume@tv-basicstudies",
+            "Moving Average@tv-basicstudies"
+          ],
+          "drawings_access": {{
+            "type": "black",
+            "tools": [
+              {{"name": "Trend Line"}},
+              {{"name": "Horizontal Line"}},
+              {{"name": "Fibonacci Retracement"}},
+              {{"name": "Rectangle"}},
+              {{"name": "Text"}}
+            ]
+          }},
+          "enabled_features": [
+            "study_templates",
+            "header_indicators",
+            "header_compare",
+            "header_screenshot",
+            "header_fullscreen_button",
+            "header_settings",
+            "header_symbol_search"
+          ]
+        }});
+        </script>
+        """
+        components.html(tv_widget, height=680)
 
 def mostrar_movimientos_asesor():
     st.title("👨‍💼 Panel del Asesor")
@@ -5942,12 +5644,12 @@ def mostrar_analisis_portafolio():
         if portafolio:
             st.markdown("---")
             st.subheader("📊 Resumen del Portafolio")
-            mostrar_resumen_portafolio_mejorado(token_acceso, id_cliente)
+            mostrar_resumen_portafolio(portafolio, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
     
     with tab2:
-        # Mostrar estado de cuenta y movimientos de forma unificada
+        # Mostrar estado de cuenta y movimientos
         st.markdown("#### 💰 Estado de Cuenta y Movimientos")
         
         # Verificar token antes de proceder
@@ -5964,285 +5666,119 @@ def mostrar_analisis_portafolio():
         
         # Obtener estado de cuenta para el cliente seleccionado
         with st.spinner(f"Obteniendo estado de cuenta para {nombre_cliente}..."):
-            try:
-                estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
-            except Exception as e:
-                st.error(f"❌ Error al obtener estado de cuenta: {e}")
-                estado_cuenta = None
+            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         
+        if estado_cuenta:
+            # Mostrar resumen del estado de cuenta
+            st.subheader(f"🏦 Resumen del Estado de Cuenta - {nombre_cliente}")
+            
+            cuentas = estado_cuenta.get('cuentas', [])
+            total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+            
+            # Métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("💰 Total en Pesos", f"${total_en_pesos:,.2f}")
+            col2.metric("📊 Cantidad de Cuentas", len(cuentas))
+            
+            # Calcular totales por moneda
+            total_ars = 0
+            total_usd = 0
+            cuentas_operables = 0
+            
+            for cuenta in cuentas:
+                if cuenta.get('estado') == 'operable':
+                    cuentas_operables += 1
+                    moneda = cuenta.get('moneda', '').lower()
+                    total = float(cuenta.get('total', 0))
+                    
+                    if 'peso' in moneda:
+                        total_ars += total
+                    elif 'dolar' in moneda:
+                        total_usd += total
+            
+            col3.metric("🇦🇷 Total ARS", f"${total_ars:,.2f}")
+            col4.metric("🇺🇸 Total USD", f"${total_usd:,.2f}")
+            
+            # Mostrar cuentas detalladas
+            st.markdown("#### 📋 Detalle de Cuentas")
+            
+            cuentas_argentina = []
+            cuentas_eeuu = []
+            
+            for cuenta in cuentas:
+                if cuenta.get('estado') == 'operable':
+                    tipo = cuenta.get('tipo', '')
+                    if 'argentina' in tipo.lower() or 'peso' in cuenta.get('moneda', '').lower():
+                        cuentas_argentina.append(cuenta)
+                    elif 'estados' in tipo.lower() or 'dolar' in cuenta.get('moneda', '').lower():
+                        cuentas_eeuu.append(cuenta)
+            
+            # Argentina
+            if cuentas_argentina:
+                st.markdown("**🇦🇷 Argentina**")
+                df_ar = pd.DataFrame(cuentas_argentina)
+                df_ar_display = df_ar[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
+                df_ar_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
+                
+                # Formatear valores monetarios
+                for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
+                    if col in df_ar_display.columns:
+                        df_ar_display[col] = df_ar_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                
+                st.dataframe(df_ar_display, use_container_width=True)
+            
+            # Estados Unidos
+            if cuentas_eeuu:
+                st.markdown("**🇺🇸 Estados Unidos**")
+                df_us = pd.DataFrame(cuentas_eeuu)
+                df_us_display = df_us[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
+                df_us_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
+                
+                # Formatear valores monetarios
+                for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
+                    if col in df_us_display.columns:
+                        df_us_display[col] = df_us_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                
+                st.dataframe(df_us_display, use_container_width=True)
+        else:
+            st.error("❌ No se pudo obtener el estado de cuenta")
+            
         # Obtener movimientos para el cliente seleccionado
         with st.spinner(f"Obteniendo movimientos para {nombre_cliente}..."):
-            try:
-                # Validar endpoint antes de intentar obtener movimientos
-                endpoint_valido, mensaje = validar_endpoint_movimientos(token_acceso)
-                if not endpoint_valido:
-                    st.warning(f"⚠️ **Endpoint de movimientos no disponible**: {mensaje}")
-                    st.info("🔄 Usando método con series históricas para obtener datos reales...")
-                    movimientos = obtener_movimientos_con_series_historicas(token_acceso, id_cliente, 
-                                                                        st.session_state.get('fecha_desde', date.today() - timedelta(days=30)),
-                                                                        st.session_state.get('fecha_hasta', date.today()))
-                    if not movimientos:
-                        st.info("🔄 Usando método alternativo...")
-                        movimientos = obtener_movimientos_alternativo(token_acceso, id_cliente, 
-                                                                    st.session_state.get('fecha_desde', date.today() - timedelta(days=30)),
-                                                                    st.session_state.get('fecha_hasta', date.today()))
-                else:
-                    movimientos = obtener_movimientos_completos(token_acceso, id_cliente)
-                    
-            except Exception as e:
-                st.error(f"❌ Error al obtener movimientos: {e}")
-                st.info("🔄 Intentando método con series históricas...")
-                try:
-                    movimientos = obtener_movimientos_con_series_historicas(token_acceso, id_cliente, 
-                                                                        st.session_state.get('fecha_desde', date.today() - timedelta(days=30)),
-                                                                        st.session_state.get('fecha_hasta', date.today()))
-                    if not movimientos:
-                        st.info("🔄 Intentando método alternativo...")
-                        movimientos = obtener_movimientos_alternativo(token_acceso, id_cliente, 
-                                                                    st.session_state.get('fecha_desde', date.today() - timedelta(days=30)),
-                                                                    st.session_state.get('fecha_hasta', date.today()))
-                except Exception as e2:
-                    st.error(f"❌ Error en método alternativo: {e2}")
-                    movimientos = None
+            movimientos = obtener_movimientos_completos(token_acceso, id_cliente)
         
-        # Mostrar análisis integrado unificado
-        if estado_cuenta or movimientos:
-            # Mostrar indicador de tipo de datos
-            if movimientos and isinstance(movimientos, dict):
-                metodo = movimientos.get('metodo', 'desconocido')
-                if 'simulado' in metodo.lower() or 'respaldo' in metodo.lower() or 'emergencia' in metodo.lower():
-                    st.warning("⚠️ **Datos Simulados**: Los movimientos mostrados son simulados debido a limitaciones de permisos de la API")
-                    st.info("💡 **Explicación**: Tu cuenta no tiene permisos de asesor, pero los datos del estado de cuenta y portafolio son reales")
-                elif 'series_historicas' in metodo.lower():
-                    st.success("✅ **Series Históricas Reales**: Los movimientos se generaron usando datos históricos reales de los activos")
-                    st.info("💡 **Explicación**: Se obtuvieron series históricas de precios de los activos en tu portafolio")
-                elif 'datos_reales' in metodo.lower() or 'alternativo' in metodo.lower():
-                    st.success("✅ **Datos Reales**: Los movimientos se generaron a partir de datos reales de tu cuenta")
-                else:
-                    st.success("✅ **Datos Reales**: Movimientos obtenidos directamente de la API")
-            
-            mostrar_analisis_integrado_unificado(estado_cuenta, movimientos, token_acceso, nombre_cliente, id_cliente)
-        else:
-            st.error("❌ **No se pudieron obtener datos**")
-            st.warning("💡 **Diagnóstico del problema:**")
-            
-            # Verificar diferentes aspectos
-            if not verificar_token_valido(token_acceso):
-                st.error("🔐 **Problema de autenticación detectado**")
-                st.info("• El token de acceso ha expirado o es inválido")
-                st.info("• Por favor, vuelva a autenticarse")
+        if movimientos:
+            metodo = movimientos.get('metodo', 'API directa')
+            if metodo in ['alternativo_estado_cuenta', 'respaldo_minimo', 'emergencia', 'ultimo_recurso']:
+                st.warning(f"⚠️ **Movimientos Obtenidos con Método Alternativo**: {metodo}")
+                st.info("💡 **Explicación:** Los datos son simulados debido a limitaciones de acceso a la API de movimientos.")
+                st.info("🔐 **Causa:** Tu cuenta no tiene permisos de asesor para acceder a los endpoints `/api/v2/estadocuenta` y `/api/v2/Asesor/Movimientos`")
+                st.info("✅ **Beneficio:** Esto permite que la aplicación funcione y muestre análisis aproximados")
+                st.info("📊 **Limitación:** Los análisis de retorno y riesgo serán aproximados, no exactos")
             else:
-                endpoint_valido, mensaje = validar_endpoint_movimientos(token_acceso)
-                if not endpoint_valido:
-                    st.error(f"🌐 **Problema de conectividad**: {mensaje}")
-                    st.info("• El servidor de IOL puede estar experimentando problemas")
-                    st.info("• Verifique su conexión a internet")
-                    st.info("• Intente nuevamente en unos minutos")
-                else:
-                    st.error("❓ **Problema desconocido**")
-                    st.info("• Los datos solicitados pueden no estar disponibles")
-                    st.info("• Verifique que el cliente tenga movimientos en el período seleccionado")
-                    st.info("• Contacte al soporte técnico si el problema persiste")
-        
-def mostrar_analisis_integrado_unificado(estado_cuenta, movimientos, token_acceso, nombre_cliente, id_cliente):
-    """
-    Muestra un análisis integrado unificado de estado de cuenta y movimientos
-    """
-    st.subheader("📈 Análisis Integrado: Estado de Cuenta + Movimientos")
-    
-    # Mostrar información del cliente
-    st.info(f"🔍 **Cliente seleccionado**: {nombre_cliente} (ID: {id_cliente})")
-    
-    # Verificar si los datos son reales o simulados
-    if movimientos and isinstance(movimientos, dict):
-        metodo = movimientos.get('metodo', 'desconocido')
-        if 'simulado' in metodo.lower() or 'respaldo' in metodo.lower() or 'emergencia' in metodo.lower():
-            st.warning("⚠️ **Nota**: Los datos de movimientos mostrados son simulados debido a limitaciones de la API")
-            st.info("💡 Los datos del estado de cuenta y portafolio son reales")
-        elif 'datos_reales' in metodo.lower() or 'alternativo' in metodo.lower():
-            st.success("✅ **Datos reales**: Los movimientos se generaron a partir de datos reales de tu cuenta")
+                st.success(f"✅ Movimientos obtenidos exitosamente desde la API")
+            
+            # Mostrar análisis integrado de movimientos y portafolio
+            mostrar_analisis_integrado(movimientos, estado_cuenta, token_acceso)
         else:
-            st.success("✅ **Datos reales**: Movimientos obtenidos directamente de la API")
-    
-    # Crear resumen consolidado
-    st.markdown("#### 📊 Resumen Consolidado")
-    
-    # Métricas del estado de cuenta
-    if estado_cuenta:
-        cuentas = estado_cuenta.get('cuentas', [])
-        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-        
-        # Calcular totales por moneda desde estado de cuenta
-        total_ars_estado = 0
-        total_usd_estado = 0
-        total_titulos_ars = 0
-        total_titulos_usd = 0
-        
-        for cuenta in cuentas:
-            if cuenta.get('estado') == 'operable':
-                moneda = cuenta.get('moneda', '').lower()
-                total = float(cuenta.get('total', 0))
-                titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
-                
-                if 'peso' in moneda:
-                    total_ars_estado += total
-                    total_titulos_ars += titulos_valorizados
-                elif 'dolar' in moneda:
-                    total_usd_estado += total
-                    total_titulos_usd += titulos_valorizados
-        
-        # Mostrar métricas consolidadas
-        col1, col2, col3, col4 = st.columns(4)
-        
-        col1.metric("💰 Total Estado Cuenta", f"${total_en_pesos:,.2f}")
-        col2.metric("🇦🇷 Total ARS", f"${total_ars_estado:,.2f}")
-        col3.metric("🇺🇸 Total USD", f"${total_usd_estado:,.2f}")
-        col4.metric("📊 Cuentas Activas", len([c for c in cuentas if c.get('estado') == 'operable']))
-        
-        # Mostrar detalle de cuentas
-        st.markdown("#### 📋 Detalle de Cuentas")
-        
-        cuentas_argentina = []
-        cuentas_eeuu = []
-        
-        for cuenta in cuentas:
-            if cuenta.get('estado') == 'operable':
-                tipo = cuenta.get('tipo', '')
-                if 'argentina' in tipo.lower() or 'peso' in cuenta.get('moneda', '').lower():
-                    cuentas_argentina.append(cuenta)
-                elif 'estados' in tipo.lower() or 'dolar' in cuenta.get('moneda', '').lower():
-                    cuentas_eeuu.append(cuenta)
-        
-        # Argentina
-        if cuentas_argentina:
-            st.markdown("**🇦🇷 Argentina**")
-            df_ar = pd.DataFrame(cuentas_argentina)
-            df_ar_display = df_ar[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
-            df_ar_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
+            st.error("❌ **Error Crítico**: No se pudieron obtener los movimientos del portafolio")
+            st.markdown("""
+            **Posibles causas:**
+            - 🔑 Token de autenticación expirado o inválido
+            - 🌐 Problemas de conectividad con la API de IOL
+            - 🔒 Permisos insuficientes para acceder a los movimientos
+            - ⏰ Timeout en la respuesta del servidor
             
-            # Formatear valores monetarios
-            for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
-                if col in df_ar_display.columns:
-                    df_ar_display[col] = df_ar_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+            **Soluciones recomendadas:**
+            1. 🔄 Haga clic en "🔄 Renovar Token" en la barra lateral
+            2. 🔐 Vuelva a autenticarse con sus credenciales
+            3. 📱 Verifique su conexión a internet
+            4. ⏳ Intente nuevamente en unos minutos
+            """)
             
-            st.dataframe(df_ar_display, use_container_width=True)
-        
-        # Estados Unidos
-        if cuentas_eeuu:
-            st.markdown("**🇺🇸 Estados Unidos**")
-            df_us = pd.DataFrame(cuentas_eeuu)
-            df_us_display = df_us[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
-            df_us_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
-            
-            # Formatear valores monetarios
-            for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
-                if col in df_us_display.columns:
-                    df_us_display[col] = df_us_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-            
-            st.dataframe(df_us_display, use_container_width=True)
-    
-    # Análisis de movimientos
-    if movimientos:
-        st.markdown("#### 📈 Análisis de Movimientos")
-        
-        if 'movimientos' in movimientos and movimientos['movimientos']:
-            df_mov = pd.DataFrame(movimientos['movimientos'])
-            
-            # Mostrar resumen de movimientos
-            st.success(f"✅ Se encontraron {len(df_mov)} movimientos en el período")
-            
-            # Tipos de movimientos
-            if 'tipo' in df_mov.columns:
-                tipos_movimientos = df_mov['tipo'].value_counts()
-                st.markdown("**📊 Tipos de Movimientos:**")
-                for tipo, cantidad in tipos_movimientos.items():
-                    st.write(f"• **{tipo}**: {cantidad} movimientos")
-            
-            # Mostrar tabla de movimientos
-            st.markdown("**📋 Detalle de Movimientos:**")
-            if not df_mov.empty:
-                # Seleccionar columnas relevantes
-                columnas_display = []
-                for col in ['fechaOperacion', 'simbolo', 'tipo', 'cantidad', 'precio', 'moneda', 'descripcion']:
-                    if col in df_mov.columns:
-                        columnas_display.append(col)
-                
-                if columnas_display:
-                    df_display = df_mov[columnas_display].copy()
-                    df_display.columns = ['Fecha', 'Símbolo', 'Tipo', 'Cantidad', 'Precio', 'Moneda', 'Descripción']
-                    
-                    # Formatear valores
-                    if 'Precio' in df_display.columns:
-                        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-                    if 'Cantidad' in df_display.columns:
-                        df_display['Cantidad'] = df_display['Cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
-                    
-                    st.dataframe(df_display, use_container_width=True)
-        else:
-            st.warning("⚠️ No se encontraron movimientos en el período seleccionado")
-    
-    # Análisis de rendimiento integrado
-    if estado_cuenta and movimientos:
-        st.markdown("#### 📊 Análisis de Rendimiento Integrado")
-        
-        # Calcular rendimiento basado en movimientos y estado actual
-        if 'movimientos' in movimientos and movimientos['movimientos']:
-            # Analizar movimientos para calcular rendimiento
-            rendimiento_calculado = calcular_rendimiento_desde_movimientos(movimientos['movimientos'], estado_cuenta)
-            
-            if rendimiento_calculado:
-                col1, col2, col3, col4 = st.columns(4)
-                
-                col1.metric("📈 Rendimiento Total", f"{rendimiento_calculado.get('rendimiento_total', 0):+.2f}%")
-                col2.metric("💰 Ganancia/Pérdida", f"${rendimiento_calculado.get('ganancia_total', 0):+,.2f}")
-                col3.metric("📊 Volatilidad", f"{rendimiento_calculado.get('volatilidad', 0):.2f}%")
-                col4.metric("⚖️ Ratio Sharpe", f"{rendimiento_calculado.get('sharpe_ratio', 0):.2f}")
-    
-    # Recomendaciones basadas en el análisis integrado
-    if estado_cuenta:
-        st.markdown("#### 💡 Recomendaciones Integradas")
-        
-        # Análisis de diversificación
-        if total_ars_estado > 0 and total_usd_estado > 0:
-            ratio_diversificacion = total_usd_estado / (total_ars_estado + total_usd_estado) * 100
-            st.info(f"🌍 **Diversificación Internacional**: {ratio_diversificacion:.1f}% en USD")
-            
-            if ratio_diversificacion < 10:
-                st.warning("⚠️ **Baja diversificación internacional**: Considera aumentar exposición a activos en USD")
-            elif ratio_diversificacion > 50:
-                st.warning("⚠️ **Alta exposición internacional**: Considera aumentar activos locales")
-            else:
-                st.success("✅ **Diversificación equilibrada**: Buena distribución entre mercados locales e internacionales")
-        
-        # Análisis de liquidez
-        total_disponible = 0
-        for cuenta in cuentas:
-            if cuenta.get('estado') == 'operable':
-                total_disponible += float(cuenta.get('disponible', 0))
-        
-        if total_en_pesos > 0:
-            ratio_liquidez = total_disponible / total_en_pesos * 100
-            st.info(f"💧 **Liquidez**: {ratio_liquidez:.1f}% disponible")
-            
-            if ratio_liquidez < 5:
-                st.warning("⚠️ **Baja liquidez**: Considera mantener más efectivo disponible")
-            elif ratio_liquidez > 30:
-                st.warning("⚠️ **Alta liquidez**: Considera invertir el exceso de efectivo")
-            else:
-                st.success("✅ **Liquidez adecuada**: Nivel de efectivo apropiado")
-    
-    # Notas finales
-    st.markdown("---")
-    st.markdown("""
-    **📝 Notas del Análisis Integrado:**
-    - Los datos combinan información del estado de cuenta y movimientos
-    - Las diferencias entre fuentes pueden deberse a actualizaciones en tiempo real
-    - El análisis de rendimiento considera tanto movimientos históricos como posiciones actuales
-    - Las recomendaciones se basan en métricas consolidadas de todas las fuentes
-    """)
-
-
-def mostrar_portafolio_eeuu(token_acceso, id_cliente):
+            # Botón para reintentar
+            if st.button("🔄 Reintentar Obtención de Movimientos", key="retry_movements", type="primary"):
+                st.rerun()
     
     with tab3:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
@@ -7123,16 +6659,12 @@ def main():
         if st.session_state.token_acceso:
             st.sidebar.title("Menú principal")
             
-            # Debug mode toggle
-            debug_mode = st.sidebar.checkbox("🔧 Modo Debug", value=st.session_state.get('debug_mode', False))
-            st.session_state['debug_mode'] = debug_mode
-            if debug_mode:
-                st.sidebar.info("🔍 Modo debug activado - Se mostrarán datos raw y logs detallados")
 
+            
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Panel del asesor", "Series históricas"),
+                ("Inicio", "Análisis de portafolio", "Panel del asesor"),
                 index=0,
                 key="menu_principal"
             )
@@ -7147,13 +6679,6 @@ def main():
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "Panel del asesor":
                 mostrar_movimientos_asesor()
-            elif opcion == "Series históricas":
-                if st.session_state.cliente_seleccionado:
-                    cliente = st.session_state.cliente_seleccionado
-                    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
-                    mostrar_series_historicas_movimientos(st.session_state.token_acceso, id_cliente)
-                else:
-                    st.info("Seleccione un cliente en la barra lateral para comenzar")
         else:
             st.info("Ingrese sus credenciales para comenzar")
             
@@ -7210,1350 +6735,6 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
-
-def obtener_series_historicas_movimientos(token_portador, id_cliente, fecha_desde, fecha_hasta, pais=None):
-    """
-    Obtiene series históricas de movimientos para un cliente específico
-    y los organiza por país (Argentina/EEUU)
-    """
-    try:
-        print(f"📊 Obteniendo series históricas de movimientos para cliente {id_cliente}")
-        
-        # Verificar token antes de proceder
-        if not verificar_token_valido(token_portador):
-            print("⚠️ Token no válido, intentando renovar...")
-            refresh_token = st.session_state.get('refresh_token')
-            if refresh_token:
-                nuevo_token = renovar_token(refresh_token)
-                if nuevo_token:
-                    st.session_state['token_acceso'] = nuevo_token
-                    token_portador = nuevo_token
-                    print("✅ Token renovado exitosamente")
-                else:
-                    print("❌ No se pudo renovar el token")
-                    return None
-        
-        # Intentar obtener movimientos con reintentos para errores 500
-        max_reintentos = 2
-        reintento_actual = 0
-        
-        while reintento_actual < max_reintentos:
-            try:
-                # Obtener movimientos para Argentina
-                movimientos_argentina = obtener_movimientos_asesor(
-                    token_portador=token_portador,
-                    clientes=[id_cliente],
-                    fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
-                    fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
-                    tipo_fecha="fechaOperacion",
-                    pais="Argentina" if pais is None or pais == "Argentina" else None,
-                    moneda="peso_Argentino" if pais is None or pais == "Argentina" else None
-                )
-                
-                # Obtener movimientos para Estados Unidos
-                movimientos_eeuu = obtener_movimientos_asesor(
-                    token_portador=token_portador,
-                    clientes=[id_cliente],
-                    fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
-                    fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
-                    tipo_fecha="fechaOperacion",
-                    pais="Estados Unidos" if pais is None or pais == "Estados Unidos" else None,
-                    moneda="dolar_Estadounidense" if pais is None or pais == "Estados Unidos" else None
-                )
-                
-                # Si al menos uno funciona, salir del bucle
-                if movimientos_argentina or movimientos_eeuu:
-                    break
-                    
-                reintento_actual += 1
-                if reintento_actual < max_reintentos:
-                    print(f"🔄 Reintento {reintento_actual} de {max_reintentos}...")
-                    time.sleep(2)  # Esperar 2 segundos antes del reintento
-                    
-            except Exception as e:
-                print(f"💥 Error en intento {reintento_actual + 1}: {e}")
-                reintento_actual += 1
-                if reintento_actual < max_reintentos:
-                    time.sleep(2)
-        
-        # Si ambos fallan después de reintentos, usar método alternativo
-        if not movimientos_argentina and not movimientos_eeuu:
-            print("🔄 Ambos endpoints fallaron después de reintentos, usando método alternativo...")
-            movimientos_argentina = obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta)
-            movimientos_eeuu = obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta)
-        
-        # Procesar movimientos de Argentina
-        series_argentina = procesar_movimientos_para_series(movimientos_argentina, "Argentina")
-        
-        # Procesar movimientos de Estados Unidos
-        series_eeuu = procesar_movimientos_para_series(movimientos_eeuu, "Estados Unidos")
-        
-        return {
-            'argentina': series_argentina,
-            'eeuu': series_eeuu,
-            'fecha_desde': fecha_desde,
-            'fecha_hasta': fecha_hasta
-        }
-        
-    except Exception as e:
-        print(f"💥 Error al obtener series históricas de movimientos: {e}")
-        return None
-
-def procesar_movimientos_para_series(movimientos, pais):
-    """
-    Procesa los movimientos para crear series históricas por tipo de operación
-    """
-    if not movimientos:
-        return {}
-    
-    try:
-        # Convertir a DataFrame si es necesario
-        if isinstance(movimientos, list):
-            df = pd.DataFrame(movimientos)
-        elif isinstance(movimientos, dict) and 'movimientos' in movimientos:
-            df = pd.DataFrame(movimientos['movimientos'])
-        else:
-            df = pd.DataFrame([movimientos])
-        
-        if df.empty:
-            return {}
-        
-        # Asegurar que tenemos la columna de fecha
-        if 'fechaOperacion' not in df.columns:
-            print(f"⚠️ No se encontró columna fechaOperacion en movimientos de {pais}")
-            return {}
-        
-        # Convertir fecha a datetime
-        df['fecha'] = pd.to_datetime(df['fechaOperacion'])
-        df = df.sort_values('fecha')
-        
-        # Agrupar por fecha y tipo de operación
-        series_por_tipo = {}
-        
-        # Series por tipo de operación
-        tipos_operacion = df['tipo'].unique() if 'tipo' in df.columns else ['operacion']
-        
-        for tipo in tipos_operacion:
-            df_tipo = df[df['tipo'] == tipo] if 'tipo' in df.columns else df
-            
-            if not df_tipo.empty:
-                # Agrupar por fecha y sumar valores
-                df_agrupado = df_tipo.groupby(df_tipo['fecha'].dt.date).agg({
-                    'valor': 'sum' if 'valor' in df_tipo.columns else 'count',
-                    'cantidad': 'sum' if 'cantidad' in df_tipo.columns else 'count',
-                    'precio': 'mean' if 'precio' in df_tipo.columns else 'count'
-                }).reset_index()
-                
-                df_agrupado['fecha'] = pd.to_datetime(df_agrupado['fecha'])
-                
-                series_por_tipo[f'series_{tipo}'] = {
-                    'fechas': df_agrupado['fecha'].tolist(),
-                    'valores': df_agrupado['valor'].tolist() if 'valor' in df_tipo.columns else df_agrupado['cantidad'].tolist(),
-                    'cantidades': df_agrupado['cantidad'].tolist() if 'cantidad' in df_tipo.columns else [],
-                    'precios': df_agrupado['precio'].tolist() if 'precio' in df_tipo.columns else []
-                }
-        
-        # Series acumulativas
-        if not df.empty:
-            df_acumulado = df.groupby(df['fecha'].dt.date).agg({
-                'valor': 'sum' if 'valor' in df.columns else 'count'
-            }).reset_index()
-            df_acumulado['fecha'] = pd.to_datetime(df_acumulado['fecha'])
-            df_acumulado['valor_acumulado'] = df_acumulado['valor'].cumsum()
-            
-            series_por_tipo['series_acumulada'] = {
-                'fechas': df_acumulado['fecha'].tolist(),
-                'valores': df_acumulado['valor'].tolist(),
-                'valores_acumulados': df_acumulado['valor_acumulado'].tolist()
-            }
-        
-        return series_por_tipo
-        
-    except Exception as e:
-        print(f"💥 Error al procesar movimientos para {pais}: {e}")
-        return {}
-
-def graficar_series_historicas_movimientos(series_data, token_portador):
-    """
-    Grafica las series históricas de movimientos para Argentina y EEUU
-    """
-    if not series_data:
-        st.warning("❌ No hay datos de series históricas para graficar")
-        return
-    
-    st.subheader("📈 Series Históricas de Movimientos")
-    
-    # Crear pestañas para cada país
-    tab_argentina, tab_eeuu, tab_comparacion = st.tabs(["🇦🇷 Argentina", "🇺🇸 Estados Unidos", "📊 Comparación"])
-    
-    with tab_argentina:
-        graficar_series_pais(series_data.get('argentina', {}), "Argentina", "🇦🇷")
-    
-    with tab_eeuu:
-        graficar_series_pais(series_data.get('eeuu', {}), "Estados Unidos", "🇺🇸")
-    
-    with tab_comparacion:
-        graficar_comparacion_series(series_data)
-
-def graficar_series_pais(series_pais, nombre_pais, emoji):
-    """
-    Grafica las series históricas para un país específico
-    """
-    if not series_pais:
-        st.info(f"📊 No hay datos de movimientos para {nombre_pais}")
-        return
-    
-    st.markdown(f"### {emoji} Series Históricas - {nombre_pais}")
-    
-    # Mostrar resumen de series disponibles
-    series_disponibles = list(series_pais.keys())
-    st.info(f"📋 Series disponibles: {', '.join(series_disponibles)}")
-    
-    # Gráfico de movimientos por tipo
-    if len(series_disponibles) > 1:
-        fig_tipos = go.Figure()
-        
-        colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-        
-        for i, (tipo, datos) in enumerate(series_pais.items()):
-            if tipo == 'series_acumulada':
-                continue
-                
-            if 'fechas' in datos and 'valores' in datos:
-                color = colores[i % len(colores)]
-                nombre_serie = tipo.replace('series_', '').replace('_', ' ').title()
-                
-                fig_tipos.add_trace(go.Scatter(
-                    x=datos['fechas'],
-                    y=datos['valores'],
-                    mode='lines+markers',
-                    name=nombre_serie,
-                    line=dict(color=color, width=2),
-                    marker=dict(size=6, color=color)
-                ))
-        
-        fig_tipos.update_layout(
-            title=f'Movimientos por Tipo - {nombre_pais}',
-            xaxis_title='Fecha',
-            yaxis_title='Valor',
-            template='plotly_white',
-            height=500,
-            showlegend=True
-        )
-        
-        st.plotly_chart(fig_tipos, use_container_width=True)
-    
-    # Gráfico de serie acumulativa
-    if 'series_acumulada' in series_pais:
-        datos_acum = series_pais['series_acumulada']
-        
-        if 'fechas' in datos_acum and 'valores_acumulados' in datos_acum:
-            fig_acum = go.Figure()
-            
-            fig_acum.add_trace(go.Scatter(
-                x=datos_acum['fechas'],
-                y=datos_acum['valores_acumulados'],
-                mode='lines+markers',
-                name='Valor Acumulado',
-                line=dict(color='#2ca02c', width=3),
-                marker=dict(size=8, color='#2ca02c'),
-                fill='tonexty'
-            ))
-            
-            fig_acum.update_layout(
-                title=f'Valor Acumulado de Movimientos - {nombre_pais}',
-                xaxis_title='Fecha',
-                yaxis_title='Valor Acumulado',
-                template='plotly_white',
-                height=500,
-                showlegend=True
-            )
-            
-            st.plotly_chart(fig_acum, use_container_width=True)
-    
-    # Tabla de resumen estadístico
-    st.markdown("#### 📊 Resumen Estadístico")
-    
-    datos_resumen = []
-    for tipo, datos in series_pais.items():
-        if 'valores' in datos and datos['valores']:
-            valores = [v for v in datos['valores'] if v is not None and not pd.isna(v)]
-            if valores:
-                datos_resumen.append({
-                    'Tipo': tipo.replace('series_', '').replace('_', ' ').title(),
-                    'Total Operaciones': len(valores),
-                    'Valor Total': sum(valores),
-                    'Valor Promedio': np.mean(valores),
-                    'Valor Máximo': max(valores),
-                    'Valor Mínimo': min(valores)
-                })
-    
-    if datos_resumen:
-        df_resumen = pd.DataFrame(datos_resumen)
-        
-        # Formatear valores monetarios
-        for col in ['Valor Total', 'Valor Promedio', 'Valor Máximo', 'Valor Mínimo']:
-            if col in df_resumen.columns:
-                df_resumen[col] = df_resumen[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-        
-        st.dataframe(df_resumen, use_container_width=True)
-
-def graficar_comparacion_series(series_data):
-    """
-    Grafica la comparación entre series de Argentina y EEUU
-    """
-    st.markdown("### 📊 Comparación Argentina vs Estados Unidos")
-    
-    argentina = series_data.get('argentina', {})
-    eeuu = series_data.get('eeuu', {})
-    
-    if not argentina and not eeuu:
-        st.info("📊 No hay datos para comparar")
-        return
-    
-    # Comparación de series acumuladas
-    if 'series_acumulada' in argentina and 'series_acumulada' in eeuu:
-        fig_comparacion = go.Figure()
-        
-        # Argentina
-        datos_ar = argentina['series_acumulada']
-        if 'fechas' in datos_ar and 'valores_acumulados' in datos_ar:
-            fig_comparacion.add_trace(go.Scatter(
-                x=datos_ar['fechas'],
-                y=datos_ar['valores_acumulados'],
-                mode='lines+markers',
-                name='🇦🇷 Argentina',
-                line=dict(color='#1f77b4', width=3),
-                marker=dict(size=8, color='#1f77b4')
-            ))
-        
-        # Estados Unidos
-        datos_us = eeuu['series_acumulada']
-        if 'fechas' in datos_us and 'valores_acumulados' in datos_us:
-            fig_comparacion.add_trace(go.Scatter(
-                x=datos_us['fechas'],
-                y=datos_us['valores_acumulados'],
-                mode='lines+markers',
-                name='🇺🇸 Estados Unidos',
-                line=dict(color='#ff7f0e', width=3),
-                marker=dict(size=8, color='#ff7f0e')
-            ))
-        
-        fig_comparacion.update_layout(
-            title='Comparación de Valor Acumulado - Argentina vs Estados Unidos',
-            xaxis_title='Fecha',
-            yaxis_title='Valor Acumulado',
-            template='plotly_white',
-            height=600,
-            showlegend=True
-        )
-        
-        st.plotly_chart(fig_comparacion, use_container_width=True)
-    
-    # Métricas comparativas
-    st.markdown("#### 📈 Métricas Comparativas")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    # Calcular métricas para Argentina
-    total_ar = 0
-    operaciones_ar = 0
-    if argentina:
-        for tipo, datos in argentina.items():
-            if 'valores' in datos and datos['valores']:
-                valores = [v for v in datos['valores'] if v is not None and not pd.isna(v)]
-                total_ar += sum(valores)
-                operaciones_ar += len(valores)
-    
-    # Calcular métricas para EEUU
-    total_us = 0
-    operaciones_us = 0
-    if eeuu:
-        for tipo, datos in eeuu.items():
-            if 'valores' in datos and datos['valores']:
-                valores = [v for v in datos['valores'] if v is not None and not pd.isna(v)]
-                total_us += sum(valores)
-                operaciones_us += len(valores)
-    
-    col1.metric("🇦🇷 Total Argentina", f"${total_ar:,.2f}")
-    col2.metric("🇺🇸 Total EEUU", f"${total_us:,.2f}")
-    col3.metric("🇦🇷 Operaciones AR", operaciones_ar)
-    col4.metric("🇺🇸 Operaciones US", operaciones_us)
-    
-    # Análisis de distribución
-    if total_ar > 0 or total_us > 0:
-        total_global = total_ar + total_us
-        porcentaje_ar = (total_ar / total_global * 100) if total_global > 0 else 0
-        porcentaje_us = (total_us / total_global * 100) if total_global > 0 else 0
-        
-        st.markdown("#### 📊 Distribución por País")
-        
-        fig_distribucion = go.Figure(data=[go.Pie(
-            labels=['🇦🇷 Argentina', '🇺🇸 Estados Unidos'],
-            values=[total_ar, total_us],
-            hole=0.3,
-            marker_colors=['#1f77b4', '#ff7f0e']
-        )])
-        
-        fig_distribucion.update_layout(
-            title='Distribución de Movimientos por País',
-            height=400
-        )
-        
-        st.plotly_chart(fig_distribucion, use_container_width=True)
-        
-        # Mostrar porcentajes
-        col1, col2 = st.columns(2)
-        col1.metric("🇦🇷 % Argentina", f"{porcentaje_ar:.1f}%")
-        col2.metric("🇺🇸 % Estados Unidos", f"{porcentaje_us:.1f}%")
-
-def crear_series_historicas_ejemplo(fecha_desde, fecha_hasta, pais=None):
-    """
-    Crea datos de ejemplo para las series históricas cuando el servidor no está disponible
-    """
-    try:
-        # Generar fechas entre fecha_desde y fecha_hasta
-        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-        
-        # Datos de ejemplo para Argentina
-        series_argentina = {}
-        if pais is None or pais == "Argentina":
-            # Compras
-            compras_ar = [random.uniform(1000, 5000) for _ in range(len(fechas))]
-            series_argentina['series_compras'] = {
-                'fechas': fechas.tolist(),
-                'valores': compras_ar,
-                'cantidades': [random.randint(1, 10) for _ in range(len(fechas))],
-                'precios': [random.uniform(100, 500) for _ in range(len(fechas))]
-            }
-            
-            # Ventas
-            ventas_ar = [random.uniform(500, 3000) for _ in range(len(fechas))]
-            series_argentina['series_ventas'] = {
-                'fechas': fechas.tolist(),
-                'valores': ventas_ar,
-                'cantidades': [random.randint(1, 8) for _ in range(len(fechas))],
-                'precios': [random.uniform(150, 600) for _ in range(len(fechas))]
-            }
-            
-            # Acumulado
-            valores_acumulados = np.cumsum([c - v for c, v in zip(compras_ar, ventas_ar)])
-            series_argentina['series_acumulada'] = {
-                'fechas': fechas.tolist(),
-                'valores': [c - v for c, v in zip(compras_ar, ventas_ar)],
-                'valores_acumulados': valores_acumulados.tolist()
-            }
-        
-        # Datos de ejemplo para Estados Unidos
-        series_eeuu = {}
-        if pais is None or pais == "Estados Unidos":
-            # Compras
-            compras_us = [random.uniform(500, 2000) for _ in range(len(fechas))]
-            series_eeuu['series_compras'] = {
-                'fechas': fechas.tolist(),
-                'valores': compras_us,
-                'cantidades': [random.randint(1, 5) for _ in range(len(fechas))],
-                'precios': [random.uniform(50, 200) for _ in range(len(fechas))]
-            }
-            
-            # Ventas
-            ventas_us = [random.uniform(200, 1500) for _ in range(len(fechas))]
-            series_eeuu['series_ventas'] = {
-                'fechas': fechas.tolist(),
-                'valores': ventas_us,
-                'cantidades': [random.randint(1, 4) for _ in range(len(fechas))],
-                'precios': [random.uniform(60, 250) for _ in range(len(fechas))]
-            }
-            
-            # Acumulado
-            valores_acumulados_us = np.cumsum([c - v for c, v in zip(compras_us, ventas_us)])
-            series_eeuu['series_acumulada'] = {
-                'fechas': fechas.tolist(),
-                'valores': [c - v for c, v in zip(compras_us, ventas_us)],
-                'valores_acumulados': valores_acumulados_us.tolist()
-            }
-        
-        return {
-            'argentina': series_argentina,
-            'eeuu': series_eeuu,
-            'fecha_desde': fecha_desde,
-            'fecha_hasta': fecha_hasta,
-            'metodo': 'datos_ejemplo'
-        }
-        
-    except Exception as e:
-        print(f"💥 Error al crear series históricas de ejemplo: {e}")
-        return None
-
-def mostrar_series_historicas_movimientos(token_portador, id_cliente):
-    """
-    Función principal para mostrar las series históricas de movimientos
-    """
-    st.header("📈 Series Históricas de Movimientos")
-    st.markdown("""
-    Analiza la evolución temporal de los movimientos de tu portafolio,
-    separando por país (Argentina y Estados Unidos) y tipo de operación.
-    """)
-    
-    # Verificar token
-    if not verificar_token_valido(token_portador):
-        st.warning("⚠️ Token expirado. Renovando...")
-        nuevo_token = renovar_token(st.session_state.get('refresh_token'))
-        if nuevo_token:
-            st.session_state['token_acceso'] = nuevo_token
-            token_portador = nuevo_token
-            st.success("✅ Token renovado")
-        else:
-            st.error("❌ No se pudo renovar el token")
-            return
-    
-    # Configuración de fechas
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        fecha_desde = st.date_input(
-            "📅 Fecha Desde",
-            value=date.today() - timedelta(days=30),
-            max_value=date.today()
-        )
-    
-    with col2:
-        fecha_hasta = st.date_input(
-            "📅 Fecha Hasta",
-            value=date.today(),
-            max_value=date.today()
-        )
-    
-    with col3:
-        pais_filtro = st.selectbox(
-            "🌍 País",
-            options=["Todos", "Argentina", "Estados Unidos"],
-            help="Filtrar por país específico o ver todos"
-        )
-    
-    # Validar fechas
-    if fecha_desde > fecha_hasta:
-        st.error("❌ La fecha desde no puede ser mayor que la fecha hasta")
-        return
-    
-    # Botón para obtener datos
-    if st.button("🚀 Obtener Series Históricas", type="primary"):
-        with st.spinner("📊 Obteniendo series históricas de movimientos..."):
-            try:
-                # Determinar país para filtro
-                pais_param = None
-                if pais_filtro != "Todos":
-                    pais_param = pais_filtro
-                
-                # Obtener series históricas
-                series_data = obtener_series_historicas_movimientos(
-                    token_portador=token_portador,
-                    id_cliente=id_cliente,
-                    fecha_desde=fecha_desde,
-                    fecha_hasta=fecha_hasta,
-                    pais=pais_param
-                )
-                
-                if series_data:
-                    st.success(f"✅ Series históricas obtenidas para el período {fecha_desde} - {fecha_hasta}")
-                    
-                    # Mostrar información del período
-                    st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%Y')}")
-                    
-                    # Graficar las series
-                    graficar_series_historicas_movimientos(series_data, token_portador)
-                    
-                    # Mostrar datos raw para debugging solo si hay errores
-                    if st.session_state.get('debug_mode', False):
-                        with st.expander("🔍 Datos Raw (Debug)"):
-                            st.json(series_data)
-                        
-                else:
-                    # Crear datos de ejemplo para mostrar la funcionalidad
-                    st.warning("⚠️ No se pudieron obtener datos reales del servidor")
-                    st.info("💡 Mostrando datos de ejemplo para demostrar la funcionalidad")
-                    
-                    # Crear datos de ejemplo
-                    series_ejemplo = crear_series_historicas_ejemplo(fecha_desde, fecha_hasta, pais_param)
-                    
-                    if series_ejemplo:
-                        st.success(f"✅ Datos de ejemplo generados para el período {fecha_desde} - {fecha_hasta}")
-                        st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
-                        
-                        # Graficar las series de ejemplo
-                        graficar_series_historicas_movimientos(series_ejemplo, token_portador)
-                        
-                        st.info("💡 **Nota**: Estos son datos de ejemplo. Los datos reales estarán disponibles cuando el servidor esté funcionando correctamente.")
-                    else:
-                        st.error("❌ No se pudieron generar datos de ejemplo")
-                    
-            except Exception as e:
-                st.error(f"💥 Error al obtener series históricas: {e}")
-                st.exception(e)
-
-def mostrar_info_origen_datos(portafolio_argentina, portafolio_eeuu):
-    """
-    Muestra información sobre el origen de los datos del portafolio
-    """
-    metodos_argentina = portafolio_argentina.get('metodo', 'desconocido') if portafolio_argentina else 'error'
-    metodos_eeuu = portafolio_eeuu.get('metodo', 'desconocido') if portafolio_eeuu else 'error'
-    
-    # Determinar si se usaron datos alternativos
-    uso_alternativo = False
-    if metodos_argentina in ['alternativo_estado_cuenta', 'simulado'] or metodos_eeuu in ['alternativo_estado_cuenta', 'simulado']:
-        uso_alternativo = True
-    
-    if uso_alternativo:
-        st.info("📊 **Información sobre los datos mostrados:**")
-        
-        if metodos_argentina == 'simulado':
-            st.warning("🇦🇷 **Argentina**: Datos simulados (API no disponible)")
-        elif metodos_argentina == 'alternativo_estado_cuenta':
-            st.success("🇦🇷 **Argentina**: Datos del estado de cuenta")
-        else:
-            st.success("🇦🇷 **Argentina**: Datos directos de la API")
-        
-        if metodos_eeuu == 'simulado':
-            st.warning("🇺🇸 **Estados Unidos**: Datos simulados (API no disponible)")
-        elif metodos_eeuu == 'alternativo_estado_cuenta':
-            st.success("🇺🇸 **Estados Unidos**: Datos del estado de cuenta")
-        else:
-            st.success("🇺🇸 **Estados Unidos**: Datos directos de la API")
-        
-        st.info("💡 **Nota**: Los datos alternativos permiten que la aplicación funcione, pero pueden no reflejar la posición exacta actual.")
-
-def obtener_portafolio_por_pais_mejorado(token_portador, pais):
-    """
-    Obtiene el portafolio usando el endpoint /api/v2/portafolio/{pais}
-    con autenticación correcta y manejo de errores
-    """
-    try:
-        # Normalizar el país para el endpoint según la documentación
-        if pais.lower() in ['argentina', 'argentina']:
-            pais_normalizado = 'argentina'
-        elif pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu']:
-            pais_normalizado = 'estados_Unidos'
-        else:
-            pais_normalizado = pais.lower()
-        
-        url = f'https://api.invertironline.com/api/v2/portafolio/{pais_normalizado}'
-        
-        # Generar headers con autenticación Bearer
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {token_portador}',
-            'Content-Type': 'application/json'
-        }
-        
-        print(f"🔍 Obteniendo portafolio de {pais} desde: {url}")
-        print(f"🔑 Token usado: {token_portador[:10]}...")
-        
-        response = requests.get(url, headers=headers, timeout=30)
-        print(f"📡 Respuesta HTTP: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ Portafolio obtenido exitosamente para {pais}")
-            print(f"📊 Estructura de respuesta: {list(data.keys()) if isinstance(data, dict) else 'No es dict'}")
-            
-            # Verificar estructura de respuesta según la documentación
-            if isinstance(data, dict) and 'activos' in data:
-                activos = data.get('activos', [])
-                print(f"📊 Cantidad de activos encontrados: {len(activos)}")
-                
-                # Verificar si hay activos con cantidad > 0
-                activos_con_cantidad = [activo for activo in activos if activo.get('cantidad', 0) > 0]
-                print(f"📊 Activos con cantidad > 0: {len(activos_con_cantidad)}")
-                
-                return data
-            else:
-                print(f"⚠️ Estructura de respuesta inesperada para {pais}")
-                print(f"📝 Respuesta: {data}")
-                return None
-                
-        elif response.status_code == 401:
-            print(f"❌ Error 401: No autorizado para {pais}")
-            print(f"📝 Respuesta del servidor: {response.text}")
-            
-            # Intentar renovar token y reintentar
-            print("🔄 Intentando renovar token...")
-            refresh_token = st.session_state.get('refresh_token')
-            if refresh_token:
-                nuevo_token = renovar_token(refresh_token)
-                if nuevo_token:
-                    st.session_state['token_acceso'] = nuevo_token
-                    print("✅ Token renovado, reintentando...")
-                    
-                    # Reintentar con nuevo token
-                    headers['Authorization'] = f'Bearer {nuevo_token}'
-                    response = requests.get(url, headers=headers, timeout=30)
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        print(f"✅ Portafolio obtenido exitosamente en reintento para {pais}")
-                        return data
-                    else:
-                        print(f"❌ Error persistente después de renovar token: {response.status_code}")
-                        print(f"📝 Respuesta: {response.text}")
-            
-            # Si aún falla, mostrar error específico
-            st.error(f"❌ **Error de Autorización**: No tienes permisos para acceder al portafolio de {pais}")
-            st.info("💡 **Posibles soluciones:**")
-            st.info("1. Verifica que tu cuenta tenga permisos para acceder a portafolios")
-            st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
-            st.info("3. Asegúrate de que tu token de acceso sea válido")
-            return None
-            
-        elif response.status_code == 403:
-            print(f"❌ Error 403: Prohibido para {pais}")
-            st.error(f"❌ **Acceso Prohibido**: No tienes permisos para acceder al portafolio de {pais}")
-            return None
-            
-        else:
-            print(f"❌ Error HTTP {response.status_code} para {pais}")
-            print(f"📝 Respuesta del servidor: {response.text}")
-            if response.status_code == 500:
-                print(f"❌ Error del servidor ({response.status_code}) para {pais}")
-                # No mostrar error al usuario, el sistema usará fallbacks automáticamente
-            else:
-                st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
-            return None
-            
-    except requests.exceptions.Timeout:
-        print(f"⏰ Timeout al obtener portafolio de {pais}")
-        st.error("⏰ **Timeout**: La consulta tardó demasiado en responder")
-        return None
-    except requests.exceptions.RequestException as e:
-        print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
-        st.error(f"🌐 **Error de Conexión**: {str(e)}")
-        return None
-    except Exception as e:
-        print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
-        st.error(f"💥 **Error Inesperado**: {str(e)}")
-        return None
-
-def obtener_portafolio_alternativo_mejorado(token_portador, pais):
-    """
-    Método alternativo para obtener datos del portafolio cuando el endpoint principal falla
-    """
-    try:
-        print(f"🔄 Usando método alternativo para {pais}")
-        
-        # Intentar obtener datos del estado de cuenta
-        estado_cuenta = obtener_estado_cuenta(token_portador)
-        if not estado_cuenta:
-            print(f"❌ No se pudo obtener estado de cuenta para {pais}")
-            return crear_portafolio_simulado(pais)
-        
-        # Crear portafolio basado en estado de cuenta
-        portafolio_alternativo = {
-            'pais': pais,
-            'activos': [],
-            'metodo': 'alternativo_estado_cuenta'
-        }
-        
-        # Extraer información de las cuentas
-        cuentas = estado_cuenta.get('cuentas', [])
-        for cuenta in cuentas:
-            if cuenta.get('estado') == 'operable':
-                tipo_cuenta = cuenta.get('tipo', '')
-                moneda = cuenta.get('moneda', '').lower()
-                total = float(cuenta.get('total', 0))
-                titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
-                disponible = float(cuenta.get('disponible', 0))
-                
-                # Filtrar por país basado en la moneda y tipo de cuenta
-                es_pais_correcto = False
-                if pais.lower() in ['argentina', 'argentina']:
-                    es_pais_correcto = 'peso' in moneda or 'argentina' in tipo_cuenta.lower()
-                elif pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu']:
-                    es_pais_correcto = 'dolar' in moneda or 'estados' in tipo_cuenta.lower()
-                
-                if es_pais_correcto and (total > 0 or titulos_valorizados > 0):
-                    # Crear activos basados en datos reales
-                    if titulos_valorizados > 0:
-                        activo_titulos = {
-                            'cantidad': 1,
-                            'valorizado': titulos_valorizados,
-                            'ultimoPrecio': titulos_valorizados,
-                            'ppc': titulos_valorizados,
-                            'comprometido': 0,
-                            'variacionDiaria': 0,
-                            'gananciaPorcentaje': 0,
-                            'gananciaDinero': 0,
-                            'puntosVariacion': 0,
-                            'titulo': {
-                                'simbolo': f"TITULOS_{moneda[:3].upper()}",
-                                'descripcion': f"Títulos Valorizados - {tipo_cuenta}",
-                                'pais': pais,
-                                'mercado': 'BCBA' if 'peso' in moneda else 'NYSE',
-                                'tipo': 'acciones' if 'peso' in moneda else 'stocks',
-                                'plazo': 't0',
-                                'moneda': moneda
-                            },
-                            'parking': {
-                                'disponibleInmediato': 0
-                            }
-                        }
-                        portafolio_alternativo['activos'].append(activo_titulos)
-                    
-                    if disponible > 0:
-                        activo_disponible = {
-                            'cantidad': 1,
-                            'valorizado': disponible,
-                            'ultimoPrecio': disponible,
-                            'ppc': disponible,
-                            'comprometido': 0,
-                            'variacionDiaria': 0,
-                            'gananciaPorcentaje': 0,
-                            'gananciaDinero': 0,
-                            'puntosVariacion': 0,
-                            'titulo': {
-                                'simbolo': f"DISP_{moneda[:3].upper()}",
-                                'descripcion': f"Disponible - {tipo_cuenta}",
-                                'pais': pais,
-                                'mercado': 'BCBA' if 'peso' in moneda else 'NYSE',
-                                'tipo': 'efectivo',
-                                'plazo': 't0',
-                                'moneda': moneda
-                            },
-                            'parking': {
-                                'disponibleInmediato': disponible
-                            }
-                        }
-                        portafolio_alternativo['activos'].append(activo_disponible)
-        
-        if not portafolio_alternativo['activos']:
-            print(f"⚠️ No se encontraron activos para {pais} en el estado de cuenta")
-            return crear_portafolio_simulado(pais)
-        
-        print(f"✅ Portafolio alternativo creado para {pais}: {len(portafolio_alternativo['activos'])} activos")
-        return portafolio_alternativo
-        
-    except Exception as e:
-        print(f"💥 Error en método alternativo para {pais}: {e}")
-        return crear_portafolio_simulado(pais)
-
-def crear_portafolio_simulado(pais):
-    """
-    Crea un portafolio simulado cuando no se pueden obtener datos reales
-    """
-    print(f"🎭 Creando portafolio simulado para {pais}")
-    
-    # Activos simulados más realistas
-    if pais.lower() in ['argentina', 'argentina']:
-        activos_simulados = [
-            {
-                'cantidad': 100,
-                'valorizado': 50000,
-                'ultimoPrecio': 500,
-                'ppc': 480,
-                'comprometido': 0,
-                'variacionDiaria': 2.5,
-                'gananciaPorcentaje': 4.2,
-                'gananciaDinero': 2000,
-                'puntosVariacion': 12,
-                'titulo': {
-                    'simbolo': 'GGAL',
-                    'descripcion': 'Grupo Galicia S.A.',
-                    'pais': 'Argentina',
-                    'mercado': 'BCBA',
-                    'tipo': 'acciones',
-                    'plazo': 't0',
-                    'moneda': 'peso_Argentino'
-                },
-                'parking': {
-                    'disponibleInmediato': 0
-                }
-            },
-            {
-                'cantidad': 50,
-                'valorizado': 25000,
-                'ultimoPrecio': 500,
-                'ppc': 520,
-                'comprometido': 0,
-                'variacionDiaria': -1.8,
-                'gananciaPorcentaje': -3.8,
-                'gananciaDinero': -1000,
-                'puntosVariacion': -9,
-                'titulo': {
-                    'simbolo': 'YPF',
-                    'descripcion': 'YPF S.A.',
-                    'pais': 'Argentina',
-                    'mercado': 'BCBA',
-                    'tipo': 'acciones',
-                    'plazo': 't0',
-                    'moneda': 'peso_Argentino'
-                },
-                'parking': {
-                    'disponibleInmediato': 0
-                }
-            }
-        ]
-    else:  # Estados Unidos
-        activos_simulados = [
-            {
-                'cantidad': 10,
-                'valorizado': 1500,
-                'ultimoPrecio': 150,
-                'ppc': 145,
-                'comprometido': 0,
-                'variacionDiaria': 3.3,
-                'gananciaPorcentaje': 3.4,
-                'gananciaDinero': 50,
-                'puntosVariacion': 5,
-                'titulo': {
-                    'simbolo': 'AAPL',
-                    'descripcion': 'Apple Inc.',
-                    'pais': 'Estados Unidos',
-                    'mercado': 'NYSE',
-                    'tipo': 'stocks',
-                    'plazo': 't0',
-                    'moneda': 'dolar_Estadounidense'
-                },
-                'parking': {
-                    'disponibleInmediato': 0
-                }
-            },
-            {
-                'cantidad': 5,
-                'valorizado': 2500,
-                'ultimoPrecio': 500,
-                'ppc': 480,
-                'comprometido': 0,
-                'variacionDiaria': 4.2,
-                'gananciaPorcentaje': 4.2,
-                'gananciaDinero': 100,
-                'puntosVariacion': 20,
-                'titulo': {
-                    'simbolo': 'GOOGL',
-                    'descripcion': 'Alphabet Inc.',
-                    'pais': 'Estados Unidos',
-                    'mercado': 'NYSE',
-                    'tipo': 'stocks',
-                    'plazo': 't0',
-                    'moneda': 'dolar_Estadounidense'
-                },
-                'parking': {
-                    'disponibleInmediato': 0
-                }
-            }
-        ]
-    
-    return {
-        'pais': pais,
-        'activos': activos_simulados,
-        'metodo': 'simulado'
-    }
-
-def mostrar_resumen_portafolio_mejorado(token_portador, id_cliente=None):
-    """
-    Muestra un resumen mejorado del portafolio que incluye tanto Argentina como EEUU
-    usando el nuevo endpoint /api/v2/portafolio/{pais}
-    """
-    st.markdown("### 📊 Resumen del Portafolio")
-    
-    # Verificar token antes de proceder
-    if not verificar_token_valido(token_portador):
-        st.warning("⚠️ Token expirado. Renovando...")
-        nuevo_token = renovar_token(st.session_state.get('refresh_token'))
-        if nuevo_token:
-            st.session_state['token_acceso'] = nuevo_token
-            token_portador = nuevo_token
-            st.success("✅ Token renovado")
-        else:
-            st.error("❌ No se pudo renovar el token")
-            return
-    
-    # Obtener portafolios de ambos países
-    with st.spinner("📊 Obteniendo portafolios..."):
-        portafolio_argentina = obtener_portafolio_por_pais_mejorado(token_portador, 'argentina')
-        portafolio_eeuu = obtener_portafolio_por_pais_mejorado(token_portador, 'estados_unidos')
-    
-    # Verificar si se obtuvieron datos reales
-    if not portafolio_argentina and not portafolio_eeuu:
-        st.error("❌ **No se pudieron obtener datos de portafolio**")
-        st.info("💡 **Posibles causas:**")
-        st.info("• Tu cuenta no tiene permisos para acceder a los endpoints de portafolio")
-        st.info("• El token de acceso ha expirado o es inválido")
-        st.info("• Los endpoints requieren permisos especiales de IOL")
-        st.info("• Problemas de conectividad con la API")
-        return
-    
-    # Mostrar información sobre el origen de los datos
-    mostrar_info_origen_datos(portafolio_argentina, portafolio_eeuu)
-    
-    # Procesar datos de Argentina
-    datos_argentina = procesar_portafolio_pais(portafolio_argentina, "Argentina", token_portador) if portafolio_argentina else {'activos': [], 'valor_total': 0, 'pais': 'Argentina'}
-    
-    # Procesar datos de Estados Unidos
-    datos_eeuu = procesar_portafolio_pais(portafolio_eeuu, "Estados Unidos", token_portador) if portafolio_eeuu else {'activos': [], 'valor_total': 0, 'pais': 'Estados Unidos'}
-    
-    # Combinar datos para análisis general
-    todos_los_activos = datos_argentina['activos'] + datos_eeuu['activos']
-    valor_total_ars = datos_argentina['valor_total']
-    valor_total_usd = datos_eeuu['valor_total']
-    
-    # Calcular total en ARS usando MEP
-    mep = obtener_tasa_mep_al30(token_portador) or 0.0
-    valor_total_mep = valor_total_ars + (valor_total_usd * mep if mep > 0 else 0.0)
-    
-    # Información General
-    st.subheader("📈 Información General")
-    cols = st.columns(4)
-    cols[0].metric("Total de activos", len(todos_los_activos))
-    cols[1].metric("Símbolos únicos", len(set([activo['Símbolo'] for activo in todos_los_activos])))
-    cols[2].metric("Tipos de activos", len(set([activo['Tipo'] for activo in todos_los_activos])))
-    cols[3].metric("Valor total (ARS + USD a MEP)", f"${valor_total_mep:,.2f}")
-    
-    # Desglose por país
-    st.subheader("🌍 Desglose por País")
-    col1, col2, col3 = st.columns(3)
-    
-    col1.metric("🇦🇷 Argentina", f"${valor_total_ars:,.2f}")
-    col2.metric("🇺🇸 Estados Unidos", f"${valor_total_usd:,.2f}")
-    col3.metric("💱 Tasa MEP", f"${mep:,.2f}" if mep > 0 else "N/A")
-    
-    # Análisis de riesgo combinado
-    if todos_los_activos:
-        st.subheader("⚠️ Análisis de Riesgo")
-        
-        # Crear diccionario de portafolio para métricas
-        portafolio_dict = {activo['Símbolo']: activo for activo in todos_los_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total_mep, token_portador)
-        
-        if metricas:
-            cols = st.columns(3)
-            
-            # Mostrar concentración como porcentaje
-            concentracion_pct = metricas['concentracion'] * 100
-            cols[0].metric("Concentración", 
-                         f"{concentracion_pct:.1f}%",
-                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
-            
-            # Mostrar volatilidad como porcentaje anual
-            volatilidad_pct = metricas['std_dev_activo'] * 100
-            cols[1].metric("Volatilidad Anual", 
-                         f"{volatilidad_pct:.1f}%",
-                         help="Riesgo medido como desviación estándar de retornos anuales")
-            
-            # Nivel de concentración
-            if metricas['concentracion'] < 0.3:
-                concentracion_status = "Baja"
-            elif metricas['concentracion'] < 0.6:
-                concentracion_status = "Media"
-            else:
-                concentracion_status = "Alta"
-            cols[2].metric("Nivel de concentración", concentracion_status)
-            
-            # Proyecciones
-            st.subheader("📊 Proyecciones de Rendimiento")
-            cols = st.columns(3)
-            
-            # Mostrar retornos como porcentaje del portafolio
-            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
-            cols[0].metric("Retorno Esperado Anual", 
-                         f"{retorno_anual_pct:+.1f}%",
-                         help="Retorno anual esperado basado en datos históricos")
-            
-            # Mostrar escenarios como porcentaje del portafolio
-            optimista_pct = (metricas['pl_esperado_max'] / valor_total_mep) * 100 if valor_total_mep > 0 else 0
-            pesimista_pct = (metricas['pl_esperado_min'] / valor_total_mep) * 100 if valor_total_mep > 0 else 0
-            
-            cols[1].metric("Escenario Optimista (95%)", 
-                         f"{optimista_pct:+.1f}%",
-                         help="Mejor escenario con 95% de confianza")
-            cols[2].metric("Escenario Pesimista (5%)", 
-                         f"{pesimista_pct:+.1f}%",
-                         help="Peor escenario con 5% de confianza")
-            
-            # Probabilidades
-            st.subheader("🎲 Probabilidades")
-            cols = st.columns(4)
-            probs = metricas['probabilidades']
-            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
-            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
-            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
-            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
-    
-    # Mostrar tablas por país
-    mostrar_tablas_portafolio_por_pais(datos_argentina, datos_eeuu)
-
-def procesar_portafolio_pais(portafolio, pais, token_portador):
-    """
-    Procesa los datos de un portafolio específico por país
-    """
-    datos_activos = []
-    valor_total = 0
-    
-    if not portafolio or not isinstance(portafolio, dict):
-        return {'activos': [], 'valor_total': 0, 'pais': pais}
-    
-    activos = portafolio.get('activos', [])
-    if not activos:
-        return {'activos': [], 'valor_total': 0, 'pais': pais}
-    
-    for activo in activos:
-        try:
-            titulo = activo.get('titulo', {})
-            simbolo = titulo.get('simbolo', 'N/A')
-            descripcion = titulo.get('descripcion', 'Sin descripción')
-            tipo = titulo.get('tipo', 'N/A')
-            cantidad = activo.get('cantidad', 0)
-            moneda = titulo.get('moneda', 'peso_Argentino')
-            
-            # Campos extra para tabla
-            precio_promedio_compra = None
-            variacion_diaria_pct = None
-            activos_comp = 0
-            
-            # Buscar valuación en diferentes campos
-            campos_valuacion = [
-                'valorizado', 'valuacion', 'valorActual', 'valorMercado',
-                'valorTotal', 'importe', 'montoInvertido'
-            ]
-            
-            valuacion = 0
-            for campo in campos_valuacion:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        val = float(activo[campo])
-                        if val > 0:
-                            valuacion = val
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            # Si no hay valuación directa, calcularla
-            if valuacion == 0 and cantidad:
-                ultimo_precio = activo.get('ultimoPrecio', 0)
-                if ultimo_precio > 0:
-                    try:
-                        cantidad_num = float(cantidad)
-                        # Aplicar regla de valuación según el tipo
-                        if necesita_ajuste_por_100(simbolo, tipo):
-                            valuacion = (cantidad_num * ultimo_precio) / 100.0
-                        else:
-                            valuacion = cantidad_num * ultimo_precio
-                    except (ValueError, TypeError):
-                        pass
-            
-            # Obtener otros campos
-            ultimo_precio_view = activo.get('ultimoPrecio')
-            precio_promedio_compra = activo.get('ppc')  # Precio promedio de compra
-            variacion_diaria_pct = activo.get('variacionDiaria')
-            activos_comp = activo.get('comprometido', 0)
-            
-            datos_activos.append({
-                'Símbolo': simbolo,
-                'Descripción': descripcion,
-                'Tipo': tipo,
-                'Cantidad': cantidad,
-                'Valuación': valuacion,
-                'UltimoPrecio': ultimo_precio_view,
-                'PrecioPromedioCompra': precio_promedio_compra,
-                'VariacionDiariaPct': variacion_diaria_pct,
-                'ActivosComp': activos_comp,
-                'Moneda': moneda,
-                'País': pais,
-                'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
-            })
-            
-            valor_total += valuacion
-            
-        except Exception as e:
-            print(f"💥 Error procesando activo en {pais}: {e}")
-            continue
-    
-    return {
-        'activos': datos_activos,
-        'valor_total': valor_total,
-        'pais': pais
-    }
-
-def mostrar_tablas_portafolio_por_pais(datos_argentina, datos_eeuu):
-    """
-    Muestra las tablas de activos separadas por país
-    """
-    # Crear pestañas para cada país
-    tab_argentina, tab_eeuu = st.tabs(["🇦🇷 Argentina", "🇺🇸 Estados Unidos"])
-    
-    with tab_argentina:
-        st.subheader("🇦🇷 Portafolio Argentina")
-        if datos_argentina['activos']:
-            mostrar_tabla_activos(datos_argentina['activos'], "Argentina")
-        else:
-            st.info("📊 No hay activos en el portafolio de Argentina")
-    
-    with tab_eeuu:
-        st.subheader("🇺🇸 Portafolio Estados Unidos")
-        if datos_eeuu['activos']:
-            mostrar_tabla_activos(datos_eeuu['activos'], "Estados Unidos")
-        else:
-            st.info("📊 No hay activos en el portafolio de Estados Unidos")
-
-def mostrar_tabla_activos(activos, pais):
-    """
-    Muestra una tabla formateada de activos para un país específico
-    """
-    try:
-        df_tabla = pd.DataFrame(activos)
-        if not df_tabla.empty:
-            # Columnas visibles y orden
-            columnas = [
-                'Símbolo', 'Descripción', 'Cantidad', 'ActivosComp',
-                'VariacionDiariaPct', 'UltimoPrecio', 'PrecioPromedioCompra',
-                'Valuación', 'Moneda'
-            ]
-            columnas_disponibles = [c for c in columnas if c in df_tabla.columns]
-            df_view = df_tabla[columnas_disponibles].copy()
-            
-            # Formatos
-            if 'VariacionDiariaPct' in df_view.columns:
-                df_view['VariacionDiariaPct'] = df_view['VariacionDiariaPct'].apply(
-                    lambda x: f"{x:+.3f} %" if pd.notna(x) else "")
-            if 'UltimoPrecio' in df_view.columns:
-                df_view['UltimoPrecio'] = df_view['UltimoPrecio'].apply(
-                    lambda x: f"${x:,.2f}" if pd.notna(x) else "")
-            if 'PrecioPromedioCompra' in df_view.columns:
-                df_view['PrecioPromedioCompra'] = df_view['PrecioPromedioCompra'].apply(
-                    lambda x: f"${x:,.2f}" if pd.notna(x) else "")
-            if 'Valuación' in df_view.columns:
-                df_view['Valuación'] = df_view['Valuación'].apply(
-                    lambda x: f"$ {x:,.0f}" if isinstance(x, (int, float)) else str(x))
-            
-            # Renombrar encabezados
-            df_view = df_view.rename(columns={
-                'ActivosComp': 'Activos comp.',
-                'VariacionDiariaPct': 'Variación diaria',
-                'UltimoPrecio': 'Último precio',
-                'PrecioPromedioCompra': 'Precio promedio de compra',
-                'Valuación': 'Valorizado',
-                'Moneda': 'Moneda'
-            })
-            
-            st.dataframe(df_view, use_container_width=True)
-            
-            # Mostrar resumen
-            valor_total = sum([activo['Valuación'] for activo in activos])
-            st.metric(f"💰 Valor total {pais}", f"${valor_total:,.2f}")
-            
-    except Exception as e:
-        st.error(f"❌ Error al mostrar tabla de {pais}: {e}")
-
-def diagnosticar_api_movimientos():
-    """
-    Función para diagnosticar problemas con la API de movimientos
-    """
-    st.subheader("🔍 Diagnóstico de la API de Movimientos")
-    
-    if not st.session_state.get('token_acceso'):
-        st.error("❌ No hay token de acceso disponible")
-        st.info("🔐 Por favor, autentíquese primero")
-        return
-    
-    token_acceso = st.session_state.token_acceso
-    
-    # Validar token
-    if not verificar_token_valido(token_acceso):
-        st.warning("⚠️ Token expirado, intentando renovar...")
-        refresh_token = st.session_state.get('refresh_token')
-        if refresh_token:
-            nuevo_token = renovar_token(refresh_token)
-            if nuevo_token:
-                st.session_state.token_acceso = nuevo_token
-                token_acceso = nuevo_token
-                st.success("✅ Token renovado")
-            else:
-                st.error("❌ No se pudo renovar el token")
-                return
-        else:
-            st.error("❌ No hay refresh token disponible")
-            return
-    
-    # Obtener cliente de prueba
-    clientes = obtener_lista_clientes(token_acceso)
-    if not clientes:
-        st.error("❌ No se pudieron obtener clientes")
-        return
-    
-    cliente_prueba = clientes[0]['numeroCliente'] if isinstance(clientes, list) else clientes[0]['numeroCliente']
-    
-    st.info(f"🔍 Usando cliente de prueba: {cliente_prueba}")
-    
-    # Probar diferentes configuraciones
-    configuraciones = [
-        {
-            "nombre": "Configuración básica",
-            "payload": {
-                "clientes": [cliente_prueba],
-                "from": "2024-01-01T00:00:00.000Z",
-                "to": "2024-01-02T23:59:59.999Z",
-                "dateType": "fechaOperacion"
-            }
-        },
-        {
-            "nombre": "Configuración con moneda ARS",
-            "payload": {
-                "clientes": [cliente_prueba],
-                "from": "2024-01-01T00:00:00.000Z",
-                "to": "2024-01-02T23:59:59.999Z",
-                "dateType": "fechaOperacion",
-                "currency": "ARS"
-            }
-        },
-        {
-            "nombre": "Configuración con fechas recientes",
-            "payload": {
-                "clientes": [cliente_prueba],
-                "from": "2024-12-01T00:00:00.000Z",
-                "to": "2024-12-31T23:59:59.999Z",
-                "dateType": "fechaOperacion"
-            }
-        }
-    ]
-    
-    resultados = []
-    
-    for config in configuraciones:
-        with st.expander(f"🔍 {config['nombre']}"):
-            st.code(f"Payload: {config['payload']}")
-            
-            try:
-                url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
-                headers = obtener_encabezado_autorizacion(token_acceso)
-                
-                if not headers:
-                    st.error("❌ No se pudieron generar headers")
-                    continue
-                
-                response = requests.post(url, headers=headers, json=config['payload'], timeout=30)
-                
-                if response.status_code == 200:
-                    st.success(f"✅ Éxito - Status: {response.status_code}")
-                    data = response.json()
-                    if isinstance(data, dict) and 'movimientos' in data:
-                        st.info(f"📊 Movimientos encontrados: {len(data['movimientos'])}")
-                    elif isinstance(data, list):
-                        st.info(f"📊 Movimientos encontrados: {len(data)}")
-                    else:
-                        st.info(f"📊 Estructura: {type(data)}")
-                elif response.status_code == 500:
-                    st.error(f"❌ Error 500 - Error interno del servidor")
-                    st.code(f"Respuesta: {response.text}")
-                else:
-                    st.error(f"❌ Error {response.status_code}")
-                    st.code(f"Respuesta: {response.text}")
-                    
-            except Exception as e:
-                st.error(f"💥 Error: {e}")
-    
-    st.markdown("---")
-    st.info("💡 **Recomendaciones:**")
-    st.info("• Si todas las pruebas fallan con error 500, el problema es del servidor de IOL")
-    st.info("• Si algunas funcionan, el problema está en los parámetros específicos")
-    st.info("• Verifica que tu cuenta tenga permisos de asesor")
-    st.info("• Contacta al soporte de IOL si el problema persiste")
 
 if __name__ == "__main__":
     main()
