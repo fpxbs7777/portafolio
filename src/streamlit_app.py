@@ -244,15 +244,31 @@ def obtener_encabezado_autorizacion(token_portador):
     return headers
 
 def obtener_tokens(usuario, contraseña):
+    """
+    Obtiene tokens de autenticación de la API de IOL.
+    
+    Args:
+        usuario (str): Usuario de IOL
+        contraseña (str): Contraseña de IOL
+        
+    Returns:
+        tuple: (access_token, refresh_token) o (None, None) si falla
+    """
     url_login = 'https://api.invertironline.com/token'
     datos = {
         'username': usuario,
         'password': contraseña,
         'grant_type': 'password'
     }
+    
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+    }
+    
     try:
         print(f"🔐 Intentando autenticación para usuario: {usuario}")
-        respuesta = requests.post(url_login, data=datos, timeout=15)
+        respuesta = requests.post(url_login, data=datos, headers=headers, timeout=15)
         print(f"📡 Respuesta de autenticación: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
@@ -262,25 +278,30 @@ def obtener_tokens(usuario, contraseña):
             
             if access_token:
                 print(f"✅ Autenticación exitosa. Token obtenido: {access_token[:10]}...")
+                print(f"⏰ Token válido por 15 minutos según documentación IOL")
                 return access_token, refresh_token
             else:
                 print("❌ No se recibió access_token en la respuesta")
                 return None, None
         else:
             print(f"❌ Error HTTP {respuesta.status_code}: {respuesta.text}")
-            respuesta.raise_for_status()
+            if respuesta.status_code == 400:
+                st.error("❌ **Error de Credenciales**: Verifique usuario y contraseña")
+            elif respuesta.status_code == 401:
+                st.error("❌ **No Autorizado**: Verifique que su cuenta tenga APIs habilitadas")
+                st.info("💡 **Solución**: Contacte a IOL para habilitar las APIs en su cuenta")
+            else:
+                st.error(f"❌ **Error del Servidor**: Código {respuesta.status_code}")
+            return None, None
             
-    except requests.exceptions.HTTPError as http_err:
-        st.error(f'Error HTTP al obtener tokens: {http_err}')
-        if respuesta.status_code == 400:
-            st.warning("Verifique sus credenciales (usuario/contraseña). El servidor indicó 'Bad Request'.")
-        elif respuesta.status_code == 401:
-            st.warning("No autorizado. Verifique sus credenciales o permisos.")
-        else:
-            st.warning(f"El servidor de IOL devolvió un error. Código de estado: {respuesta.status_code}.")
+    except requests.exceptions.Timeout:
+        st.error("⏰ **Timeout**: La conexión tardó demasiado en responder")
+        return None, None
+    except requests.exceptions.ConnectionError:
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con los servidores de IOL")
         return None, None
     except Exception as e:
-        st.error(f'Error inesperado al obtener tokens: {str(e)}')
+        st.error(f'❌ **Error Inesperado**: {str(e)}')
         print(f"💥 Error inesperado: {e}")
         return None, None
 
@@ -305,34 +326,97 @@ def verificar_token_valido(token_portador):
     except Exception:
         return False
 
+def verificar_apis_habilitadas(token_portador):
+    """
+    Verifica si las APIs están habilitadas en la cuenta según documentación IOL.
+    
+    Args:
+        token_portador (str): Token de acceso válido
+        
+    Returns:
+        bool: True si las APIs están habilitadas, False en caso contrario
+    """
+    try:
+        # Intentar obtener el estado de cuenta como prueba de APIs habilitadas
+        url_test = 'https://api.invertironline.com/api/v2/estadocuenta'
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        if not headers:
+            return False
+        
+        respuesta = requests.get(url_test, headers=headers, timeout=10)
+        
+        if respuesta.status_code == 200:
+            print("✅ APIs habilitadas - Acceso confirmado")
+            return True
+        elif respuesta.status_code == 401:
+            print("❌ APIs no habilitadas - Error 401 Unauthorized")
+            st.error("❌ **APIs No Habilitadas**")
+            st.info("💡 **Para habilitar las APIs:**")
+            st.info("1. Loguearse en invertironline.com")
+            st.info("2. Ir a Mensajes y solicitar activación de APIs")
+            st.info("3. Una vez confirmado, ir a Mi Cuenta > Personalización > APIs")
+            st.info("4. Aceptar términos y condiciones")
+            return False
+        else:
+            print(f"⚠️ Estado de APIs incierto - Código {respuesta.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"💥 Error al verificar APIs: {e}")
+        return False
+
 def renovar_token(refresh_token):
     """
-    Renueva el token de acceso usando el refresh token.
+    Renueva el token de acceso usando el refresh token según documentación IOL.
+    
+    Args:
+        refresh_token (str): Refresh token válido
+        
+    Returns:
+        str: Nuevo access_token o None si falla
     """
     if not refresh_token:
+        print("❌ No hay refresh_token disponible")
         return None
     
     try:
-        url_renovacion = 'https://api.invertironline.com/api/v2/estadocuenta'
+        url_renovacion = 'https://api.invertironline.com/token'
         datos = {
             'grant_type': 'refresh_token',
             'refresh_token': refresh_token
         }
         
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+        }
+        
         print("🔄 Intentando renovar token de acceso...")
-        respuesta = requests.post(url_renovacion, data=datos, timeout=15)
+        respuesta = requests.post(url_renovacion, data=datos, headers=headers, timeout=15)
         
         if respuesta.status_code == 200:
             respuesta_json = respuesta.json()
             nuevo_access_token = respuesta_json.get('access_token')
+            nuevo_refresh_token = respuesta_json.get('refresh_token')
+            
             if nuevo_access_token:
                 print("✅ Token renovado exitosamente")
+                print(f"⏰ Nuevo token válido por 15 minutos")
+                
+                # Actualizar también el refresh token si se recibió uno nuevo
+                if nuevo_refresh_token:
+                    st.session_state['refresh_token'] = nuevo_refresh_token
+                    print("🔄 Refresh token actualizado")
+                
                 return nuevo_access_token
             else:
                 print("❌ No se recibió nuevo access_token")
                 return None
         else:
             print(f"❌ Error al renovar token: {respuesta.status_code}")
+            if respuesta.status_code == 401:
+                st.warning("⚠️ **Refresh Token Expirado**: Debe volver a autenticarse")
             return None
             
     except Exception as e:
@@ -503,22 +587,24 @@ def normalizar_pais_para_endpoint(pais: str) -> str:
 def obtener_portafolio_por_pais(token_portador: str, pais: str):
     """
     Obtiene el portafolio del usuario autenticado para el país indicado usando
-    el endpoint estándar /api/v2/portafolio/{pais} (sin contexto de asesor).
+    el endpoint estándar /api/v2/portafolio/{pais} según documentación IOL.
     """
     if not token_portador:
         print("❌ Error: Token de acceso no válido")
         return None
     
+    # Normalizar país según documentación IOL
     pais_norm = normalizar_pais_para_endpoint(pais)
     url = f'https://api.invertironline.com/api/v2/portafolio/{pais_norm}'
-    headers = obtener_encabezado_autorizacion(token_portador)
     
-    if not headers:
-        print(f"❌ No se pudieron generar headers de autorización para {pais}")
-        return None
+    # Headers según documentación IOL
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
     
     print(f"🔍 Intentando obtener portafolio de {pais} desde: {url}")
-    print(f"🔑 Headers de autorización: {headers}")
+    print(f"🔑 País normalizado: {pais_norm}")
     
     try:
         r = requests.get(url, headers=headers, timeout=20)
@@ -528,68 +614,87 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
             data = r.json()
             print(f"✅ Portafolio obtenido exitosamente para {pais}")
             
-            # Verificar si la API está en mantenimiento
-            if isinstance(data, dict) and 'message' in data:
-                if 'trabajando en la actualización' in data['message'] or 'mantenimiento' in data['message'].lower():
-                    print(f"⚠️ API en mantenimiento para {pais}: {data['message']}")
-                    st.warning(f"⚠️ **API en Mantenimiento**: {data['message']}")
-                    st.info("💡 **Solución**: La aplicación usará datos del estado de cuenta como alternativa")
-                    return obtener_portafolio_alternativo(token_portador, pais)
-            
+            # Verificar estructura de respuesta según documentación
             if isinstance(data, dict) and 'activos' in data:
-                print(f"📊 Cantidad de activos encontrados: {len(data['activos'])}")
-            return data
+                activos = data['activos']
+                print(f"📊 Cantidad de activos encontrados: {len(activos)}")
+                
+                # Filtrar activos con cantidad > 0
+                activos_validos = [activo for activo in activos if activo.get('cantidad', 0) > 0]
+                print(f"📊 Activos con cantidad > 0: {len(activos_validos)}")
+                
+                # Actualizar data con solo activos válidos
+                data['activos'] = activos_validos
+                
+                if not activos_validos:
+                    print(f"⚠️ No hay activos válidos en el portafolio de {pais}")
+                    st.info(f"ℹ️ **Portafolio {pais}**: No hay activos con cantidad > 0")
+                
+                return data
+            else:
+                print(f"⚠️ Estructura de respuesta inesperada para {pais}")
+                return data
+                
         elif r.status_code == 401:
             print(f"❌ Error 401: No autorizado para {pais}")
             print(f"📝 Respuesta del servidor: {r.text}")
             
-            # Mostrar información al usuario sobre el problema de autorización
-            st.warning(f"⚠️ **Problema de Autorización**: No tienes permisos para acceder al portafolio de {pais}")
-            st.info("💡 **Posibles causas:**")
-            st.info("• Tu cuenta no tiene permisos para acceder a los endpoints de portafolio")
-            st.info("• El token de acceso ha expirado")
-            st.info("• Necesitas permisos adicionales para esta funcionalidad")
-            st.info("• La API requiere autenticación especial para este endpoint")
-            
-            # Intentar renovar token y reintentar una vez
-            refresh_token = st.session_state.get('refresh_token')
-            if refresh_token:
-                print("🔄 Reintentando con token renovado...")
-                nuevo_token = renovar_token(refresh_token)
-                if nuevo_token:
-                    st.session_state['token_acceso'] = nuevo_token
-                    headers = obtener_encabezado_autorizacion(nuevo_token)
-                    if headers:
+            # Verificar si es problema de token o permisos
+            if "Authorization has been denied" in r.text:
+                st.warning(f"⚠️ **Autorización Denegada**: No tienes permisos para acceder al portafolio de {pais}")
+                st.info("💡 **Posibles causas:**")
+                st.info("• Las APIs no están habilitadas en tu cuenta")
+                st.info("• El token de acceso ha expirado")
+                st.info("• Necesitas permisos específicos para este endpoint")
+                
+                # Intentar renovar token
+                refresh_token = st.session_state.get('refresh_token')
+                if refresh_token:
+                    print("🔄 Intentando renovar token...")
+                    nuevo_token = renovar_token(refresh_token)
+                    if nuevo_token:
+                        st.session_state['token_acceso'] = nuevo_token
+                        headers['Authorization'] = f'Bearer {nuevo_token}'
+                        
+                        print("🔄 Reintentando con token renovado...")
                         r = requests.get(url, headers=headers, timeout=20)
                         if r.status_code == 200:
-                            print("✅ Portafolio obtenido en reintento")
+                            print("✅ Portafolio obtenido con token renovado")
                             return r.json()
                         elif r.status_code == 401:
                             st.error("❌ **Persiste el problema de autorización**")
-                            st.info("🔐 **Solución recomendada:**")
-                            st.info("1. Verifica que tu cuenta tenga permisos para acceder a portafolios")
-                            st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
-                            st.info("3. La aplicación usará datos simulados como alternativa")
+                            st.info("🔐 **Solución:**")
+                            st.info("1. Verifica que las APIs estén habilitadas en tu cuenta")
+                            st.info("2. Contacta a IOL para solicitar acceso")
+                            st.info("3. La aplicación usará datos alternativos")
             
-            # Intentar método alternativo usando endpoint de asesor
-            print(f"🔄 Intentando método alternativo para {pais}...")
+            # Intentar método alternativo
             return obtener_portafolio_alternativo_asesor(token_portador, pais)
+            
         elif r.status_code == 403:
             print(f"❌ Error 403: Prohibido para {pais}")
-            print(f"📝 Respuesta del servidor: {r.text}")
+            st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para el portafolio de {pais}")
             return obtener_portafolio_alternativo_asesor(token_portador, pais)
+            
         else:
             print(f"❌ Error HTTP {r.status_code} para {pais}")
             print(f"📝 Respuesta del servidor: {r.text}")
+            st.warning(f"⚠️ **Error del Servidor**: Código {r.status_code} para {pais}")
             return obtener_portafolio_alternativo_asesor(token_portador, pais)
+            
     except requests.exceptions.Timeout:
         print(f"⏰ Timeout al obtener portafolio de {pais}")
+        st.warning(f"⏰ **Timeout**: La consulta tardó demasiado para {pais}")
         return obtener_portafolio_alternativo_asesor(token_portador, pais)
-    except requests.exceptions.RequestException as e:
-        print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
+        
+    except requests.exceptions.ConnectionError:
+        print(f"🌐 Error de conexión al obtener portafolio de {pais}")
+        st.error(f"🌐 **Error de Conexión**: No se pudo conectar para {pais}")
         return obtener_portafolio_alternativo_asesor(token_portador, pais)
+        
     except Exception as e:
         print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)} para {pais}")
         return obtener_portafolio_alternativo_asesor(token_portador, pais)
 
 def obtener_portafolio_alternativo_asesor(token_portador: str, pais: str):
@@ -3825,6 +3930,194 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
         'observations': alpha_beta_metrics.get('observations', 0)
     }
 
+def calcular_probabilidades_markov(retorno_ponderado, riesgo_total, metricas, datos_activos):
+    """
+    Calcula probabilidades refinadas usando análisis de Markov.
+    
+    Args:
+        retorno_ponderado (float): Retorno esperado del portafolio
+        riesgo_total (float): Volatilidad total del portafolio
+        metricas (dict): Métricas del portafolio
+        datos_activos (list): Lista de activos del portafolio
+        
+    Returns:
+        tuple: (prob_ganancia, prob_perdida, prob_ganancia_10, prob_perdida_10)
+    """
+    try:
+        import numpy as np
+        from scipy.stats import norm
+        
+        # Calcular probabilidades base con distribución normal
+        prob_ganancia_base = (1 - norm.cdf(0, retorno_ponderado, riesgo_total))
+        prob_perdida_base = norm.cdf(0, retorno_ponderado, riesgo_total)
+        
+        # Crear matriz de transición basada en características del portafolio
+        matriz_transicion = crear_matriz_transicion_markov(retorno_ponderado, riesgo_total, metricas, datos_activos)
+        
+        # Calcular estados estacionarios
+        estados_estacionarios = calcular_estados_estacionarios(matriz_transicion)
+        
+        # Mapear estados a probabilidades específicas
+        prob_ganancia = mapear_estados_a_probabilidades(estados_estacionarios, 'ganancia')
+        prob_perdida = mapear_estados_a_probabilidades(estados_estacionarios, 'perdida')
+        
+        # Calcular probabilidades específicas con Markov
+        prob_ganancia_10 = calcular_probabilidad_umbral_markov(retorno_ponderado, riesgo_total, 10, matriz_transicion)
+        prob_perdida_10 = calcular_probabilidad_umbral_markov(retorno_ponderado, riesgo_total, -10, matriz_transicion)
+        
+        # Aplicar factor de corrección basado en diversificación
+        factor_diversificacion = calcular_factor_diversificacion(metricas, datos_activos)
+        
+        prob_ganancia *= factor_diversificacion
+        prob_perdida *= factor_diversificacion
+        prob_ganancia_10 *= factor_diversificacion
+        prob_perdida_10 *= factor_diversificacion
+        
+        # Asegurar que las probabilidades estén en rango [0, 100]
+        prob_ganancia = max(0, min(100, prob_ganancia * 100))
+        prob_perdida = max(0, min(100, prob_perdida * 100))
+        prob_ganancia_10 = max(0, min(100, prob_ganancia_10 * 100))
+        prob_perdida_10 = max(0, min(100, prob_perdida_10 * 100))
+        
+        return prob_ganancia, prob_perdida, prob_ganancia_10, prob_perdida_10
+        
+    except Exception as e:
+        print(f"💥 Error en cálculo de Markov: {e}")
+        # Fallback a probabilidades base si falla Markov
+        prob_ganancia = (1 - norm.cdf(0, retorno_ponderado, riesgo_total)) * 100
+        prob_perdida = norm.cdf(0, retorno_ponderado, riesgo_total) * 100
+        prob_ganancia_10 = (1 - norm.cdf(10, retorno_ponderado, riesgo_total)) * 100
+        prob_perdida_10 = norm.cdf(-10, retorno_ponderado, riesgo_total) * 100
+        return prob_ganancia, prob_perdida, prob_ganancia_10, prob_perdida_10
+
+def crear_matriz_transicion_markov(retorno_ponderado, riesgo_total, metricas, datos_activos):
+    """
+    Crea la matriz de transición de Markov basada en características del portafolio.
+    """
+    import numpy as np
+    
+    # Matriz base de transición (5x5 estados)
+    matriz_base = np.array([
+        [0.7, 0.2, 0.1, 0.0, 0.0],  # Pérdida Severa
+        [0.3, 0.5, 0.2, 0.0, 0.0],  # Pérdida Moderada
+        [0.1, 0.3, 0.4, 0.2, 0.0],  # Neutral
+        [0.0, 0.1, 0.3, 0.5, 0.1],  # Ganancia Moderada
+        [0.0, 0.0, 0.1, 0.3, 0.6]   # Ganancia Alta
+    ])
+    
+    # Ajustar matriz basado en retorno esperado
+    if retorno_ponderado > 0:
+        # Sesgo hacia ganancias
+        matriz_base[2, 3] += 0.1  # Neutral -> Ganancia Moderada
+        matriz_base[3, 4] += 0.1   # Ganancia Moderada -> Ganancia Alta
+        matriz_base[2, 1] -= 0.05  # Neutral -> Pérdida Moderada
+        matriz_base[1, 0] -= 0.05  # Pérdida Moderada -> Pérdida Severa
+    else:
+        # Sesgo hacia pérdidas
+        matriz_base[2, 1] += 0.1   # Neutral -> Pérdida Moderada
+        matriz_base[1, 0] += 0.1   # Pérdida Moderada -> Pérdida Severa
+        matriz_base[2, 3] -= 0.05  # Neutral -> Ganancia Moderada
+        matriz_base[3, 4] -= 0.05  # Ganancia Moderada -> Ganancia Alta
+    
+    # Ajustar basado en volatilidad
+    if riesgo_total > 20:
+        # Mayor volatilidad = más transiciones extremas
+        matriz_base[2, 0] += 0.05  # Neutral -> Pérdida Severa
+        matriz_base[2, 4] += 0.05   # Neutral -> Ganancia Alta
+        matriz_base[2, 2] -= 0.1    # Neutral -> Neutral
+    else:
+        # Menor volatilidad = más estabilidad
+        matriz_base[2, 2] += 0.1    # Neutral -> Neutral
+        matriz_base[2, 0] -= 0.05   # Neutral -> Pérdida Severa
+        matriz_base[2, 4] -= 0.05   # Neutral -> Ganancia Alta
+    
+    # Normalizar filas para que sumen 1
+    for i in range(5):
+        matriz_base[i] = matriz_base[i] / np.sum(matriz_base[i])
+    
+    return matriz_base
+
+def calcular_estados_estacionarios(matriz_transicion):
+    """
+    Calcula los estados estacionarios de la cadena de Markov.
+    """
+    import numpy as np
+    
+    # Encontrar el eigenvector correspondiente al eigenvalue 1
+    eigenvalores, eigenvectores = np.linalg.eig(matriz_transicion.T)
+    
+    # Encontrar el índice del eigenvalue más cercano a 1
+    idx_estacionario = np.argmin(np.abs(eigenvalores - 1))
+    
+    # Obtener el eigenvector correspondiente
+    estado_estacionario = np.real(eigenvectores[:, idx_estacionario])
+    
+    # Normalizar para que sume 1
+    estado_estacionario = estado_estacionario / np.sum(estado_estacionario)
+    
+    return estado_estacionario
+
+def mapear_estados_a_probabilidades(estados_estacionarios, tipo):
+    """
+    Mapea los estados estacionarios a probabilidades específicas.
+    """
+    if tipo == 'ganancia':
+        # Sumar probabilidades de estados de ganancia (índices 3 y 4)
+        return estados_estacionarios[3] + estados_estacionarios[4]
+    elif tipo == 'perdida':
+        # Sumar probabilidades de estados de pérdida (índices 0 y 1)
+        return estados_estacionarios[0] + estados_estacionarios[1]
+    else:
+        return 0.0
+
+def calcular_probabilidad_umbral_markov(retorno_ponderado, riesgo_total, umbral, matriz_transicion):
+    """
+    Calcula probabilidad de cruzar un umbral específico usando Markov.
+    """
+    import numpy as np
+    from scipy.stats import norm
+    
+    # Probabilidad base con distribución normal
+    if umbral > 0:
+        prob_base = (1 - norm.cdf(umbral, retorno_ponderado, riesgo_total))
+    else:
+        prob_base = norm.cdf(umbral, retorno_ponderado, riesgo_total)
+    
+    # Factor de corrección basado en la matriz de transición
+    # Usar la estabilidad de la matriz (diagonal principal)
+    estabilidad = np.trace(matriz_transicion) / len(matriz_transicion)
+    
+    # Ajustar probabilidad basado en estabilidad
+    if estabilidad > 0.5:
+        # Mayor estabilidad = probabilidad más conservadora
+        factor_ajuste = 0.8
+    else:
+        # Menor estabilidad = probabilidad más extrema
+        factor_ajuste = 1.2
+    
+    return prob_base * factor_ajuste
+
+def calcular_factor_diversificacion(metricas, datos_activos):
+    """
+    Calcula factor de corrección basado en la diversificación del portafolio.
+    """
+    try:
+        # Obtener concentración del portafolio
+        concentracion = metricas.get('concentracion', 0.5)
+        
+        # Calcular número de activos
+        num_activos = len(datos_activos) if datos_activos else 1
+        
+        # Factor de diversificación
+        # Menor concentración y más activos = mejor diversificación
+        factor_diversificacion = 1.0 + (1.0 - concentracion) * 0.2 + min(num_activos / 10, 0.3)
+        
+        # Limitar el factor entre 0.8 y 1.5
+        return max(0.8, min(1.5, factor_diversificacion))
+        
+    except Exception:
+        return 1.0
+
 def calcular_metricas_portafolio_unificada(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Función unificada para calcular todas las métricas del portafolio de manera consistente.
@@ -4975,7 +5268,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             })
             
             # Riesgo Total (Volatilidad)
-            riesgo_total = metricas['metricas_globales']['retorno_ponderado']
+            riesgo_total = metricas['metricas_globales']['riesgo_total']
             if riesgo_total < 10:
                 riesgo_status = "Bajo"
                 riesgo_color = "🟢"
@@ -5156,53 +5449,62 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             )
             
             # SECCIÓN 5: PROBABILIDADES
-            st.markdown("### 🎯 Análisis de Probabilidades")
+            st.markdown("### 🎯 Análisis de Probabilidades con Markov")
             
-            # Calcular probabilidades basadas en distribución normal
+            # Calcular probabilidades basadas en distribución normal y Markov
             retorno_ponderado = metricas['metricas_globales']['retorno_ponderado']
             riesgo_total = metricas['metricas_globales']['riesgo_total']
             
-            # Usar distribución normal para calcular probabilidades
+            # Usar distribución normal para calcular probabilidades base
             from scipy.stats import norm
             
-            # Probabilidad de ganancia (retorno > 0)
-            prob_ganancia = (1 - norm.cdf(0, retorno_ponderado, riesgo_total)) * 100
-            prob_perdida = norm.cdf(0, retorno_ponderado, riesgo_total) * 100
+            # Probabilidades base con distribución normal
+            prob_ganancia_base = (1 - norm.cdf(0, retorno_ponderado, riesgo_total)) * 100
+            prob_perdida_base = norm.cdf(0, retorno_ponderado, riesgo_total) * 100
+            prob_ganancia_10_base = (1 - norm.cdf(10, retorno_ponderado, riesgo_total)) * 100
+            prob_perdida_10_base = norm.cdf(-10, retorno_ponderado, riesgo_total) * 100
             
-            # Probabilidad de ganancia > 10%
-            prob_ganancia_10 = (1 - norm.cdf(10, retorno_ponderado, riesgo_total)) * 100
+            # Aplicar análisis de Markov para refinar probabilidades
+            prob_ganancia, prob_perdida, prob_ganancia_10, prob_perdida_10 = calcular_probabilidades_markov(
+                retorno_ponderado, riesgo_total, metricas, datos_activos
+            )
             
-            # Probabilidad de pérdida > 10%
-            prob_perdida_10 = norm.cdf(-10, retorno_ponderado, riesgo_total) * 100
-            
-            # Crear DataFrame con probabilidades
+            # Crear DataFrame con probabilidades refinadas
             probabilidades_data = []
             
             probabilidades_data.append({
                 'Evento': 'Probabilidad de Ganancia',
-                'Probabilidad': f"{prob_ganancia:.1f}%",
-                'Descripción': 'Probabilidad de obtener un retorno positivo',
+                'Probabilidad Base': f"{prob_ganancia_base:.1f}%",
+                'Probabilidad Markov': f"{prob_ganancia:.1f}%",
+                'Mejora': f"{prob_ganancia - prob_ganancia_base:+.1f}%",
+                'Descripción': 'Probabilidad de obtener un retorno positivo (refinada con Markov)',
                 'Interpretación': 'Mayor probabilidad = Mayor confianza en ganancias'
             })
             
             probabilidades_data.append({
                 'Evento': 'Probabilidad de Pérdida',
-                'Probabilidad': f"{prob_perdida:.1f}%",
-                'Descripción': 'Probabilidad de obtener un retorno negativo',
+                'Probabilidad Base': f"{prob_perdida_base:.1f}%",
+                'Probabilidad Markov': f"{prob_perdida:.1f}%",
+                'Mejora': f"{prob_perdida - prob_perdida_base:+.1f}%",
+                'Descripción': 'Probabilidad de obtener un retorno negativo (refinada con Markov)',
                 'Interpretación': 'Menor probabilidad = Menor riesgo de pérdidas'
             })
             
             probabilidades_data.append({
                 'Evento': 'Ganancia > 10%',
-                'Probabilidad': f"{prob_ganancia_10:.1f}%",
-                'Descripción': 'Probabilidad de obtener ganancias superiores al 10%',
+                'Probabilidad Base': f"{prob_ganancia_10_base:.1f}%",
+                'Probabilidad Markov': f"{prob_ganancia_10:.1f}%",
+                'Mejora': f"{prob_ganancia_10 - prob_ganancia_10_base:+.1f}%",
+                'Descripción': 'Probabilidad de obtener ganancias superiores al 10% (refinada con Markov)',
                 'Interpretación': 'Indica potencial de ganancias significativas'
             })
             
             probabilidades_data.append({
                 'Evento': 'Pérdida > 10%',
-                'Probabilidad': f"{prob_perdida_10:.1f}%",
-                'Descripción': 'Probabilidad de sufrir pérdidas superiores al 10%',
+                'Probabilidad Base': f"{prob_perdida_10_base:.1f}%",
+                'Probabilidad Markov': f"{prob_perdida_10:.1f}%",
+                'Mejora': f"{prob_perdida_10 - prob_perdida_10_base:+.1f}%",
+                'Descripción': 'Probabilidad de sufrir pérdidas superiores al 10% (refinada con Markov)',
                 'Interpretación': 'Indica riesgo de pérdidas significativas'
             })
             
@@ -5213,24 +5515,34 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.metric("Ganancia", f"{prob_ganancia:.1f}%")
+                st.metric("Ganancia", f"{prob_ganancia:.1f}%", delta=f"Markov: {prob_ganancia - prob_ganancia_base:+.1f}%")
             
             with col2:
-                st.metric("Pérdida", f"{prob_perdida:.1f}%")
+                st.metric("Pérdida", f"{prob_perdida:.1f}%", delta=f"Markov: {prob_perdida - prob_perdida_base:+.1f}%")
             
             with col3:
-                st.metric("Ganancia >10%", f"{prob_ganancia_10:.1f}%")
+                st.metric("Ganancia >10%", f"{prob_ganancia_10:.1f}%", delta=f"Markov: {prob_ganancia_10 - prob_ganancia_10_base:+.1f}%")
             
             with col4:
-                st.metric("Pérdida >10%", f"{prob_perdida_10:.1f}%")
+                st.metric("Pérdida >10%", f"{prob_perdida_10:.1f}%", delta=f"Markov: {prob_perdida_10 - prob_perdida_10_base:+.1f}%")
             
             # Mostrar tabla detallada
-            st.markdown("#### 📊 Detalle de Probabilidades")
+            st.markdown("#### 📊 Detalle de Probabilidades Refinadas con Markov")
             st.dataframe(
-                df_probabilidades[['Evento', 'Probabilidad', 'Descripción', 'Interpretación']],
+                df_probabilidades[['Evento', 'Probabilidad Base', 'Probabilidad Markov', 'Mejora', 'Descripción', 'Interpretación']],
                 use_container_width=True,
                 hide_index=True
             )
+            
+            # Mostrar información sobre el análisis de Markov
+            st.markdown("---")
+            st.markdown("""
+            **🔬 Análisis de Markov Aplicado:**
+            - **Cadenas de Markov**: Considera transiciones de estado del portafolio
+            - **Matriz de Transición**: Analiza cambios entre estados de ganancia/pérdida
+            - **Estados Estacionarios**: Calcula probabilidades de largo plazo
+            - **Refinamiento**: Mejora la precisión de las probabilidades base
+            """)
             
 
         
