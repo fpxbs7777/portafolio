@@ -6303,9 +6303,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             
                             # Ocultadas: estadísticas del histograma y evolución temporal del portafolio
                                 
-                                # Mostrar métricas globales del portafolio (usando valores unificados)
-                                st.markdown("#### Métricas Globales del Portafolio")
-                                col1, col2, col3, col4 = st.columns(4)
+                            # Mostrar métricas globales del portafolio (usando valores unificados)
+                            st.markdown("#### Métricas Globales del Portafolio")
+                            col1, col2, col3, col4 = st.columns(4)
                                 
                                 # Usar métricas unificadas como fuente única de verdad
                                 if metricas and 'metricas_globales' in metricas:
