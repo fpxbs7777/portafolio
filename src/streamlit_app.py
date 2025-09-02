@@ -705,6 +705,172 @@ def obtener_portafolio_con_manejo_errores(token_portador, pais):
         st.error(f"💥 Error inesperado al obtener portafolio de {pais}")
         return None
 
+def diagnosticar_problema_autenticacion(token_portador):
+    """
+    Diagnostica problemas específicos de autenticación con la API de IOL
+    """
+    st.subheader("🔍 Diagnóstico de Autenticación")
+    
+    if not token_portador:
+        st.error("❌ **Problema identificado**: No hay token de acceso")
+        st.info("💡 **Solución**: Vaya a la página de login y autentíquese nuevamente")
+        return False
+    
+    # Verificar formato del token
+    if not isinstance(token_portador, str) or len(token_portador.strip()) == 0:
+        st.error("❌ **Problema identificado**: Token de acceso inválido")
+        st.info("💡 **Solución**: Vaya a la página de login y autentíquese nuevamente")
+        return False
+    
+    # Verificar conectividad básica
+    st.info("🔍 **Paso 1**: Verificando conectividad con la API...")
+    try:
+        response = requests.get('https://api.invertironline.com/api/v2/estadocuenta', timeout=10)
+        if response.status_code == 401:
+            st.success("✅ **Conectividad**: La API responde correctamente")
+        else:
+            st.warning(f"⚠️ **Conectividad**: La API responde con código {response.status_code}")
+    except Exception as e:
+        st.error(f"❌ **Conectividad**: No se puede conectar con la API - {str(e)}")
+        return False
+    
+    # Verificar token con endpoint de prueba
+    st.info("🔍 **Paso 2**: Verificando validez del token...")
+    try:
+        headers = {
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }
+        response = requests.get('https://api.invertironline.com/api/v2/estadocuenta', headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            st.success("✅ **Token**: El token es válido y funciona correctamente")
+            return True
+        elif response.status_code == 401:
+            st.error("❌ **Token**: El token ha expirado o es inválido")
+            st.info("💡 **Solución**: Vaya a la página de login y autentíquese nuevamente")
+            return False
+        elif response.status_code == 403:
+            st.error("❌ **Permisos**: El token es válido pero no tiene permisos suficientes")
+            st.info("💡 **Solución**: Contacte a IOL para habilitar las APIs en su cuenta")
+            return False
+        else:
+            st.warning(f"⚠️ **Token**: Respuesta inesperada - Código {response.status_code}")
+            st.info(f"📝 **Respuesta del servidor**: {response.text[:200]}")
+            return False
+            
+    except Exception as e:
+        st.error(f"❌ **Error al verificar token**: {str(e)}")
+        return False
+
+def verificar_endpoints_especificos(token_portador):
+    """
+    Verifica endpoints específicos del portafolio para identificar el problema exacto
+    """
+    st.subheader("🔍 Verificación de Endpoints Específicos")
+    
+    headers = {
+        'Authorization': f'Bearer {token_portador}',
+        'Accept': 'application/json'
+    }
+    
+    endpoints = [
+        ('Estado de Cuenta', 'https://api.invertironline.com/api/v2/estadocuenta'),
+        ('Portafolio Argentina', 'https://api.invertironline.com/api/v2/portafolio/argentina'),
+        ('Portafolio Estados Unidos', 'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'),
+    ]
+    
+    resultados = {}
+    
+    for nombre, url in endpoints:
+        st.info(f"🔍 **Probando**: {nombre}")
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            resultados[nombre] = {
+                'status_code': response.status_code,
+                'success': response.status_code == 200,
+                'error': None
+            }
+            
+            if response.status_code == 200:
+                st.success(f"✅ **{nombre}**: Funciona correctamente")
+            elif response.status_code == 401:
+                st.error(f"❌ **{nombre}**: Token expirado o inválido")
+            elif response.status_code == 403:
+                st.error(f"❌ **{nombre}**: Sin permisos para este endpoint")
+            elif response.status_code == 404:
+                st.warning(f"⚠️ **{nombre}**: Endpoint no encontrado")
+            else:
+                st.warning(f"⚠️ **{nombre}**: Código {response.status_code}")
+                
+        except Exception as e:
+            resultados[nombre] = {
+                'status_code': None,
+                'success': False,
+                'error': str(e)
+            }
+            st.error(f"❌ **{nombre}**: Error de conexión - {str(e)}")
+    
+    return resultados
+
+def mostrar_soluciones_especificas(resultados_diagnostico):
+    """
+    Muestra soluciones específicas basadas en los resultados del diagnóstico
+    """
+    st.subheader("💡 Soluciones Específicas")
+    
+    if not resultados_diagnostico:
+        st.warning("⚠️ No se pudo completar el diagnóstico")
+        return
+    
+    # Analizar resultados
+    endpoints_funcionando = [k for k, v in resultados_diagnostico.items() if v.get('success')]
+    endpoints_401 = [k for k, v in resultados_diagnostico.items() if v.get('status_code') == 401]
+    endpoints_403 = [k for k, v in resultados_diagnostico.items() if v.get('status_code') == 403]
+    
+    if endpoints_401:
+        st.error("🔴 **Problema Principal**: Token expirado o inválido")
+        st.markdown("""
+        ### 🔧 **Solución Inmediata:**
+        1. **Vaya a la página de login** de la aplicación
+        2. **Cierre sesión** si está autenticado
+        3. **Vuelva a autenticarse** con sus credenciales de IOL
+        4. **Espere a que se genere un nuevo token**
+        5. **Intente nuevamente** obtener el portafolio
+        """)
+    
+    elif endpoints_403:
+        st.error("🔴 **Problema Principal**: Permisos insuficientes")
+        st.markdown("""
+        ### 🔧 **Solución Requerida:**
+        1. **Contacte a IOL** por teléfono o chat
+        2. **Solicite habilitación de APIs** en su cuenta
+        3. **Especifique que necesita acceso a**: Portafolio, Estado de Cuenta, Movimientos
+        4. **Espere confirmación** de que las APIs están habilitadas
+        5. **Vuelva a autenticarse** en la aplicación
+        """)
+    
+    elif endpoints_funcionando:
+        st.success("🟢 **Diagnóstico**: Algunos endpoints funcionan")
+        st.info(f"✅ **Endpoints que funcionan**: {', '.join(endpoints_funcionando)}")
+        st.warning("⚠️ **Problema**: Endpoints específicos del portafolio no responden")
+        st.markdown("""
+        ### 🔧 **Posibles Soluciones:**
+        1. **Verifique que tenga activos** en su portafolio de IOL
+        2. **Intente más tarde** - puede ser un problema temporal del servidor
+        3. **Contacte soporte** de IOL si el problema persiste
+        """)
+    
+    else:
+        st.error("🔴 **Problema Crítico**: Ningún endpoint responde correctamente")
+        st.markdown("""
+        ### 🔧 **Solución Completa:**
+        1. **Verifique su conexión a internet**
+        2. **Reautentíquese** en la aplicación
+        3. **Contacte a IOL** para verificar el estado de las APIs
+        4. **Intente desde otro dispositivo** o red
+        """)
+
 def verificar_conectividad_api():
     """
     Verifica la conectividad con la API de IOL
@@ -874,13 +1040,26 @@ def obtener_portafolio_correcto(token_portador: str):
         # Si llegamos aquí, ningún endpoint funcionó
         print("❌ Ningún endpoint funcionó para obtener el portafolio")
         
-        # Verificar conectividad antes de mostrar error
-        if not verificar_conectividad_api():
-            st.error("❌ **Error de Conectividad**: No se puede conectar con la API de IOL")
-            st.warning("⚠️ **Verifique su conexión a internet y que los servidores de IOL estén disponibles**")
-        else:
-            st.error("❌ **Error de Autenticación**: No se pudo obtener el portafolio desde ningún endpoint")
-            st.warning("⚠️ **Verifique su token de acceso y permisos de API**")
+        # Ejecutar diagnóstico automático
+        st.error("❌ **Error de Autenticación**: No se pudo obtener el portafolio desde ningún endpoint")
+        st.warning("⚠️ **Verifique su token de acceso y permisos de API**")
+        
+        # Mostrar botón para diagnóstico detallado
+        if st.button("🔍 Ejecutar Diagnóstico Detallado", type="primary"):
+            with st.spinner("🔍 Ejecutando diagnóstico..."):
+                # Diagnóstico de autenticación
+                token_valido = diagnosticar_problema_autenticacion(token_portador)
+                
+                if token_valido:
+                    # Si el token es válido, verificar endpoints específicos
+                    st.info("🔍 **Continuando diagnóstico de endpoints...**")
+                    resultados_endpoints = verificar_endpoints_especificos(token_portador)
+                    
+                    # Mostrar soluciones específicas
+                    mostrar_soluciones_especificas(resultados_endpoints)
+                else:
+                    st.error("❌ **Diagnóstico completado**: El problema es de autenticación")
+                    st.info("💡 **Acción requerida**: Reautentíquese en la aplicación")
         
         return None
             
@@ -943,64 +1122,34 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
         elif r.status_code == 401:
             print(f"❌ Error 401: No autorizado para {pais}")
             print(f"📝 Respuesta del servidor: {r.text}")
-            
-            # Verificar si es problema de token o permisos
-            if "Authorization has been denied" in r.text:
-                st.warning(f"⚠️ **Autorización Denegada**: No tienes permisos para acceder al portafolio de {pais}")
-                st.info("💡 **Posibles causas:**")
-                st.info("• Las APIs no están habilitadas en tu cuenta")
-                st.info("• El token de acceso ha expirado")
-                st.info("• Necesitas permisos específicos para este endpoint")
-                
-                # Intentar renovar token
-                refresh_token = st.session_state.get('refresh_token')
-                if refresh_token:
-                    print("🔄 Intentando renovar token...")
-                    nuevo_token = renovar_token(refresh_token)
-                    if nuevo_token:
-                        st.session_state['token_acceso'] = nuevo_token
-                        headers['Authorization'] = f'Bearer {nuevo_token}'
-                        
-                        print("🔄 Reintentando con token renovado...")
-                        r = requests.get(url, headers=headers, timeout=20)
-                        if r.status_code == 200:
-                            print("✅ Portafolio obtenido con token renovado")
-                            return r.json()
-                        elif r.status_code == 401:
-                            st.error("❌ **Persiste el problema de autorización**")
-                            st.info("🔐 **Solución:**")
-                            st.info("1. Verifica que las APIs estén habilitadas en tu cuenta")
-                            st.info("2. Contacta a IOL para solicitar acceso")
-                            st.info("3. La aplicación usará datos alternativos")
-            
-            # Intentar método alternativo
-            return obtener_portafolio_alternativo_asesor(token_portador, pais)
+            st.warning(f"⚠️ **Error de Autenticación**: No se pudo obtener el portafolio de {pais}")
+            return None
             
         elif r.status_code == 403:
             print(f"❌ Error 403: Prohibido para {pais}")
             st.warning(f"⚠️ **Acceso Prohibido**: No tienes permisos para el portafolio de {pais}")
-            return obtener_portafolio_alternativo_asesor(token_portador, pais)
+            return None
             
         else:
             print(f"❌ Error HTTP {r.status_code} para {pais}")
             print(f"📝 Respuesta del servidor: {r.text}")
             st.warning(f"⚠️ **Error del Servidor**: Código {r.status_code} para {pais}")
-            return obtener_portafolio_alternativo_asesor(token_portador, pais)
+            return None
             
     except requests.exceptions.Timeout:
         print(f"⏰ Timeout al obtener portafolio de {pais}")
         st.warning(f"⏰ **Timeout**: La consulta tardó demasiado para {pais}")
-        return obtener_portafolio_alternativo_asesor(token_portador, pais)
+        return None
         
     except requests.exceptions.ConnectionError:
         print(f"🌐 Error de conexión al obtener portafolio de {pais}")
         st.error(f"🌐 **Error de Conexión**: No se pudo conectar para {pais}")
-        return obtener_portafolio_alternativo_asesor(token_portador, pais)
+        return None
         
     except Exception as e:
         print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
         st.error(f"💥 **Error Inesperado**: {str(e)} para {pais}")
-        return obtener_portafolio_alternativo_asesor(token_portador, pais)
+        return None
 
 def obtener_portafolio_alternativo_asesor(token_portador: str, pais: str):
     """
@@ -8033,9 +8182,6 @@ def mostrar_analisis_portafolio():
         mostrar_optimizacion_portafolio(token_acceso, id_cliente)
     
     with tab6:
-        mostrar_conversion_usd(token_acceso, id_cliente)
-    
-    with tab7:
         mostrar_distribucion_activos_mejorada()
     
     with tab8:
@@ -8102,8 +8248,8 @@ def mostrar_analisis_portafolio():
         mostrar_diagnostico_autorizacion()
     
     with tab10:
-        # Nueva funcionalidad de portafolios separados con conversión
-        mostrar_portafolios_separados_con_conversion(token_acceso, id_cliente)
+        # Nueva funcionalidad de portafolios separados
+        mostrar_portafolios_separados(token_acceso, id_cliente)
 
 
 def obtener_historico_movimientos_portafolio(token_portador, id_cliente, dias_atras=30):
@@ -8544,11 +8690,6 @@ def mostrar_datos_historicos_portafolio():
         """)
 
 
-def mostrar_conversion_usd(token_acceso, id_cliente):
-    st.markdown("### 💵 Conversión USD")
-    st.info("Esta funcionalidad estará disponible próximamente")
-
-
 def main():
     st.markdown("---")
     st.markdown("""
@@ -8557,517 +8698,6 @@ def main():
     - Las ganancias/pérdidas son calculadas en USD
     - Considera el impacto de las comisiones en tus cálculos
     - La diversificación es clave para reducir el riesgo
-    """)
-
-def mostrar_conversion_usd(token_acceso, id_cliente):
-    """
-    Muestra la funcionalidad para calcular ganancias/pérdidas en dólares
-    al vender acciones argentinas y convertirlas a dólares (MELID, MELIC, etc.)
-    """
-    st.header("💵 Conversión a Dólares - Análisis de Ganancias/Pérdidas")
-    st.markdown("""
-    Calcula si estás ganando o perdiendo en términos de dólares cuando vendes acciones argentinas 
-    que se pueden convertir a dólares (MELID, MELIC, etc.).
-    """)
-    
-    # Verificar si el token es válido
-    if not verificar_token_valido(token_acceso):
-        st.warning("⚠️ El token de acceso ha expirado. Intentando renovar...")
-        nuevo_token = renovar_token(st.session_state.refresh_token)
-        if nuevo_token:
-            st.session_state.token_acceso = nuevo_token
-            token_acceso = nuevo_token
-            st.success("✅ Token renovado exitosamente")
-        else:
-            st.error("❌ No se pudo renovar el token. Por favor, vuelva a autenticarse.")
-            return
-    
-    # Obtener portafolios usando endpoint de asesor (que funciona)
-    st.text("Obteniendo portafolios con endpoint de asesor...")
-    
-    # Obtener cliente seleccionado
-    cliente_actual = st.session_state.get('cliente_seleccionado')
-    if not cliente_actual:
-        st.error("No hay cliente seleccionado")
-        return
-    
-    id_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id'))
-    if not id_cliente:
-        st.error("No se pudo obtener ID del cliente")
-        return
-    
-    # Obtener portafolios usando endpoint de asesor
-    portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
-    portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
-    
-    # Debug: Mostrar qué se obtuvo
-    st.text(f"Portafolio Argentina obtenido: {portafolio_ar is not None}")
-    st.text(f"Portafolio Estados Unidos obtenido: {portafolio_us is not None}")
-    
-    if portafolio_ar:
-        st.text(f"Activos Argentina: {len(portafolio_ar.get('activos', []))}")
-    if portafolio_us:
-        st.text(f"Activos Estados Unidos: {len(portafolio_us.get('activos', []))}")
-    
-    # Combinar portafolios
-    portafolio_combinado = {'activos': []}
-    
-    if portafolio_ar and 'activos' in portafolio_ar:
-        portafolio_combinado['activos'].extend(portafolio_ar['activos'])
-        print(f"✅ Portafolio argentino: {len(portafolio_ar['activos'])} activos")
-    
-    if portafolio_us and 'activos' in portafolio_us:
-        portafolio_combinado['activos'].extend(portafolio_us['activos'])
-        print(f"✅ Portafolio estadounidense: {len(portafolio_us['activos'])} activos")
-    
-    # Si no hay activos, intentar método de respaldo usando estado de cuenta
-    if not portafolio_combinado['activos']:
-        st.text("Intentando método de respaldo con estado de cuenta...")
-        
-        # Obtener estado de cuenta
-        estado_cuenta = obtener_estado_cuenta(token_acceso)
-        if estado_cuenta and 'cuentas' in estado_cuenta:
-            cuentas = estado_cuenta['cuentas']
-            
-            # Buscar cuentas estadounidenses
-            for cuenta in cuentas:
-                if cuenta.get('estado') == 'operable':
-                    tipo_cuenta = cuenta.get('tipo', '').lower()
-                    moneda = cuenta.get('moneda', '').lower()
-                    
-                    # Identificar cuentas estadounidenses
-                    if ('estados' in tipo_cuenta or 'dolar' in moneda or 'usd' in moneda) and cuenta.get('total', 0) > 0:
-                        st.text(f"Encontrada cuenta estadounidense: {tipo_cuenta} - {moneda}")
-                        
-                        # Crear activo simulado basado en la cuenta
-                        activo_us = {
-                            'titulo': {
-                                'simbolo': f"USD_{tipo_cuenta[:5].upper()}",
-                                'descripcion': f"Cuenta {tipo_cuenta}",
-                                'tipo': 'cuenta_usd',
-                                'pais': 'estados_Unidos',
-                                'mercado': 'NYSE',
-                                'moneda': 'dolar_Estadounidense'
-                            },
-                            'cantidad': 1,
-                            'valuacion': float(cuenta.get('total', 0)),
-                            'valorizado': float(cuenta.get('total', 0)),
-                            'ultimoPrecio': float(cuenta.get('total', 0)),
-                            'ppc': float(cuenta.get('total', 0)),
-                            'gananciaPorcentaje': 0,
-                            'gananciaDinero': 0,
-                            'variacionDiaria': 0,
-                            'comprometido': 0
-                        }
-                        
-                        portafolio_combinado['activos'].append(activo_us)
-                        st.text(f"Agregado activo estadounidense: ${activo_us['valuacion']:,.2f}")
-    
-    st.text(f"Total activos final: {len(portafolio_combinado['activos'])}")
-    
-    if not portafolio_combinado['activos']:
-        st.error("❌ **No se pudieron obtener datos reales del portafolio**")
-        st.warning("⚠️ **La aplicación requiere datos reales de la API de IOL para funcionar**")
-        
-        # Mostrar información detallada sobre el problema
-        mostrar_error_conectividad()
-        
-        st.info("💡 **Para continuar:**")
-        st.info("1. Verifique su conexión a internet")
-        st.info("2. Asegúrese de estar autenticado correctamente")
-        st.info("3. Confirme que las APIs estén habilitadas en su cuenta de IOL")
-        st.info("4. Intente nuevamente en unos minutos")
-        
-        return
-    
-    # Usar el portafolio combinado directamente
-    portafolio_final = portafolio_combinado
-    
-
-    
-    # Verificar si el portafolio combinado tiene activos
-    activos_raw = portafolio_final.get('activos', [])
-    if not activos_raw:
-        st.error("❌ No se encontraron activos en los portafolios combinados")
-        st.info("**Estructura del portafolio recibido:**")
-        st.json(portafolio_final)
-        st.warning("""
-        **Posibles causas:**
-        - Los portafolios están realmente vacíos
-        - Los activos no tienen la estructura esperada
-        - Problemas de autenticación o permisos
-        - La API está devolviendo datos en un formato diferente
-        """)
-        
-        # Intentar obtener portafolio con método alternativo
-        st.info("🔄 **Intentando método alternativo...**")
-        try:
-            # Intentar obtener portafolios usando el endpoint de asesor
-            portafolio_ar_alt = obtener_portafolio(token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', ''), 'Argentina')
-            portafolio_us_alt = obtener_portafolio(token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', ''), 'Estados Unidos')
-            
-            portafolio_combinado_alt = {'activos': []}
-            if portafolio_ar_alt and portafolio_ar_alt.get('activos'):
-                portafolio_combinado_alt['activos'].extend(portafolio_ar_alt['activos'])
-            if portafolio_us_alt and portafolio_us_alt.get('activos'):
-                portafolio_combinado_alt['activos'].extend(portafolio_us_alt['activos'])
-            
-            if portafolio_combinado_alt['activos']:
-                st.success("✅ Se encontraron activos con método alternativo")
-                portafolio_ar = portafolio_combinado_alt
-                activos_raw = portafolio_ar.get('activos', [])
-            else:
-                st.warning("⚠️ El método alternativo tampoco encontró activos")
-                st.error("❌ **No se pudieron obtener datos reales del portafolio**")
-                st.warning("⚠️ **La aplicación requiere datos reales de la API de IOL para funcionar**")
-                
-                # Mostrar información detallada sobre el problema
-                mostrar_error_conectividad()
-                
-                st.info("💡 **Para continuar:**")
-                st.info("1. Verifique que tenga activos en sus portafolios en la plataforma de IOL")
-                st.info("2. Confirme que las APIs estén habilitadas en su cuenta")
-                st.info("3. Intente reautenticarse")
-                st.info("4. Contacte al soporte de IOL si el problema persiste")
-                
-                return
-        except Exception as e:
-            st.error(f"❌ Error en método alternativo: {e}")
-            return
-    
-    # Filtrar activos argentinos (acciones, bonos, letras, etc.)
-    activos_ar = []
-    for activo in activos_raw:
-         titulo = activo.get('titulo', {})
-         tipo = titulo.get('tipo', '')
-         simbolo = titulo.get('simbolo', '')
-         descripcion = titulo.get('descripcion', 'Sin descripción')
-         
-         # Incluir todos los activos argentinos (no solo acciones)
-         if simbolo and simbolo != 'N/A':
-             # Crear objeto con datos estructurados
-             activo_info = {
-                 'simbolo': simbolo,
-                 'descripcion': descripcion,
-                 'tipo': tipo,
-                 'cantidad': activo.get('cantidad', 0),
-                 'precio': 0,
-                 'valuacion': 0,
-                 'precio_compra': 0,
-                 'variacion_diaria': 0,
-                 'rendimiento': 0
-             }
-             
-             # Obtener precio y valuación
-             campos_valuacion = [
-                 'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
-                 'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
-                 'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
-             ]
-             
-             for campo in campos_valuacion:
-                 if campo in activo and activo[campo] is not None:
-                     try:
-                         val = float(activo[campo])
-                         if val > 0:
-                             activo_info['valuacion'] = val
-                             break
-                     except (ValueError, TypeError):
-                         continue
-             
-             # Obtener precio de compra y otros datos
-             campos_precio = [
-                 'precioPromedio', 'precioCompra', 'precioActual', 'precio',
-                 'precioUnitario', 'ultimoPrecio', 'cotizacion'
-             ]
-             
-             for campo in campos_precio:
-                 if campo in activo and activo[campo] is not None:
-                     try:
-                         precio = float(activo[campo])
-                         if precio > 0:
-                             activo_info['precio'] = precio
-                             activo_info['precio_compra'] = precio
-                             break
-                     except (ValueError, TypeError):
-                         continue
-             
-             # Obtener variación diaria y rendimiento
-             if 'variacionDiaria' in activo and activo['variacionDiaria'] is not None:
-                 try:
-                     activo_info['variacion_diaria'] = float(activo['variacionDiaria'])
-                 except (ValueError, TypeError):
-                     pass
-             
-             if 'rendimiento' in activo and activo['rendimiento'] is not None:
-                 try:
-                     activo_info['rendimiento'] = float(activo['rendimiento'])
-                 except (ValueError, TypeError):
-                     pass
-             
-             # Si no hay valuación, calcular con precio y cantidad
-             if activo_info['valuacion'] == 0 and activo_info['cantidad'] and activo_info['precio']:
-                 activo_info['valuacion'] = activo_info['cantidad'] * activo_info['precio']
-             
-             activos_ar.append(activo_info)
-    
-    if not activos_ar:
-        st.error("❌ No se pudieron procesar los activos del portafolio argentino")
-        st.info("💡 **Posibles causas:**")
-        st.info("• Los activos no tienen símbolos válidos")
-        st.info("• La estructura de datos es diferente a la esperada")
-        st.info("• Problemas en el procesamiento de los datos")
-        return
-    
-    # Mostrar resumen de todos los activos argentinos
-    st.subheader("📊 Resumen de Activos Argentinos")
-    
-    # Crear tabla resumen de todos los activos
-    df_activos = pd.DataFrame(activos_ar)
-    if not df_activos.empty:
-        # Mostrar métricas clave
-        col1, col2, col3, col4 = st.columns(4)
-        
-        valor_total = df_activos['valuacion'].sum()
-        col1.metric("💰 Valor Total", f"${valor_total:,.2f}")
-        col2.metric("📈 Cantidad Activos", len(activos_ar))
-        col3.metric("📊 Rendimiento Promedio", f"{df_activos['rendimiento'].mean():.2f}%")
-        col4.metric("📉 Variación Promedio", f"{df_activos['variacion_diaria'].mean():.2f}%")
-        
-        # Tabla de activos
-        st.markdown("#### 📋 Lista de Activos Disponibles")
-        df_display = df_activos[['simbolo', 'descripcion', 'cantidad', 'precio', 'valuacion', 'rendimiento', 'variacion_diaria']].copy()
-        df_display.columns = ['Símbolo', 'Descripción', 'Cantidad', 'Precio', 'Valuación', 'Rendimiento %', 'Var. Diaria %']
-        df_display['Valuación'] = df_display['Valuación'].apply(lambda x: f"${x:,.2f}")
-        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}")
-        df_display['Rendimiento %'] = df_display['Rendimiento %'].apply(lambda x: f"{x:+.2f}%")
-        df_display['Var. Diaria %'] = df_display['Var. Diaria %'].apply(lambda x: f"{x:+.2f}%")
-        
-        st.dataframe(df_display, use_container_width=True)
-    
-    # Crear interfaz para seleccionar activo y calcular conversión
-    st.markdown("---")
-    st.subheader("💱 Análisis de Conversión a Dólares")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("📊 Selección de Activo")
-        
-        # Selector de activo
-        opciones_activos = [f"{activo['simbolo']} - {activo['descripcion']}" 
-                           for activo in activos_ar]
-        activo_seleccionado = st.selectbox(
-            "Seleccione el activo a analizar:",
-            options=opciones_activos,
-            index=0,
-            key="activo_conversion_usd"
-        )
-        
-        # Obtener datos del activo seleccionado
-        activo_idx = opciones_activos.index(activo_seleccionado)
-        activo_data = activos_ar[activo_idx]
-        
-        # Mostrar información del activo
-        st.info(f"""
-        **Activo seleccionado:** {activo_data['simbolo']}
-        - **Descripción:** {activo_data['descripcion']}
-        - **Tipo:** {activo_data['tipo'] or 'N/A'}
-        - **Cantidad:** {activo_data['cantidad']:,.0f}
-        - **Precio actual:** ${activo_data['precio']:,.2f}
-        - **Valuación actual:** ${activo_data['valuacion']:,.2f}
-        - **Rendimiento:** {activo_data['rendimiento']:+.2f}%
-        - **Variación diaria:** {activo_data['variacion_diaria']:+.2f}%
-        """)
-        
-        # Inputs para el cálculo
-        st.subheader("💰 Parámetros de Conversión")
-        
-        precio_venta_ars = st.number_input(
-            "Precio de venta en ARS:",
-            min_value=0.01,
-            value=float(activo_data['precio'] if activo_data['precio'] > 0 else activo_data['valuacion'] / activo_data['cantidad'] if activo_data['cantidad'] > 0 else 0),
-            step=0.01,
-            format="%.2f"
-        )
-        
-        # Selector de tipo de conversión
-        tipo_conversion = st.selectbox(
-            "Tipo de conversión:",
-            options=["MELID (Dólar MEP)", "MELIC (Dólar CCL)", "Dólar Blue", "Dólar Oficial"],
-            index=0,
-            key="tipo_conversion_usd"
-        )
-        
-        # Input para tipo de cambio
-        if tipo_conversion == "MELID (Dólar MEP)":
-            tc_default = 1000.0  # Valor aproximado del dólar MEP
-            tc_help = "Ingrese el tipo de cambio MEP actual (ARS/USD)"
-        elif tipo_conversion == "MELIC (Dólar CCL)":
-            tc_default = 1100.0  # Valor aproximado del dólar CCL
-            tc_help = "Ingrese el tipo de cambio CCL actual (ARS/USD)"
-        elif tipo_conversion == "Dólar Blue":
-            tc_default = 1200.0  # Valor aproximado del dólar blue
-            tc_help = "Ingrese el tipo de cambio blue actual (ARS/USD)"
-        else:  # Dólar Oficial
-            tc_default = 350.0  # Valor aproximado del dólar oficial
-            tc_help = "Ingrese el tipo de cambio oficial actual (ARS/USD)"
-        
-        tipo_cambio = st.number_input(
-            f"Tipo de cambio {tipo_conversion.split(' ')[0]}:",
-            min_value=0.01,
-            value=tc_default,
-            step=0.01,
-            format="%.2f",
-            help=tc_help
-        )
-    
-    with col2:
-        st.subheader("📈 Resultados")
-        
-        # Validar que tenemos datos válidos para el cálculo
-        if activo_data['cantidad'] <= 0 or activo_data['valuacion'] <= 0:
-            st.error("❌ No hay datos suficientes para realizar el cálculo. Verifique que el activo tenga cantidad y valuación válidas.")
-            return
-        
-        # Calcular resultados
-        cantidad = float(activo_data['cantidad'])
-        precio_compra = float(activo_data['precio']) if activo_data['precio'] > 0 else activo_data['valuacion'] / activo_data['cantidad']
-        valuacion_actual = float(activo_data['valuacion'])
-        
-        # Calcular venta en ARS
-        venta_ars = cantidad * precio_venta_ars
-        
-        # Calcular conversión a USD
-        venta_usd = venta_ars / tipo_cambio
-        
-        # Calcular ganancia/pérdida en ARS
-        ganancia_ars = venta_ars - valuacion_actual
-        
-        # Calcular ganancia/pérdida en USD
-        ganancia_usd = venta_usd - (valuacion_actual / tipo_cambio)
-        
-        # Mostrar métricas
-        st.metric(
-            "💰 Venta en ARS",
-            f"${venta_ars:,.2f}",
-            f"{ganancia_ars:+,.2f} ARS"
-        )
-        
-        st.metric(
-            "💵 Venta en USD",
-            f"${venta_usd:,.2f}",
-            f"{ganancia_usd:+,.2f} USD"
-        )
-        
-        # Calcular porcentajes de ganancia/pérdida
-        porcentaje_ars = (ganancia_ars / valuacion_actual) * 100 if valuacion_actual > 0 else 0
-        porcentaje_usd = (ganancia_usd / (valuacion_actual / tipo_cambio)) * 100 if valuacion_actual > 0 else 0
-        
-        # Mostrar métricas
-        st.metric(
-            "📊 Rendimiento ARS",
-            f"{porcentaje_ars:+.2f}%",
-            f"{ganancia_ars:+,.2f} ARS"
-        )
-        
-        st.metric(
-            "📊 Rendimiento USD",
-            f"{porcentaje_usd:+.2f}%",
-            f"{ganancia_usd:+,.2f} USD"
-        )
-    
-    # Análisis adicional
-    st.markdown("---")
-    st.subheader("🔍 Análisis Detallado")
-    
-    col_an1, col_an2 = st.columns(2)
-    
-    with col_an1:
-        st.markdown("**📋 Resumen de la operación:**")
-        st.info(f"""
-        - **Inversión original:** ${valuacion_actual:,.2f} ARS
-        - **Venta proyectada:** ${venta_ars:,.2f} ARS
-        - **Ganancia/Pérdida ARS:** {ganancia_ars:+,.2f} ARS ({porcentaje_ars:+.2f}%)
-        - **Conversión a USD:** ${venta_usd:,.2f} USD
-        - **Ganancia/Pérdida USD:** {ganancia_usd:+,.2f} USD ({porcentaje_usd:+.2f}%)
-        """)
-    
-    with col_an2:
-        st.markdown("**💡 Recomendaciones:**")
-        
-        if ganancia_usd > 0:
-            st.success(f"✅ **Ganancia en USD:** Estás ganando ${ganancia_usd:,.2f} USD")
-            if ganancia_ars < 0:
-                st.warning("⚠️ **Pérdida en ARS:** Aunque pierdes en pesos, ganas en dólares")
-        elif ganancia_usd < 0:
-            st.error(f"❌ **Pérdida en USD:** Estás perdiendo ${abs(ganancia_usd):,.2f} USD")
-            if ganancia_ars > 0:
-                st.info("ℹ️ **Ganancia en ARS:** Aunque ganas en pesos, pierdes en dólares")
-        else:
-            st.info("ℹ️ **Equilibrio:** No hay ganancia ni pérdida en USD")
-        
-        # Análisis del tipo de cambio
-        if tipo_cambio > 1000:
-            st.info("💱 **Dólar alto:** Favorable para vender acciones argentinas")
-        else:
-            st.info("💱 **Dólar bajo:** Considera esperar o usar otro tipo de cambio")
-    
-    # Gráfico de comparación
-    st.markdown("---")
-    st.subheader("📊 Visualización de Resultados")
-    
-    # Crear datos para el gráfico
-    categorias = ['Inversión Original', 'Venta Proyectada']
-    valores_ars = [valuacion_actual, venta_ars]
-    valores_usd = [valuacion_actual / tipo_cambio, venta_usd]
-    
-    # Crear gráfico de barras
-    fig = go.Figure()
-    
-    fig.add_trace(go.Bar(
-        name='ARS',
-        x=categorias,
-        y=valores_ars,
-        marker_color=['#1f77b4', '#ff7f0e'],
-        text=[f'${v:,.0f}' for v in valores_ars],
-        textposition='auto',
-    ))
-    
-    fig.add_trace(go.Bar(
-        name='USD',
-        x=categorias,
-        y=valores_usd,
-        marker_color=['#2ca02c', '#d62728'],
-        text=[f'${v:,.2f}' for v in valores_usd],
-        textposition='auto',
-        yaxis='y2'
-    ))
-    
-    fig.update_layout(
-        title="Comparación: Inversión Original vs Venta Proyectada",
-        xaxis_title="",
-        yaxis_title="Valor en ARS",
-        yaxis2=dict(
-            title="Valor en USD",
-            overlaying="y",
-            side="right"
-        ),
-        barmode='group',
-        height=400,
-        showlegend=True
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Notas importantes
-    st.markdown("---")
-    st.markdown("""
-    **📝 Notas importantes:**
-    - Los cálculos son estimativos y no incluyen comisiones
-    - El tipo de cambio puede variar significativamente
-    - Considera el impacto fiscal de la operación
-    - MELID y MELIC son instrumentos de conversión de pesos a dólares
     """)
 
 def main():
@@ -9568,6 +9198,130 @@ def obtener_portafolio_eeuu_directo(token_portador: str):
     print("❌ Todos los endpoints EEUU fallaron")
     return None
 
+def obtener_portafolio_argentina_mejorado(token_portador: str):
+    """
+    Función mejorada para obtener portafolio de Argentina con múltiples fallbacks
+    """
+    print("🇦🇷 Intentando obtener portafolio de Argentina...")
+    
+    # Método 1: Endpoint directo /api/v2/portafolio/argentina
+    print("📊 Método 1: Endpoint directo /api/v2/portafolio/argentina")
+    try:
+        resultado = obtener_portafolio_por_pais(token_portador, 'argentina')
+        if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
+            print("✅ Método 1 exitoso")
+            return resultado
+        else:
+            print("⚠️ Método 1: No se encontraron activos válidos")
+    except Exception as e:
+        print(f"❌ Método 1 falló: {e}")
+    
+    # Método 2: Endpoint de asesor
+    print("📊 Método 2: Endpoint de asesor")
+    try:
+        cliente_actual = st.session_state.get('cliente_seleccionado')
+        if cliente_actual:
+            id_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id'))
+            if id_cliente:
+                resultado = obtener_portafolio(token_portador, id_cliente, 'Argentina')
+                if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
+                    print("✅ Método 2 exitoso")
+                    return resultado
+                else:
+                    print("⚠️ Método 2: No se encontraron activos válidos")
+            else:
+                print("❌ Método 2: No se pudo obtener ID del cliente")
+        else:
+            print("❌ Método 2: No hay cliente seleccionado")
+    except Exception as e:
+        print(f"❌ Método 2 falló: {e}")
+    
+    # Método 3: Extraer de estado de cuenta
+    print("📊 Método 3: Extraer de estado de cuenta")
+    try:
+        resultado = extraer_portafolio_ar_desde_estado_cuenta(token_portador)
+        if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
+            print("✅ Método 3 exitoso")
+            return resultado
+        else:
+            print("⚠️ Método 3: No se encontraron activos válidos")
+    except Exception as e:
+        print(f"❌ Método 3 falló: {e}")
+    
+    print("❌ Todos los métodos fallaron")
+    return None
+
+def extraer_portafolio_ar_desde_estado_cuenta(token_portador: str):
+    """
+    Extrae información de portafolio argentino desde el estado de cuenta
+    """
+    try:
+        print("🔍 Extrayendo información AR desde estado de cuenta...")
+        
+        # Obtener estado de cuenta
+        estado_cuenta = obtener_estado_cuenta(token_portador)
+        if not estado_cuenta or 'cuentas' not in estado_cuenta:
+            print("❌ No se pudo obtener estado de cuenta")
+            return None
+        
+        cuentas = estado_cuenta['cuentas']
+        activos_ar = []
+        
+        for cuenta in cuentas:
+            if cuenta.get('estado') == 'operable':
+                tipo_cuenta = cuenta.get('tipo', '').lower()
+                moneda = cuenta.get('moneda', '').lower()
+                total = float(cuenta.get('total', 0))
+                titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
+                disponible = float(cuenta.get('disponible', 0))
+                
+                # Identificar cuentas argentinas
+                es_cuenta_ar = (
+                    'argentina' in tipo_cuenta or 
+                    'peso' in moneda or 
+                    'ars' in moneda or
+                    'bcba' in tipo_cuenta.lower()
+                )
+                
+                if es_cuenta_ar and (total > 0 or titulos_valorizados > 0):
+                    print(f"✅ Encontrada cuenta AR: {tipo_cuenta} - Total: ${total:,.2f}")
+                    
+                    # Crear activo basado en la cuenta
+                    activo = {
+                        'titulo': {
+                            'simbolo': f"CUENTA_{tipo_cuenta.upper()}",
+                            'descripcion': f"Cuenta {tipo_cuenta} - {moneda.upper()}",
+                            'tipo': 'cuenta',
+                            'pais': 'argentina',
+                            'mercado': 'BCBA',
+                            'moneda': 'peso_Argentino'
+                        },
+                        'cantidad': 1,
+                        'valuacion': total,
+                        'valorizado': total,
+                        'ultimoPrecio': total,
+                        'ppc': total,
+                        'gananciaPorcentaje': 0,
+                        'gananciaDinero': 0,
+                        'variacionDiaria': 0,
+                        'comprometido': 0
+                    }
+                    activos_ar.append(activo)
+        
+        if activos_ar:
+            return {
+                'pais': 'argentina',
+                'activos': activos_ar,
+                'metodo': 'extraido_estado_cuenta'
+            }
+        else:
+            print("⚠️ No se encontraron cuentas argentinas con saldos")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error al extraer portafolio AR: {e}")
+        return None
+
 def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
     """
     Función mejorada para obtener portafolio de Estados Unidos con múltiples fallbacks
@@ -9575,14 +9329,13 @@ def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
     """
     print("🇺🇸 Intentando obtener portafolio de Estados Unidos...")
     
-    # Método 1: Endpoint estándar (puede fallar con 401)
-    print("📊 Método 1: Endpoint estándar /api/v2/portafolio/estados_Unidos")
+    # Método 1: Endpoint directo /api/v2/portafolio/estados_Unidos
+    print("📊 Método 1: Endpoint directo /api/v2/portafolio/estados_Unidos")
     try:
-        # Usar el método correcto en lugar del que falla
-        resultado = obtener_portafolio_correcto(token_portador)
-        if resultado and 'activos_estadounidenses' in resultado and len(resultado['activos_estadounidenses']) > 0:
+        resultado = obtener_portafolio_por_pais(token_portador, 'estados_Unidos')
+        if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
             print("✅ Método 1 exitoso")
-            return {'pais': 'estados_Unidos', 'activos': resultado['activos_estadounidenses'], 'metodo': 'filtrado_desde_completo'}
+            return resultado
         else:
             print("⚠️ Método 1: No se encontraron activos válidos")
     except Exception as e:
@@ -9619,15 +9372,6 @@ def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
             print("⚠️ Método 3: No se encontraron activos válidos")
     except Exception as e:
         print(f"❌ Método 3 falló: {e}")
-    
-    # Método 4: Crear portafolio simulado basado en datos disponibles
-    print("📊 Método 4: Crear portafolio simulado")
-    resultado = crear_portafolio_us_simulado(token_portador)
-    if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
-        print("✅ Método 4 exitoso (simulado)")
-        return resultado
-    else:
-        print("❌ Método 4: No se pudo crear portafolio simulado")
     
     print("❌ Todos los métodos fallaron")
     return None
@@ -9863,8 +9607,8 @@ def mostrar_distribucion_activos_mejorada():
     # Obtener portafolios con métodos mejorados
     with st.spinner("🔄 Obteniendo datos de portafolio..."):
         
-        # Portafolio argentino
-        portafolio_ar = obtener_portafolio_por_pais(token_acceso, "argentina")
+        # Portafolio argentino con método mejorado
+        portafolio_ar = obtener_portafolio_argentina_mejorado(token_acceso)
         if not portafolio_ar or not portafolio_ar.get('activos'):
             st.warning("⚠️ No se pudieron obtener activos argentinos")
             portafolio_ar = {'activos': [], 'metodo': 'fallback'}
@@ -10621,36 +10365,28 @@ def procesar_datos_historicos_usuario(texto_datos):
             else:
                 st.error("❌ Error al generar CSV")
 
-def mostrar_portafolios_separados_con_conversion(token_acceso, id_cliente):
+def mostrar_portafolios_separados(token_acceso, id_cliente):
     """
-    Muestra los portafolios de Argentina y EEUU por separado con opción de ver ambas series
-    en un único gráfico y conversión de monedas usando dólar MEP
+    Muestra los portafolios de Argentina y EEUU por separado
     """
-    st.subheader("🌍 Portafolios Separados con Conversión de Monedas")
+    st.subheader("🌍 Portafolios Separados")
     
     # Obtener portafolios por país
     with st.spinner("Obteniendo portafolios por país..."):
         portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
         portafolio_us = obtener_portafolio_por_pais(token_acceso, 'estados_Unidos')
     
-    # Obtener tasa MEP para conversiones
-    tasa_mep = obtener_tasa_mep_al30(token_acceso)
-    
     # Crear tabs para diferentes visualizaciones
-    tab_individual, tab_combinado, tab_conversion = st.tabs([
+    tab_individual, tab_combinado = st.tabs([
         "📊 Portafolios Individuales", 
-        "🌍 Vista Combinada", 
-        "💱 Conversión de Monedas"
+        "🌍 Vista Combinada"
     ])
     
     with tab_individual:
-        mostrar_portafolios_individuales(portafolio_ar, portafolio_us, tasa_mep)
+        mostrar_portafolios_individuales(portafolio_ar, portafolio_us)
     
     with tab_combinado:
-        mostrar_vista_combinada(portafolio_ar, portafolio_us, tasa_mep)
-    
-    with tab_conversion:
-        mostrar_conversion_monedas(portafolio_ar, portafolio_us, tasa_mep)
+        mostrar_vista_combinada(portafolio_ar, portafolio_us)
 
 def mostrar_portafolios_individuales(portafolio_ar, portafolio_us, tasa_mep):
     """
