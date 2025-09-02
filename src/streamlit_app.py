@@ -3779,6 +3779,287 @@ def analizar_estrategia_inversion(alpha_beta_metrics):
         'observations': alpha_beta_metrics.get('observations', 0)
     }
 
+def calcular_metricas_portafolio_unificada(portafolio, valor_total, token_portador, dias_historial=252):
+    """
+    Función unificada para calcular todas las métricas del portafolio de manera consistente.
+    Esta función centraliza todos los cálculos para evitar discrepancias.
+    
+    Args:
+        portafolio (dict): Diccionario con los activos y sus cantidades
+        valor_total (float): Valor total del portafolio
+        token_portador (str): Token de autenticación para la API de InvertirOnline
+        dias_historial (int): Número de días de histórico a considerar (por defecto: 252 días hábiles)
+        
+    Returns:
+        dict: Diccionario con todas las métricas calculadas de manera unificada
+    """
+    if not isinstance(portafolio, dict) or not portafolio or valor_total <= 0:
+        return {
+            'concentracion': 0,
+            'std_dev_activo': 0,
+            'retorno_esperado_anual': 0,
+            'pl_esperado_min': 0,
+            'pl_esperado_max': 0,
+            'probabilidades': {'perdida': 0.5, 'ganancia': 0.5, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
+            'riesgo_anual': 0,
+            'ratio_retorno_riesgo': 0,
+            'valor_total': valor_total,
+            'metricas_individuales': {},
+            'metricas_globales': {
+                'valor_total': valor_total,
+                'retorno_ponderado': 0,
+                'riesgo_total': 0,
+                'ratio_retorno_riesgo': 0
+            }
+        }
+
+    # Obtener fechas para el histórico
+    fecha_hasta = datetime.now().strftime('%Y-%m-%d')
+    fecha_desde = (datetime.now() - timedelta(days=dias_historial*1.5)).strftime('%Y-%m-%d')
+    
+    # 1. Calcular concentración del portafolio (Índice de Herfindahl-Hirschman normalizado)
+    if len(portafolio) == 0:
+        concentracion = 0
+    elif len(portafolio) == 1:
+        concentracion = 1.0
+    else:
+        sum_squares = sum((activo.get('Valuación', 0) / valor_total) ** 2 
+                         for activo in portafolio.values())
+        # Normalizar entre 0 y 1
+        min_concentration = 1.0 / len(portafolio)
+        concentracion = (sum_squares - min_concentration) / (1 - min_concentration)
+    
+    # Inicializar estructuras para cálculos
+    retornos_diarios = {}
+    metricas_activos = {}
+    contribucion_activos = {}
+    retornos_individuales = {}
+    riesgos_individuales = {}
+    
+    # 2. Obtener datos históricos y calcular métricas por activo
+    for simbolo, activo in portafolio.items():
+        try:
+            # Obtener datos históricos usando el método estándar
+            mercado = activo.get('mercado', 'BCBA')
+            tipo_activo = activo.get('Tipo', 'Desconocido')
+            valuacion = activo.get('Valuación', 0)
+            
+            # Obtener la serie histórica
+            df_historico = obtener_serie_historica_iol(
+                token_portador=token_portador,
+                mercado=mercado,
+                simbolo=simbolo,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                ajustada="SinAjustar"
+            )
+            
+            if df_historico is None or df_historico.empty:
+                continue
+                
+            # Asegurarse de que tenemos las columnas necesarias
+            if 'fecha' not in df_historico.columns or 'precio' not in df_historico.columns:
+                continue
+                
+            # Ordenar por fecha y limpiar duplicados
+            df_historico = df_historico.sort_values('fecha')
+            df_historico = df_historico.drop_duplicates(subset=['fecha'], keep='last')
+            
+            # Calcular retornos diarios
+            df_historico['retorno'] = df_historico['precio'].pct_change()
+            
+            # Filtrar valores atípicos
+            if len(df_historico) > 5:
+                q_low = df_historico['retorno'].quantile(0.01)
+                q_high = df_historico['retorno'].quantile(0.99)
+                df_historico = df_historico[
+                    (df_historico['retorno'] >= q_low) & 
+                    (df_historico['retorno'] <= q_high)
+                ]
+            
+            # Filtrar valores no finitos
+            retornos_validos = df_historico['retorno'].replace(
+                [np.inf, -np.inf], np.nan
+            ).dropna()
+            
+            if len(retornos_validos) < 5:
+                continue
+                
+            # Verificar si hay suficientes variaciones de precio
+            if retornos_validos.nunique() < 2:
+                continue
+            
+            # Calcular métricas básicas
+            retorno_medio = retornos_validos.mean() * 252  # Anualizado
+            volatilidad = retornos_validos.std() * np.sqrt(252)  # Anualizada
+            
+            # Asegurar valores razonables
+            retorno_medio = np.clip(retorno_medio, -5, 5)  # Límite de ±500% anual
+            volatilidad = min(volatilidad, 3)  # Límite de 300% de volatilidad
+            
+            # Calcular métricas de riesgo basadas en la distribución de retornos
+            ret_pos = retornos_validos[retornos_validos > 0]
+            ret_neg = retornos_validos[retornos_validos < 0]
+            n_total = len(retornos_validos)
+            
+            # Calcular probabilidades
+            prob_ganancia = len(ret_pos) / n_total if n_total > 0 else 0.5
+            prob_perdida = len(ret_neg) / n_total if n_total > 0 else 0.5
+            
+            # Calcular probabilidades de movimientos extremos
+            prob_ganancia_10 = len(ret_pos[ret_pos > 0.1]) / n_total if n_total > 0 else 0
+            prob_perdida_10 = len(ret_neg[ret_neg < -0.1]) / n_total if n_total > 0 else 0
+            
+            # Calcular el peso del activo en el portafolio
+            peso = valuacion / valor_total if valor_total > 0 else 0
+            
+            # Guardar métricas individuales
+            metricas_activos[simbolo] = {
+                'retorno_medio': retorno_medio,
+                'volatilidad': volatilidad,
+                'prob_ganancia': prob_ganancia,
+                'prob_perdida': prob_perdida,
+                'prob_ganancia_10': prob_ganancia_10,
+                'prob_perdida_10': prob_perdida_10,
+                'peso': peso,
+                'valuacion': valuacion
+            }
+            
+            # Guardar para cálculos globales
+            contribucion_activos[simbolo] = valuacion
+            retornos_individuales[simbolo] = retorno_medio * 100  # Convertir a porcentaje
+            riesgos_individuales[simbolo] = volatilidad * 100    # Convertir a porcentaje
+            
+            # Guardar retornos para cálculo de correlaciones
+            retornos_diarios[simbolo] = df_historico.set_index('fecha')['retorno']
+            
+        except Exception as e:
+            print(f"Error procesando {simbolo}: {str(e)}")
+            continue
+    
+    if not metricas_activos:
+        return {
+            'concentracion': concentracion,
+            'std_dev_activo': 0,
+            'retorno_esperado_anual': 0,
+            'pl_esperado_min': 0,
+            'pl_esperado_max': 0,
+            'probabilidades': {'perdida': 0.5, 'ganancia': 0.5, 'perdida_mayor_10': 0, 'ganancia_mayor_10': 0},
+            'riesgo_anual': 0,
+            'ratio_retorno_riesgo': 0,
+            'valor_total': valor_total,
+            'metricas_individuales': {},
+            'metricas_globales': {
+                'valor_total': valor_total,
+                'retorno_ponderado': 0,
+                'riesgo_total': 0,
+                'ratio_retorno_riesgo': 0
+            }
+        }
+    
+    # 3. Calcular métricas del portafolio
+    # Retorno esperado ponderado
+    retorno_esperado_anual = sum(
+        m['retorno_medio'] * m['peso'] 
+        for m in metricas_activos.values()
+    )
+    
+    # Volatilidad del portafolio (considerando correlaciones)
+    try:
+        if len(retornos_diarios) > 1:
+            df_retornos = pd.DataFrame(retornos_diarios).dropna()
+            if len(df_retornos) < 5:
+                # Usar promedio ponderado simple como respaldo
+                volatilidad_portafolio = sum(
+                    m['volatilidad'] * m['peso'] 
+                    for m in metricas_activos.values()
+                )
+            else:
+                # Calcular matriz de correlación
+                df_correlacion = df_retornos.corr()
+                
+                # Verificar si la matriz de correlación es válida
+                if df_correlacion.isna().any().any():
+                    # Usar correlación promedio de 0.5 como respaldo
+                    volatilidad_portafolio = np.sqrt(
+                        sum(m['volatilidad']**2 * m['peso']**2 for m in metricas_activos.values()) +
+                        0.5 * sum(
+                            m1['volatilidad'] * m1['peso'] * m2['volatilidad'] * m2['peso']
+                            for i, m1 in enumerate(metricas_activos.values())
+                            for j, m2 in enumerate(metricas_activos.values())
+                            if i != j
+                        )
+                    )
+                else:
+                    # Calcular volatilidad del portafolio usando correlaciones reales
+                    volatilidad_portafolio = 0
+                    for i, (sim1, m1) in enumerate(metricas_activos.items()):
+                        for j, (sim2, m2) in enumerate(metricas_activos.items()):
+                            if i == j:
+                                volatilidad_portafolio += m1['volatilidad']**2 * m1['peso']**2
+                            else:
+                                corr = df_correlacion.loc[sim1, sim2] if not pd.isna(df_correlacion.loc[sim1, sim2]) else 0.5
+                                volatilidad_portafolio += m1['volatilidad'] * m1['peso'] * m2['volatilidad'] * m2['peso'] * corr
+                    volatilidad_portafolio = np.sqrt(volatilidad_portafolio)
+        else:
+            # Un solo activo
+            volatilidad_portafolio = list(metricas_activos.values())[0]['volatilidad']
+    except Exception as e:
+        print(f"Error calculando volatilidad del portafolio: {str(e)}")
+        # Usar promedio ponderado simple como respaldo
+        volatilidad_portafolio = sum(
+            m['volatilidad'] * m['peso'] 
+            for m in metricas_activos.values()
+        )
+    
+    # Calcular métricas globales unificadas
+    valor_total_portfolio = sum(contribucion_activos.values())
+    pesos = {simbolo: valor / valor_total_portfolio for simbolo, valor in contribucion_activos.items()}
+    
+    # Retorno ponderado del portafolio (en porcentaje)
+    retorno_portfolio = sum(pesos[simbolo] * retornos_individuales.get(simbolo, 0) 
+                          for simbolo in pesos.keys())
+    
+    # Riesgo del portafolio (en porcentaje)
+    riesgo_portfolio = volatilidad_portafolio * 100
+    
+    # Ratio retorno/riesgo
+    ratio_retorno_riesgo = retorno_portfolio / riesgo_portfolio if riesgo_portfolio > 0 else 0
+    
+    # Calcular escenarios de P&L
+    pl_esperado_max = valor_total * (1 + retorno_esperado_anual + 2 * volatilidad_portafolio)
+    pl_esperado_min = valor_total * (1 + retorno_esperado_anual - 2 * volatilidad_portafolio)
+    
+    # Calcular probabilidades agregadas del portafolio
+    prob_ganancia_portfolio = sum(m['prob_ganancia'] * m['peso'] for m in metricas_activos.values())
+    prob_perdida_portfolio = sum(m['prob_perdida'] * m['peso'] for m in metricas_activos.values())
+    prob_ganancia_10_portfolio = sum(m['prob_ganancia_10'] * m['peso'] for m in metricas_activos.values())
+    prob_perdida_10_portfolio = sum(m['prob_perdida_10'] * m['peso'] for m in metricas_activos.values())
+    
+    return {
+        'concentracion': concentracion,
+        'std_dev_activo': volatilidad_portafolio,
+        'retorno_esperado_anual': retorno_esperado_anual,
+        'pl_esperado_min': pl_esperado_min,
+        'pl_esperado_max': pl_esperado_max,
+        'probabilidades': {
+            'perdida': prob_perdida_portfolio,
+            'ganancia': prob_ganancia_portfolio,
+            'perdida_mayor_10': prob_perdida_10_portfolio,
+            'ganancia_mayor_10': prob_ganancia_10_portfolio
+        },
+        'riesgo_anual': volatilidad_portafolio,
+        'ratio_retorno_riesgo': ratio_retorno_riesgo,
+        'valor_total': valor_total,
+        'metricas_individuales': metricas_activos,
+        'metricas_globales': {
+            'valor_total': valor_total_portfolio,
+            'retorno_ponderado': retorno_portfolio,
+            'riesgo_total': riesgo_portfolio,
+            'ratio_retorno_riesgo': ratio_retorno_riesgo
+        }
+    }
+
 def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_historial=252):
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
@@ -4479,7 +4760,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         df_activos = pd.DataFrame(datos_activos)
         # Convert list to dictionary with symbols as keys
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
-        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
+        # Usar la función unificada para cálculos consistentes
+        metricas = calcular_metricas_portafolio_unificada(portafolio_dict, valor_total, token_portador)
         
         # Separar activos por mercado usando información real de la API
         activos_argentinos = []
@@ -4608,7 +4890,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             """, unsafe_allow_html=True)
         
         with col4:
-            valor_total_display = totales_cta.get('total_ars_mep', valor_total) if totales_cta else valor_total
+            # Usar el valor total de las métricas unificadas
+            valor_total_display = metricas.get('metricas_globales', {}).get('valor_total', valor_total) if metricas else valor_total
             st.markdown(f"""
             <div class="metric-card">
                 <h3>💰 Valor Total</h3>
@@ -4669,12 +4952,13 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 """, unsafe_allow_html=True)
             
             with col2:
-                volatilidad_pct = metricas['std_dev_activo'] * 100
+                # Usar el riesgo total de las métricas unificadas
+                riesgo_total = metricas.get('metricas_globales', {}).get('riesgo_total', metricas['std_dev_activo'] * 100)
                 st.markdown(f"""
                 <div class="risk-card">
-                    <h3>📈 Volatilidad Anual</h3>
-                    <h2>{volatilidad_pct:.1f}%</h2>
-                    <small>Desviación estándar de retornos</small>
+                    <h3>📈 Riesgo Total</h3>
+                    <h2>{riesgo_total:.1f}%</h2>
+                    <small>Volatilidad anual del portafolio</small>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -5322,8 +5606,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                         st.plotly_chart(fig_renta_fija, use_container_width=True)
                                 
                         try:
-                            # Análisis de retorno esperado por horizonte de inversión
-                            st.markdown("#### Análisis de retorno esperado")
+                            # Análisis de retorno esperado usando histograma y Markov Chain
+                            st.markdown("#### 📈 Análisis de Retorno Esperado (Histograma + Markov Chain)")
                             
                             # Calcular retornos en USD para diferentes horizontes
                             horizontes_analisis = [1, 7, 30, 90, 180, 365]
@@ -5392,7 +5676,206 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 
                                 st.plotly_chart(fig_horizontes, use_container_width=True)
                                 
-                                # Se removieron métricas y proyecciones de retorno esperado y recomendaciones
+                                # ANÁLISIS AVANZADO CON MARKOV CHAIN
+                                st.markdown("##### 🔮 Predicción Avanzada con Markov Chain")
+                                
+                                # Preparar datos para Markov Chain
+                                returns_data = df_portfolio_returns.values
+                                
+                                # Crear estados discretos para Markov Chain
+                                n_states = 10
+                                returns_min = np.min(returns_data)
+                                returns_max = np.max(returns_data)
+                                state_bounds = np.linspace(returns_min, returns_max, n_states + 1)
+                                
+                                # Asignar estados a cada retorno
+                                states = np.digitize(returns_data, state_bounds) - 1
+                                states = np.clip(states, 0, n_states - 1)
+                                
+                                # Construir matriz de transición
+                                transition_matrix = np.zeros((n_states, n_states))
+                                for i in range(len(states) - 1):
+                                    current_state = states[i]
+                                    next_state = states[i + 1]
+                                    transition_matrix[current_state][next_state] += 1
+                                
+                                # Normalizar la matriz de transición
+                                row_sums = transition_matrix.sum(axis=1)
+                                transition_matrix = np.divide(transition_matrix, row_sums[:, np.newaxis], 
+                                                            where=row_sums[:, np.newaxis] != 0)
+                                
+                                # Calcular distribución estacionaria
+                                eigenvals, eigenvecs = np.linalg.eig(transition_matrix.T)
+                                stationary_dist = np.real(eigenvecs[:, np.argmax(np.real(eigenvals))])
+                                stationary_dist = stationary_dist / np.sum(stationary_dist)
+                                
+                                # Calcular valores esperados por estado
+                                state_centers = (state_bounds[:-1] + state_bounds[1:]) / 2
+                                expected_return = np.sum(stationary_dist * state_centers)
+                                
+                                # Simular trayectorias futuras
+                                n_simulations = 1000
+                                n_steps = 30  # 30 días hacia adelante
+                                
+                                simulated_paths = []
+                                for _ in range(n_simulations):
+                                    # Empezar desde el estado actual
+                                    current_state = states[-1] if len(states) > 0 else 0
+                                    path = [current_state]
+                                    
+                                    for _ in range(n_steps):
+                                        # Transición según la matriz
+                                        if np.sum(transition_matrix[current_state]) > 0:
+                                            next_state = np.random.choice(n_states, p=transition_matrix[current_state])
+                                        else:
+                                            next_state = current_state
+                                        path.append(next_state)
+                                        current_state = next_state
+                                    
+                                    # Convertir estados a retornos
+                                    path_returns = [state_centers[s] for s in path]
+                                    simulated_paths.append(path_returns)
+                                
+                                # Calcular estadísticas de las simulaciones
+                                simulated_paths = np.array(simulated_paths)
+                                cumulative_returns = np.cumprod(1 + simulated_paths, axis=1) - 1
+                                
+                                # Percentiles de retorno esperado
+                                percentiles = [5, 25, 50, 75, 95]
+                                return_percentiles = np.percentile(cumulative_returns[:, -1], percentiles)
+                                
+                                # Crear gráfico de distribución de predicciones
+                                fig_prediction = go.Figure()
+                                
+                                # Histograma de retornos simulados
+                                fig_prediction.add_trace(go.Histogram(
+                                    x=cumulative_returns[:, -1],
+                                    nbinsx=50,
+                                    name="Distribución de predicciones",
+                                    marker_color='#8b5cf6',
+                                    opacity=0.7
+                                ))
+                                
+                                # Líneas de percentiles
+                                colors = ['#ef4444', '#f59e0b', '#10b981', '#f59e0b', '#ef4444']
+                                for i, p in enumerate(percentiles):
+                                    fig_prediction.add_vline(
+                                        x=return_percentiles[i],
+                                        line_dash="dash",
+                                        line_color=colors[i],
+                                        annotation_text=f"{p}%: {return_percentiles[i]:.2%}"
+                                    )
+                                
+                                fig_prediction.update_layout(
+                                    title="Distribución de Retornos Esperados (30 días) - Simulación Markov Chain",
+                                    xaxis_title="Retorno acumulado esperado",
+                                    yaxis_title="Frecuencia",
+                                    height=400,
+                                    template='plotly_dark',
+                                    showlegend=False
+                                )
+                                
+                                st.plotly_chart(fig_prediction, use_container_width=True)
+                                
+                                # Mostrar métricas de predicción
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.markdown(f"""
+                                    <div class="metric-card">
+                                        <h3>📊 Retorno Esperado</h3>
+                                        <h2>{expected_return:.2%}</h2>
+                                        <small>Markov Chain</small>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col2:
+                                    st.markdown(f"""
+                                    <div class="metric-card">
+                                        <h3>🎯 Mediana</h3>
+                                        <h2>{return_percentiles[2]:.2%}</h2>
+                                        <small>50% de probabilidad</small>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col3:
+                                    st.markdown(f"""
+                                    <div class="metric-card">
+                                        <h3>📈 Escenario Optimista</h3>
+                                        <h2>{return_percentiles[4]:.2%}</h2>
+                                        <small>95% de probabilidad</small>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col4:
+                                    st.markdown(f"""
+                                    <div class="metric-card">
+                                        <h3>📉 Escenario Pesimista</h3>
+                                        <h2>{return_percentiles[0]:.2%}</h2>
+                                        <small>5% de probabilidad</small>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                # Análisis de probabilidades
+                                st.markdown("##### 📊 Análisis de Probabilidades")
+                                
+                                # Calcular probabilidades de diferentes escenarios
+                                prob_positive = np.mean(cumulative_returns[:, -1] > 0) * 100
+                                prob_negative = np.mean(cumulative_returns[:, -1] < 0) * 100
+                                prob_high_gain = np.mean(cumulative_returns[:, -1] > 0.05) * 100  # >5%
+                                prob_high_loss = np.mean(cumulative_returns[:, -1] < -0.05) * 100  # <-5%
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.markdown(f"""
+                                    <div class="probability-card">
+                                        <h3>📈 Probabilidad de Ganancia</h3>
+                                        <h2>{prob_positive:.1f}%</h2>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col2:
+                                    st.markdown(f"""
+                                    <div class="probability-card">
+                                        <h3>📉 Probabilidad de Pérdida</h3>
+                                        <h2>{prob_negative:.1f}%</h2>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col3:
+                                    st.markdown(f"""
+                                    <div class="probability-card">
+                                        <h3>🚀 Ganancia >5%</h3>
+                                        <h2>{prob_high_gain:.1f}%</h2>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col4:
+                                    st.markdown(f"""
+                                    <div class="probability-card">
+                                        <h3>⚠️ Pérdida >5%</h3>
+                                        <h2>{prob_high_loss:.1f}%</h2>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                # Información técnica del modelo
+                                with st.expander("🔬 Información Técnica del Modelo"):
+                                    st.markdown("""
+                                    **Metodología del Análisis:**
+                                    
+                                    1. **Histograma de Retornos:** Se analiza la distribución histórica de retornos diarios del portafolio
+                                    2. **Estados Discretos:** Los retornos se dividen en 10 estados discretos para el análisis de Markov
+                                    3. **Matriz de Transición:** Se calcula la probabilidad de transición entre estados basada en datos históricos
+                                    4. **Simulación Monte Carlo:** Se generan 1000 trayectorias simuladas de 30 días usando la matriz de transición
+                                    5. **Análisis de Percentiles:** Se calculan los percentiles 5%, 25%, 50%, 75% y 95% de los retornos esperados
+                                    
+                                    **Ventajas del Modelo:**
+                                    - Considera la dependencia temporal entre retornos consecutivos
+                                    - Captura patrones de volatilidad y tendencias del portafolio
+                                    - Proporciona estimaciones probabilísticas en lugar de valores puntuales
+                                    - Se adapta automáticamente a las características específicas del portafolio
+                                    """)
                             
                             else:
                                 st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
