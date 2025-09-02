@@ -14,6 +14,8 @@ import random
 import warnings
 import streamlit.components.v1 as components
 from scipy.stats import linregress
+import os
+import numpy as np
 
 warnings.filterwarnings('ignore')
 
@@ -702,124 +704,122 @@ def obtener_portafolio_correcto(token_portador: str):
             print("❌ Error: Token de acceso no válido")
             return None
         
-        # Endpoint que SÍ funciona
-        url = 'https://api.invertironline.com/api/v2/portafolio'
+        # Intentar múltiples endpoints para mayor robustez
+        endpoints = [
+            'https://api.invertironline.com/api/v2/portafolio',
+            'https://api.invertironline.com/api/v2/portafolio/argentina',
+            'https://api.invertironline.com/api/v2/portafolio/estados_Unidos'
+        ]
         
-        # Generar headers con la función mejorada
-        encabezados = generar_headers_autorizacion(token_portador)
-        if not encabezados:
-            print("❌ No se pudieron generar headers de autorización")
-            return None
-        
-        print(f"🔍 Intentando obtener portafolio desde: {url}")
-        
-        # Realizar request
-        response = requests.get(url, headers=encabezados, timeout=30)
-        print(f"📡 Respuesta HTTP: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ Portafolio obtenido exitosamente")
+        for i, url in enumerate(endpoints, 1):
+            print(f"🔍 Intentando endpoint {i}: {url}")
             
-            # Verificar estructura de respuesta
-            if isinstance(data, dict) and 'activos' in data:
-                activos = data['activos']
-                print(f"📊 Total de activos encontrados: {len(activos)}")
+            # Generar headers con la función correcta
+            encabezados = obtener_encabezado_autorizacion(token_portador)
+            if not encabezados:
+                print("❌ No se pudieron generar headers de autorización")
+                continue
+            
+            try:
+                # Realizar request con timeout más corto
+                response = requests.get(url, headers=encabezados, timeout=15)
+                print(f"📡 Respuesta HTTP: {response.status_code}")
                 
-                # Mostrar todos los activos para debug
-                for j, activo in enumerate(activos):
-                    titulo = activo.get('titulo', {})
-                    simbolo = titulo.get('simbolo', 'N/A')
-                    pais = titulo.get('pais', 'N/A')
-                    tipo = titulo.get('tipo', 'N/A')
-                    cantidad = activo.get('cantidad', 0)
-                    valorizado = activo.get('valorizado', 0)
-                    print(f"  📈 Activo {j+1}: {simbolo} - País: {pais} - Tipo: {tipo} - Cantidad: {cantidad} - Valorizado: ${valorizado:,.2f}")
-                
-                # Filtrar activos con cantidad > 0
-                activos_validos = [activo for activo in activos if activo.get('cantidad', 0) > 0]
-                print(f"📊 Activos con cantidad > 0: {len(activos_validos)}")
-                
-                # Separar activos por país
-                activos_argentinos = []
-                activos_estadounidenses = []
-                
-                for activo in activos_validos:
-                    titulo = activo.get('titulo', {})
-                    simbolo = titulo.get('simbolo', '')
-                    pais = titulo.get('pais', '')
-                    tipo = titulo.get('tipo', '')
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"✅ Portafolio obtenido exitosamente desde endpoint {i}")
                     
-                    # Clasificar como EEUU si:
-                    # 1. El país está marcado como estados_Unidos
-                    # 2. Es un símbolo conocido de EEUU (ARKK, BBD, EWZ, FXI, YPF, etc.)
-                    # 3. La función de clasificación lo identifica como EEUU
-                    es_eeuu = (
-                        pais == 'estados_Unidos' or 
-                        simbolo in ['ARKK', 'BBD', 'EWZ', 'FXI', 'YPF', 'AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA'] or
-                        _es_activo_estadounidense(simbolo, tipo)
-                    )
-                    
-                    if es_eeuu:
-                        activos_estadounidenses.append(activo)
-                        print(f"🇺🇸 Identificado como EEUU: {simbolo}")
+                    # Verificar estructura de respuesta
+                    if isinstance(data, dict) and 'activos' in data:
+                        activos = data['activos']
+                        print(f"📊 Total de activos encontrados: {len(activos)}")
+                        
+                        # Filtrar activos con cantidad > 0
+                        activos_validos = [activo for activo in activos if activo.get('cantidad', 0) > 0]
+                        print(f"📊 Activos con cantidad > 0: {len(activos_validos)}")
+                        
+                        # Separar activos por país
+                        activos_argentinos = []
+                        activos_estadounidenses = []
+                        
+                        for activo in activos_validos:
+                            titulo = activo.get('titulo', {})
+                            simbolo = titulo.get('simbolo', '')
+                            pais = titulo.get('pais', '')
+                            tipo = titulo.get('tipo', '')
+                            
+                            # Clasificar como EEUU si:
+                            # 1. El país está marcado como estados_Unidos
+                            # 2. Es un símbolo conocido de EEUU
+                            # 3. La función de clasificación lo identifica como EEUU
+                            es_eeuu = (
+                                pais == 'estados_Unidos' or 
+                                simbolo in ['ARKK', 'BBD', 'EWZ', 'FXI', 'YPF', 'AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA'] or
+                                _es_activo_estadounidense(simbolo, tipo)
+                            )
+                            
+                            if es_eeuu:
+                                activos_estadounidenses.append(activo)
+                                print(f"🇺🇸 Identificado como EEUU: {simbolo}")
+                            else:
+                                activos_argentinos.append(activo)
+                                print(f"🇦🇷 Identificado como Argentina: {simbolo}")
+                        
+                        print(f"🇦🇷 Activos argentinos: {len(activos_argentinos)}")
+                        print(f"🇺🇸 Activos estadounidenses: {len(activos_estadounidenses)}")
+                        
+                        # Crear estructura de respuesta
+                        resultado = {
+                            'activos': activos_validos,
+                            'activos_argentinos': activos_argentinos,
+                            'activos_estadounidenses': activos_estadounidenses,
+                            'metodo': f'endpoint_{i}'
+                        }
+                        
+                        return resultado
                     else:
-                        activos_argentinos.append(activo)
-                        print(f"🇦🇷 Identificado como Argentina: {simbolo}")
+                        print(f"⚠️ Estructura de respuesta inesperada en endpoint {i}")
+                        continue
+                        
+                elif response.status_code == 401:
+                    print(f"❌ Error 401: No autorizado para endpoint {i}")
+                    print(f"📝 Respuesta del servidor: {response.text}")
+                    continue
+                    
+                elif response.status_code == 403:
+                    print(f"❌ Error 403: Acceso prohibido para endpoint {i}")
+                    continue
+                    
+                elif response.status_code == 500:
+                    print(f"❌ Error 500: Error interno del servidor para endpoint {i}")
+                    print(f"📝 Respuesta del servidor: {response.text}")
+                    continue
+                    
+                else:
+                    print(f"❌ Error HTTP {response.status_code} para endpoint {i}")
+                    print(f"📝 Respuesta del servidor: {response.text}")
+                    continue
+                    
+            except requests.exceptions.Timeout:
+                print(f"⏰ Timeout al obtener portafolio desde endpoint {i}")
+                continue
                 
-                print(f"🇦🇷 Activos argentinos: {len(activos_argentinos)}")
-                print(f"🇺🇸 Activos estadounidenses: {len(activos_estadounidenses)}")
+            except requests.exceptions.ConnectionError as e:
+                print(f"🌐 Error de conexión al obtener portafolio desde endpoint {i}: {e}")
+                continue
                 
-                # Crear estructura de respuesta
-                resultado = {
-                    'activos': activos_validos,
-                    'activos_argentinos': activos_argentinos,
-                    'activos_estadounidenses': activos_estadounidenses,
-                    'metodo': 'portafolio_completo'
-                }
-                
-                return resultado
-            else:
-                print(f"⚠️ Estructura de respuesta inesperada")
-                return data
-                
-        elif response.status_code == 401:
-            print(f"❌ Error 401: No autorizado para portafolio")
-            print(f"📝 Respuesta del servidor: {response.text}")
-            
-            # Usar el nuevo manejo de errores
-            if manejar_error_autorizacion_portafolio(token_portador, "general", "Token expirado"):
-                return obtener_portafolio_correcto(st.session_state.token_acceso)
-            return None
-            
-        elif response.status_code == 403:
-            print(f"❌ Error 403: Acceso prohibido para portafolio")
-            st.warning("⚠️ **Acceso Prohibido**: No tienes permisos para acceder al portafolio")
-            return None
-            
-        else:
-            print(f"❌ Error HTTP {response.status_code}")
-            print(f"📝 Respuesta del servidor: {response.text}")
-            st.error(f"Error {response.status_code} al obtener portafolio")
-            return None
-            
-    except requests.exceptions.Timeout:
-        print("⏰ Timeout al obtener portafolio")
-        st.warning("⏰ Timeout al obtener portafolio")
-        return None
+            except Exception as e:
+                print(f"💥 Error inesperado al obtener portafolio desde endpoint {i}: {e}")
+                continue
         
-    except requests.exceptions.ConnectionError as e:
-        print(f"🌐 Error de conexión al obtener portafolio: {e}")
-        st.error("🌐 Error de conexión al obtener portafolio")
+        # Si llegamos aquí, ningún endpoint funcionó
+        print("❌ Ningún endpoint funcionó para obtener el portafolio")
+        st.warning("⚠️ **Error de Conexión**: No se pudo obtener el portafolio desde ningún endpoint")
         return None
-        
+            
     except Exception as e:
-        print(f"💥 Error inesperado al obtener portafolio: {e}")
+        print(f"💥 Error general al obtener portafolio: {e}")
         st.error("💥 Error inesperado al obtener portafolio")
-        return None
-            
-    except Exception as e:
-        print(f"💥 Error al obtener portafolio: {e}")
         return None
 
 def obtener_portafolio_por_pais(token_portador: str, pais: str):
@@ -8050,7 +8050,64 @@ def mostrar_analisis_portafolio():
         mostrar_distribucion_activos_mejorada()
     
     with tab8:
-        mostrar_datos_historicos_portafolio()
+        # Crear sub-tabs para diferentes funcionalidades de histórico
+        tab_historico_api, tab_datos_manuales, tab_historico_financiero = st.tabs([
+            "🔗 Histórico desde API", 
+            "📋 Datos Manuales",
+            "💰 Histórico Financiero"
+        ])
+        
+        with tab_historico_api:
+            mostrar_datos_historicos_portafolio()
+            
+            # Nueva funcionalidad para movimiento histórico del portafolio
+            st.markdown("---")
+            st.markdown("### 🔄 Movimiento Histórico del Portafolio")
+            st.markdown("Obtiene y analiza el movimiento histórico para indexación temporal del portafolio")
+            
+            # Configuración de días atrás
+            dias_atras = st.slider("📅 Días hacia atrás para análisis", 30, 365, 90)
+            
+            if st.button("📊 Obtener Movimiento Histórico del Portafolio", type="primary"):
+                if 'token_acceso' in st.session_state and 'cliente_seleccionado' in st.session_state:
+                    token_acceso = st.session_state['token_acceso']
+                    id_cliente = st.session_state['cliente_seleccionado']['id']
+                    procesar_movimiento_historico_portafolio(token_acceso, id_cliente, dias_atras)
+                else:
+                    st.error("❌ No hay token de acceso o cliente seleccionado")
+        
+        with tab_datos_manuales:
+            st.markdown("### 📋 Datos Históricos Manuales")
+            st.markdown("""
+            Pega aquí datos históricos en formato tabulado para generar gráficos de composición.
+            """)
+            
+            # Aquí iría la funcionalidad existente de datos manuales
+            st.info("📊 Funcionalidad de datos manuales en desarrollo")
+        
+        with tab_historico_financiero:
+            st.markdown("### 💰 Histórico Financiero")
+            st.markdown("""
+            Procesa y analiza datos históricos financieros en formato estructurado.
+            """)
+            
+            # Input para datos históricos
+            datos_historicos_input = st.text_area(
+                "📊 Pegar datos históricos aquí:",
+                height=200,
+                placeholder="Ejemplo:\n2025-09-02 TOTAL_inversio posicion_total 1 $198,761.86 peso_Argentino Posición total en inversion_Argentina_Pesos\n2025-09-02 TITULOS_inversio titulos_valorizados 1 $198,429.51 peso_Argentino Títulos valorizados en inversion_Argentina_Pesos"
+            )
+            
+            if st.button("📊 Procesar Datos Históricos", type="primary"):
+                if datos_historicos_input.strip():
+                    procesar_datos_historicos_usuario(datos_historicos_input)
+                else:
+                    st.warning("⚠️ Por favor, ingresa datos históricos para procesar")
+            
+            # Mostrar histórico existente
+            st.markdown("### 📈 Histórico Guardado")
+            if st.button("📊 Mostrar Histórico Financiero"):
+                mostrar_historico_financiero()
     
     with tab9:
         mostrar_diagnostico_autorizacion()
@@ -9839,6 +9896,504 @@ def mostrar_distribucion_activos_mejorada():
     - Las valuaciones se actualizan en tiempo real cuando es posible
     - Considera verificar la información con tu broker
     """)
+
+# ============================================================================
+# FUNCIONES PARA HISTÓRICO DE DATOS FINANCIEROS
+# ============================================================================
+
+def obtener_movimiento_historico_portafolio(token_portador, id_cliente, dias_atras=90):
+    """
+    Obtiene el movimiento histórico del portafolio para indexación temporal
+    """
+    try:
+        print(f"📊 Obteniendo movimiento histórico para indexación del portafolio...")
+        
+        # Obtener movimientos históricos
+        movimientos_data = obtener_historico_movimientos_portafolio(token_portador, id_cliente, dias_atras)
+        
+        if not movimientos_data or 'movimientos' not in movimientos_data:
+            print("⚠️ No se pudieron obtener movimientos históricos para indexación")
+            return None
+        
+        movimientos = movimientos_data['movimientos']
+        if not movimientos:
+            print("⚠️ No hay movimientos históricos disponibles")
+            return None
+        
+        print(f"✅ Movimientos históricos obtenidos: {len(movimientos)} entradas")
+        
+        # Procesar movimientos para crear índice histórico
+        df_movimientos = pd.DataFrame(movimientos)
+        
+        # Convertir fechas
+        if 'fecha' in df_movimientos.columns:
+            df_movimientos['fecha'] = pd.to_datetime(df_movimientos['fecha'], errors='coerce')
+        elif 'fechaOperacion' in df_movimientos.columns:
+            df_movimientos['fecha'] = pd.to_datetime(df_movimientos['fechaOperacion'], errors='coerce')
+        
+        # Limpiar datos
+        df_movimientos = df_movimientos.dropna(subset=['fecha'])
+        df_movimientos = df_movimientos.sort_values('fecha')
+        
+        # Crear índice histórico por fecha
+        indice_historico = {}
+        
+        for fecha in df_movimientos['fecha'].unique():
+            movimientos_fecha = df_movimientos[df_movimientos['fecha'] == fecha]
+            
+            # Calcular totales por moneda
+            total_ars = 0
+            total_usd = 0
+            
+            for _, movimiento in movimientos_fecha.iterrows():
+                monto = float(movimiento.get('valor', 0) or 0)
+                moneda = movimiento.get('moneda', '').lower()
+                
+                if 'peso' in moneda or 'ars' in moneda:
+                    total_ars += monto
+                elif 'dolar' in moneda or 'usd' in moneda:
+                    total_usd += monto
+            
+            indice_historico[fecha.strftime('%Y-%m-%d')] = {
+                'fecha': fecha.strftime('%Y-%m-%d'),
+                'total_ars': total_ars,
+                'total_usd': total_usd,
+                'total_ars_formatted': f"${total_ars:,.2f}",
+                'total_usd_formatted': f"${total_usd:,.2f}",
+                'movimientos_count': len(movimientos_fecha),
+                'tipos_operaciones': movimientos_fecha['tipo'].unique().tolist() if 'tipo' in movimientos_fecha.columns else []
+            }
+        
+        print(f"✅ Índice histórico creado con {len(indice_historico)} fechas")
+        return indice_historico
+        
+    except Exception as e:
+        print(f"💥 Error al obtener movimiento histórico del portafolio: {e}")
+        return None
+
+def mostrar_indice_historico_portafolio(indice_historico):
+    """
+    Muestra el índice histórico del portafolio con análisis temporal
+    """
+    if not indice_historico:
+        st.warning("⚠️ No hay datos de índice histórico disponibles")
+        return
+    
+    st.markdown("### 📈 Índice Histórico del Portafolio")
+    st.markdown("Análisis temporal basado en movimientos históricos de la API")
+    
+    # Convertir a DataFrame para análisis
+    df_indice = pd.DataFrame(list(indice_historico.values()))
+    df_indice['fecha'] = pd.to_datetime(df_indice['fecha'])
+    df_indice = df_indice.sort_values('fecha')
+    
+    # Mostrar resumen
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📅 Período", f"{df_indice['fecha'].min().strftime('%d/%m/%Y')} - {df_indice['fecha'].max().strftime('%d/%m/%Y')}")
+    with col2:
+        st.metric("📊 Fechas", len(df_indice))
+    with col3:
+        total_movimientos = df_indice['movimientos_count'].sum()
+        st.metric("🔄 Movimientos", total_movimientos)
+    
+    # Gráfico de evolución temporal
+    st.markdown("#### 📊 Evolución Temporal del Portafolio")
+    
+    fig_evolucion = go.Figure()
+    
+    # Línea ARS
+    fig_evolucion.add_trace(go.Scatter(
+        x=df_indice['fecha'],
+        y=df_indice['total_ars'],
+        mode='lines+markers',
+        name='Total ARS',
+        line=dict(color='#3b82f6', width=3),
+        marker=dict(size=6)
+    ))
+    
+    # Línea USD
+    fig_evolucion.add_trace(go.Scatter(
+        x=df_indice['fecha'],
+        y=df_indice['total_usd'],
+        mode='lines+markers',
+        name='Total USD',
+        line=dict(color='#10b981', width=3),
+        marker=dict(size=6)
+    ))
+    
+    fig_evolucion.update_layout(
+        title="Evolución del Portafolio por Fecha",
+        xaxis_title="Fecha",
+        yaxis_title="Valor Total ($)",
+        height=500,
+        template='plotly_dark',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    st.plotly_chart(fig_evolucion, use_container_width=True)
+    
+    # Tabla de datos históricos
+    st.markdown("#### 📋 Detalle Histórico")
+    
+    # Preparar datos para tabla
+    df_tabla = df_indice.copy()
+    df_tabla['fecha'] = df_tabla['fecha'].dt.strftime('%d/%m/%Y')
+    df_tabla = df_tabla[['fecha', 'total_ars_formatted', 'total_usd_formatted', 'movimientos_count']]
+    df_tabla.columns = ['Fecha', 'Total ARS', 'Total USD', 'Movimientos']
+    
+    st.dataframe(df_tabla, use_container_width=True)
+    
+    # Análisis de tendencias
+    st.markdown("#### 📈 Análisis de Tendencia")
+    
+    if len(df_indice) > 1:
+        # Calcular tendencia ARS
+        x_ars = np.arange(len(df_indice))
+        y_ars = df_indice['total_ars'].values
+        slope_ars, intercept_ars, r_value_ars, p_value_ars, std_err_ars = linregress(x_ars, y_ars)
+        
+        # Calcular tendencia USD
+        y_usd = df_indice['total_usd'].values
+        slope_usd, intercept_usd, r_value_usd, p_value_usd, std_err_usd = linregress(x_ars, y_usd)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric(
+                "📈 Tendencia ARS",
+                f"{slope_ars:,.2f} ARS/día",
+                delta=f"{slope_ars/df_indice['total_ars'].iloc[-1]*100:.2f}%" if df_indice['total_ars'].iloc[-1] > 0 else "N/A"
+            )
+        
+        with col2:
+            st.metric(
+                "📈 Tendencia USD",
+                f"{slope_usd:,.2f} USD/día",
+                delta=f"{slope_usd/df_indice['total_usd'].iloc[-1]*100:.2f}%" if df_indice['total_usd'].iloc[-1] > 0 else "N/A"
+            )
+
+def procesar_movimiento_historico_portafolio(token_portador, id_cliente, dias_atras=90):
+    """
+    Procesa el movimiento histórico del portafolio y muestra el análisis
+    """
+    st.markdown("### 🔄 Procesando Movimiento Histórico del Portafolio")
+    
+    with st.spinner("📊 Obteniendo datos históricos de la API..."):
+        indice_historico = obtener_movimiento_historico_portafolio(token_portador, id_cliente, dias_atras)
+    
+    if indice_historico:
+        st.success(f"✅ Índice histórico obtenido exitosamente con {len(indice_historico)} fechas")
+        mostrar_indice_historico_portafolio(indice_historico)
+        
+        # Opción para guardar datos
+        if st.button("💾 Guardar Índice Histórico", type="primary"):
+            try:
+                df_indice = pd.DataFrame(list(indice_historico.values()))
+                nombre_archivo = f"indice_historico_portafolio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                df_indice.to_csv(nombre_archivo, index=False)
+                st.success(f"✅ Índice histórico guardado como {nombre_archivo}")
+                
+                # Descargar archivo
+                with open(nombre_archivo, 'r') as f:
+                    st.download_button(
+                        label="📥 Descargar CSV",
+                        data=f.read(),
+                        file_name=nombre_archivo,
+                        mime="text/csv"
+                    )
+            except Exception as e:
+                st.error(f"❌ Error al guardar: {e}")
+    else:
+        st.error("❌ No se pudo obtener el índice histórico del portafolio")
+
+def parsear_datos_historicos(texto_datos):
+    """
+    Parsea los datos históricos proporcionados por el usuario
+    """
+    try:
+        datos_parseados = []
+        lineas = texto_datos.strip().split('\n')
+        
+        for linea in lineas:
+            if not linea.strip():
+                continue
+                
+            # Parsear línea: 2025-09-02 TOTAL_inversio posicion_total 1 $198,761.86 peso_Argentino Posición total en inversion_Argentina_Pesos
+            partes = linea.split()
+            if len(partes) >= 6:
+                fecha = partes[0]
+                tipo_operacion = partes[1]
+                categoria = partes[2]
+                cantidad = float(partes[3])
+                monto = float(partes[4].replace('$', '').replace(',', ''))
+                moneda = partes[5]
+                descripcion = ' '.join(partes[6:]) if len(partes) > 6 else ''
+                
+                datos_parseados.append({
+                    'fecha': fecha,
+                    'tipo_operacion': tipo_operacion,
+                    'categoria': categoria,
+                    'cantidad': cantidad,
+                    'monto': monto,
+                    'moneda': moneda,
+                    'descripcion': descripcion
+                })
+        
+        return datos_parseados
+    except Exception as e:
+        st.error(f"Error al parsear datos históricos: {e}")
+        return []
+
+def guardar_historico_csv(datos_parseados, nombre_archivo="historico_financiero.csv"):
+    """
+    Guarda los datos históricos en un archivo CSV
+    """
+    try:
+        df = pd.DataFrame(datos_parseados)
+        df.to_csv(nombre_archivo, index=False, encoding='utf-8')
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar histórico: {e}")
+        return False
+
+def cargar_historico_csv(nombre_archivo="historico_financiero.csv"):
+    """
+    Carga los datos históricos desde un archivo CSV
+    """
+    try:
+        if os.path.exists(nombre_archivo):
+            df = pd.read_csv(nombre_archivo, encoding='utf-8')
+            return df.to_dict('records')
+        return []
+    except Exception as e:
+        st.error(f"Error al cargar histórico: {e}")
+        return []
+
+def agregar_datos_historicos(datos_nuevos, nombre_archivo="historico_financiero.csv"):
+    """
+    Agrega nuevos datos al histórico existente
+    """
+    try:
+        # Cargar datos existentes
+        datos_existentes = cargar_historico_csv(nombre_archivo)
+        
+        # Combinar con nuevos datos
+        todos_datos = datos_existentes + datos_nuevos
+        
+        # Eliminar duplicados basados en fecha, tipo_operacion y categoria
+        df = pd.DataFrame(todos_datos)
+        df = df.drop_duplicates(subset=['fecha', 'tipo_operacion', 'categoria'], keep='last')
+        
+        # Guardar
+        df.to_csv(nombre_archivo, index=False, encoding='utf-8')
+        return True
+    except Exception as e:
+        st.error(f"Error al agregar datos históricos: {e}")
+        return False
+
+def mostrar_historico_financiero(nombre_archivo="historico_financiero.csv"):
+    """
+    Muestra el histórico financiero en una interfaz interactiva
+    """
+    try:
+        datos = cargar_historico_csv(nombre_archivo)
+        if not datos:
+            st.info("📊 No hay datos históricos disponibles")
+            return
+        
+        df = pd.DataFrame(datos)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        st.markdown("## 📈 Histórico Financiero")
+        
+        # Filtros
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            fecha_desde = st.date_input(
+                "Fecha desde",
+                value=df['fecha'].min().date(),
+                min_value=df['fecha'].min().date(),
+                max_value=df['fecha'].max().date()
+            )
+        
+        with col2:
+            fecha_hasta = st.date_input(
+                "Fecha hasta",
+                value=df['fecha'].max().date(),
+                min_value=df['fecha'].min().date(),
+                max_value=df['fecha'].max().date()
+            )
+        
+        with col3:
+            monedas = ['Todas'] + df['moneda'].unique().tolist()
+            moneda_seleccionada = st.selectbox("Moneda", monedas)
+        
+        # Filtrar datos
+        df_filtrado = df[
+            (df['fecha'].dt.date >= fecha_desde) &
+            (df['fecha'].dt.date <= fecha_hasta)
+        ]
+        
+        if moneda_seleccionada != 'Todas':
+            df_filtrado = df_filtrado[df_filtrado['moneda'] == moneda_seleccionada]
+        
+        # Métricas principales
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_monto = df_filtrado['monto'].sum()
+            st.metric("💰 Total", f"${total_monto:,.2f}")
+        
+        with col2:
+            promedio_monto = df_filtrado['monto'].mean()
+            st.metric("📊 Promedio", f"${promedio_monto:,.2f}")
+        
+        with col3:
+            max_monto = df_filtrado['monto'].max()
+            st.metric("📈 Máximo", f"${max_monto:,.2f}")
+        
+        with col4:
+            registros = len(df_filtrado)
+            st.metric("📋 Registros", f"{registros}")
+        
+        # Gráficos
+        tab1, tab2, tab3 = st.tabs(["📈 Evolución Temporal", "💰 Distribución por Categoría", "📊 Tabla de Datos"])
+        
+        with tab1:
+            # Gráfico de evolución temporal
+            fig_evolucion = go.Figure()
+            
+            for categoria in df_filtrado['categoria'].unique():
+                datos_categoria = df_filtrado[df_filtrado['categoria'] == categoria]
+                fig_evolucion.add_trace(go.Scatter(
+                    x=datos_categoria['fecha'],
+                    y=datos_categoria['monto'],
+                    mode='lines+markers',
+                    name=categoria,
+                    hovertemplate='<b>%{x}</b><br>%{y:,.2f}<extra></extra>'
+                ))
+            
+            fig_evolucion.update_layout(
+                title="Evolución Temporal de Valores",
+                xaxis_title="Fecha",
+                yaxis_title="Monto ($)",
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_evolucion, use_container_width=True)
+        
+        with tab2:
+            # Gráfico de distribución por categoría
+            distribucion_categoria = df_filtrado.groupby('categoria')['monto'].sum().sort_values(ascending=True)
+            
+            fig_distribucion = go.Figure(data=[go.Bar(
+                x=distribucion_categoria.values,
+                y=distribucion_categoria.index,
+                orientation='h',
+                text=[f"${val:,.2f}" for val in distribucion_categoria.values],
+                textposition='auto'
+            )])
+            
+            fig_distribucion.update_layout(
+                title="Distribución por Categoría",
+                xaxis_title="Monto ($)",
+                yaxis_title="Categoría"
+            )
+            st.plotly_chart(fig_distribucion, use_container_width=True)
+        
+        with tab3:
+            # Tabla de datos
+            df_mostrar = df_filtrado.copy()
+            df_mostrar['fecha'] = df_mostrar['fecha'].dt.strftime('%Y-%m-%d')
+            df_mostrar['monto'] = df_mostrar['monto'].apply(lambda x: f"${x:,.2f}")
+            
+            st.dataframe(
+                df_mostrar[['fecha', 'tipo_operacion', 'categoria', 'monto', 'moneda', 'descripcion']],
+                use_container_width=True
+            )
+        
+        # Exportar datos
+        st.markdown("### 📤 Exportar Datos")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            csv_data = df_filtrado.to_csv(index=False, encoding='utf-8')
+            st.download_button(
+                label="📥 Descargar CSV",
+                data=csv_data,
+                file_name=f"historico_financiero_{fecha_desde}_{fecha_hasta}.csv",
+                mime="text/csv"
+            )
+        
+        with col2:
+            # Generar reporte PDF (simulado)
+            st.info("📄 Función de reporte PDF en desarrollo")
+    
+    except Exception as e:
+        st.error(f"Error al mostrar histórico: {e}")
+
+def procesar_datos_historicos_usuario(texto_datos):
+    """
+    Procesa los datos históricos proporcionados por el usuario
+    """
+    st.markdown("## 📊 Procesamiento de Datos Históricos")
+    
+    # Parsear datos
+    datos_parseados = parsear_datos_historicos(texto_datos)
+    
+    if not datos_parseados:
+        st.error("❌ No se pudieron parsear los datos")
+        return
+    
+    st.success(f"✅ Se parsearon {len(datos_parseados)} registros")
+    
+    # Mostrar datos parseados
+    st.markdown("### 📋 Datos Parseados")
+    df_parseados = pd.DataFrame(datos_parseados)
+    st.dataframe(df_parseados, use_container_width=True)
+    
+    # Resumen de datos
+    st.markdown("### 📊 Resumen de Datos")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Por Moneda:**")
+        resumen_moneda = df_parseados.groupby('moneda')['monto'].sum()
+        for moneda, total in resumen_moneda.items():
+            st.write(f"• {moneda}: ${total:,.2f}")
+    
+    with col2:
+        st.markdown("**Por Categoría:**")
+        resumen_categoria = df_parseados.groupby('categoria')['monto'].sum()
+        for categoria, total in resumen_categoria.items():
+            st.write(f"• {categoria}: ${total:,.2f}")
+    
+    # Opciones de guardado
+    st.markdown("### 💾 Guardar Datos")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("💾 Guardar en Histórico"):
+            if agregar_datos_historicos(datos_parseados):
+                st.success("✅ Datos guardados exitosamente")
+            else:
+                st.error("❌ Error al guardar datos")
+    
+    with col2:
+        if st.button("📥 Descargar CSV"):
+            if guardar_historico_csv(datos_parseados, "datos_historicos_temporales.csv"):
+                st.success("✅ CSV generado")
+            else:
+                st.error("❌ Error al generar CSV")
 
 if __name__ == "__main__":
     main()
