@@ -5785,7 +5785,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         elif tipo_visualizacion == "📈 Distribución por Tipo de Activo":
             # Distribución por tipo de activo
             if 'Tipo' in df_activos.columns:
-            tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
+                tipo_stats = df_activos.groupby('Tipo')['Valuación'].sum().reset_index()
                 tipo_stats = tipo_stats.sort_values('Valuación', ascending=False)
                 
                 fig_tipo = go.Figure(data=[go.Bar(
