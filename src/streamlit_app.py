@@ -5378,100 +5378,132 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
     
     if not portafolio_ar:
-        st.warning("No se pudo obtener el portafolio de Argentina")
+        st.error("❌ No se pudo obtener el portafolio de Argentina")
+        st.info("💡 **Posibles causas:**")
+        st.info("• Problemas de conectividad con la API")
+        st.info("• Token de acceso expirado")
+        st.info("• Permisos insuficientes para acceder al portafolio")
+        st.info("• El portafolio argentino está vacío")
         return
     
     # Debug: mostrar estructura del portafolio para entender los datos
     if st.session_state.get('debug_mode', False):
         st.json(portafolio_ar)
     
-    # Filtrar activos argentinos (acciones, bonos, letras, etc.)
-    activos_ar = []
-    for activo in portafolio_ar.get('activos', []):
-        titulo = activo.get('titulo', {})
-        tipo = titulo.get('tipo', '')
-        simbolo = titulo.get('simbolo', '')
-        descripcion = titulo.get('descripcion', 'Sin descripción')
-        
-        # Incluir todos los activos argentinos (no solo acciones)
-        if simbolo and simbolo != 'N/A':
-            # Crear objeto con datos estructurados
-            activo_info = {
-                'simbolo': simbolo,
-                'descripcion': descripcion,
-                'tipo': tipo,
-                'cantidad': activo.get('cantidad', 0),
-                'precio': 0,
-                'valuacion': 0,
-                'precio_compra': 0,
-                'variacion_diaria': 0,
-                'rendimiento': 0
-            }
-            
-            # Obtener precio y valuación
-            campos_valuacion = [
-                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
-                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
-                'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
-            ]
-            
-            for campo in campos_valuacion:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        val = float(activo[campo])
-                        if val > 0:
-                            activo_info['valuacion'] = val
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            # Obtener precio de compra y otros datos
-            campos_precio = [
-                'precioPromedio', 'precioCompra', 'precioActual', 'precio',
-                'precioUnitario', 'ultimoPrecio', 'cotizacion'
-            ]
-            
-            for campo in campos_precio:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        precio = float(activo[campo])
-                        if precio > 0:
-                            activo_info['precio'] = precio
-                            activo_info['precio_compra'] = precio
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            # Obtener variación diaria y rendimiento
-            if 'variacionDiaria' in activo and activo['variacionDiaria'] is not None:
-                try:
-                    activo_info['variacion_diaria'] = float(activo['variacionDiaria'])
-                except (ValueError, TypeError):
-                    pass
-            
-            if 'rendimiento' in activo and activo['rendimiento'] is not None:
-                try:
-                    activo_info['rendimiento'] = float(activo['rendimiento'])
-                except (ValueError, TypeError):
-                    pass
-            
-            # Si no hay valuación, calcular con precio y cantidad
-            if activo_info['valuacion'] == 0 and activo_info['cantidad'] and activo_info['precio']:
-                activo_info['valuacion'] = activo_info['cantidad'] * activo_info['precio']
-            
-            activos_ar.append(activo_info)
-    
-    if not activos_ar:
+    # Verificar si el portafolio tiene activos
+    activos_raw = portafolio_ar.get('activos', [])
+    if not activos_raw:
         st.error("❌ No se encontraron activos en el portafolio argentino")
         st.info("**Estructura del portafolio recibido:**")
         st.json(portafolio_ar)
         st.warning("""
         **Posibles causas:**
-        - El portafolio está vacío
+        - El portafolio argentino está realmente vacío
         - Los activos no tienen la estructura esperada
         - Problemas de autenticación o permisos
+        - La API está devolviendo datos en un formato diferente
         """)
-        return
+        
+        # Intentar obtener portafolio con método alternativo
+        st.info("🔄 **Intentando método alternativo...**")
+        try:
+            # Intentar obtener portafolio usando el endpoint de asesor
+            portafolio_alternativo = obtener_portafolio(token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', ''), 'Argentina')
+            if portafolio_alternativo and portafolio_alternativo.get('activos'):
+                st.success("✅ Se encontraron activos con método alternativo")
+                portafolio_ar = portafolio_alternativo
+                activos_raw = portafolio_ar.get('activos', [])
+            else:
+                st.warning("⚠️ El método alternativo tampoco encontró activos")
+                st.info("💡 **Sugerencia:** Verifica que tengas activos en tu portafolio argentino en la plataforma de IOL")
+                return
+        except Exception as e:
+            st.error(f"❌ Error en método alternativo: {e}")
+            return
+    
+    # Filtrar activos argentinos (acciones, bonos, letras, etc.)
+    activos_ar = []
+     for activo in activos_raw:
+         titulo = activo.get('titulo', {})
+         tipo = titulo.get('tipo', '')
+         simbolo = titulo.get('simbolo', '')
+         descripcion = titulo.get('descripcion', 'Sin descripción')
+         
+         # Incluir todos los activos argentinos (no solo acciones)
+         if simbolo and simbolo != 'N/A':
+             # Crear objeto con datos estructurados
+             activo_info = {
+                 'simbolo': simbolo,
+                 'descripcion': descripcion,
+                 'tipo': tipo,
+                 'cantidad': activo.get('cantidad', 0),
+                 'precio': 0,
+                 'valuacion': 0,
+                 'precio_compra': 0,
+                 'variacion_diaria': 0,
+                 'rendimiento': 0
+             }
+             
+             # Obtener precio y valuación
+             campos_valuacion = [
+                 'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
+                 'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
+                 'montoInvertido', 'valorMercado', 'valorTotal', 'importe'
+             ]
+             
+             for campo in campos_valuacion:
+                 if campo in activo and activo[campo] is not None:
+                     try:
+                         val = float(activo[campo])
+                         if val > 0:
+                             activo_info['valuacion'] = val
+                             break
+                     except (ValueError, TypeError):
+                         continue
+             
+             # Obtener precio de compra y otros datos
+             campos_precio = [
+                 'precioPromedio', 'precioCompra', 'precioActual', 'precio',
+                 'precioUnitario', 'ultimoPrecio', 'cotizacion'
+             ]
+             
+             for campo in campos_precio:
+                 if campo in activo and activo[campo] is not None:
+                     try:
+                         precio = float(activo[campo])
+                         if precio > 0:
+                             activo_info['precio'] = precio
+                             activo_info['precio_compra'] = precio
+                             break
+                     except (ValueError, TypeError):
+                         continue
+             
+             # Obtener variación diaria y rendimiento
+             if 'variacionDiaria' in activo and activo['variacionDiaria'] is not None:
+                 try:
+                     activo_info['variacion_diaria'] = float(activo['variacionDiaria'])
+                 except (ValueError, TypeError):
+                     pass
+             
+             if 'rendimiento' in activo and activo['rendimiento'] is not None:
+                 try:
+                     activo_info['rendimiento'] = float(activo['rendimiento'])
+                 except (ValueError, TypeError):
+                     pass
+             
+             # Si no hay valuación, calcular con precio y cantidad
+             if activo_info['valuacion'] == 0 and activo_info['cantidad'] and activo_info['precio']:
+                 activo_info['valuacion'] = activo_info['cantidad'] * activo_info['precio']
+             
+             activos_ar.append(activo_info)
+     
+     if not activos_ar:
+         st.error("❌ No se pudieron procesar los activos del portafolio argentino")
+         st.info("💡 **Posibles causas:**")
+         st.info("• Los activos no tienen símbolos válidos")
+         st.info("• La estructura de datos es diferente a la esperada")
+         st.info("• Problemas en el procesamiento de los datos")
+         return
     
     # Mostrar resumen de todos los activos argentinos
     st.subheader("📊 Resumen de Activos Argentinos")
