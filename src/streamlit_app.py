@@ -7867,7 +7867,7 @@ def mostrar_analisis_portafolio():
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
     
     # Crear tabs con iconos
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
         "📈 Resumen Portafolio", 
         "💰 Estado de Cuenta", 
         "📊 Análisis Técnico",
@@ -7876,7 +7876,8 @@ def mostrar_analisis_portafolio():
         "💵 Conversión USD",
         "🌍 Distribución Mejorada",
         "📈 Datos Históricos",
-        "🔍 Diagnóstico"
+        "🔍 Diagnóstico",
+        "🌍 Portafolios Separados"
     ])
 
     with tab1:
@@ -8253,6 +8254,10 @@ def mostrar_analisis_portafolio():
     
     with tab9:
         mostrar_diagnostico_autorizacion()
+    
+    with tab10:
+        # Nueva funcionalidad de portafolios separados con conversión
+        mostrar_portafolios_separados_con_conversion(token_acceso, id_cliente)
 
 
 def obtener_historico_movimientos_portafolio(token_portador, id_cliente, dias_atras=30):
@@ -10790,6 +10795,681 @@ def procesar_datos_historicos_usuario(texto_datos):
                 st.success("✅ CSV generado")
             else:
                 st.error("❌ Error al generar CSV")
+
+def mostrar_portafolios_separados_con_conversion(token_acceso, id_cliente):
+    """
+    Muestra los portafolios de Argentina y EEUU por separado con opción de ver ambas series
+    en un único gráfico y conversión de monedas usando dólar MEP
+    """
+    st.subheader("🌍 Portafolios Separados con Conversión de Monedas")
+    
+    # Obtener portafolios por país
+    with st.spinner("Obteniendo portafolios por país..."):
+        portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
+        portafolio_us = obtener_portafolio_por_pais(token_acceso, 'estados_Unidos')
+    
+    # Obtener tasa MEP para conversiones
+    tasa_mep = obtener_tasa_mep_al30(token_acceso)
+    
+    # Crear tabs para diferentes visualizaciones
+    tab_individual, tab_combinado, tab_conversion = st.tabs([
+        "📊 Portafolios Individuales", 
+        "🌍 Vista Combinada", 
+        "💱 Conversión de Monedas"
+    ])
+    
+    with tab_individual:
+        mostrar_portafolios_individuales(portafolio_ar, portafolio_us, tasa_mep)
+    
+    with tab_combinado:
+        mostrar_vista_combinada(portafolio_ar, portafolio_us, tasa_mep)
+    
+    with tab_conversion:
+        mostrar_conversion_monedas(portafolio_ar, portafolio_us, tasa_mep)
+
+def mostrar_portafolios_individuales(portafolio_ar, portafolio_us, tasa_mep):
+    """
+    Muestra los portafolios de Argentina y EEUU por separado con opciones de conversión
+    """
+    st.markdown("### 📊 Portafolios Individuales")
+    
+    # Argentina Portfolio
+    st.markdown("#### 🇦🇷 Portafolio Argentina")
+    
+    if portafolio_ar and portafolio_ar.get('activos'):
+        activos_ar = portafolio_ar['activos']
+        
+        # Opciones de visualización para Argentina
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            mostrar_activos_argentina = st.checkbox("Mostrar activos argentinos", value=True, key="show_ar_assets")
+            convertir_a_usd = st.checkbox("Convertir a USD usando MEP", value=False, key="convert_ar_to_usd")
+        
+        with col2:
+            if tasa_mep:
+                st.info(f"💱 MEP: ${tasa_mep:,.2f}")
+            else:
+                st.warning("⚠️ No se pudo obtener MEP")
+        
+        if mostrar_activos_argentina:
+            # Procesar activos argentinos
+            df_ar = procesar_activos_argentinos(activos_ar, tasa_mep, convertir_a_usd)
+            
+            if not df_ar.empty:
+                # Métricas del portafolio argentino
+                col1, col2, col3, col4 = st.columns(4)
+                
+                total_ars = df_ar['valuacion_ars'].sum()
+                total_usd = df_ar['valuacion_usd'].sum() if 'valuacion_usd' in df_ar.columns else 0
+                
+                col1.metric("💰 Total ARS", f"${total_ars:,.2f}")
+                col2.metric("💵 Total USD", f"${total_usd:,.2f}")
+                col3.metric("📊 Cantidad Activos", len(df_ar))
+                col4.metric("📈 Rendimiento Promedio", f"{df_ar['rendimiento'].mean():.2f}%")
+                
+                # Gráfico de distribución
+                fig_ar = crear_grafico_distribucion_argentina(df_ar, convertir_a_usd)
+                st.plotly_chart(fig_ar, use_container_width=True)
+                
+                # Tabla de activos
+                st.markdown("**📋 Detalle de Activos Argentinos**")
+                columnas_mostrar = ['simbolo', 'descripcion', 'cantidad', 'precio_ars', 'valuacion_ars', 'rendimiento']
+                if convertir_a_usd and 'valuacion_usd' in df_ar.columns:
+                    columnas_mostrar.append('valuacion_usd')
+                
+                df_display = df_ar[columnas_mostrar].copy()
+                df_display.columns = ['Símbolo', 'Descripción', 'Cantidad', 'Precio ARS', 'Valuación ARS', 'Rendimiento %']
+                if convertir_a_usd and 'valuacion_usd' in df_ar.columns:
+                    df_display.columns = list(df_display.columns) + ['Valuación USD']
+                
+                # Formatear valores
+                df_display['Valuación ARS'] = df_display['Valuación ARS'].apply(lambda x: f"${x:,.2f}")
+                df_display['Precio ARS'] = df_display['Precio ARS'].apply(lambda x: f"${x:,.2f}")
+                df_display['Rendimiento %'] = df_display['Rendimiento %'].apply(lambda x: f"{x:+.2f}%")
+                if convertir_a_usd and 'valuacion_usd' in df_ar.columns:
+                    df_display['Valuación USD'] = df_display['Valuación USD'].apply(lambda x: f"${x:,.2f}")
+                
+                st.dataframe(df_display, use_container_width=True)
+            else:
+                st.warning("⚠️ No se pudieron procesar los activos argentinos")
+        else:
+            st.info("ℹ️ Selecciona 'Mostrar activos argentinos' para ver el detalle")
+    else:
+        st.info("ℹ️ No hay activos en el portafolio argentino")
+    
+    st.markdown("---")
+    
+    # Estados Unidos Portfolio
+    st.markdown("#### 🇺🇸 Portafolio Estados Unidos")
+    
+    if portafolio_us and portafolio_us.get('activos'):
+        activos_us = portafolio_us['activos']
+        
+        # Opciones de visualización para EEUU
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            mostrar_activos_eeuu = st.checkbox("Mostrar activos estadounidenses", value=True, key="show_us_assets")
+            convertir_a_ars = st.checkbox("Convertir a ARS usando MEP", value=False, key="convert_us_to_ars")
+        
+        with col2:
+            if tasa_mep:
+                st.info(f"💱 MEP: ${tasa_mep:,.2f}")
+            else:
+                st.warning("⚠️ No se pudo obtener MEP")
+        
+        if mostrar_activos_eeuu:
+            # Procesar activos estadounidenses
+            df_us = procesar_activos_estadounidenses(activos_us, tasa_mep, convertir_a_ars)
+            
+            if not df_us.empty:
+                # Métricas del portafolio estadounidense
+                col1, col2, col3, col4 = st.columns(4)
+                
+                total_usd = df_us['valuacion_usd'].sum()
+                total_ars = df_us['valuacion_ars'].sum() if 'valuacion_ars' in df_us.columns else 0
+                
+                col1.metric("💵 Total USD", f"${total_usd:,.2f}")
+                col2.metric("💰 Total ARS", f"${total_ars:,.2f}")
+                col3.metric("📊 Cantidad Activos", len(df_us))
+                col4.metric("📈 Rendimiento Promedio", f"{df_us['rendimiento'].mean():.2f}%")
+                
+                # Gráfico de distribución
+                fig_us = crear_grafico_distribucion_eeuu(df_us, convertir_a_ars)
+                st.plotly_chart(fig_us, use_container_width=True)
+                
+                # Tabla de activos
+                st.markdown("**📋 Detalle de Activos Estadounidenses**")
+                columnas_mostrar = ['simbolo', 'descripcion', 'cantidad', 'precio_usd', 'valuacion_usd', 'rendimiento']
+                if convertir_a_ars and 'valuacion_ars' in df_us.columns:
+                    columnas_mostrar.append('valuacion_ars')
+                
+                df_display = df_us[columnas_mostrar].copy()
+                df_display.columns = ['Símbolo', 'Descripción', 'Cantidad', 'Precio USD', 'Valuación USD', 'Rendimiento %']
+                if convertir_a_ars and 'valuacion_ars' in df_us.columns:
+                    df_display.columns = list(df_display.columns) + ['Valuación ARS']
+                
+                # Formatear valores
+                df_display['Valuación USD'] = df_display['Valuación USD'].apply(lambda x: f"${x:,.2f}")
+                df_display['Precio USD'] = df_display['Precio USD'].apply(lambda x: f"${x:,.2f}")
+                df_display['Rendimiento %'] = df_display['Rendimiento %'].apply(lambda x: f"{x:+.2f}%")
+                if convertir_a_ars and 'valuacion_ars' in df_us.columns:
+                    df_display['Valuación ARS'] = df_display['Valuación ARS'].apply(lambda x: f"${x:,.2f}")
+                
+                st.dataframe(df_display, use_container_width=True)
+            else:
+                st.warning("⚠️ No se pudieron procesar los activos estadounidenses")
+        else:
+            st.info("ℹ️ Selecciona 'Mostrar activos estadounidenses' para ver el detalle")
+    else:
+        st.info("ℹ️ No hay activos en el portafolio estadounidense")
+
+def mostrar_vista_combinada(portafolio_ar, portafolio_us, tasa_mep):
+    """
+    Muestra ambas series en un único gráfico con opciones de conversión
+    """
+    st.markdown("### 🌍 Vista Combinada de Portafolios")
+    
+    # Opciones de visualización
+    col1, col2 = st.columns([2, 2])
+    
+    with col1:
+        mostrar_ambos = st.checkbox("Mostrar ambos portafolios", value=True, key="show_both_portfolios")
+        moneda_base = st.selectbox(
+            "Moneda base para comparación:",
+            options=["ARS", "USD"],
+            index=0,
+            key="base_currency_comparison"
+        )
+    
+    with col2:
+        if tasa_mep:
+            st.info(f"💱 Tasa MEP: ${tasa_mep:,.2f}")
+        else:
+            st.warning("⚠️ No se pudo obtener MEP")
+    
+    if mostrar_ambos:
+        # Procesar ambos portafolios
+        df_ar = pd.DataFrame()
+        df_us = pd.DataFrame()
+        
+        if portafolio_ar and portafolio_ar.get('activos'):
+            df_ar = procesar_activos_argentinos(portafolio_ar['activos'], tasa_mep, moneda_base == "USD")
+        
+        if portafolio_us and portafolio_us.get('activos'):
+            df_us = procesar_activos_estadounidenses(portafolio_us['activos'], tasa_mep, moneda_base == "ARS")
+        
+        if not df_ar.empty or not df_us.empty:
+            # Combinar datos para gráfico
+            df_combinado = pd.DataFrame()
+            
+            if not df_ar.empty:
+                df_ar['pais'] = 'Argentina'
+                df_ar['color'] = '#1f77b4'
+                df_combinado = pd.concat([df_combinado, df_ar], ignore_index=True)
+            
+            if not df_us.empty:
+                df_us['pais'] = 'Estados Unidos'
+                df_us['color'] = '#ff7f0e'
+                df_combinado = pd.concat([df_combinado, df_us], ignore_index=True)
+            
+            if not df_combinado.empty:
+                # Métricas combinadas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                total_ars = df_combinado['valuacion_ars'].sum() if 'valuacion_ars' in df_combinado.columns else 0
+                total_usd = df_combinado['valuacion_usd'].sum() if 'valuacion_usd' in df_combinado.columns else 0
+                
+                col1.metric("💰 Total ARS", f"${total_ars:,.2f}")
+                col2.metric("💵 Total USD", f"${total_usd:,.2f}")
+                col3.metric("📊 Total Activos", len(df_combinado))
+                col4.metric("📈 Rendimiento Promedio", f"{df_combinado['rendimiento'].mean():.2f}%")
+                
+                # Gráfico combinado
+                fig_combinado = crear_grafico_combinado(df_combinado, moneda_base)
+                st.plotly_chart(fig_combinado, use_container_width=True)
+                
+                # Distribución por país
+                st.markdown("#### 📊 Distribución por País")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Gráfico de torta por país
+                    fig_pais = crear_grafico_distribucion_pais(df_combinado, moneda_base)
+                    st.plotly_chart(fig_pais, use_container_width=True)
+                
+                with col2:
+                    # Gráfico de barras por país
+                    fig_barras = crear_grafico_barras_pais(df_combinado, moneda_base)
+                    st.plotly_chart(fig_barras, use_container_width=True)
+                
+                # Tabla combinada
+                st.markdown("#### 📋 Resumen Combinado")
+                df_resumen = df_combinado.groupby('pais').agg({
+                    'valuacion_ars': 'sum',
+                    'valuacion_usd': 'sum',
+                    'rendimiento': 'mean',
+                    'simbolo': 'count'
+                }).reset_index()
+                
+                df_resumen.columns = ['País', 'Total ARS', 'Total USD', 'Rendimiento Promedio %', 'Cantidad Activos']
+                df_resumen['Total ARS'] = df_resumen['Total ARS'].apply(lambda x: f"${x:,.2f}")
+                df_resumen['Total USD'] = df_resumen['Total USD'].apply(lambda x: f"${x:,.2f}")
+                df_resumen['Rendimiento Promedio %'] = df_resumen['Rendimiento Promedio %'].apply(lambda x: f"{x:.2f}%")
+                
+                st.dataframe(df_resumen, use_container_width=True)
+            else:
+                st.warning("⚠️ No hay datos para mostrar en la vista combinada")
+        else:
+            st.info("ℹ️ No hay datos de portafolios disponibles")
+    else:
+        st.info("ℹ️ Selecciona 'Mostrar ambos portafolios' para ver la vista combinada")
+
+def mostrar_conversion_monedas(portafolio_ar, portafolio_us, tasa_mep):
+    """
+    Muestra herramientas de conversión de monedas usando MEP
+    """
+    st.markdown("### 💱 Conversión de Monedas")
+    
+    if not tasa_mep:
+        st.error("❌ No se pudo obtener la tasa MEP para conversiones")
+        st.info("💡 La tasa MEP es necesaria para realizar conversiones de monedas")
+        return
+    
+    st.success(f"✅ Tasa MEP obtenida: ${tasa_mep:,.2f}")
+    
+    # Calculadora de conversión
+    st.markdown("#### 🧮 Calculadora de Conversión")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**ARS → USD**")
+        monto_ars = st.number_input("Monto en ARS:", min_value=0.0, value=1000.0, step=100.0, key="monto_ars_input")
+        monto_usd_convertido = monto_ars / tasa_mep
+        
+        st.metric("Equivale a USD:", f"${monto_usd_convertido:,.2f}")
+        
+        # Mostrar fórmula
+        st.info(f"**Fórmula:** ${monto_ars:,.2f} ARS ÷ ${tasa_mep:,.2f} MEP = ${monto_usd_convertido:,.2f} USD")
+    
+    with col2:
+        st.markdown("**USD → ARS**")
+        monto_usd = st.number_input("Monto en USD:", min_value=0.0, value=100.0, step=10.0, key="monto_usd_input")
+        monto_ars_convertido = monto_usd * tasa_mep
+        
+        st.metric("Equivale a ARS:", f"${monto_ars_convertido:,.2f}")
+        
+        # Mostrar fórmula
+        st.info(f"**Fórmula:** ${monto_usd:,.2f} USD × ${tasa_mep:,.2f} MEP = ${monto_ars_convertido:,.2f} ARS")
+    
+    # Análisis de portafolios con conversión
+    st.markdown("#### 📊 Análisis de Portafolios con Conversión")
+    
+    if portafolio_ar and portafolio_ar.get('activos') and portafolio_us and portafolio_us.get('activos'):
+        # Calcular totales
+        total_ar_ars = sum([activo.get('valuacion', 0) for activo in portafolio_ar['activos']])
+        total_us_usd = sum([activo.get('valuacion', 0) for activo in portafolio_us['activos']])
+        
+        # Convertir a moneda común
+        total_ar_usd = total_ar_ars / tasa_mep
+        total_us_ars = total_us_usd * tasa_mep
+        
+        # Mostrar comparación
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🇦🇷 Portafolio Argentina**")
+            st.metric("En ARS:", f"${total_ar_ars:,.2f}")
+            st.metric("En USD (MEP):", f"${total_ar_usd:,.2f}")
+        
+        with col2:
+            st.markdown("**🇺🇸 Portafolio Estados Unidos**")
+            st.metric("En USD:", f"${total_us_usd:,.2f}")
+            st.metric("En ARS (MEP):", f"${total_us_ars:,.2f}")
+        
+        # Total combinado
+        st.markdown("#### 💰 Total Combinado")
+        total_combinado_ars = total_ar_ars + total_us_ars
+        total_combinado_usd = total_ar_usd + total_us_usd
+        
+        col1, col2 = st.columns(2)
+        col1.metric("Total en ARS:", f"${total_combinado_ars:,.2f}")
+        col2.metric("Total en USD:", f"${total_combinado_usd:,.2f}")
+        
+        # Distribución porcentual
+        distribucion_ar = (total_ar_ars / total_combinado_ars) * 100
+        distribucion_us = (total_us_ars / total_combinado_ars) * 100
+        
+        st.markdown("#### 📈 Distribución del Portafolio")
+        fig_distribucion = go.Figure(data=[go.Pie(
+            labels=['Argentina', 'Estados Unidos'],
+            values=[distribucion_ar, distribucion_us],
+            hole=0.3,
+            marker_colors=['#1f77b4', '#ff7f0e']
+        )])
+        
+        fig_distribucion.update_layout(
+            title="Distribución del Portafolio Total (en ARS)",
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig_distribucion, use_container_width=True)
+        
+        # Recomendaciones
+        st.markdown("#### 💡 Recomendaciones")
+        
+        if distribucion_ar > 70:
+            st.warning("⚠️ **Alta concentración en Argentina**: Considera diversificar hacia activos internacionales")
+        elif distribucion_us > 70:
+            st.warning("⚠️ **Alta concentración en EEUU**: Considera diversificar hacia activos locales")
+        else:
+            st.success("✅ **Buena diversificación**: Tu portafolio está bien balanceado entre mercados")
+        
+        # Análisis de riesgo cambiario
+        st.markdown("#### 🎯 Análisis de Riesgo Cambiario")
+        
+        if tasa_mep > 1000:
+            st.info("💱 **Dólar alto**: Favorable para activos en USD, riesgo para activos en ARS")
+        else:
+            st.info("💱 **Dólar bajo**: Favorable para activos en ARS, riesgo para activos en USD")
+    
+    else:
+        st.info("ℹ️ No hay suficientes datos de portafolios para realizar el análisis")
+
+def procesar_activos_argentinos(activos, tasa_mep, convertir_a_usd=False):
+    """
+    Procesa los activos argentinos y agrega conversiones de moneda
+    """
+    if not activos:
+        return pd.DataFrame()
+    
+    datos_procesados = []
+    
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', 'N/A')
+        descripcion = titulo.get('descripcion', 'Sin descripción')
+        
+        # Obtener datos básicos
+        cantidad = float(activo.get('cantidad', 0))
+        precio_ars = 0
+        valuacion_ars = 0
+        
+        # Buscar precio y valuación
+        campos_valuacion = ['valuacion', 'valorizado', 'valuacionActual', 'valorActual', 'montoInvertido']
+        for campo in campos_valuacion:
+            if campo in activo and activo[campo]:
+                try:
+                    valuacion_ars = float(activo[campo])
+                    break
+                except (ValueError, TypeError):
+                    continue
+        
+        campos_precio = ['ultimoPrecio', 'precio', 'precioActual', 'precioPromedio']
+        for campo in campos_precio:
+            if campo in activo and activo[campo]:
+                try:
+                    precio_ars = float(activo[campo])
+                    break
+                except (ValueError, TypeError):
+                    continue
+        
+        # Si no hay valuación, calcular con precio y cantidad
+        if valuacion_ars == 0 and precio_ars > 0 and cantidad > 0:
+            valuacion_ars = precio_ars * cantidad
+        
+        # Calcular rendimiento
+        rendimiento = 0
+        if 'gananciaPorcentaje' in activo and activo['gananciaPorcentaje']:
+            try:
+                rendimiento = float(activo['gananciaPorcentaje'])
+            except (ValueError, TypeError):
+                pass
+        
+        # Conversión a USD si se solicita
+        valuacion_usd = 0
+        if convertir_a_usd and tasa_mep and tasa_mep > 0:
+            valuacion_usd = valuacion_ars / tasa_mep
+        
+        datos_procesados.append({
+            'simbolo': simbolo,
+            'descripcion': descripcion,
+            'cantidad': cantidad,
+            'precio_ars': precio_ars,
+            'valuacion_ars': valuacion_ars,
+            'valuacion_usd': valuacion_usd,
+            'rendimiento': rendimiento
+        })
+    
+    return pd.DataFrame(datos_procesados)
+
+def procesar_activos_estadounidenses(activos, tasa_mep, convertir_a_ars=False):
+    """
+    Procesa los activos estadounidenses y agrega conversiones de moneda
+    """
+    if not activos:
+        return pd.DataFrame()
+    
+    datos_procesados = []
+    
+    for activo in activos:
+        titulo = activo.get('titulo', {})
+        simbolo = titulo.get('simbolo', 'N/A')
+        descripcion = titulo.get('descripcion', 'Sin descripción')
+        
+        # Obtener datos básicos
+        cantidad = float(activo.get('cantidad', 0))
+        precio_usd = 0
+        valuacion_usd = 0
+        
+        # Buscar precio y valuación
+        campos_valuacion = ['valuacion', 'valorizado', 'valuacionActual', 'valorActual', 'montoInvertido']
+        for campo in campos_valuacion:
+            if campo in activo and activo[campo]:
+                try:
+                    valuacion_usd = float(activo[campo])
+                    break
+                except (ValueError, TypeError):
+                    continue
+        
+        campos_precio = ['ultimoPrecio', 'precio', 'precioActual', 'precioPromedio']
+        for campo in campos_precio:
+            if campo in activo and activo[campo]:
+                try:
+                    precio_usd = float(activo[campo])
+                    break
+                except (ValueError, TypeError):
+                    continue
+        
+        # Si no hay valuación, calcular con precio y cantidad
+        if valuacion_usd == 0 and precio_usd > 0 and cantidad > 0:
+            valuacion_usd = precio_usd * cantidad
+        
+        # Calcular rendimiento
+        rendimiento = 0
+        if 'gananciaPorcentaje' in activo and activo['gananciaPorcentaje']:
+            try:
+                rendimiento = float(activo['gananciaPorcentaje'])
+            except (ValueError, TypeError):
+                pass
+        
+        # Conversión a ARS si se solicita
+        valuacion_ars = 0
+        if convertir_a_ars and tasa_mep and tasa_mep > 0:
+            valuacion_ars = valuacion_usd * tasa_mep
+        
+        datos_procesados.append({
+            'simbolo': simbolo,
+            'descripcion': descripcion,
+            'cantidad': cantidad,
+            'precio_usd': precio_usd,
+            'valuacion_usd': valuacion_usd,
+            'valuacion_ars': valuacion_ars,
+            'rendimiento': rendimiento
+        })
+    
+    return pd.DataFrame(datos_procesados)
+
+def crear_grafico_distribucion_argentina(df, convertir_a_usd=False):
+    """
+    Crea gráfico de distribución para el portafolio argentino
+    """
+    if df.empty:
+        return go.Figure()
+    
+    # Ordenar por valuación
+    df_sorted = df.sort_values('valuacion_ars', ascending=True)
+    
+    # Crear gráfico de barras horizontales
+    fig = go.Figure(data=[go.Bar(
+        y=df_sorted['simbolo'],
+        x=df_sorted['valuacion_usd'] if convertir_a_usd else df_sorted['valuacion_ars'],
+        orientation='h',
+        marker_color='#1f77b4',
+        text=[f"${val:,.2f}" for val in (df_sorted['valuacion_usd'] if convertir_a_usd else df_sorted['valuacion_ars'])],
+        textposition='auto'
+    )])
+    
+    fig.update_layout(
+        title=f"Distribución del Portafolio Argentina ({'USD' if convertir_a_usd else 'ARS'})",
+        xaxis_title=f"Valuación ({'USD' if convertir_a_usd else 'ARS'})",
+        yaxis_title="Activo",
+        height=400,
+        showlegend=False
+    )
+    
+    return fig
+
+def crear_grafico_distribucion_eeuu(df, convertir_a_ars=False):
+    """
+    Crea gráfico de distribución para el portafolio estadounidense
+    """
+    if df.empty:
+        return go.Figure()
+    
+    # Ordenar por valuación
+    df_sorted = df.sort_values('valuacion_usd', ascending=True)
+    
+    # Crear gráfico de barras horizontales
+    fig = go.Figure(data=[go.Bar(
+        y=df_sorted['simbolo'],
+        x=df_sorted['valuacion_ars'] if convertir_a_ars else df_sorted['valuacion_usd'],
+        orientation='h',
+        marker_color='#ff7f0e',
+        text=[f"${val:,.2f}" for val in (df_sorted['valuacion_ars'] if convertir_a_ars else df_sorted['valuacion_usd'])],
+        textposition='auto'
+    )])
+    
+    fig.update_layout(
+        title=f"Distribución del Portafolio Estados Unidos ({'ARS' if convertir_a_ars else 'USD'})",
+        xaxis_title=f"Valuación ({'ARS' if convertir_a_ars else 'USD'})",
+        yaxis_title="Activo",
+        height=400,
+        showlegend=False
+    )
+    
+    return fig
+
+def crear_grafico_combinado(df, moneda_base="ARS"):
+    """
+    Crea gráfico combinado de ambos portafolios
+    """
+    if df.empty:
+        return go.Figure()
+    
+    # Agrupar por país
+    df_agrupado = df.groupby('pais').agg({
+        'valuacion_ars': 'sum',
+        'valuacion_usd': 'sum'
+    }).reset_index()
+    
+    # Seleccionar moneda base
+    columna_valor = 'valuacion_usd' if moneda_base == "USD" else 'valuacion_ars'
+    
+    fig = go.Figure(data=[go.Bar(
+        x=df_agrupado['pais'],
+        y=df_agrupado[columna_valor],
+        marker_color=['#1f77b4', '#ff7f0e'],
+        text=[f"${val:,.2f}" for val in df_agrupado[columna_valor]],
+        textposition='auto'
+    )])
+    
+    fig.update_layout(
+        title=f"Comparación de Portafolios ({moneda_base})",
+        xaxis_title="País",
+        yaxis_title=f"Valuación Total ({moneda_base})",
+        height=400,
+        showlegend=False
+    )
+    
+    return fig
+
+def crear_grafico_distribucion_pais(df, moneda_base="ARS"):
+    """
+    Crea gráfico de torta por país
+    """
+    if df.empty:
+        return go.Figure()
+    
+    # Agrupar por país
+    df_agrupado = df.groupby('pais').agg({
+        'valuacion_ars': 'sum',
+        'valuacion_usd': 'sum'
+    }).reset_index()
+    
+    # Seleccionar moneda base
+    columna_valor = 'valuacion_usd' if moneda_base == "USD" else 'valuacion_ars'
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=df_agrupado['pais'],
+        values=df_agrupado[columna_valor],
+        hole=0.3,
+        marker_colors=['#1f77b4', '#ff7f0e']
+    )])
+    
+    fig.update_layout(
+        title=f"Distribución por País ({moneda_base})",
+        showlegend=True
+    )
+    
+    return fig
+
+def crear_grafico_barras_pais(df, moneda_base="ARS"):
+    """
+    Crea gráfico de barras por país
+    """
+    if df.empty:
+        return go.Figure()
+    
+    # Agrupar por país
+    df_agrupado = df.groupby('pais').agg({
+        'valuacion_ars': 'sum',
+        'valuacion_usd': 'sum',
+        'rendimiento': 'mean'
+    }).reset_index()
+    
+    # Seleccionar moneda base
+    columna_valor = 'valuacion_usd' if moneda_base == "USD" else 'valuacion_ars'
+    
+    fig = go.Figure(data=[go.Bar(
+        x=df_agrupado['pais'],
+        y=df_agrupado['rendimiento'],
+        marker_color=['#1f77b4', '#ff7f0e'],
+        text=[f"{val:.2f}%" for val in df_agrupado['rendimiento']],
+        textposition='auto'
+    )])
+    
+    fig.update_layout(
+        title="Rendimiento Promedio por País",
+        xaxis_title="País",
+        yaxis_title="Rendimiento Promedio (%)",
+        height=400,
+        showlegend=False
+    )
+    
+    return fig
 
 if __name__ == "__main__":
     main()
