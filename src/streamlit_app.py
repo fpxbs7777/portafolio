@@ -5630,7 +5630,7 @@ def mostrar_analisis_portafolio():
         if portafolio:
             st.markdown("---")
             st.subheader("📊 Resumen del Portafolio")
-            mostrar_resumen_portafolio(portafolio, token_acceso)
+            mostrar_resumen_portafolio_mejorado(token_acceso, id_cliente)
         else:
             st.warning("No se pudo obtener el portafolio de Argentina")
     
@@ -7191,6 +7191,344 @@ def mostrar_series_historicas_movimientos(token_portador, id_cliente):
             except Exception as e:
                 st.error(f"💥 Error al obtener series históricas: {e}")
                 st.exception(e)
+
+def obtener_portafolio_por_pais_mejorado(token_portador, pais):
+    """
+    Obtiene el portafolio usando el nuevo endpoint /api/v2/portafolio/{pais}
+    con mejor manejo de errores y fallbacks
+    """
+    try:
+        # Normalizar el país para el endpoint
+        pais_normalizado = normalizar_pais_para_endpoint(pais)
+        url = f'https://api.invertironline.com/api/v2/portafolio/{pais_normalizado}'
+        
+        headers = obtener_encabezado_autorizacion(token_portador)
+        if not headers:
+            print(f"❌ No se pudieron generar headers para {pais}")
+            return None
+        
+        print(f"🔍 Obteniendo portafolio de {pais} desde: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=20)
+        print(f"📡 Respuesta HTTP: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Portafolio obtenido exitosamente para {pais}")
+            
+            # Verificar estructura de respuesta
+            if isinstance(data, dict) and 'activos' in data:
+                print(f"📊 Cantidad de activos encontrados: {len(data['activos'])}")
+                return data
+            else:
+                print(f"⚠️ Estructura de respuesta inesperada para {pais}")
+                return None
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para {pais}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            return None
+            
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Prohibido para {pais}")
+            return None
+            
+        else:
+            print(f"❌ Error HTTP {response.status_code} para {pais}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener portafolio de {pais}")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"🌐 Error de conexión al obtener portafolio de {pais}: {e}")
+        return None
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener portafolio de {pais}: {e}")
+        return None
+
+def mostrar_resumen_portafolio_mejorado(token_portador, id_cliente=None):
+    """
+    Muestra un resumen mejorado del portafolio que incluye tanto Argentina como EEUU
+    usando el nuevo endpoint /api/v2/portafolio/{pais}
+    """
+    st.markdown("### 📊 Resumen del Portafolio")
+    
+    # Verificar token antes de proceder
+    if not verificar_token_valido(token_portador):
+        st.warning("⚠️ Token expirado. Renovando...")
+        nuevo_token = renovar_token(st.session_state.get('refresh_token'))
+        if nuevo_token:
+            st.session_state['token_acceso'] = nuevo_token
+            token_portador = nuevo_token
+            st.success("✅ Token renovado")
+        else:
+            st.error("❌ No se pudo renovar el token")
+            return
+    
+    # Obtener portafolios de ambos países
+    with st.spinner("📊 Obteniendo portafolios..."):
+        portafolio_argentina = obtener_portafolio_por_pais_mejorado(token_portador, 'argentina')
+        portafolio_eeuu = obtener_portafolio_por_pais_mejorado(token_portador, 'estados_unidos')
+    
+    # Procesar datos de Argentina
+    datos_argentina = procesar_portafolio_pais(portafolio_argentina, "Argentina", token_portador)
+    
+    # Procesar datos de Estados Unidos
+    datos_eeuu = procesar_portafolio_pais(portafolio_eeuu, "Estados Unidos", token_portador)
+    
+    # Combinar datos para análisis general
+    todos_los_activos = datos_argentina['activos'] + datos_eeuu['activos']
+    valor_total_ars = datos_argentina['valor_total']
+    valor_total_usd = datos_eeuu['valor_total']
+    
+    # Calcular total en ARS usando MEP
+    mep = obtener_tasa_mep_al30(token_portador) or 0.0
+    valor_total_mep = valor_total_ars + (valor_total_usd * mep if mep > 0 else 0.0)
+    
+    # Información General
+    st.subheader("📈 Información General")
+    cols = st.columns(4)
+    cols[0].metric("Total de activos", len(todos_los_activos))
+    cols[1].metric("Símbolos únicos", len(set([activo['Símbolo'] for activo in todos_los_activos])))
+    cols[2].metric("Tipos de activos", len(set([activo['Tipo'] for activo in todos_los_activos])))
+    cols[3].metric("Valor total (ARS + USD a MEP)", f"${valor_total_mep:,.2f}")
+    
+    # Desglose por país
+    st.subheader("🌍 Desglose por País")
+    col1, col2, col3 = st.columns(3)
+    
+    col1.metric("🇦🇷 Argentina", f"${valor_total_ars:,.2f}")
+    col2.metric("🇺🇸 Estados Unidos", f"${valor_total_usd:,.2f}")
+    col3.metric("💱 Tasa MEP", f"${mep:,.2f}" if mep > 0 else "N/A")
+    
+    # Análisis de riesgo combinado
+    if todos_los_activos:
+        st.subheader("⚠️ Análisis de Riesgo")
+        
+        # Crear diccionario de portafolio para métricas
+        portafolio_dict = {activo['Símbolo']: activo for activo in todos_los_activos}
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total_mep, token_portador)
+        
+        if metricas:
+            cols = st.columns(3)
+            
+            # Mostrar concentración como porcentaje
+            concentracion_pct = metricas['concentracion'] * 100
+            cols[0].metric("Concentración", 
+                         f"{concentracion_pct:.1f}%",
+                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+            
+            # Mostrar volatilidad como porcentaje anual
+            volatilidad_pct = metricas['std_dev_activo'] * 100
+            cols[1].metric("Volatilidad Anual", 
+                         f"{volatilidad_pct:.1f}%",
+                         help="Riesgo medido como desviación estándar de retornos anuales")
+            
+            # Nivel de concentración
+            if metricas['concentracion'] < 0.3:
+                concentracion_status = "Baja"
+            elif metricas['concentracion'] < 0.6:
+                concentracion_status = "Media"
+            else:
+                concentracion_status = "Alta"
+            cols[2].metric("Nivel de concentración", concentracion_status)
+            
+            # Proyecciones
+            st.subheader("📊 Proyecciones de Rendimiento")
+            cols = st.columns(3)
+            
+            # Mostrar retornos como porcentaje del portafolio
+            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+            cols[0].metric("Retorno Esperado Anual", 
+                         f"{retorno_anual_pct:+.1f}%",
+                         help="Retorno anual esperado basado en datos históricos")
+            
+            # Mostrar escenarios como porcentaje del portafolio
+            optimista_pct = (metricas['pl_esperado_max'] / valor_total_mep) * 100 if valor_total_mep > 0 else 0
+            pesimista_pct = (metricas['pl_esperado_min'] / valor_total_mep) * 100 if valor_total_mep > 0 else 0
+            
+            cols[1].metric("Escenario Optimista (95%)", 
+                         f"{optimista_pct:+.1f}%",
+                         help="Mejor escenario con 95% de confianza")
+            cols[2].metric("Escenario Pesimista (5%)", 
+                         f"{pesimista_pct:+.1f}%",
+                         help="Peor escenario con 5% de confianza")
+            
+            # Probabilidades
+            st.subheader("🎲 Probabilidades")
+            cols = st.columns(4)
+            probs = metricas['probabilidades']
+            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}%")
+    
+    # Mostrar tablas por país
+    mostrar_tablas_portafolio_por_pais(datos_argentina, datos_eeuu)
+
+def procesar_portafolio_pais(portafolio, pais, token_portador):
+    """
+    Procesa los datos de un portafolio específico por país
+    """
+    datos_activos = []
+    valor_total = 0
+    
+    if not portafolio or not isinstance(portafolio, dict):
+        return {'activos': [], 'valor_total': 0, 'pais': pais}
+    
+    activos = portafolio.get('activos', [])
+    if not activos:
+        return {'activos': [], 'valor_total': 0, 'pais': pais}
+    
+    for activo in activos:
+        try:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            descripcion = titulo.get('descripcion', 'Sin descripción')
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            moneda = titulo.get('moneda', 'peso_Argentino')
+            
+            # Campos extra para tabla
+            precio_promedio_compra = None
+            variacion_diaria_pct = None
+            activos_comp = 0
+            
+            # Buscar valuación en diferentes campos
+            campos_valuacion = [
+                'valorizado', 'valuacion', 'valorActual', 'valorMercado',
+                'valorTotal', 'importe', 'montoInvertido'
+            ]
+            
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Si no hay valuación directa, calcularla
+            if valuacion == 0 and cantidad:
+                ultimo_precio = activo.get('ultimoPrecio', 0)
+                if ultimo_precio > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        # Aplicar regla de valuación según el tipo
+                        if necesita_ajuste_por_100(simbolo, tipo):
+                            valuacion = (cantidad_num * ultimo_precio) / 100.0
+                        else:
+                            valuacion = cantidad_num * ultimo_precio
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Obtener otros campos
+            ultimo_precio_view = activo.get('ultimoPrecio')
+            precio_promedio_compra = activo.get('ppc')  # Precio promedio de compra
+            variacion_diaria_pct = activo.get('variacionDiaria')
+            activos_comp = activo.get('comprometido', 0)
+            
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+                'UltimoPrecio': ultimo_precio_view,
+                'PrecioPromedioCompra': precio_promedio_compra,
+                'VariacionDiariaPct': variacion_diaria_pct,
+                'ActivosComp': activos_comp,
+                'Moneda': moneda,
+                'País': pais,
+                'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
+            })
+            
+            valor_total += valuacion
+            
+        except Exception as e:
+            print(f"💥 Error procesando activo en {pais}: {e}")
+            continue
+    
+    return {
+        'activos': datos_activos,
+        'valor_total': valor_total,
+        'pais': pais
+    }
+
+def mostrar_tablas_portafolio_por_pais(datos_argentina, datos_eeuu):
+    """
+    Muestra las tablas de activos separadas por país
+    """
+    # Crear pestañas para cada país
+    tab_argentina, tab_eeuu = st.tabs(["🇦🇷 Argentina", "🇺🇸 Estados Unidos"])
+    
+    with tab_argentina:
+        st.subheader("🇦🇷 Portafolio Argentina")
+        if datos_argentina['activos']:
+            mostrar_tabla_activos(datos_argentina['activos'], "Argentina")
+        else:
+            st.info("📊 No hay activos en el portafolio de Argentina")
+    
+    with tab_eeuu:
+        st.subheader("🇺🇸 Portafolio Estados Unidos")
+        if datos_eeuu['activos']:
+            mostrar_tabla_activos(datos_eeuu['activos'], "Estados Unidos")
+        else:
+            st.info("📊 No hay activos en el portafolio de Estados Unidos")
+
+def mostrar_tabla_activos(activos, pais):
+    """
+    Muestra una tabla formateada de activos para un país específico
+    """
+    try:
+        df_tabla = pd.DataFrame(activos)
+        if not df_tabla.empty:
+            # Columnas visibles y orden
+            columnas = [
+                'Símbolo', 'Descripción', 'Cantidad', 'ActivosComp',
+                'VariacionDiariaPct', 'UltimoPrecio', 'PrecioPromedioCompra',
+                'Valuación', 'Moneda'
+            ]
+            columnas_disponibles = [c for c in columnas if c in df_tabla.columns]
+            df_view = df_tabla[columnas_disponibles].copy()
+            
+            # Formatos
+            if 'VariacionDiariaPct' in df_view.columns:
+                df_view['VariacionDiariaPct'] = df_view['VariacionDiariaPct'].apply(
+                    lambda x: f"{x:+.3f} %" if pd.notna(x) else "")
+            if 'UltimoPrecio' in df_view.columns:
+                df_view['UltimoPrecio'] = df_view['UltimoPrecio'].apply(
+                    lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+            if 'PrecioPromedioCompra' in df_view.columns:
+                df_view['PrecioPromedioCompra'] = df_view['PrecioPromedioCompra'].apply(
+                    lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+            if 'Valuación' in df_view.columns:
+                df_view['Valuación'] = df_view['Valuación'].apply(
+                    lambda x: f"$ {x:,.0f}" if isinstance(x, (int, float)) else str(x))
+            
+            # Renombrar encabezados
+            df_view = df_view.rename(columns={
+                'ActivosComp': 'Activos comp.',
+                'VariacionDiariaPct': 'Variación diaria',
+                'UltimoPrecio': 'Último precio',
+                'PrecioPromedioCompra': 'Precio promedio de compra',
+                'Valuación': 'Valorizado',
+                'Moneda': 'Moneda'
+            })
+            
+            st.dataframe(df_view, use_container_width=True)
+            
+            # Mostrar resumen
+            valor_total = sum([activo['Valuación'] for activo in activos])
+            st.metric(f"💰 Valor total {pais}", f"${valor_total:,.2f}")
+            
+    except Exception as e:
+        st.error(f"❌ Error al mostrar tabla de {pais}: {e}")
 
 if __name__ == "__main__":
     main()
