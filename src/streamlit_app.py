@@ -4817,80 +4817,21 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         activos_argentinos = []
         activos_eeuu = []
         
-        # Obtener activos_raw del portafolio combinado
-        activos_raw = portafolio_ar.get('activos', [])
-        
-        for activo in activos_raw:
-            try:
-                titulo = activo.get('titulo', {})
-                simbolo = titulo.get('simbolo', 'N/A')
-                descripcion = titulo.get('descripcion', 'Sin descripción')
-                tipo = titulo.get('tipo', 'N/A')
-                pais = titulo.get('pais', 'argentina')
-                mercado = titulo.get('mercado', 'BCBA')
-                
-                # Obtener valuación
-                valuacion = 0
-                campos_valuacion = [
-                    'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
-                    'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
-                    'montoInvertido', 'valorMercado', 'valorTotal', 'importe', 'valorizado'
-                ]
-                
-                for campo in campos_valuacion:
-                    if campo in activo and activo[campo] is not None:
-                        try:
-                            val = float(activo[campo])
-                            if val > 0:
-                                valuacion = val
-                                break
-                        except (ValueError, TypeError):
-                            continue
-                
-                # Si no hay valuación, usar valorizado
-                if valuacion == 0 and 'valorizado' in activo:
-                    try:
-                        valuacion = float(activo['valorizado'])
-                    except (ValueError, TypeError):
-                        pass
-                
-                # Clasificar activo
-                es_estadounidense = False
-                
-                # Primero verificar por país y mercado
-                if pais.lower() in ['estados_unidos', 'estados unidos', 'eeuu']:
-                    es_estadounidense = True
-                elif mercado.upper() in ['NYSE', 'NASDAQ', 'AMEX', 'OTC']:
-                    es_estadounidense = True
-                else:
-                    # Usar función de clasificación como respaldo
-                    es_estadounidense = _es_activo_estadounidense(simbolo, tipo)
-                
-                # Crear objeto de activo
-                activo_info = {
-                    'Símbolo': simbolo,
-                    'Descripción': descripcion,
-                    'Tipo': tipo,
-                    'Cantidad': activo.get('cantidad', 0),
-                    'Valuación': valuacion,
-                    'UltimoPrecio': activo.get('ultimoPrecio', 0),
-                    'PrecioPromedioCompra': activo.get('ppc', 0),
-                    'VariacionDiariaPct': activo.get('variacionDiaria', 0),
-                    'ActivosComp': activo.get('comprometido', 0),
-                    'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
-                }
-                
-                # Agregar a la lista correspondiente
-                if es_estadounidense:
-                    activos_eeuu.append(activo_info)
-                    st.text(f"Clasificado como EEUU: {simbolo} - ${valuacion:,.2f}")
-                else:
-                    activos_argentinos.append(activo_info)
-                    st.text(f"Clasificado como Argentina: {simbolo} - ${valuacion:,.2f}")
-                    
-            except Exception as e:
-                st.text(f"Error procesando activo: {e}")
-                continue
+        # Usar los datos ya procesados para clasificación
+        for activo_data in datos_activos:
+            simbolo = activo_data['Símbolo']
+            tipo = activo_data['Tipo']
+            
+            # Clasificar activo usando la función de clasificación
+            es_estadounidense = _es_activo_estadounidense(simbolo, tipo)
+            
+            # Agregar a la lista correspondiente
+            if es_estadounidense:
+                activos_eeuu.append(activo_data)
+                st.text(f"Clasificado como EEUU: {simbolo} - ${activo_data['Valuación']:,.2f}")
+            else:
+                activos_argentinos.append(activo_data)
+                st.text(f"Clasificado como Argentina: {simbolo} - ${activo_data['Valuación']:,.2f}")
         
         # Usar métricas unificadas como fuente única de verdad
         if metricas and 'metricas_globales' in metricas:
@@ -4915,16 +4856,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             st.markdown("### 🔍 Debug: Clasificación de Mercados")
             
             debug_data = []
-            for activo in datos_activos:
-                simbolo = activo['Símbolo']
-                tipo_activo = activo['Tipo']
-                mercado_real = None
-                
-                # Buscar el mercado real
-                for activo_original in activos:
-                    if activo_original.get('titulo', {}).get('simbolo') == simbolo:
-                        mercado_real = activo_original.get('titulo', {}).get('mercado', 'BCBA')
-                        break
+            for activo_data in datos_activos:
+                simbolo = activo_data['Símbolo']
+                tipo_activo = activo_data['Tipo']
                 
                 # Determinar clasificación
                 if simbolo in [a['Símbolo'] for a in activos_argentinos]:
@@ -4941,10 +4875,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 debug_data.append({
                     'Símbolo': simbolo,
                     'Tipo': tipo_activo,
-                    'Mercado Real': mercado_real or 'N/A',
                     'Clasificación': clasificacion,
                     'Razón': razon_clasificacion,
-                    'Valorización': f"${activo['Valuación']:,.2f}"
+                    'Valorización': f"${activo_data['Valuación']:,.2f}"
                 })
             
             df_debug = pd.DataFrame(debug_data)
