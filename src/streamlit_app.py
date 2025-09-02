@@ -24,9 +24,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Inicializar modo debug en session state
-if 'debug_mode' not in st.session_state:
-    st.session_state.debug_mode = False
+
 
 # Estilos CSS personalizados
 st.markdown("""
@@ -1567,10 +1565,7 @@ def calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha
             st.warning("No se pudieron identificar activos desde los movimientos")
             return
         
-        # Mostrar información de debug sobre activos identificados
-        if st.session_state.get('debug_mode', False):
-            with st.expander("🔍 Debug: Activos Identificados"):
-                st.json(activos_identificados)
+
         
         st.info(f"📊 Se identificaron {len(activos_identificados)} activos para análisis")
         
@@ -1611,27 +1606,7 @@ def calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha
                 st.info("• Problemas de conectividad con la API")
                 st.info("• Período de fechas sin datos disponibles")
                 
-                # Mostrar información de debug si está habilitado
-                if st.session_state.get('debug_mode', False):
-                    st.write("**Token válido:**", "✅" if verificar_token_valido(token_portador) else "❌")
-                    st.write("**Fecha desde:**", fecha_desde.strftime('%Y-%m-%d'))
-                    st.write("**Fecha hasta:**", fecha_hasta.strftime('%Y-%m-%d'))
-                    st.write("**Activos a procesar:**", list(activos_identificados.keys()))
-                    
-                    # Mostrar información adicional de debug
-                    st.write("**Estado de la API:**")
-                    st.write("- Token de acceso:", "✅ Válido" if verificar_token_valido(token_portador) else "❌ Inválido")
-                    st.write("- Refresh token disponible:", "✅" if st.session_state.get('refresh_token') else "❌")
-                    
-                    # Botón para intentar renovar token
-                    if st.button("🔄 Intentar Renovar Token", key="try_renew_token"):
-                        with st.spinner("Renovando token..."):
-                            nuevo_token = renovar_token()
-                            if nuevo_token:
-                                st.success("✅ Token renovado exitosamente")
-                                st.rerun()
-                            else:
-                                st.error("❌ No se pudo renovar el token")
+
             
             # Mostrar opción para usar datos simulados
             st.info("🎭 **Alternativa:** La aplicación puede crear series simuladas para análisis básicos")
@@ -1663,10 +1638,6 @@ def calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha
         
     except Exception as e:
         st.error(f"❌ Error al calcular métricas reales: {e}")
-        if st.session_state.get('debug_mode', False):
-            st.exception(e)
-        else:
-            st.info("💡 Active el modo debug para ver detalles del error")
 
 def analizar_movimientos_para_activos(movimientos):
     """
@@ -4339,9 +4310,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         
 
                         
-                        # Validar la valuación calculada
-                        if st.session_state.get('debug_mode', False):
-                            validar_valuacion(simbolo, tipo, cantidad, precio_unitario, valuacion)
+
                     except (ValueError, TypeError):
                         pass
                 if precio_unitario == 0:
@@ -4553,8 +4522,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             )
             st.plotly_chart(fig_pie, use_container_width=True)
         
-        # Histograma del portafolio total valorizado
-        st.subheader("Histograma del valor total del portafolio")
+        # Histograma de retornos del portafolio
+        st.subheader("📊 Histograma de Retornos del Portafolio")
         
         # Configuración del horizonte de inversión
         horizonte_inversion = st.selectbox(
@@ -4716,40 +4685,41 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         df_portfolio = df_portfolio.dropna()
                         
                         if len(df_portfolio) > 0:
-                            # Crear histograma del valor total del portafolio
-                            valores_portfolio = df_portfolio['Portfolio_Total'].values
+                            # Calcular retornos diarios del portafolio
+                            df_portfolio_returns = df_portfolio['Portfolio_Total'].pct_change().dropna()
                             
-                            fig_hist = go.Figure(data=[go.Histogram(
-                                x=valores_portfolio,
-                                nbinsx=30,
-                                name="Valor total del portafolio",
-                                marker_color='#3b82f6',
-                                opacity=0.7
-                            )])
-                            
-                            # Agregar líneas de métricas importantes
-                            media_valor = np.mean(valores_portfolio)
-                            mediana_valor = np.median(valores_portfolio)
-                            percentil_5 = np.percentile(valores_portfolio, 5)
-                            percentil_95 = np.percentile(valores_portfolio, 95)
-                            
-                            fig_hist.add_vline(x=media_valor, line_dash="dash", line_color="#ef4444", 
-                                             annotation_text=f"Media: ${media_valor:,.2f}")
-                            fig_hist.add_vline(x=mediana_valor, line_dash="dash", line_color="#10b981", 
-                                             annotation_text=f"Mediana: ${mediana_valor:,.2f}")
-                            fig_hist.add_vline(x=percentil_5, line_dash="dash", line_color="#f59e0b", 
-                                             annotation_text=f"P5: ${percentil_5:,.2f}")
-                            fig_hist.add_vline(x=percentil_95, line_dash="dash", line_color="#8b5cf6", 
-                                             annotation_text=f"P95: ${percentil_95:,.2f}")
-                            
-                            fig_hist.update_layout(
-                                title="Distribución del valor total del portafolio",
-                                xaxis_title="Valor del portafolio ($)",
-                                yaxis_title="Frecuencia",
-                                height=500,
-                                showlegend=False,
-                                template='plotly_dark'
-                            )
+                            if len(df_portfolio_returns) > 10:  # Mínimo de datos para análisis
+                                # Crear histograma de retornos del portafolio
+                                fig_hist = go.Figure(data=[go.Histogram(
+                                    x=df_portfolio_returns,
+                                    nbinsx=30,
+                                    name="Retornos del portafolio",
+                                    marker_color='#3b82f6',
+                                    opacity=0.7
+                                )])
+                                
+                                # Calcular métricas estadísticas de los retornos
+                                mean_return = df_portfolio_returns.mean()
+                                std_return = df_portfolio_returns.std()
+                                var_95 = np.percentile(df_portfolio_returns, 5)
+                                var_99 = np.percentile(df_portfolio_returns, 1)
+                                
+                                # Agregar líneas de métricas importantes
+                                fig_hist.add_vline(x=mean_return, line_dash="dash", line_color="#ef4444", 
+                                                 annotation_text=f"Media: {mean_return:.4f}")
+                                fig_hist.add_vline(x=var_95, line_dash="dash", line_color="#f59e0b", 
+                                                 annotation_text=f"VaR 95%: {var_95:.4f}")
+                                fig_hist.add_vline(x=var_99, line_dash="dash", line_color="#8b5cf6", 
+                                                 annotation_text=f"VaR 99%: {var_99:.4f}")
+                                
+                                fig_hist.update_layout(
+                                    title="Distribución de retornos diarios del portafolio",
+                                    xaxis_title="Retorno diario",
+                                    yaxis_title="Frecuencia",
+                                    height=500,
+                                    showlegend=False,
+                                    template='plotly_dark'
+                                )
                             
                             st.plotly_chart(fig_hist, use_container_width=True)
                             
@@ -4844,80 +4814,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 col3.metric("Riesgo Total", f"{riesgo_portfolio:.1f}%")
                                 col4.metric("Ratio Retorno/Riesgo", f"{retorno_portfolio/riesgo_portfolio:.2f}" if riesgo_portfolio > 0 else "N/A")
                             
-                            # Calcular y mostrar histograma de retornos del portafolio
-                            st.markdown("#### 📊 Histograma de Retornos del Portafolio")
-                            
-                            try:
-                                # Calcular retornos diarios del portafolio
-                                df_portfolio_returns = df_portfolio['Portfolio_Total'].pct_change().dropna()
-                                
-                                if len(df_portfolio_returns) > 10:  # Mínimo de datos para análisis
-                                    # Calcular métricas estadísticas de los retornos
-                                    mean_return = df_portfolio_returns.mean()
-                                    std_return = df_portfolio_returns.std()
-                                    skewness = stats.skew(df_portfolio_returns)
-                                    kurtosis = stats.kurtosis(df_portfolio_returns)
-                                    var_95 = np.percentile(df_portfolio_returns, 5)
-                                    var_99 = np.percentile(df_portfolio_returns, 1)
-                                    
-                                    # Calcular Jarque-Bera test para normalidad
-                                    jb_stat, jb_p_value = stats.jarque_bera(df_portfolio_returns)
-                                    is_normal = jb_p_value > 0.05
-                                    
-                                    # Crear histograma de retornos
-                                    fig_returns_hist = go.Figure(data=[go.Histogram(
-                                        x=df_portfolio_returns,
-                                        nbinsx=50,
-                                        name="Retornos del Portafolio",
-                                        marker_color='#28a745',
-                                        opacity=0.7
-                                    )])
-                                    
-                                    # Agregar líneas de métricas importantes
-                                    fig_returns_hist.add_vline(x=mean_return, line_dash="dash", line_color="red", 
-                                                             annotation_text=f"Media: {mean_return:.4f}")
-                                    fig_returns_hist.add_vline(x=var_95, line_dash="dash", line_color="orange", 
-                                                             annotation_text=f"VaR 95%: {var_95:.4f}")
-                                    fig_returns_hist.add_vline(x=var_99, line_dash="dash", line_color="darkred", 
-                                                             annotation_text=f"VaR 99%: {var_99:.4f}")
-                                    
-                                    fig_returns_hist.update_layout(
-                                        title="Distribución de retornos diarios del portafolio",
-                                        xaxis_title="Retorno diario",
-                                        yaxis_title="Frecuencia",
-                                        height=500,
-                                        showlegend=False,
-                                        template='plotly_dark'
-                                    )
-                                    
-                                    st.plotly_chart(fig_returns_hist, use_container_width=True)
-                                    
-                                    # Mostrar estadísticas de retornos
-                                    st.markdown("#### Estadísticas de retornos")
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    
-                                    col1.metric("Retorno Medio Diario", f"{mean_return:.4f}")
-                                    col2.metric("Volatilidad Diaria", f"{std_return:.4f}")
-                                    col3.metric("VaR 95%", f"{var_95:.4f}")
-                                    col4.metric("VaR 99%", f"{var_99:.4f}")
-                                    
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    col1.metric("Skewness", f"{skewness:.4f}")
-                                    col2.metric("Kurtosis", f"{kurtosis:.4f}")
-                                    col3.metric("JB Statistic", f"{jb_stat:.4f}")
-                                    normalidad = "Normal" if is_normal else "No normal"
-                                    col4.metric("Normalidad", normalidad)
-                                    
-                                    # Calcular métricas anualizadas
-                                    mean_return_annual = mean_return * 252
-                                    std_return_annual = std_return * np.sqrt(252)
-                                    sharpe_ratio = mean_return_annual / std_return_annual if std_return_annual > 0 else 0
-                                    
-                                    st.markdown("#### Métricas anualizadas")
-                                    col1, col2, col3 = st.columns(3)
-                                    col1.metric("Retorno Anual", f"{mean_return_annual:.2%}")
-                                    col2.metric("Volatilidad Anual", f"{std_return_annual:.2%}")
-                                    col3.metric("Ratio de Sharpe", f"{sharpe_ratio:.4f}")
+
                                     
                                     # Se removió análisis de la distribución por solicitud
                                     
@@ -4955,8 +4852,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             total_renta_fija += valuacion
                                     
                                     if instrumentos_renta_fija:
-                                        pass
-                                            
                                         # Mostrar tabla de instrumentos de renta fija
                                         df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
                                         df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
@@ -5016,8 +4911,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                             )
                                             st.plotly_chart(fig_renta_fija, use_container_width=True)
                                         
-                                    else:
-                                        pass
+
                                 
                                 # Análisis de retorno esperado por horizonte de inversión
                                 st.markdown("#### Análisis de retorno esperado")
@@ -5093,6 +4987,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 
                                 else:
                                     st.warning("⚠️ No hay suficientes datos para calcular retornos del portafolio")
+                                    pass
                                     
                             except Exception as e:
                                 st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
@@ -5122,8 +5017,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Recomendaciones (removidas por solicitud)
         # st.subheader("Recomendaciones")
-        if metricas:
-            pass
     else:
         st.warning("No se encontraron activos en el portafolio")
 
@@ -5630,9 +5523,7 @@ def mostrar_movimientos_asesor():
                     
                     st.subheader("📋 Resultados de la búsqueda")
                     
-                    # Mostrar columnas disponibles para debugging
-                    if st.session_state.get('debug_mode', False):
-                        st.info(f"📊 **Columnas disponibles**: {list(df.columns)}")
+
                     
                     # Seleccionar columnas relevantes para mostrar
                     columnas_display = []
@@ -5725,51 +5616,6 @@ def mostrar_analisis_portafolio():
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
 
     st.title(f"📊 Análisis de Portafolio - {nombre_cliente}")
-    
-    # Mostrar información de estado del token y conectividad
-    if st.session_state.get('debug_mode', False):
-        with st.expander("🔍 Debug: Estado de Autenticación y Conectividad"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**🔑 Token de Acceso:**")
-                if token_acceso:
-                    st.success(f"✅ Disponible: {token_acceso[:10]}...")
-                    token_valido = verificar_token_valido(token_acceso)
-                    st.write(f"**Validez:** {'✅ Válido' if token_valido else '❌ Inválido'}")
-                    
-                    if not token_valido:
-                        st.warning("⚠️ El token ha expirado y necesita renovación")
-                else:
-                    st.error("❌ No disponible")
-                
-                st.write("**🔄 Refresh Token:**")
-                refresh_token = st.session_state.get('refresh_token')
-                if refresh_token:
-                    st.success(f"✅ Disponible: {refresh_token[:10]}...")
-                else:
-                    st.error("❌ No disponible")
-                    st.warning("⚠️ Sin refresh token, será necesario reautenticarse")
-            
-            with col2:
-                st.write("**🌐 Conectividad API:**")
-                try:
-                    # Test básico de conectividad
-                    response = requests.get("https://api.invertironline.com/api/v2/estadocuenta", timeout=5)
-                    if response.status_code == 401:
-                        st.warning("⚠️ API accesible pero requiere autenticación")
-                    elif response.status_code == 200:
-                        st.success("✅ API accesible y respondiendo")
-                    else:
-                        st.warning(f"⚠️ API responde con código: {response.status_code}")
-                except Exception as e:
-                    st.error(f"❌ Error de conectividad: {e}")
-                
-                st.write("**📊 Estado de Endpoints:**")
-                st.write("• `/estadocuenta`: ✅ Disponible")
-                st.write("• `/portafolio/{pais}`: ✅ Disponible")
-                st.write("• `/Asesor/Movimientos`: ⚠️ Requiere permisos especiales")
-                st.write("• `/Asesores/EstadoDeCuenta/{id}`: ⚠️ Requiere permisos especiales")
     
     # Crear tabs con iconos
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -5997,9 +5843,7 @@ def mostrar_portafolio_eeuu(token_acceso, id_cliente):
         st.info("• El portafolio estadounidense está vacío")
         return
     
-    # Debug: mostrar estructura del portafolio para entender los datos
-    if st.session_state.get('debug_mode', False):
-        st.json(portafolio_us)
+
     
     # Verificar si el portafolio tiene activos
     activos_raw = portafolio_us.get('activos', [])
@@ -6286,9 +6130,7 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
         st.info("• El portafolio argentino está vacío")
         return
     
-    # Debug: mostrar estructura del portafolio para entender los datos
-    if st.session_state.get('debug_mode', False):
-        st.json(portafolio_ar)
+
     
     # Verificar si el portafolio tiene activos
     activos_raw = portafolio_ar.get('activos', [])
@@ -6767,34 +6609,7 @@ def main():
             
             st.divider()
             
-            # Toggle para modo debug
-            debug_mode = st.checkbox("🔍 Modo Debug", value=st.session_state.get('debug_mode', False), 
-                                   help="Activa información detallada para troubleshooting")
-            st.session_state.debug_mode = debug_mode
-            
-            # Guía de troubleshooting
-            with st.expander("🆘 Guía de Solución de Problemas"):
-                st.markdown("""
-                **Problemas Comunes y Soluciones:**
-                
-                🔑 **Error 401 - No Autorizado:**
-                - Haga clic en "🔄 Renovar Token"
-                - Si persiste, vuelva a autenticarse
-                
-                📊 **No se muestran movimientos:**
-                - La API de movimientos requiere permisos especiales
-                - La aplicación usa métodos alternativos automáticamente
-                - Los datos simulados permiten análisis básicos
-                
-                🌐 **Problemas de conectividad:**
-                - Verifique su conexión a internet
-                - Los servidores de IOL pueden estar ocupados
-                - Intente nuevamente en unos minutos
-                
-                💡 **Para mejor experiencia:**
-                - Active el modo debug para información detallada
-                - Use el botón "💰 Ver Estado de Cuenta" para verificar datos
-                """)
+
             
             st.subheader("Configuración de Fechas")
             col1, col2 = st.columns(2)
@@ -6860,12 +6675,7 @@ def main():
         if st.session_state.token_acceso:
             st.sidebar.title("Menú principal")
             
-            # Toggle para modo debug
-            st.sidebar.markdown("---")
-            debug_mode = st.sidebar.checkbox("🔍 Modo Debug", value=st.session_state.debug_mode, help="Activa validaciones detalladas de valuación")
-            if debug_mode != st.session_state.debug_mode:
-                st.session_state.debug_mode = debug_mode
-                st.rerun()
+
             
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
