@@ -5163,6 +5163,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         activos_argentinos = []
         activos_eeuu = []
         
+        # Debug: Mostrar información de activos antes de clasificación
+        print(f"🔍 Clasificando {len(datos_activos)} activos...")
+        
         # Usar los datos ya procesados para clasificación
         for activo_data in datos_activos:
             simbolo = activo_data['Símbolo']
@@ -5170,12 +5173,15 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             
             # Clasificar activo usando la función de clasificación
             es_estadounidense = _es_activo_estadounidense(simbolo, tipo)
+            print(f"  📊 {simbolo} ({tipo}) -> {'🇺🇸 EEUU' if es_estadounidense else '🇦🇷 Argentina'}")
             
             # Agregar a la lista correspondiente
             if es_estadounidense:
                 activos_eeuu.append(activo_data)
             else:
                 activos_argentinos.append(activo_data)
+        
+        print(f"✅ Clasificación completada: {len(activos_argentinos)} argentinos, {len(activos_eeuu)} estadounidenses")
         
         # Usar métricas unificadas como fuente única de verdad
         if metricas and 'metricas_globales' in metricas:
@@ -8028,6 +8034,8 @@ def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
         if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
             print("✅ Método 1 exitoso")
             return resultado
+        else:
+            print("⚠️ Método 1: No se encontraron activos válidos")
     except Exception as e:
         print(f"❌ Método 1 falló: {e}")
     
@@ -8042,6 +8050,12 @@ def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
                 if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
                     print("✅ Método 2 exitoso")
                     return resultado
+                else:
+                    print("⚠️ Método 2: No se encontraron activos válidos")
+            else:
+                print("❌ Método 2: No se pudo obtener ID del cliente")
+        else:
+            print("❌ Método 2: No hay cliente seleccionado")
     except Exception as e:
         print(f"❌ Método 2 falló: {e}")
     
@@ -8052,15 +8066,25 @@ def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
         if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
             print("✅ Método 3 exitoso")
             return resultado
+        else:
+            print("⚠️ Método 3: No se encontraron activos válidos")
     except Exception as e:
         print(f"❌ Método 3 falló: {e}")
     
     # Método 4: Crear portafolio simulado basado en datos disponibles
     print("📊 Método 4: Crear portafolio simulado")
     resultado = crear_portafolio_us_simulado(token_portador)
-    if resultado:
+    if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
         print("✅ Método 4 exitoso (simulado)")
+        print(f"📊 Activos simulados creados: {len(resultado['activos'])}")
+        for i, activo in enumerate(resultado['activos']):
+            simbolo = activo.get('titulo', {}).get('simbolo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            valorizado = activo.get('valorizado', 0)
+            print(f"  📈 Activo {i+1}: {simbolo} - Cantidad: {cantidad}, Valorizado: ${valorizado:,.2f}")
         return resultado
+    else:
+        print("❌ Método 4: No se pudo crear portafolio simulado")
     
     print("❌ Todos los métodos fallaron")
     return None
@@ -8111,10 +8135,10 @@ def extraer_portafolio_us_desde_estado_cuenta(token_portador: str):
                                 'mercado': 'NYSE',
                                 'moneda': 'dolar_Estadounidense'
                             },
-                            'cantidad': 1,
+                            'cantidad': 1000,
                             'valorizado': titulos_valorizados,
-                            'ultimoPrecio': titulos_valorizados,
-                            'ppc': titulos_valorizados,
+                            'ultimoPrecio': titulos_valorizados / 1000,
+                            'ppc': titulos_valorizados / 1000,
                             'gananciaPorcentaje': 0,
                             'gananciaDinero': 0,
                             'variacionDiaria': 0,
@@ -8132,10 +8156,10 @@ def extraer_portafolio_us_desde_estado_cuenta(token_portador: str):
                                 'mercado': 'NYSE',
                                 'moneda': 'dolar_Estadounidense'
                             },
-                            'cantidad': 1,
+                            'cantidad': 1000,
                             'valorizado': disponible,
-                            'ultimoPrecio': disponible,
-                            'ppc': disponible,
+                            'ultimoPrecio': disponible / 1000,
+                            'ppc': disponible / 1000,
                             'gananciaPorcentaje': 0,
                             'gananciaDinero': 0,
                             'variacionDiaria': 0,
@@ -8192,10 +8216,10 @@ def crear_portafolio_us_simulado(token_portador: str):
                     'mercado': 'NASDAQ',
                     'moneda': 'dolar_Estadounidense'
                 },
-                'cantidad': 10,
+                'cantidad': 100,
                 'valorizado': total_usd * 0.3,
-                'ultimoPrecio': (total_usd * 0.3) / 10,
-                'ppc': (total_usd * 0.3) / 10,
+                'ultimoPrecio': (total_usd * 0.3) / 100,
+                'ppc': (total_usd * 0.3) / 100,
                 'gananciaPorcentaje': 5.2,
                 'gananciaDinero': total_usd * 0.015,
                 'variacionDiaria': 1.2,
@@ -8210,10 +8234,10 @@ def crear_portafolio_us_simulado(token_portador: str):
                     'mercado': 'NASDAQ',
                     'moneda': 'dolar_Estadounidense'
                 },
-                'cantidad': 5,
+                'cantidad': 50,
                 'valorizado': total_usd * 0.25,
-                'ppc': (total_usd * 0.25) / 5,
-                'ultimoPrecio': (total_usd * 0.25) / 5,
+                'ppc': (total_usd * 0.25) / 50,
+                'ultimoPrecio': (total_usd * 0.25) / 50,
                 'gananciaPorcentaje': 3.8,
                 'gananciaDinero': total_usd * 0.009,
                 'variacionDiaria': 0.8,
@@ -8228,10 +8252,10 @@ def crear_portafolio_us_simulado(token_portador: str):
                     'mercado': 'NASDAQ',
                     'moneda': 'dolar_Estadounidense'
                 },
-                'cantidad': 8,
+                'cantidad': 80,
                 'valorizado': total_usd * 0.25,
-                'ultimoPrecio': (total_usd * 0.25) / 8,
-                'ppc': (total_usd * 0.25) / 8,
+                'ultimoPrecio': (total_usd * 0.25) / 80,
+                'ppc': (total_usd * 0.25) / 80,
                 'gananciaPorcentaje': 4.1,
                 'gananciaDinero': total_usd * 0.010,
                 'variacionDiaria': 1.0,
@@ -8246,10 +8270,10 @@ def crear_portafolio_us_simulado(token_portador: str):
                     'mercado': 'NYSE',
                     'moneda': 'dolar_Estadounidense'
                 },
-                'cantidad': 1,
+                'cantidad': 1000,
                 'valorizado': total_usd * 0.2,
-                'ultimoPrecio': total_usd * 0.2,
-                'ppc': total_usd * 0.2,
+                'ultimoPrecio': total_usd * 0.2 / 1000,
+                'ppc': total_usd * 0.2 / 1000,
                 'gananciaPorcentaje': 0,
                 'gananciaDinero': 0,
                 'variacionDiaria': 0,
@@ -8265,6 +8289,7 @@ def crear_portafolio_us_simulado(token_portador: str):
         }
         
         print(f"🎭 Portafolio US simulado creado con {len(activos_simulados)} activos")
+        print(f"📊 Estructura del primer activo: {activos_simulados[0] if activos_simulados else 'No hay activos'}")
         return portafolio_simulado
         
     except Exception as e:
