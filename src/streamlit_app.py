@@ -5831,24 +5831,195 @@ def mostrar_analisis_portafolio():
             st.info("• Token de acceso expirado o inválido")
             st.info("• Permisos insuficientes para acceder a los datos")
             st.info("• El servidor está experimentando problemas temporales")
-            st.error("❌ **Error Crítico**: No se pudieron obtener los movimientos del portafolio")
-            st.markdown("""
-            **Posibles causas:**
-            - 🔑 Token de autenticación expirado o inválido
-            - 🌐 Problemas de conectividad con la API de IOL
-            - 🔒 Permisos insuficientes para acceder a los movimientos
-            - ⏰ Timeout en la respuesta del servidor
+        
+def mostrar_analisis_integrado_unificado(estado_cuenta, movimientos, token_acceso, nombre_cliente, id_cliente):
+    """
+    Muestra un análisis integrado unificado de estado de cuenta y movimientos
+    """
+    st.subheader("📈 Análisis Integrado: Estado de Cuenta + Movimientos")
+    
+    # Mostrar información del cliente
+    st.info(f"🔍 **Cliente seleccionado**: {nombre_cliente} (ID: {id_cliente})")
+    
+    # Crear resumen consolidado
+    st.markdown("#### 📊 Resumen Consolidado")
+    
+    # Métricas del estado de cuenta
+    if estado_cuenta:
+        cuentas = estado_cuenta.get('cuentas', [])
+        total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+        
+        # Calcular totales por moneda desde estado de cuenta
+        total_ars_estado = 0
+        total_usd_estado = 0
+        total_titulos_ars = 0
+        total_titulos_usd = 0
+        
+        for cuenta in cuentas:
+            if cuenta.get('estado') == 'operable':
+                moneda = cuenta.get('moneda', '').lower()
+                total = float(cuenta.get('total', 0))
+                titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
+                
+                if 'peso' in moneda:
+                    total_ars_estado += total
+                    total_titulos_ars += titulos_valorizados
+                elif 'dolar' in moneda:
+                    total_usd_estado += total
+                    total_titulos_usd += titulos_valorizados
+        
+        # Mostrar métricas consolidadas
+        col1, col2, col3, col4 = st.columns(4)
+        
+        col1.metric("💰 Total Estado Cuenta", f"${total_en_pesos:,.2f}")
+        col2.metric("🇦🇷 Total ARS", f"${total_ars_estado:,.2f}")
+        col3.metric("🇺🇸 Total USD", f"${total_usd_estado:,.2f}")
+        col4.metric("📊 Cuentas Activas", len([c for c in cuentas if c.get('estado') == 'operable']))
+        
+        # Mostrar detalle de cuentas
+        st.markdown("#### 📋 Detalle de Cuentas")
+        
+        cuentas_argentina = []
+        cuentas_eeuu = []
+        
+        for cuenta in cuentas:
+            if cuenta.get('estado') == 'operable':
+                tipo = cuenta.get('tipo', '')
+                if 'argentina' in tipo.lower() or 'peso' in cuenta.get('moneda', '').lower():
+                    cuentas_argentina.append(cuenta)
+                elif 'estados' in tipo.lower() or 'dolar' in cuenta.get('moneda', '').lower():
+                    cuentas_eeuu.append(cuenta)
+        
+        # Argentina
+        if cuentas_argentina:
+            st.markdown("**🇦🇷 Argentina**")
+            df_ar = pd.DataFrame(cuentas_argentina)
+            df_ar_display = df_ar[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
+            df_ar_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
             
-            **Soluciones recomendadas:**
-            1. 🔄 Haga clic en "🔄 Renovar Token" en la barra lateral
-            2. 🔐 Vuelva a autenticarse con sus credenciales
-            3. 📱 Verifique su conexión a internet
-            4. ⏳ Intente nuevamente en unos minutos
-            """)
+            # Formatear valores monetarios
+            for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
+                if col in df_ar_display.columns:
+                    df_ar_display[col] = df_ar_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
             
-            # Botón para reintentar
-            if st.button("🔄 Reintentar Obtención de Movimientos", key="retry_movements", type="primary"):
-                st.rerun()
+            st.dataframe(df_ar_display, use_container_width=True)
+        
+        # Estados Unidos
+        if cuentas_eeuu:
+            st.markdown("**🇺🇸 Estados Unidos**")
+            df_us = pd.DataFrame(cuentas_eeuu)
+            df_us_display = df_us[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
+            df_us_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
+            
+            # Formatear valores monetarios
+            for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
+                if col in df_us_display.columns:
+                    df_us_display[col] = df_us_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+            
+            st.dataframe(df_us_display, use_container_width=True)
+    
+    # Análisis de movimientos
+    if movimientos:
+        st.markdown("#### 📈 Análisis de Movimientos")
+        
+        if 'movimientos' in movimientos and movimientos['movimientos']:
+            df_mov = pd.DataFrame(movimientos['movimientos'])
+            
+            # Mostrar resumen de movimientos
+            st.success(f"✅ Se encontraron {len(df_mov)} movimientos en el período")
+            
+            # Tipos de movimientos
+            if 'tipo' in df_mov.columns:
+                tipos_movimientos = df_mov['tipo'].value_counts()
+                st.markdown("**📊 Tipos de Movimientos:**")
+                for tipo, cantidad in tipos_movimientos.items():
+                    st.write(f"• **{tipo}**: {cantidad} movimientos")
+            
+            # Mostrar tabla de movimientos
+            st.markdown("**📋 Detalle de Movimientos:**")
+            if not df_mov.empty:
+                # Seleccionar columnas relevantes
+                columnas_display = []
+                for col in ['fechaOperacion', 'simbolo', 'tipo', 'cantidad', 'precio', 'moneda', 'descripcion']:
+                    if col in df_mov.columns:
+                        columnas_display.append(col)
+                
+                if columnas_display:
+                    df_display = df_mov[columnas_display].copy()
+                    df_display.columns = ['Fecha', 'Símbolo', 'Tipo', 'Cantidad', 'Precio', 'Moneda', 'Descripción']
+                    
+                    # Formatear valores
+                    if 'Precio' in df_display.columns:
+                        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                    if 'Cantidad' in df_display.columns:
+                        df_display['Cantidad'] = df_display['Cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+                    
+                    st.dataframe(df_display, use_container_width=True)
+        else:
+            st.warning("⚠️ No se encontraron movimientos en el período seleccionado")
+    
+    # Análisis de rendimiento integrado
+    if estado_cuenta and movimientos:
+        st.markdown("#### 📊 Análisis de Rendimiento Integrado")
+        
+        # Calcular rendimiento basado en movimientos y estado actual
+        if 'movimientos' in movimientos and movimientos['movimientos']:
+            # Analizar movimientos para calcular rendimiento
+            rendimiento_calculado = calcular_rendimiento_desde_movimientos(movimientos['movimientos'], estado_cuenta)
+            
+            if rendimiento_calculado:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                col1.metric("📈 Rendimiento Total", f"{rendimiento_calculado.get('rendimiento_total', 0):+.2f}%")
+                col2.metric("💰 Ganancia/Pérdida", f"${rendimiento_calculado.get('ganancia_total', 0):+,.2f}")
+                col3.metric("📊 Volatilidad", f"{rendimiento_calculado.get('volatilidad', 0):.2f}%")
+                col4.metric("⚖️ Ratio Sharpe", f"{rendimiento_calculado.get('sharpe_ratio', 0):.2f}")
+    
+    # Recomendaciones basadas en el análisis integrado
+    if estado_cuenta:
+        st.markdown("#### 💡 Recomendaciones Integradas")
+        
+        # Análisis de diversificación
+        if total_ars_estado > 0 and total_usd_estado > 0:
+            ratio_diversificacion = total_usd_estado / (total_ars_estado + total_usd_estado) * 100
+            st.info(f"🌍 **Diversificación Internacional**: {ratio_diversificacion:.1f}% en USD")
+            
+            if ratio_diversificacion < 10:
+                st.warning("⚠️ **Baja diversificación internacional**: Considera aumentar exposición a activos en USD")
+            elif ratio_diversificacion > 50:
+                st.warning("⚠️ **Alta exposición internacional**: Considera aumentar activos locales")
+            else:
+                st.success("✅ **Diversificación equilibrada**: Buena distribución entre mercados locales e internacionales")
+        
+        # Análisis de liquidez
+        total_disponible = 0
+        for cuenta in cuentas:
+            if cuenta.get('estado') == 'operable':
+                total_disponible += float(cuenta.get('disponible', 0))
+        
+        if total_en_pesos > 0:
+            ratio_liquidez = total_disponible / total_en_pesos * 100
+            st.info(f"💧 **Liquidez**: {ratio_liquidez:.1f}% disponible")
+            
+            if ratio_liquidez < 5:
+                st.warning("⚠️ **Baja liquidez**: Considera mantener más efectivo disponible")
+            elif ratio_liquidez > 30:
+                st.warning("⚠️ **Alta liquidez**: Considera invertir el exceso de efectivo")
+            else:
+                st.success("✅ **Liquidez adecuada**: Nivel de efectivo apropiado")
+    
+    # Notas finales
+    st.markdown("---")
+    st.markdown("""
+    **📝 Notas del Análisis Integrado:**
+    - Los datos combinan información del estado de cuenta y movimientos
+    - Las diferencias entre fuentes pueden deberse a actualizaciones en tiempo real
+    - El análisis de rendimiento considera tanto movimientos históricos como posiciones actuales
+    - Las recomendaciones se basan en métricas consolidadas de todas las fuentes
+    """)
+
+
+def mostrar_portafolio_eeuu(token_acceso, id_cliente):
     
     with tab3:
         mostrar_analisis_tecnico(token_acceso, id_cliente)
