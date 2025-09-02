@@ -2205,45 +2205,6 @@ def mostrar_metricas_reales(metricas):
         df_reb = pd.DataFrame(metricas['rebalanceos_detectados'])
         st.dataframe(df_reb, use_container_width=True)
 
-def mostrar_resumen_estado_cuenta_sidebar(estado_cuenta):
-    """
-    Muestra un resumen compacto del estado de cuenta en el sidebar
-    """
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("💰 Resumen Estado de Cuenta")
-    
-    # Métricas principales
-    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
-    cuentas = estado_cuenta.get('cuentas', [])
-    
-    st.sidebar.metric("Total en Pesos", f"${total_en_pesos:,.0f}")
-    st.sidebar.metric("Cantidad Cuentas", len(cuentas))
-    
-    # Calcular totales por moneda
-    total_ars = 0
-    total_usd = 0
-    
-    for cuenta in cuentas:
-        if cuenta.get('estado') == 'operable':
-            moneda = cuenta.get('moneda', '').lower()
-            total = float(cuenta.get('total', 0))
-            
-            if 'peso' in moneda:
-                total_ars += total
-            else:
-                total_usd += total
-    
-    st.sidebar.metric("Total ARS", f"${total_ars:,.0f}")
-    st.sidebar.metric("Total USD", f"${total_usd:,.0f}")
-    
-    # Mostrar cuentas principales
-    st.sidebar.markdown("**Cuentas Principales:**")
-    for cuenta in cuentas[:3]:  # Solo las primeras 3
-        if cuenta.get('estado') == 'operable':
-            tipo = cuenta.get('tipo', 'N/A')
-            total = cuenta.get('total', 0)
-            st.sidebar.info(f"{tipo}: ${total:,.0f}")
-
 def obtener_tasas_caucion(token_portador):
     """
     Obtiene las tasas de caución desde la API de IOL
@@ -5163,9 +5124,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         activos_argentinos = []
         activos_eeuu = []
         
-        # Debug: Mostrar información de activos antes de clasificación
-        print(f"🔍 Clasificando {len(datos_activos)} activos...")
-        
         # Usar los datos ya procesados para clasificación
         for activo_data in datos_activos:
             simbolo = activo_data['Símbolo']
@@ -5173,15 +5131,12 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             
             # Clasificar activo usando la función de clasificación
             es_estadounidense = _es_activo_estadounidense(simbolo, tipo)
-            print(f"  📊 {simbolo} ({tipo}) -> {'🇺🇸 EEUU' if es_estadounidense else '🇦🇷 Argentina'}")
             
             # Agregar a la lista correspondiente
             if es_estadounidense:
                 activos_eeuu.append(activo_data)
             else:
                 activos_argentinos.append(activo_data)
-        
-        print(f"✅ Clasificación completada: {len(activos_argentinos)} argentinos, {len(activos_eeuu)} estadounidenses")
         
         # Usar métricas unificadas como fuente única de verdad
         if metricas and 'metricas_globales' in metricas:
@@ -5200,48 +5155,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         
         # Usar el valor total unificado
         valor_total = metricas['metricas_globales']['valor_total'] if metricas and 'metricas_globales' in metricas else valor_total
-        
-        # Debug: Mostrar información de clasificación de mercados
-        if st.checkbox("🔍 Mostrar información de debug de mercados", key="debug_mercados"):
-            st.markdown("### 🔍 Debug: Clasificación de Mercados")
-            
-            debug_data = []
-            for activo_data in datos_activos:
-                simbolo = activo_data['Símbolo']
-                tipo_activo = activo_data['Tipo']
-                
-                # Determinar clasificación
-                if simbolo in [a['Símbolo'] for a in activos_argentinos]:
-                    clasificacion = "🇦🇷 Argentina"
-                elif simbolo in [a['Símbolo'] for a in activos_eeuu]:
-                    clasificacion = "🇺🇸 Estados Unidos"
-                else:
-                    clasificacion = "❓ No clasificado"
-                
-                # Función de clasificación aplicada
-                es_eeuu = _es_activo_estadounidense(simbolo, tipo_activo)
-                razon_clasificacion = f"Función retorna: {'EEUU' if es_eeuu else 'Argentina'}"
-                
-                debug_data.append({
-                    'Símbolo': simbolo,
-                    'Tipo': tipo_activo,
-                    'Clasificación': clasificacion,
-                    'Razón': razon_clasificacion,
-                    'Valorización': f"${activo_data['Valuación']:,.2f}"
-                })
-            
-            df_debug = pd.DataFrame(debug_data)
-            st.dataframe(df_debug, use_container_width=True)
-            
-            # Mostrar resumen de clasificación
-            st.markdown("#### 📊 Resumen de Clasificación")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Activos", len(datos_activos))
-            with col2:
-                st.metric("🇦🇷 Argentina", len(activos_argentinos))
-            with col3:
-                st.metric("🇺🇸 Estados Unidos", len(activos_eeuu))
         
         # Obtener totales del estado de cuenta
         cliente_actual = st.session_state.get('cliente_seleccionado')
@@ -7064,38 +6977,55 @@ def mostrar_analisis_portafolio():
         
         # Obtener portafolio combinado (Argentina + EEUU)
         with st.spinner("Obteniendo portafolios combinados..."):
-            portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+            # Usar el método correcto para obtener el portafolio completo
+            portafolio_completo = obtener_portafolio_completo_correcto(token_acceso)
             
-            # Usar la función mejorada para obtener portafolio estadounidense
-            portafolio_us = obtener_portafolio_estados_unidos_mejorado(token_acceso)
-            
-            # Mostrar información sobre el estado de los portafolios
-            if portafolio_ar and portafolio_ar.get('activos'):
-                st.success(f"✅ Portafolio Argentino: {len(portafolio_ar['activos'])} activos")
-            else:
-                st.warning("⚠️ No se pudo obtener el portafolio argentino")
-            
-            if portafolio_us and portafolio_us.get('activos'):
-                metodo_us = portafolio_us.get('metodo', 'estándar')
-                st.success(f"✅ Portafolio Estadounidense: {len(portafolio_us['activos'])} activos")
-                st.info(f"🔍 Método utilizado: {metodo_us}")
+            if portafolio_completo and portafolio_completo.get('activos'):
+                st.success(f"✅ Portafolio Completo: {len(portafolio_completo['activos'])} activos")
+                st.info(f"🔍 Método utilizado: {portafolio_completo.get('metodo', 'estándar')}")
                 
-                # Mostrar información adicional según el método
-                if metodo_us == 'simulado_ejemplo':
-                    st.warning("⚠️ **Datos Simulados**: Los activos estadounidenses mostrados son simulados debido a limitaciones de acceso")
-                    st.info("💡 **Para obtener datos reales:**")
-                    st.info("• Contacta a IOL para habilitar APIs de portafolio EEUU")
-                    st.info("• Verifica que tu cuenta tenga permisos para este endpoint")
-                elif metodo_us == 'extraido_estado_cuenta':
-                    st.success("✅ **Datos Reales**: Extraídos desde el estado de cuenta")
+                # Separar activos por país
+                activos_argentinos = portafolio_completo.get('activos_argentinos', [])
+                activos_estadounidenses = portafolio_completo.get('activos_estadounidenses', [])
+                
+                st.success(f"🇦🇷 Activos Argentinos: {len(activos_argentinos)}")
+                st.success(f"🇺🇸 Activos Estadounidenses: {len(activos_estadounidenses)}")
+                
+                # Crear estructura para compatibilidad
+                portafolio_ar = {'activos': activos_argentinos}
+                portafolio_us = {'activos': activos_estadounidenses}
             else:
-                st.warning("⚠️ **Portafolio Estadounidense**: No disponible")
-                st.info("💡 **La aplicación intentó múltiples métodos:**")
-                st.info("• Endpoint estándar (401 - Sin autorización)")
-                st.info("• Endpoint de asesor")
-                st.info("• Extracción desde estado de cuenta")
-                st.info("• Datos simulados")
-                st.info("• Ningún método funcionó")
+                st.warning("⚠️ No se pudo obtener el portafolio completo")
+                # Fallback a métodos anteriores
+                portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+                portafolio_us = obtener_portafolio_estados_unidos_mejorado(token_acceso)
+                
+                if portafolio_ar and portafolio_ar.get('activos'):
+                    st.success(f"✅ Portafolio Argentino: {len(portafolio_ar['activos'])} activos")
+                else:
+                    st.warning("⚠️ No se pudo obtener el portafolio argentino")
+                
+                if portafolio_us and portafolio_us.get('activos'):
+                    metodo_us = portafolio_us.get('metodo', 'estándar')
+                    st.success(f"✅ Portafolio Estadounidense: {len(portafolio_us['activos'])} activos")
+                    st.info(f"🔍 Método utilizado: {metodo_us}")
+                    
+                    # Mostrar información adicional según el método
+                    if metodo_us == 'simulado_ejemplo':
+                        st.warning("⚠️ **Datos Simulados**: Los activos estadounidenses mostrados son simulados debido a limitaciones de acceso")
+                        st.info("💡 **Para obtener datos reales:**")
+                        st.info("• Contacta a IOL para habilitar APIs de portafolio EEUU")
+                        st.info("• Verifica que tu cuenta tenga permisos para este endpoint")
+                    elif metodo_us == 'extraido_estado_cuenta':
+                        st.success("✅ **Datos Reales**: Extraídos desde el estado de cuenta")
+                else:
+                    st.warning("⚠️ **Portafolio Estadounidense**: No disponible")
+                    st.info("💡 **La aplicación intentó múltiples métodos:**")
+                    st.info("• Endpoint estándar (401 - Sin autorización)")
+                    st.info("• Endpoint de asesor")
+                    st.info("• Extracción desde estado de cuenta")
+                    st.info("• Datos simulados")
+                    st.info("• Ningún método funcionó")
             
             # Combinar portafolios
             portafolio_combinado = {'activos': []}
@@ -7867,14 +7797,6 @@ def main():
                         st.error("❌ No se pudo renovar el token")
                         st.warning("💡 Intente autenticarse nuevamente")
             
-            # Mostrar resumen del estado de cuenta
-            if st.button("💰 Ver Estado de Cuenta", key="view_account_status", help="Muestra un resumen del estado de cuenta actual"):
-                estado_cuenta = obtener_estado_cuenta(token_acceso)
-                if estado_cuenta:
-                    mostrar_resumen_estado_cuenta_sidebar(estado_cuenta)
-                else:
-                    st.error("❌ No se pudo obtener el estado de cuenta")
-            
             st.divider()
             
 
@@ -8020,6 +7942,89 @@ def main():
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
 
+def obtener_portafolio_completo_correcto(token_portador: str):
+    """
+    Obtiene el portafolio completo usando el endpoint correcto de IOL
+    que incluye tanto activos argentinos como estadounidenses
+    """
+    print("🌍 Obteniendo portafolio completo...")
+    
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Endpoint correcto para portafolio completo
+    url = 'https://api.invertironline.com/api/v2/portafolio'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    print(f"🔍 Intentando obtener portafolio completo desde: {url}")
+    
+    try:
+        r = requests.get(url, headers=headers, timeout=20)
+        print(f"📡 Respuesta HTTP: {r.status_code}")
+        
+        if r.status_code == 200:
+            data = r.json()
+            print(f"✅ Portafolio completo obtenido exitosamente")
+            
+            # Verificar estructura de respuesta
+            if isinstance(data, dict) and 'activos' in data:
+                activos = data['activos']
+                print(f"📊 Total de activos encontrados: {len(activos)}")
+                
+                # Filtrar activos con cantidad > 0
+                activos_validos = [activo for activo in activos if activo.get('cantidad', 0) > 0]
+                print(f"📊 Activos con cantidad > 0: {len(activos_validos)}")
+                
+                # Separar activos por país
+                activos_argentinos = []
+                activos_estadounidenses = []
+                
+                for activo in activos_validos:
+                    titulo = activo.get('titulo', {})
+                    simbolo = titulo.get('simbolo', '')
+                    pais = titulo.get('pais', '')
+                    
+                    # Clasificar por país
+                    if pais == 'estados_Unidos' or _es_activo_estadounidense(simbolo, titulo.get('tipo', '')):
+                        activos_estadounidenses.append(activo)
+                    else:
+                        activos_argentinos.append(activo)
+                
+                print(f"🇦🇷 Activos argentinos: {len(activos_argentinos)}")
+                print(f"🇺🇸 Activos estadounidenses: {len(activos_estadounidenses)}")
+                
+                # Crear estructura de respuesta
+                resultado = {
+                    'activos': activos_validos,
+                    'activos_argentinos': activos_argentinos,
+                    'activos_estadounidenses': activos_estadounidenses,
+                    'metodo': 'portafolio_completo'
+                }
+                
+                return resultado
+            else:
+                print(f"⚠️ Estructura de respuesta inesperada")
+                return data
+                
+        elif r.status_code == 401:
+            print(f"❌ Error 401: No autorizado para portafolio completo")
+            print(f"📝 Respuesta del servidor: {r.text}")
+            return None
+            
+        else:
+            print(f"❌ Error HTTP {r.status_code}")
+            print(f"📝 Respuesta del servidor: {r.text}")
+            return None
+            
+    except Exception as e:
+        print(f"💥 Error al obtener portafolio completo: {e}")
+        return None
+
 def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
     """
     Función mejorada para obtener portafolio de Estados Unidos con múltiples fallbacks
@@ -8076,12 +8081,6 @@ def obtener_portafolio_estados_unidos_mejorado(token_portador: str):
     resultado = crear_portafolio_us_simulado(token_portador)
     if resultado and 'activos' in resultado and len(resultado['activos']) > 0:
         print("✅ Método 4 exitoso (simulado)")
-        print(f"📊 Activos simulados creados: {len(resultado['activos'])}")
-        for i, activo in enumerate(resultado['activos']):
-            simbolo = activo.get('titulo', {}).get('simbolo', 'N/A')
-            cantidad = activo.get('cantidad', 0)
-            valorizado = activo.get('valorizado', 0)
-            print(f"  📈 Activo {i+1}: {simbolo} - Cantidad: {cantidad}, Valorizado: ${valorizado:,.2f}")
         return resultado
     else:
         print("❌ Método 4: No se pudo crear portafolio simulado")
@@ -8289,7 +8288,6 @@ def crear_portafolio_us_simulado(token_portador: str):
         }
         
         print(f"🎭 Portafolio US simulado creado con {len(activos_simulados)} activos")
-        print(f"📊 Estructura del primer activo: {activos_simulados[0] if activos_simulados else 'No hay activos'}")
         return portafolio_simulado
         
     except Exception as e:
