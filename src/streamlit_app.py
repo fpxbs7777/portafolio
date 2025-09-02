@@ -4441,7 +4441,7 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     """
     Calcula métricas clave de desempeño para un portafolio de inversión usando datos históricos.
 {{ ... }}
-    
+
     Args:
         portafolio (dict): Diccionario con los activos y sus cantidades
         valor_total (float): Valor total del portafolio
@@ -5365,7 +5365,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
             # Mostrar tabla detallada con explicaciones
             st.markdown("#### 📋 Detalle de Métricas de Riesgo")
             st.dataframe(
-                df_riesgo[['Métrica', 'Valor', 'Estado', 'Descripción', 'Interpretación']],
+                df_riesgo[['Métrica', 'Valor', 'Estado', 'Descripción', 'Implicación Monetaria']],
                 use_container_width=True,
                 hide_index=True
             )
