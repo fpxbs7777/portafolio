@@ -394,7 +394,10 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         return None
     
     try:
-        print(f"🔍 Obteniendo estado de cuenta desde: {url_estado_cuenta}")
+        if id_cliente:
+            print(f"🔍 Obteniendo estado de cuenta para cliente {id_cliente} desde: {url_estado_cuenta}")
+        else:
+            print(f"🔍 Obteniendo estado de cuenta del usuario autenticado desde: {url_estado_cuenta}")
         respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
         print(f"📡 Respuesta estado cuenta: {respuesta.status_code}")
         
@@ -979,7 +982,7 @@ def obtener_movimientos_completos(token_portador, id_cliente):
         fecha_desde = st.session_state.get('fecha_desde', date.today() - timedelta(days=30))
         fecha_hasta = st.session_state.get('fecha_hasta', date.today())
         
-        print(f"📅 Obteniendo movimientos desde {fecha_desde} hasta {fecha_hasta}")
+        print(f"📅 Obteniendo movimientos para cliente {id_cliente} desde {fecha_desde} hasta {fecha_hasta}")
         
         # Verificar token antes de proceder
         if not verificar_token_valido(token_portador):
@@ -1050,8 +1053,8 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
     try:
         print("🔄 Usando método alternativo para movimientos")
         
-        # Obtener estado de cuenta actual
-        estado_cuenta = obtener_estado_cuenta(token_portador)
+        # Obtener estado de cuenta actual para el cliente específico
+        estado_cuenta = obtener_estado_cuenta(token_portador, id_cliente)
         if not estado_cuenta:
             print("❌ No se pudo obtener estado de cuenta para movimientos alternativos")
             return crear_movimientos_respaldo_minimo(fecha_desde, fecha_hasta)
@@ -1255,9 +1258,21 @@ def mostrar_analisis_integrado(movimientos, estado_cuenta, token_acceso):
     """
     st.subheader("📈 Análisis Integrado: Estado de Cuenta + Movimientos + Portafolio")
     
-    # Obtener portafolios de ambos países
-    portafolio_ar = obtener_portafolio_por_pais(token_acceso, 'argentina')
-    portafolio_us = obtener_portafolio_por_pais(token_acceso, 'estados_unidos')
+    # Obtener cliente seleccionado
+    cliente_actual = st.session_state.get('cliente_seleccionado')
+    if not cliente_actual:
+        st.error("❌ No hay cliente seleccionado para el análisis integrado")
+        return
+    
+    id_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id'))
+    nombre_cliente = cliente_actual.get('apellidoYNombre', cliente_actual.get('nombre', 'Cliente'))
+    
+    # Mostrar información del cliente para verificación
+    st.info(f"🔍 **Cliente seleccionado**: {nombre_cliente} (ID: {id_cliente})")
+    
+    # Obtener portafolios de ambos países para el cliente seleccionado
+    portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+    portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
     
     # Crear resumen consolidado
     st.markdown("#### 📊 Resumen Consolidado")
@@ -4415,7 +4430,9 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         cols[1].metric("Símbolos únicos", df_activos['Símbolo'].nunique())
         cols[2].metric("Tipos de activos", df_activos['Tipo'].nunique())
         # Recalcular valor total basado en Estado de cuenta + MEP si disponible
-        totales_cta = obtener_totales_estado_cuenta(token_portador, st.session_state.get('cliente_seleccionado'))
+        cliente_actual = st.session_state.get('cliente_seleccionado')
+        id_cliente_actual = cliente_actual.get('numeroCliente', cliente_actual.get('id')) if cliente_actual else None
+        totales_cta = obtener_totales_estado_cuenta(token_portador, id_cliente_actual)
         if totales_cta and totales_cta.get('total_ars_mep'):
             cols[3].metric("Valor total (ARS + USD a MEP)", f"${totales_cta['total_ars_mep']:,.2f}")
         else:
@@ -5609,7 +5626,7 @@ def mostrar_movimientos_asesor():
             if movimientos and isinstance(movimientos, list) and len(movimientos) > 0:
                 df = pd.DataFrame(movimientos)
                 if not df.empty:
-                    st.success(f"✅ **Se encontraron {len(df)} movimientos**")
+                    st.success(f"✅ **Se encontraron {len(df)} movimientos para {nombre_cliente}**")
                     
                     st.subheader("📋 Resultados de la búsqueda")
                     
@@ -5817,13 +5834,13 @@ def mostrar_analisis_portafolio():
                 st.error("❌ No se pudo renovar el token")
                 return
         
-        # Obtener estado de cuenta
-        with st.spinner("Obteniendo estado de cuenta..."):
-            estado_cuenta = obtener_estado_cuenta(token_acceso)
+        # Obtener estado de cuenta para el cliente seleccionado
+        with st.spinner(f"Obteniendo estado de cuenta para {nombre_cliente}..."):
+            estado_cuenta = obtener_estado_cuenta(token_acceso, id_cliente)
         
         if estado_cuenta:
             # Mostrar resumen del estado de cuenta
-            st.subheader("🏦 Resumen del Estado de Cuenta")
+            st.subheader(f"🏦 Resumen del Estado de Cuenta - {nombre_cliente}")
             
             cuentas = estado_cuenta.get('cuentas', [])
             total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
@@ -5896,8 +5913,8 @@ def mostrar_analisis_portafolio():
         else:
             st.error("❌ No se pudo obtener el estado de cuenta")
             
-        # Obtener movimientos
-        with st.spinner("Obteniendo movimientos..."):
+        # Obtener movimientos para el cliente seleccionado
+        with st.spinner(f"Obteniendo movimientos para {nombre_cliente}..."):
             movimientos = obtener_movimientos_completos(token_acceso, id_cliente)
         
         if movimientos:
