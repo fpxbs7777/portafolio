@@ -5496,14 +5496,14 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
                  activo_info['valuacion'] = activo_info['cantidad'] * activo_info['precio']
              
              activos_ar.append(activo_info)
-     
-     if not activos_ar:
-         st.error("❌ No se pudieron procesar los activos del portafolio argentino")
-         st.info("💡 **Posibles causas:**")
-         st.info("• Los activos no tienen símbolos válidos")
-         st.info("• La estructura de datos es diferente a la esperada")
-         st.info("• Problemas en el procesamiento de los datos")
-         return
+    
+    if not activos_ar:
+        st.error("❌ No se pudieron procesar los activos del portafolio argentino")
+        st.info("💡 **Posibles causas:**")
+        st.info("• Los activos no tienen símbolos válidos")
+        st.info("• La estructura de datos es diferente a la esperada")
+        st.info("• Problemas en el procesamiento de los datos")
+        return
     
     # Mostrar resumen de todos los activos argentinos
     st.subheader("📊 Resumen de Activos Argentinos")
