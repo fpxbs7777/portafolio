@@ -1539,56 +1539,47 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
                 titulos_valorizados = float(cuenta.get('titulosValorizados', 0))
                 disponible = float(cuenta.get('disponible', 0))
                 
-                # Crear movimientos históricos simulados basados en datos reales
+                # Crear movimientos actuales basados en datos reales (NO históricos simulados)
                 if total > 0:
-                    # Simular movimientos históricos distribuidos en el período
-                    dias_periodo = (fecha_hasta - fecha_desde).days
-                    if dias_periodo > 0:
-                        # Crear varios movimientos distribuidos en el tiempo
-                        for i in range(min(5, dias_periodo)):  # Máximo 5 movimientos
-                            fecha_movimiento = fecha_desde + timedelta(days=i * dias_periodo // 5)
-                            
-                            # Movimiento de posición total
-                            movimiento_total = {
-                                'fechaOperacion': fecha_movimiento.isoformat(),
-                                'simbolo': f"TOTAL_{tipo_cuenta[:8]}",
-                                'tipo': 'posicion_total',
-                                'cantidad': 1,
-                                'precio': total * (0.8 + 0.4 * (i / 5)),  # Variación de precio
-                                'moneda': moneda,
-                                'descripcion': f"Posición total en {tipo_cuenta} - Histórico",
-                                'valor': total * (0.8 + 0.4 * (i / 5)),
-                                'tipoCuenta': tipo_cuenta
-                            }
-                            movimientos_simulados['movimientos'].append(movimiento_total)
+                    # Movimiento de posición total actual
+                    movimiento_total = {
+                        'fechaOperacion': fecha_hasta.isoformat(),
+                        'simbolo': f"TOTAL_{tipo_cuenta[:8]}",
+                        'tipo': 'posicion_total',
+                        'cantidad': 1,
+                        'precio': total,
+                        'moneda': moneda,
+                        'descripcion': f"Posición total actual en {tipo_cuenta}",
+                        'valor': total,
+                        'tipoCuenta': tipo_cuenta
+                    }
+                    movimientos_simulados['movimientos'].append(movimiento_total)
                 
                 if titulos_valorizados > 0:
-                    # Simular movimientos de títulos valorizados
-                    fecha_media = fecha_desde + timedelta(days=(fecha_hasta - fecha_desde).days // 2)
+                    # Movimiento de títulos valorizados actual
                     movimiento_titulos = {
-                        'fechaOperacion': fecha_media.isoformat(),
+                        'fechaOperacion': fecha_hasta.isoformat(),
                         'simbolo': f"TITULOS_{tipo_cuenta[:8]}",
                         'tipo': 'titulos_valorizados',
                         'cantidad': 1,
                         'precio': titulos_valorizados,
                         'moneda': moneda,
-                        'descripcion': f"Títulos valorizados en {tipo_cuenta} - Histórico",
+                        'descripcion': f"Títulos valorizados actuales en {tipo_cuenta}",
                         'valor': titulos_valorizados,
                         'tipoCuenta': tipo_cuenta
                     }
                     movimientos_simulados['movimientos'].append(movimiento_titulos)
                 
                 if disponible > 0:
-                    # Simular movimientos de disponible
-                    fecha_reciente = fecha_hasta - timedelta(days=7)
+                    # Movimiento de disponible actual
                     movimiento_disponible = {
-                        'fechaOperacion': fecha_reciente.isoformat(),
+                        'fechaOperacion': fecha_hasta.isoformat(),
                         'simbolo': f"DISP_{tipo_cuenta[:8]}",
                         'tipo': 'disponible',
                         'cantidad': 1,
                         'precio': disponible,
                         'moneda': moneda,
-                        'descripcion': f"Disponible en {tipo_cuenta} - Histórico",
+                        'descripcion': f"Disponible actual en {tipo_cuenta}",
                         'valor': disponible,
                         'tipoCuenta': tipo_cuenta
                     }
