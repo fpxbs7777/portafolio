@@ -9392,7 +9392,7 @@ def main():
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Panel del asesor"),
+                ("Inicio", "Análisis de portafolio", "Panel del asesor", "Histórico de Movimientos"),
                 index=0,
                 key="menu_principal"
             )
@@ -9407,6 +9407,11 @@ def main():
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "Panel del asesor":
                 mostrar_movimientos_asesor()
+            elif opcion == "Histórico de Movimientos":
+                if st.session_state.cliente_seleccionado:
+                    mostrar_movimientos_historicos_graficados()
+                else:
+                    st.info("Seleccione un cliente en la barra lateral para acceder al histórico de movimientos")
         else:
             st.info("Ingrese sus credenciales para comenzar")
             
@@ -11470,6 +11475,548 @@ def crear_grafico_barras_pais(df, moneda_base="ARS"):
     )
     
     return fig
+
+def obtener_movimientos_historicos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, 
+                                        tipo_fecha="fechaOperacion", estado=None, tipo_operacion=None, 
+                                        pais=None, moneda=None, cuenta_comitente=None):
+    """
+    Obtiene movimientos históricos usando el endpoint Asesor/Movimientos con parámetros avanzados
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización para movimientos históricos")
+        return None
+    
+    # Preparar el cuerpo de la solicitud con todos los parámetros disponibles
+    payload = {
+        "clientes": clientes,
+        "from": fecha_desde,
+        "to": fecha_hasta,
+        "dateType": tipo_fecha
+    }
+    
+    # Agregar filtros opcionales solo si tienen valor
+    if estado:
+        payload["status"] = estado
+    if tipo_operacion:
+        payload["type"] = tipo_operacion
+    if pais:
+        payload["country"] = pais
+    if moneda:
+        payload["currency"] = moneda
+    if cuenta_comitente:
+        payload["cuentaComitente"] = cuenta_comitente
+    
+    try:
+        print(f"🔍 Obteniendo movimientos históricos para {len(clientes)} clientes")
+        print(f"📅 Período: {fecha_desde} hasta {fecha_hasta}")
+        print(f"📋 Payload: {payload}")
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        print(f"📡 Respuesta movimientos históricos: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Movimientos históricos obtenidos exitosamente")
+            
+            # Verificar si la respuesta tiene la estructura esperada
+            if isinstance(data, dict) and 'movimientos' in data:
+                movimientos = data['movimientos']
+                print(f"📊 Total de movimientos: {len(movimientos)}")
+                return {
+                    'movimientos': movimientos,
+                    'metodo': 'asesor_movimientos',
+                    'fecha_desde': fecha_desde,
+                    'fecha_hasta': fecha_hasta,
+                    'filtros_aplicados': payload
+                }
+            elif isinstance(data, list):
+                print(f"📊 Total de movimientos: {len(data)}")
+                return {
+                    'movimientos': data,
+                    'metodo': 'asesor_movimientos',
+                    'fecha_desde': fecha_desde,
+                    'fecha_hasta': fecha_hasta,
+                    'filtros_aplicados': payload
+                }
+            else:
+                print(f"⚠️ Estructura de respuesta inesperada: {type(data)}")
+                return {
+                    'movimientos': data,
+                    'metodo': 'asesor_movimientos',
+                    'fecha_desde': fecha_desde,
+                    'fecha_hasta': fecha_hasta,
+                    'filtros_aplicados': payload
+                }
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para movimientos históricos")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a los movimientos históricos")
+            st.info("💡 **Posibles causas:**")
+            st.info("• Tu cuenta no tiene permisos de asesor")
+            st.info("• El token de acceso ha expirado")
+            st.info("• Necesitas permisos adicionales para esta funcionalidad")
+            
+            # Intentar renovar token y reintentar una vez
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                print("🔄 Reintentando con token renovado...")
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    st.session_state['token_acceso'] = nuevo_token
+                    headers = obtener_encabezado_autorizacion(nuevo_token)
+                    if headers:
+                        response = requests.post(url, headers=headers, json=payload, timeout=60)
+                        if response.status_code == 200:
+                            print("✅ Movimientos históricos obtenidos en reintento")
+                            data = response.json()
+                            if isinstance(data, dict) and 'movimientos' in data:
+                                return {
+                                    'movimientos': data['movimientos'],
+                                    'metodo': 'asesor_movimientos_reintento',
+                                    'fecha_desde': fecha_desde,
+                                    'fecha_hasta': fecha_hasta,
+                                    'filtros_aplicados': payload
+                                }
+                            elif isinstance(data, list):
+                                return {
+                                    'movimientos': data,
+                                    'metodo': 'asesor_movimientos_reintento',
+                                    'fecha_desde': fecha_desde,
+                                    'fecha_hasta': fecha_hasta,
+                                    'filtros_aplicados': payload
+                                }
+                        elif response.status_code == 401:
+                            st.error("❌ **Persiste el problema de autorización**")
+                            st.info("🔐 **Solución recomendada:**")
+                            st.info("1. Verifica que tu cuenta tenga permisos de asesor")
+                            st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
+                            st.info("3. La aplicación usará datos simulados como alternativa")
+            
+            return None
+        elif response.status_code == 500:
+            print(f"❌ Error 500: Error interno del servidor para movimientos históricos")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.warning("⚠️ **Error del Servidor IOL**: El servidor está experimentando problemas temporales")
+            st.info("💡 **Solución**: La aplicación usará datos alternativos para continuar funcionando")
+            st.info("🔄 **Recomendación**: Intente nuevamente en unos minutos")
+            return None
+        else:
+            print(f"❌ Error {response.status_code}: {response.text}")
+            st.error(f"❌ **Error {response.status_code}**: No se pudieron obtener los movimientos históricos")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout en la solicitud de movimientos históricos")
+        st.warning("⏰ **Timeout**: La solicitud tardó demasiado en completarse")
+        st.info("💡 **Solución**: Intente con un período más corto o reintente más tarde")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"💥 Error de conexión en movimientos históricos: {e}")
+        st.error(f"💥 **Error de Conexión**: {str(e)}")
+        return None
+    except Exception as e:
+        print(f"💥 Error inesperado en movimientos históricos: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def mostrar_movimientos_historicos_graficados():
+    """
+    Muestra y grafica los movimientos históricos usando el endpoint Asesor/Movimientos
+    """
+    st.title("📈 Histórico de Movimientos - Gráficos Avanzados")
+    st.markdown("### Análisis Temporal de Operaciones")
+    
+    if not st.session_state.token_acceso:
+        st.error("❌ **Error**: Debe estar autenticado para acceder a esta funcionalidad")
+        return
+    
+    if not st.session_state.cliente_seleccionado:
+        st.error("❌ **Error**: Debe seleccionar un cliente para continuar")
+        return
+    
+    # Obtener datos del cliente
+    cliente = st.session_state.cliente_seleccionado
+    id_cliente = cliente.get('numeroCliente', cliente.get('id'))
+    
+    st.info(f"👤 **Cliente seleccionado**: {cliente.get('apellidoYNombre', 'Cliente')}")
+    st.info(f"📅 **Período configurado**: {st.session_state.fecha_desde.strftime('%d/%m/%Y')} - {st.session_state.fecha_hasta.strftime('%d/%m/%Y')}")
+    
+    # Configuración de filtros avanzados
+    st.subheader("🔧 Configuración de Filtros")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        tipo_fecha = st.selectbox(
+            "Tipo de fecha:",
+            ["fechaOperacion", "fechaLiquidacion", "fechaVencimiento"],
+            help="Tipo de fecha a considerar para el filtrado"
+        )
+        
+        estado = st.selectbox(
+            "Estado de operación:",
+            ["", "Aprobada", "Pendiente", "Rechazada", "Cancelada"],
+            help="Filtrar por estado de la operación"
+        )
+    
+    with col2:
+        tipo_operacion = st.selectbox(
+            "Tipo de operación:",
+            ["", "Compra", "Venta", "Transferencia", "Dividendo", "Amortización"],
+            help="Filtrar por tipo de operación"
+        )
+        
+        pais = st.selectbox(
+            "País:",
+            ["", "Argentina", "Estados Unidos"],
+            help="Filtrar por país de origen"
+        )
+    
+    # Filtros adicionales
+    col3, col4 = st.columns(2)
+    with col3:
+        moneda = st.selectbox(
+            "Moneda:",
+            ["", "peso_Argentino", "dolar_Estadounidense"],
+            help="Filtrar por moneda de la operación"
+        )
+    
+    with col4:
+        cuenta_comitente = st.text_input(
+            "Cuenta comitente:",
+            help="Filtrar por cuenta comitente específica"
+        )
+    
+    # Botón para obtener movimientos
+    if st.button("📊 Obtener Movimientos Históricos", type="primary", use_container_width=True):
+        with st.spinner("🔄 Obteniendo movimientos históricos..."):
+            # Preparar fechas en formato ISO
+            fecha_desde_iso = st.session_state.fecha_desde.strftime('%Y-%m-%dT00:00:00.000Z')
+            fecha_hasta_iso = st.session_state.fecha_hasta.strftime('%Y-%m-%dT23:59:59.999Z')
+            
+            # Limpiar filtros vacíos
+            filtros = {}
+            if estado:
+                filtros['estado'] = estado
+            if tipo_operacion:
+                filtros['tipo_operacion'] = tipo_operacion
+            if pais:
+                filtros['pais'] = pais
+            if moneda:
+                filtros['moneda'] = moneda
+            if cuenta_comitente:
+                filtros['cuenta_comitente'] = cuenta_comitente
+            
+            # Obtener movimientos históricos
+            movimientos_data = obtener_movimientos_historicos_asesor(
+                token_portador=st.session_state.token_acceso,
+                clientes=[id_cliente],
+                fecha_desde=fecha_desde_iso,
+                fecha_hasta=fecha_hasta_iso,
+                tipo_fecha=tipo_fecha,
+                **filtros
+            )
+            
+            if movimientos_data and movimientos_data.get('movimientos'):
+                st.success(f"✅ **Movimientos obtenidos**: {len(movimientos_data['movimientos'])} operaciones")
+                st.info(f"🔍 **Método utilizado**: {movimientos_data.get('metodo', 'N/A')}")
+                
+                # Mostrar análisis y gráficos
+                mostrar_analisis_movimientos_historicos(movimientos_data)
+            else:
+                st.warning("⚠️ **No se encontraron movimientos** en el período seleccionado")
+                st.info("💡 **Sugerencias**:")
+                st.info("• Intente con un período más amplio")
+                st.info("• Verifique los filtros aplicados")
+                st.info("• Considere que algunos períodos pueden no tener operaciones")
+
+def mostrar_analisis_movimientos_historicos(movimientos_data):
+    """
+    Muestra análisis detallado y gráficos de los movimientos históricos
+    """
+    movimientos = movimientos_data['movimientos']
+    
+    # Convertir a DataFrame
+    df = pd.DataFrame(movimientos)
+    
+    if df.empty:
+        st.warning("No hay datos para analizar")
+        return
+    
+    # Limpiar y procesar datos
+    if 'fecha' in df.columns:
+        df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce')
+        df = df.sort_values('fecha')
+    
+    if 'fechaOperacion' in df.columns:
+        df['fechaOperacion'] = pd.to_datetime(df['fechaOperacion'], errors='coerce')
+    
+    # Mostrar resumen estadístico
+    st.subheader("📊 Resumen Estadístico")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Operaciones", len(df))
+    with col2:
+        if 'valor' in df.columns:
+            total_valor = df['valor'].sum()
+            st.metric("Valor Total", f"${total_valor:,.2f}")
+        else:
+            st.metric("Valor Total", "N/A")
+    with col3:
+        if 'fecha' in df.columns:
+            dias_operacion = (df['fecha'].max() - df['fecha'].min()).days
+            st.metric("Días de Operación", dias_operacion)
+        else:
+            st.metric("Días de Operación", "N/A")
+    with col4:
+        if 'tipo' in df.columns:
+            tipos_unicos = df['tipo'].nunique()
+            st.metric("Tipos de Operación", tipos_unicos)
+        else:
+            st.metric("Tipos de Operación", "N/A")
+    
+    # Gráficos de análisis
+    st.subheader("📈 Análisis Gráfico")
+    
+    # Pestañas para diferentes tipos de análisis
+    tab1, tab2, tab3, tab4 = st.tabs(["📅 Evolución Temporal", "💰 Distribución por Valor", "🏷️ Tipos de Operación", "📋 Detalle de Operaciones"])
+    
+    with tab1:
+        mostrar_grafico_evolucion_temporal(df)
+    
+    with tab2:
+        mostrar_grafico_distribucion_valor(df)
+    
+    with tab3:
+        mostrar_grafico_tipos_operacion(df)
+    
+    with tab4:
+        mostrar_detalle_operaciones(df)
+
+def mostrar_grafico_evolucion_temporal(df):
+    """
+    Muestra gráfico de evolución temporal de los movimientos
+    """
+    if 'fecha' not in df.columns or 'valor' not in df.columns:
+        st.warning("No hay datos de fecha o valor para mostrar la evolución temporal")
+        return
+    
+    # Agrupar por fecha
+    df_diario = df.groupby(df['fecha'].dt.date).agg({
+        'valor': 'sum',
+        'cantidad': 'sum'
+    }).reset_index()
+    
+    # Crear gráfico de líneas
+    fig = go.Figure()
+    
+    # Línea de valor
+    fig.add_trace(go.Scatter(
+        x=df_diario['fecha'],
+        y=df_diario['valor'],
+        mode='lines+markers',
+        name='Valor Total',
+        line=dict(color='#3b82f6', width=3),
+        marker=dict(size=8)
+    ))
+    
+    fig.update_layout(
+        title="Evolución Temporal del Valor de Operaciones",
+        xaxis_title="Fecha",
+        yaxis_title="Valor Total ($)",
+        height=500,
+        showlegend=True,
+        hovermode='x unified'
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Gráfico de cantidad de operaciones por día
+    fig_cantidad = go.Figure()
+    
+    fig_cantidad.add_trace(go.Bar(
+        x=df_diario['fecha'],
+        y=df_diario['cantidad'],
+        name='Cantidad de Operaciones',
+        marker_color='#10b981'
+    ))
+    
+    fig_cantidad.update_layout(
+        title="Cantidad de Operaciones por Día",
+        xaxis_title="Fecha",
+        yaxis_title="Cantidad",
+        height=400,
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig_cantidad, use_container_width=True)
+
+def mostrar_grafico_distribucion_valor(df):
+    """
+    Muestra gráfico de distribución por valor de las operaciones
+    """
+    if 'valor' not in df.columns:
+        st.warning("No hay datos de valor para mostrar la distribución")
+        return
+    
+    # Crear histograma de valores
+    fig = go.Figure()
+    
+    fig.add_trace(go.Histogram(
+        x=df['valor'],
+        nbinsx=20,
+        name='Distribución de Valores',
+        marker_color='#8b5cf6'
+    ))
+    
+    fig.update_layout(
+        title="Distribución de Valores de Operaciones",
+        xaxis_title="Valor ($)",
+        yaxis_title="Frecuencia",
+        height=400,
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Gráfico de caja (box plot)
+    fig_box = go.Figure()
+    
+    fig_box.add_trace(go.Box(
+        y=df['valor'],
+        name='Distribución de Valores',
+        boxpoints='outliers',
+        marker_color='#f59e0b'
+    ))
+    
+    fig_box.update_layout(
+        title="Distribución Estadística de Valores",
+        yaxis_title="Valor ($)",
+        height=400,
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig_box, use_container_width=True)
+
+def mostrar_grafico_tipos_operacion(df):
+    """
+    Muestra gráfico de distribución por tipos de operación
+    """
+    if 'tipo' not in df.columns:
+        st.warning("No hay datos de tipo de operación para mostrar la distribución")
+        return
+    
+    # Contar tipos de operación
+    tipos_count = df['tipo'].value_counts()
+    
+    # Gráfico de torta
+    fig_pie = go.Figure(data=[go.Pie(
+        labels=tipos_count.index,
+        values=tipos_count.values,
+        hole=0.3,
+        marker_colors=['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+    )])
+    
+    fig_pie.update_layout(
+        title="Distribución por Tipo de Operación",
+        height=500,
+        showlegend=True
+    )
+    
+    st.plotly_chart(fig_pie, use_container_width=True)
+    
+    # Gráfico de barras con valores
+    if 'valor' in df.columns:
+        tipos_valor = df.groupby('tipo')['valor'].sum().sort_values(ascending=False)
+        
+        fig_bar = go.Figure(data=[go.Bar(
+            x=tipos_valor.index,
+            y=tipos_valor.values,
+            marker_color=['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+        )])
+        
+        fig_bar.update_layout(
+            title="Valor Total por Tipo de Operación",
+            xaxis_title="Tipo de Operación",
+            yaxis_title="Valor Total ($)",
+            height=400,
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+def mostrar_detalle_operaciones(df):
+    """
+    Muestra tabla detallada de las operaciones
+    """
+    st.subheader("📋 Detalle de Operaciones")
+    
+    # Seleccionar columnas relevantes
+    columnas_display = []
+    if 'fecha' in df.columns:
+        columnas_display.append('fecha')
+    if 'simbolo' in df.columns:
+        columnas_display.append('simbolo')
+    if 'tipo' in df.columns:
+        columnas_display.append('tipo')
+    if 'cantidad' in df.columns:
+        columnas_display.append('cantidad')
+    if 'precio' in df.columns:
+        columnas_display.append('precio')
+    if 'valor' in df.columns:
+        columnas_display.append('valor')
+    if 'moneda' in df.columns:
+        columnas_display.append('moneda')
+    
+    if columnas_display:
+        df_display = df[columnas_display].copy()
+        
+        # Formatear fechas
+        if 'fecha' in df_display.columns:
+            df_display['fecha'] = df_display['fecha'].dt.strftime('%d/%m/%Y %H:%M')
+        
+        # Formatear valores numéricos
+        if 'valor' in df_display.columns:
+            df_display['valor'] = df_display['valor'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+        if 'precio' in df_display.columns:
+            df_display['precio'] = df_display['precio'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+        
+        st.dataframe(df_display, use_container_width=True)
+        
+        # Botón para descargar datos
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="📥 Descargar CSV",
+            data=csv,
+            file_name=f"movimientos_historicos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning("No hay columnas relevantes para mostrar en la tabla")
 
 if __name__ == "__main__":
     main()
