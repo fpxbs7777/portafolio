@@ -6307,22 +6307,22 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             st.markdown("#### Métricas Globales del Portafolio")
                             col1, col2, col3, col4 = st.columns(4)
                                 
-                                # Usar métricas unificadas como fuente única de verdad
-                                if metricas and 'metricas_globales' in metricas:
-                                    valor_total_unificado = metricas['metricas_globales']['valor_total']
-                                    retorno_ponderado_unificado = metricas['metricas_globales']['retorno_ponderado']
-                                    riesgo_total_unificado = metricas['metricas_globales']['riesgo_total']
-                                    ratio_unificado = metricas['metricas_globales']['ratio_retorno_riesgo']
-                                else:
-                                    valor_total_unificado = valor_total_portfolio
-                                    retorno_ponderado_unificado = retorno_portfolio
-                                    riesgo_total_unificado = riesgo_portfolio
-                                    ratio_unificado = retorno_portfolio/riesgo_portfolio if riesgo_portfolio > 0 else 0
-                                
-                                col1.metric("Valor Total", f"${valor_total_unificado:,.0f}")
-                                col2.metric("Retorno Ponderado", f"{retorno_ponderado_unificado:.1f}%")
-                                col3.metric("Riesgo Total", f"{riesgo_total_unificado:.1f}%")
-                                col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
+                            # Usar métricas unificadas como fuente única de verdad
+                            if metricas and 'metricas_globales' in metricas:
+                                valor_total_unificado = metricas['metricas_globales']['valor_total']
+                                retorno_ponderado_unificado = metricas['metricas_globales']['retorno_ponderado']
+                                riesgo_total_unificado = metricas['metricas_globales']['riesgo_total']
+                                ratio_unificado = metricas['metricas_globales']['ratio_retorno_riesgo']
+                            else:
+                                valor_total_unificado = valor_total_portfolio
+                                retorno_ponderado_unificado = retorno_portfolio
+                                riesgo_total_unificado = riesgo_portfolio
+                                ratio_unificado = retorno_portfolio/riesgo_portfolio if riesgo_portfolio > 0 else 0
+                            
+                            col1.metric("Valor Total", f"${valor_total_unificado:,.0f}")
+                            col2.metric("Retorno Ponderado", f"{retorno_ponderado_unificado:.1f}%")
+                            col3.metric("Riesgo Total", f"{riesgo_total_unificado:.1f}%")
+                            col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
                             
                                 # Identificar instrumentos de renta fija
                                 instrumentos_renta_fija = []
