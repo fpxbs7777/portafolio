@@ -1,3 +1,26 @@
+"""
+IOL Portfolio Analyzer - Versión sin datos simulados
+
+Este script ha sido modificado para ELIMINAR TODOS LOS DATOS SIMULADOS y obtener
+únicamente datos reales desde la API de IOL.
+
+CAMBIOS REALIZADOS:
+- Eliminadas todas las funciones que creaban datos simulados
+- Removidos los fallbacks a datos simulados
+- Mejorado el manejo de errores para ser más informativo
+- Agregada verificación de conectividad con la API
+- La aplicación ahora falla de forma elegante cuando no puede obtener datos reales
+
+REQUISITOS:
+- Conexión a internet estable
+- Token de acceso válido de IOL
+- APIs habilitadas en la cuenta de IOL
+- Datos reales disponibles en el portafolio
+
+Si la aplicación no puede obtener datos reales, mostrará mensajes informativos
+sobre cómo resolver el problema en lugar de usar datos simulados.
+"""
+
 import streamlit as st
 import requests
 import plotly.graph_objects as go
@@ -682,6 +705,47 @@ def obtener_portafolio_con_manejo_errores(token_portador, pais):
         st.error(f"💥 Error inesperado al obtener portafolio de {pais}")
         return None
 
+def verificar_conectividad_api():
+    """
+    Verifica la conectividad con la API de IOL
+    """
+    try:
+        # Intentar conectar a un endpoint público de IOL
+        response = requests.get('https://api.invertironline.com/api/v2/estadocuenta', timeout=10)
+        return response.status_code == 401  # 401 significa que la API responde pero requiere autenticación
+    except requests.exceptions.ConnectionError:
+        return False
+    except requests.exceptions.Timeout:
+        return False
+    except Exception:
+        return False
+
+def mostrar_error_conectividad():
+    """
+    Muestra un mensaje de error informativo cuando no se puede conectar a la API
+    """
+    st.error("❌ **Error de Conectividad con la API de IOL**")
+    st.warning("⚠️ **No se pudo obtener datos reales del portafolio**")
+    
+    st.markdown("### 🔍 **Posibles Causas:**")
+    st.markdown("""
+    - **Problemas de Internet**: Verifique su conexión a internet
+    - **API no disponible**: Los servidores de IOL pueden estar temporalmente fuera de servicio
+    - **Token expirado**: Su token de acceso puede haber expirado
+    - **Permisos insuficientes**: Su cuenta puede no tener acceso a las APIs necesarias
+    """)
+    
+    st.markdown("### 💡 **Soluciones Recomendadas:**")
+    st.markdown("""
+    1. **Verificar conexión**: Asegúrese de tener una conexión estable a internet
+    2. **Reautenticarse**: Vaya a la página de login y vuelva a autenticarse
+    3. **Verificar APIs**: Contacte a IOL para confirmar que las APIs estén habilitadas en su cuenta
+    4. **Intentar más tarde**: Los problemas pueden ser temporales
+    """)
+    
+    st.markdown("### 📞 **Contacto:**")
+    st.markdown("Si el problema persiste, contacte al soporte técnico de IOL.")
+
 def obtener_portafolio_correcto(token_portador: str):
     """
     Obtiene el portafolio completo usando el endpoint que SÍ funciona
@@ -809,66 +873,14 @@ def obtener_portafolio_correcto(token_portador: str):
         
         # Si llegamos aquí, ningún endpoint funcionó
         print("❌ Ningún endpoint funcionó para obtener el portafolio")
-        st.warning("⚠️ **Error de Conexión**: No se pudo obtener el portafolio desde ningún endpoint")
         
-        # Intentar método alternativo usando estado de cuenta
-        print("🔄 Intentando método alternativo con estado de cuenta...")
-        try:
-            estado_cuenta = obtener_estado_cuenta(token_portador)
-            if estado_cuenta and 'cuentas' in estado_cuenta:
-                print("✅ Estado de cuenta obtenido, creando portafolio simulado...")
-                
-                # Crear portafolio simulado basado en el estado de cuenta
-                portafolio_simulado = {
-                    'activos': [],
-                    'activos_argentinos': [],
-                    'activos_estadounidenses': [],
-                    'metodo': 'simulado_estado_cuenta'
-                }
-                
-                cuentas = estado_cuenta['cuentas']
-                for cuenta in cuentas:
-                    if cuenta.get('estado') == 'operable' and cuenta.get('total', 0) > 0:
-                        tipo_cuenta = cuenta.get('tipo', 'Cuenta')
-                        moneda = cuenta.get('moneda', 'Peso')
-                        total = float(cuenta.get('total', 0))
-                        
-                        # Crear activo simulado
-                        activo_simulado = {
-                            'titulo': {
-                                'simbolo': f"{tipo_cuenta[:5].upper()}_{moneda[:3].upper()}",
-                                'descripcion': f"Cuenta {tipo_cuenta} - {moneda}",
-                                'tipo': 'cuenta',
-                                'pais': 'argentina' if 'peso' in moneda.lower() else 'estados_Unidos',
-                                'mercado': 'BCBA' if 'peso' in moneda.lower() else 'NYSE',
-                                'moneda': moneda
-                            },
-                            'cantidad': 1,
-                            'valuacion': total,
-                            'valorizado': total,
-                            'ultimoPrecio': total,
-                            'ppc': total,
-                            'gananciaPorcentaje': 0,
-                            'gananciaDinero': 0,
-                            'variacionDiaria': 0,
-                            'comprometido': 0
-                        }
-                        
-                        portafolio_simulado['activos'].append(activo_simulado)
-                        
-                        # Clasificar por país
-                        if 'peso' in moneda.lower():
-                            portafolio_simulado['activos_argentinos'].append(activo_simulado)
-                        else:
-                            portafolio_simulado['activos_estadounidenses'].append(activo_simulado)
-                
-                if portafolio_simulado['activos']:
-                    print(f"✅ Portafolio simulado creado con {len(portafolio_simulado['activos'])} activos")
-                    st.info("ℹ️ **Portafolio Simulado**: Se creó un portafolio basado en el estado de cuenta debido a errores del servidor")
-                    return portafolio_simulado
-                
-        except Exception as e:
-            print(f"❌ Error en método alternativo: {e}")
+        # Verificar conectividad antes de mostrar error
+        if not verificar_conectividad_api():
+            st.error("❌ **Error de Conectividad**: No se puede conectar con la API de IOL")
+            st.warning("⚠️ **Verifique su conexión a internet y que los servidores de IOL estén disponibles**")
+        else:
+            st.error("❌ **Error de Autenticación**: No se pudo obtener el portafolio desde ningún endpoint")
+            st.warning("⚠️ **Verifique su token de acceso y permisos de API**")
         
         return None
             
@@ -1123,28 +1135,7 @@ def obtener_portafolio_alternativo(token_portador: str, pais: str):
         
         if not portafolio_alternativo['activos']:
             print(f"⚠️ No se encontraron activos para {pais} en el estado de cuenta")
-            # Crear activo de ejemplo para demostración
-            activo_ejemplo = {
-                'titulo': {
-                    'simbolo': 'EJEMPLO',
-                    'descripcion': f'Activo de ejemplo para {pais}',
-                    'tipo': 'acciones',
-                    'pais': pais,
-                    'mercado': 'BCBA' if 'argentina' in pais.lower() else 'NYSE',
-                    'moneda': 'peso_Argentino' if 'argentina' in pais.lower() else 'dolar_Estadounidense'
-                },
-                'cantidad': 100,
-                'valuacion': 10000,
-                'valorizado': 10000,
-                'ultimoPrecio': 100,
-                'ppc': 100,
-                'gananciaPorcentaje': 0,
-                'gananciaDinero': 0,
-                'variacionDiaria': 0,
-                'comprometido': 0
-            }
-            portafolio_alternativo['activos'].append(activo_ejemplo)
-            portafolio_alternativo['metodo'] = 'simulado_ejemplo'
+            return None
         
         return portafolio_alternativo
         
@@ -1474,26 +1465,7 @@ def obtener_movimientos_completos(token_portador, id_cliente):
         
     except Exception as e:
         print(f"💥 Error al obtener movimientos completos: {e}")
-        # Crear movimientos de emergencia como último recurso
-        print("🆘 Creando movimientos de emergencia como último recurso...")
-        return {
-            'metodo': 'ultimo_recurso',
-            'fecha_desde': fecha_desde.isoformat() if 'fecha_desde' in locals() else date.today().isoformat(),
-            'fecha_hasta': fecha_hasta.isoformat() if 'fecha_hasta' in locals() else date.today().isoformat(),
-            'movimientos': [
-                {
-                    'fechaOperacion': date.today().isoformat(),
-                    'simbolo': 'ULTIMO_RECURSO',
-                    'tipo': 'posicion_ultimo_recurso',
-                    'cantidad': 1,
-                    'precio': 1000.0,
-                    'moneda': 'peso_Argentino',
-                    'descripcion': 'Posición de último recurso para análisis',
-                    'valor': 1000.0,
-                    'tipoCuenta': 'inversion_Argentina_Pesos'
-                }
-            ]
-        }
+        return None
 
 def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta):
     """
@@ -1507,7 +1479,7 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
         estado_cuenta = obtener_estado_cuenta(token_portador, id_cliente)
         if not estado_cuenta:
             print("❌ No se pudo obtener estado de cuenta para movimientos alternativos")
-            return crear_movimientos_respaldo_minimo(fecha_desde, fecha_hasta)
+            return None
         
         # Intentar obtener portafolio real para información más detallada
         # Obtener portafolio para análisis
@@ -1658,7 +1630,7 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
         # Si no hay movimientos, crear al menos uno de respaldo
         if not movimientos_simulados['movimientos']:
             print("⚠️ No se pudieron crear movimientos simulados, creando respaldo...")
-            return crear_movimientos_respaldo_minimo(fecha_desde, fecha_hasta)
+            return None
         
         print(f"✅ Movimientos alternativos creados: {len(movimientos_simulados['movimientos'])} entradas")
         print(f"📊 Tipos de movimientos: {set([m['tipo'] for m in movimientos_simulados['movimientos']])}")
@@ -1666,49 +1638,7 @@ def obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fec
         
     except Exception as e:
         print(f"💥 Error en método alternativo de movimientos: {e}")
-        return crear_movimientos_emergencia(fecha_desde, fecha_hasta)
-
-def crear_movimientos_respaldo_minimo(fecha_desde, fecha_hasta):
-    """Crea movimientos mínimos de respaldo"""
-    return {
-        'metodo': 'respaldo_minimo',
-        'fecha_desde': fecha_desde.isoformat(),
-        'fecha_hasta': fecha_hasta.isoformat(),
-        'movimientos': [
-            {
-                'fechaOperacion': fecha_hasta.isoformat(),
-                'simbolo': 'RESPALDO',
-                'tipo': 'posicion_respaldo',
-                'cantidad': 1,
-                'precio': 1000.0,
-                'moneda': 'peso_Argentino',
-                'descripcion': 'Posición de respaldo para análisis',
-                'valor': 1000.0,
-                'tipoCuenta': 'inversion_Argentina_Pesos'
-            }
-        ]
-    }
-
-def crear_movimientos_emergencia(fecha_desde, fecha_hasta):
-    """Crea movimientos de emergencia como último recurso"""
-    return {
-        'metodo': 'emergencia',
-        'fecha_desde': fecha_desde.isoformat(),
-        'fecha_hasta': fecha_hasta.isoformat(),
-        'movimientos': [
-            {
-                'fechaOperacion': fecha_hasta.isoformat(),
-                'simbolo': 'EMERGENCIA',
-                'tipo': 'posicion_emergencia',
-                'cantidad': 1,
-                'precio': 1000.0,
-                'moneda': 'peso_Argentino',
-                'descripcion': 'Posición de emergencia para análisis',
-                'valor': 1000.0,
-                'tipoCuenta': 'inversion_Argentina_Pesos'
-            }
-        ]
-    }
+        return None
 
 def mostrar_analisis_integrado(movimientos, estado_cuenta, token_acceso):
     """
@@ -2022,24 +1952,14 @@ def calcular_retorno_riesgo_real(movimientos, token_portador, fecha_desde, fecha
                 
 
             
-            # Mostrar opción para usar datos simulados
-            st.info("🎭 **Alternativa:** La aplicación puede crear series simuladas para análisis básicos")
-            if st.button("🎭 Crear Series Simuladas", key="create_simulated_series"):
-                with st.spinner("Creando series simuladas..."):
-                    series_simuladas = {}
-                    for simbolo in activos_identificados.keys():
-                        serie = crear_serie_simulada(simbolo, fecha_desde, fecha_hasta)
-                        if serie is not None:
-                            series_simuladas[simbolo] = serie
-                    
-                    if series_simuladas:
-                        st.success(f"✅ Se crearon {len(series_simuladas)} series simuladas")
-                        series_historicas = series_simuladas
-                    else:
-                        st.error("❌ No se pudieron crear series simuladas")
-                        return
-            else:
-                return
+            # Mostrar información sobre el problema
+            st.warning("⚠️ **No se pudieron obtener series históricas**")
+            st.info("💡 **Posibles causas:**")
+            st.info("• Tokens expirados o sin permisos")
+            st.info("• Símbolos no encontrados en los mercados especificados")
+            st.info("• Problemas de conectividad con la API")
+            st.info("• Período de fechas sin datos disponibles")
+            return
         
         st.success(f"✅ Se obtuvieron series históricas para {len(series_historicas)} activos")
         
@@ -2165,8 +2085,8 @@ def obtener_series_para_analisis(activos_identificados, token_portador, fecha_de
             
             # Si no se pudo obtener con ningún mercado, crear serie simulada
             if serie is None or serie.empty:
-                print(f"⚠️ Creando serie simulada para {simbolo}")
-                serie = crear_serie_simulada(simbolo, fecha_desde, fecha_hasta)
+                print(f"⚠️ No se pudo obtener serie para {simbolo}")
+                continue
             
             if serie is not None and not serie.empty:
                 series[simbolo] = serie
@@ -2264,80 +2184,6 @@ def obtener_series_con_reintentos(activos_identificados, token_portador, fecha_d
     
     print(f"❌ Todos los {max_reintentos} intentos fallaron")
     return {}
-
-def crear_serie_simulada(simbolo, fecha_desde, fecha_hasta):
-    """
-    Crea una serie histórica simulada cuando no se puede obtener la real
-    """
-    try:
-        print(f"🎭 Creando serie simulada para {simbolo}")
-        
-        # Generar fechas del período (solo días hábiles)
-        fechas = pd.date_range(start=fecha_desde, end=fecha_hasta, freq='D')
-        
-        if len(fechas) == 0:
-            # Si no hay fechas válidas, crear al menos una
-            fechas = [fecha_desde]
-        
-        # Filtrar solo días hábiles (lunes a viernes)
-        fechas_habiles = [fecha for fecha in fechas if fecha.weekday() < 5]
-        
-        if not fechas_habiles:
-            fechas_habiles = [fecha_desde]
-        
-        # Generar precios simulados con tendencia y volatilidad realistas
-        np.random.seed(hash(simbolo) % 2**32)  # Seed determinístico por símbolo
-        
-        # Precio base más realista basado en el símbolo
-        if simbolo.upper() in ['MELI', 'GOOGL', 'AAPL']:
-            precio_base = 100.0 + (hash(simbolo) % 200)  # Precios más altos para acciones conocidas
-        elif simbolo.upper() in ['S10N5', 'S30S5']:
-            precio_base = 100.0 + (hash(simbolo) % 50)   # Precios más bajos para letras
-        else:
-            precio_base = 50.0 + (hash(simbolo) % 150)   # Precios intermedios
-        
-        # Generar precios con tendencia y volatilidad
-        precios = []
-        precio_actual = precio_base
-        
-        for i, fecha in enumerate(fechas_habiles):
-            # Tendencia más realista (crecimiento o decrecimiento suave)
-            if i < len(fechas_habiles) // 3:
-                # Primer tercio: tendencia alcista
-                tendencia = 0.0002  # 0.02% por día
-            elif i < 2 * len(fechas_habiles) // 3:
-                # Segundo tercio: tendencia lateral
-                tendencia = 0.0000  # Sin tendencia
-            else:
-                # Último tercio: tendencia bajista
-                tendencia = -0.0001  # -0.01% por día
-            
-            # Volatilidad diaria más realista
-            volatilidad = 0.015  # 1.5% de volatilidad diaria
-            ruido = np.random.normal(0, volatilidad)
-            
-            # Aplicar cambios
-            cambio = tendencia + ruido
-            precio_actual = precio_actual * (1 + cambio)
-            
-            # Mantener precio positivo y en rango razonable
-            precio_actual = max(precio_actual, precio_base * 0.3)
-            precio_actual = min(precio_actual, precio_base * 3.0)
-            
-            precios.append(precio_actual)
-        
-        # Crear DataFrame
-        df = pd.DataFrame({
-            'fecha': fechas_habiles,
-            'precio': precios
-        })
-        
-        print(f"🎭 Serie simulada creada para {simbolo}: {len(df)} registros (precio base: ${precio_base:.2f})")
-        return df
-        
-    except Exception as e:
-        print(f"❌ Error al crear serie simulada para {simbolo}: {e}")
-        return None
 
 def calcular_metricas_portafolio_movimientos(series_historicas, activos_identificados):
     """
@@ -8820,12 +8666,18 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
     st.text(f"Total activos final: {len(portafolio_combinado['activos'])}")
     
     if not portafolio_combinado['activos']:
-        st.error("❌ No se pudieron obtener portafolios de Argentina ni Estados Unidos")
-        st.info("💡 **Posibles causas:**")
-        st.info("• Problemas de conectividad con la API")
-        st.info("• Token de acceso expirado")
-        st.info("• Permisos insuficientes para acceder a los portafolios")
-        st.info("• Los portafolios están vacíos")
+        st.error("❌ **No se pudieron obtener datos reales del portafolio**")
+        st.warning("⚠️ **La aplicación requiere datos reales de la API de IOL para funcionar**")
+        
+        # Mostrar información detallada sobre el problema
+        mostrar_error_conectividad()
+        
+        st.info("💡 **Para continuar:**")
+        st.info("1. Verifique su conexión a internet")
+        st.info("2. Asegúrese de estar autenticado correctamente")
+        st.info("3. Confirme que las APIs estén habilitadas en su cuenta de IOL")
+        st.info("4. Intente nuevamente en unos minutos")
+        
         return
     
     # Usar el portafolio combinado directamente
@@ -8866,50 +8718,18 @@ def mostrar_conversion_usd(token_acceso, id_cliente):
                 activos_raw = portafolio_ar.get('activos', [])
             else:
                 st.warning("⚠️ El método alternativo tampoco encontró activos")
-                st.info("💡 **Sugerencia:** Verifica que tengas activos en tus portafolios en la plataforma de IOL")
+                st.error("❌ **No se pudieron obtener datos reales del portafolio**")
+                st.warning("⚠️ **La aplicación requiere datos reales de la API de IOL para funcionar**")
                 
-                # Crear datos de ejemplo para demostración
-                st.info("🎭 **Creando datos de ejemplo para demostración...**")
-                portafolio_ar = {
-                    'pais': 'argentina',
-                    'activos': [
-                        {
-                            'titulo': {
-                                'simbolo': 'MELI',
-                                'descripcion': 'MercadoLibre S.A.',
-                                'tipo': 'acciones'
-                            },
-                            'cantidad': 2,
-                            'valuacion': 56250,
-                            'valorizado': 56250,
-                            'ultimoPrecio': 28125,
-                            'ppc': 26125,
-                            'gananciaPorcentaje': 7.94,
-                            'gananciaDinero': 4150,
-                            'variacionDiaria': 0.8,
-                            'comprometido': 0
-                        },
-                        {
-                            'titulo': {
-                                'simbolo': 'BYMA',
-                                'descripcion': 'Bolsas Y Mercados Argentinos S.A.',
-                                'tipo': 'acciones'
-                            },
-                            'cantidad': 90,
-                            'valuacion': 16830,
-                            'valorizado': 16830,
-                            'ultimoPrecio': 187,
-                            'ppc': 203.91,
-                            'gananciaPorcentaje': -8.16,
-                            'gananciaDinero': -1499,
-                            'variacionDiaria': -2.85,
-                            'comprometido': 0
-                        }
-                    ],
-                    'metodo': 'simulado_ejemplo'
-                }
-                activos_raw = portafolio_ar.get('activos', [])
-                st.success("✅ Datos de ejemplo creados para demostración")
+                # Mostrar información detallada sobre el problema
+                mostrar_error_conectividad()
+                
+                st.info("💡 **Para continuar:**")
+                st.info("1. Verifique que tenga activos en sus portafolios en la plataforma de IOL")
+                st.info("2. Confirme que las APIs estén habilitadas en su cuenta")
+                st.info("3. Intente reautenticarse")
+                st.info("4. Contacte al soporte de IOL si el problema persiste")
+                
                 return
         except Exception as e:
             st.error(f"❌ Error en método alternativo: {e}")
