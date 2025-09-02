@@ -793,6 +793,8 @@ def obtener_portafolio_correcto(token_portador: str):
                 elif response.status_code == 500:
                     print(f"❌ Error 500: Error interno del servidor para endpoint {i}")
                     print(f"📝 Respuesta del servidor: {response.text}")
+                    st.warning(f"⚠️ **Error del Servidor**: El servidor de IOL está experimentando problemas temporales (Error 500)")
+                    st.info("💡 **Solución**: Intente nuevamente en unos minutos o use la funcionalidad de estado de cuenta")
                     continue
                     
                 else:
@@ -815,6 +817,66 @@ def obtener_portafolio_correcto(token_portador: str):
         # Si llegamos aquí, ningún endpoint funcionó
         print("❌ Ningún endpoint funcionó para obtener el portafolio")
         st.warning("⚠️ **Error de Conexión**: No se pudo obtener el portafolio desde ningún endpoint")
+        
+        # Intentar método alternativo usando estado de cuenta
+        print("🔄 Intentando método alternativo con estado de cuenta...")
+        try:
+            estado_cuenta = obtener_estado_cuenta(token_portador)
+            if estado_cuenta and 'cuentas' in estado_cuenta:
+                print("✅ Estado de cuenta obtenido, creando portafolio simulado...")
+                
+                # Crear portafolio simulado basado en el estado de cuenta
+                portafolio_simulado = {
+                    'activos': [],
+                    'activos_argentinos': [],
+                    'activos_estadounidenses': [],
+                    'metodo': 'simulado_estado_cuenta'
+                }
+                
+                cuentas = estado_cuenta['cuentas']
+                for cuenta in cuentas:
+                    if cuenta.get('estado') == 'operable' and cuenta.get('total', 0) > 0:
+                        tipo_cuenta = cuenta.get('tipo', 'Cuenta')
+                        moneda = cuenta.get('moneda', 'Peso')
+                        total = float(cuenta.get('total', 0))
+                        
+                        # Crear activo simulado
+                        activo_simulado = {
+                            'titulo': {
+                                'simbolo': f"{tipo_cuenta[:5].upper()}_{moneda[:3].upper()}",
+                                'descripcion': f"Cuenta {tipo_cuenta} - {moneda}",
+                                'tipo': 'cuenta',
+                                'pais': 'argentina' if 'peso' in moneda.lower() else 'estados_Unidos',
+                                'mercado': 'BCBA' if 'peso' in moneda.lower() else 'NYSE',
+                                'moneda': moneda
+                            },
+                            'cantidad': 1,
+                            'valuacion': total,
+                            'valorizado': total,
+                            'ultimoPrecio': total,
+                            'ppc': total,
+                            'gananciaPorcentaje': 0,
+                            'gananciaDinero': 0,
+                            'variacionDiaria': 0,
+                            'comprometido': 0
+                        }
+                        
+                        portafolio_simulado['activos'].append(activo_simulado)
+                        
+                        # Clasificar por país
+                        if 'peso' in moneda.lower():
+                            portafolio_simulado['activos_argentinos'].append(activo_simulado)
+                        else:
+                            portafolio_simulado['activos_estadounidenses'].append(activo_simulado)
+                
+                if portafolio_simulado['activos']:
+                    print(f"✅ Portafolio simulado creado con {len(portafolio_simulado['activos'])} activos")
+                    st.info("ℹ️ **Portafolio Simulado**: Se creó un portafolio basado en el estado de cuenta debido a errores del servidor")
+                    return portafolio_simulado
+                
+        except Exception as e:
+            print(f"❌ Error en método alternativo: {e}")
+        
         return None
             
     except Exception as e:
@@ -1365,8 +1427,8 @@ def obtener_movimientos_completos(token_portador, id_cliente):
     Obtiene movimientos completos para un cliente específico con múltiples fallbacks
     """
     try:
-        # Obtener fechas del session state
-        fecha_desde = st.session_state.get('fecha_desde', date.today() - timedelta(days=30))
+        # Obtener fechas del session state (usando el rango seleccionado por el usuario)
+        fecha_desde = st.session_state.get('fecha_desde', date.today() - timedelta(days=365))
         fecha_hasta = st.session_state.get('fecha_hasta', date.today())
         
         print(f"📅 Obteniendo movimientos para cliente {id_cliente} desde {fecha_desde} hasta {fecha_hasta}")
@@ -1385,8 +1447,8 @@ def obtener_movimientos_completos(token_portador, id_cliente):
                     print("❌ No se pudo renovar el token")
                     # Continuar con método alternativo
         
-        # Intentar obtener movimientos del asesor primero
-        print("🔍 Intentando obtener movimientos del asesor...")
+        # Intentar obtener movimientos del asesor primero con el rango de fechas seleccionado
+        print("🔍 Intentando obtener movimientos del asesor con rango histórico...")
         movimientos = obtener_movimientos_asesor(
             token_portador=token_portador,
             clientes=[id_cliente],
@@ -1404,6 +1466,7 @@ def obtener_movimientos_completos(token_portador, id_cliente):
         if movimientos and movimientos.get('movimientos'):
             print(f"✅ Movimientos obtenidos exitosamente: {len(movimientos['movimientos'])} entradas")
             print(f"📋 Método utilizado: {movimientos.get('metodo', 'desconocido')}")
+            print(f"📅 Rango de fechas: {fecha_desde} a {fecha_hasta}")
         else:
             print("⚠️ No se pudieron obtener movimientos válidos")
         
@@ -1789,63 +1852,17 @@ def mostrar_analisis_integrado(movimientos, estado_cuenta, token_acceso):
                 
                 st.dataframe(df_display, use_container_width=True)
     
-    # Análisis de rendimiento integrado
-    st.markdown("#### 📊 Análisis de Rendimiento Integrado")
+    # Resumen simplificado y claro
+    st.markdown("#### 📊 Resumen de Datos")
     
-    # Calcular rendimiento basado en movimientos y estado actual
-    if 'movimientos' in movimientos and movimientos['movimientos']:
-        # Analizar movimientos para calcular rendimiento
-        rendimiento_calculado = calcular_rendimiento_desde_movimientos(movimientos['movimientos'], estado_cuenta)
-        
-        if rendimiento_calculado:
-            col1, col2, col3, col4 = st.columns(4)
-            
-            col1.metric("📈 Rendimiento Total", f"{rendimiento_calculado.get('rendimiento_total', 0):+.2f}%")
-            col2.metric("💰 Ganancia/Pérdida", f"${rendimiento_calculado.get('ganancia_total', 0):+,.2f}")
-            col3.metric("📊 Volatilidad", f"{rendimiento_calculado.get('volatilidad', 0):.2f}%")
-            col4.metric("⚖️ Ratio Sharpe", f"{rendimiento_calculado.get('sharpe_ratio', 0):.2f}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
+        st.info(f"📋 **Movimientos encontrados**: {len(movimientos['movimientos']) if 'movimientos' in movimientos and movimientos['movimientos'] else 0}")
     
-    # Recomendaciones basadas en el análisis integrado
-    st.markdown("#### 💡 Recomendaciones Integradas")
-    
-    # Análisis de diversificación
-    if total_ars_estado > 0 and total_usd_estado > 0:
-        ratio_diversificacion = total_usd_estado / (total_ars_estado + total_usd_estado) * 100
-        st.info(f"🌍 **Diversificación Internacional**: {ratio_diversificacion:.1f}% en USD")
-        
-        if ratio_diversificacion < 10:
-            st.warning("⚠️ **Baja diversificación internacional**: Considera aumentar exposición a activos en USD")
-        elif ratio_diversificacion > 50:
-            st.warning("⚠️ **Alta exposición internacional**: Considera aumentar activos locales")
-        else:
-            st.success("✅ **Diversificación equilibrada**: Buena distribución entre mercados locales e internacionales")
-    
-    # Análisis de liquidez
-    total_disponible = 0
-    for cuenta in cuentas:
-        if cuenta.get('estado') == 'operable':
-            total_disponible += float(cuenta.get('disponible', 0))
-    
-    if total_en_pesos > 0:
-        ratio_liquidez = total_disponible / total_en_pesos * 100
-        st.info(f"💧 **Liquidez**: {ratio_liquidez:.1f}% disponible")
-        
-        if ratio_liquidez < 5:
-            st.warning("⚠️ **Baja liquidez**: Considera mantener más efectivo disponible")
-        elif ratio_liquidez > 30:
-            st.warning("⚠️ **Alta liquidez**: Considera invertir el exceso de efectivo")
-        else:
-            st.success("✅ **Liquidez adecuada**: Nivel de efectivo apropiado")
-    
-    # Notas finales
-    st.markdown("---")
-    st.markdown("""
-    **📝 Notas del Análisis Integrado:**
-    - Los datos combinan información del estado de cuenta, movimientos y portafolio directo
-    - Las diferencias entre fuentes pueden deberse a actualizaciones en tiempo real
-    - El análisis de rendimiento considera tanto movimientos históricos como posiciones actuales
-    - Las recomendaciones se basan en métricas consolidadas de todas las fuentes
-    """)
+    with col2:
+        st.info(f"💰 **Total Estado de Cuenta**: ${total_en_pesos:,.2f}")
+        st.info(f"🌍 **Distribución**: ARS ${total_ars_estado:,.2f} | USD ${total_usd_estado:,.2f}")
 
 def calcular_rendimiento_desde_movimientos(movimientos_lista, estado_cuenta):
     """
@@ -7904,7 +7921,14 @@ def mostrar_analisis_portafolio():
     
     with tab2:
         # Mostrar estado de cuenta y movimientos
-        st.markdown("#### 💰 Estado de Cuenta y Movimientos")
+        st.markdown("#### 💰 Estado de Cuenta y Movimientos Históricos")
+        
+        # Explicación clara del período histórico
+        fecha_desde = st.session_state.get('fecha_desde', date.today() - timedelta(days=365))
+        fecha_hasta = st.session_state.get('fecha_hasta', date.today())
+        
+        st.info(f"📊 **Análisis de período histórico**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
+        st.info("💡 **Los movimientos mostrados corresponden al rango de fechas seleccionado en la barra lateral**")
         
         # Verificar token antes de proceder
         if not verificar_token_valido(token_acceso):
@@ -8010,10 +8034,38 @@ def mostrar_analisis_portafolio():
                 st.info("✅ **Beneficio:** Esto permite que la aplicación funcione y muestre análisis aproximados")
                 st.info("📊 **Limitación:** Los análisis de retorno y riesgo serán aproximados, no exactos")
             else:
-                st.success(f"✅ Movimientos obtenidos exitosamente desde la API")
+                st.success(f"✅ **Movimientos históricos obtenidos exitosamente** desde la API de IOL")
+                st.info(f"📅 **Período analizado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
             
-            # Mostrar análisis integrado de movimientos y portafolio
-            mostrar_analisis_integrado(movimientos, estado_cuenta, token_acceso)
+            # Mostrar resumen de movimientos sin duplicar información
+            if 'movimientos' in movimientos and movimientos['movimientos']:
+                df_mov = pd.DataFrame(movimientos['movimientos'])
+                st.success(f"✅ **Movimientos históricos obtenidos**: {len(df_mov)} operaciones")
+                st.info(f"📅 **Período**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
+                
+                # Mostrar tabla de movimientos
+                st.markdown("#### 📋 Detalle de Movimientos")
+                if not df_mov.empty:
+                    # Seleccionar columnas relevantes
+                    columnas_display = []
+                    for col in ['fechaOperacion', 'simbolo', 'tipo', 'cantidad', 'precio', 'moneda', 'descripcion']:
+                        if col in df_mov.columns:
+                            columnas_display.append(col)
+                    
+                    if columnas_display:
+                        df_display = df_mov[columnas_display].copy()
+                        df_display.columns = ['Fecha', 'Símbolo', 'Tipo', 'Cantidad', 'Precio', 'Moneda', 'Descripción']
+                        
+                        # Formatear valores
+                        if 'Precio' in df_display.columns:
+                            df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                        if 'Cantidad' in df_display.columns:
+                            df_display['Cantidad'] = df_display['Cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+                        
+                        st.dataframe(df_display, use_container_width=True)
+            else:
+                st.warning("⚠️ **No se encontraron movimientos** en el período seleccionado")
+                st.info("💡 **Sugerencia**: Intente con un rango de fechas diferente o verifique los permisos de acceso")
         else:
             st.error("❌ **Error Crítico**: No se pudieron obtener los movimientos del portafolio")
             st.markdown("""
@@ -9165,23 +9217,34 @@ def main():
             
 
             
-            st.subheader("Configuración de Fechas")
+            st.subheader("📅 Configuración de Período Histórico")
+            st.info("💡 **Seleccione el rango de fechas para analizar movimientos históricos y rendimientos**")
+            
             col1, col2 = st.columns(2)
             with col1:
                 fecha_desde = st.date_input(
                     "Desde:",
                     value=st.session_state.fecha_desde,
-                    max_value=date.today()
+                    max_value=date.today(),
+                    help="Fecha inicial para el análisis histórico"
                 )
             with col2:
                 fecha_hasta = st.date_input(
                     "Hasta:",
                     value=st.session_state.fecha_hasta,
-                    max_value=date.today()
+                    max_value=date.today(),
+                    help="Fecha final para el análisis histórico"
                 )
+            
+            # Validar que fecha_desde <= fecha_hasta
+            if fecha_desde > fecha_hasta:
+                st.error("❌ **Error**: La fecha 'Desde' no puede ser posterior a la fecha 'Hasta'")
+                fecha_desde = fecha_hasta - timedelta(days=30)
             
             st.session_state.fecha_desde = fecha_desde
             st.session_state.fecha_hasta = fecha_hasta
+            
+            st.success(f"✅ **Período configurado**: {fecha_desde.strftime('%d/%m/%Y')} - {fecha_hasta.strftime('%d/%m/%Y')}")
             
             # Obtener lista de clientes
             if not st.session_state.clientes and st.session_state.token_acceso:
