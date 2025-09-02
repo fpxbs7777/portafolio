@@ -556,6 +556,83 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
         print(f"💥 Error al obtener estado de cuenta: {e}")
         return None
 
+def obtener_estado_cuenta_mejorado(token_portador: str):
+    """
+    Obtiene el estado de cuenta usando la API oficial de IOL v2
+    Endpoint: GET /api/v2/estadocuenta
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    url = 'https://api.invertironline.com/api/v2/estadocuenta'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    print("🔍 Obteniendo estado de cuenta desde API oficial...")
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=20)
+        print(f"📡 Respuesta HTTP: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print("✅ Estado de cuenta obtenido exitosamente")
+            
+            # Verificar estructura según documentación
+            if isinstance(data, dict) and 'cuentas' in data:
+                cuentas = data['cuentas']
+                print(f"📊 Cuentas encontradas: {len(cuentas)}")
+                
+                # Filtrar solo cuentas operables
+                cuentas_operables = [cuenta for cuenta in cuentas if cuenta.get('estado') == 'operable']
+                print(f"📊 Cuentas operables: {len(cuentas_operables)}")
+                
+                # Actualizar data con solo cuentas operables
+                data['cuentas'] = cuentas_operables
+                
+                return data
+            else:
+                print("⚠️ Estructura de respuesta inesperada")
+                return data
+                
+        elif response.status_code == 401:
+            print("❌ Error 401: No autorizado")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Error de Autenticación**: Token expirado o inválido")
+            st.info("💡 **Solución**: Reautentíquese en la aplicación")
+            return None
+            
+        elif response.status_code == 403:
+            print("❌ Error 403: Acceso prohibido")
+            st.error("❌ **Acceso Prohibido**: No tiene permisos para acceder al estado de cuenta")
+            st.info("💡 **Solución**: Contacte a IOL para habilitar las APIs")
+            return None
+            
+        else:
+            print(f"❌ Error HTTP {response.status_code}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout al obtener estado de cuenta")
+        st.warning("⏰ **Timeout**: La consulta tardó demasiado")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print("🌐 Error de conexión al obtener estado de cuenta")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener estado de cuenta: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
 def obtener_totales_estado_cuenta(token_portador, id_cliente):
     """
     Obtiene totales de cuentas en ARS y USD desde Estado de Cuenta
@@ -1066,6 +1143,268 @@ def obtener_portafolio_correcto(token_portador: str):
     except Exception as e:
         print(f"💥 Error general al obtener portafolio: {e}")
         st.error("💥 Error inesperado al obtener portafolio")
+        return None
+
+def obtener_cotizacion_mep_mejorado(token_portador: str, simbolo: str = "AL30"):
+    """
+    Obtiene cotización MEP usando la API oficial de IOL v2
+    Endpoint: GET /api/v2/Cotizaciones/MEP/{simbolo}
+    
+    Parámetros:
+    - simbolo: símbolo del instrumento (ej: "AL30", "GGAL", etc.)
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    url = f'https://api.invertironline.com/api/v2/Cotizaciones/MEP/{simbolo}'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    print(f"🔍 Obteniendo cotización MEP para {simbolo} desde API oficial...")
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=20)
+        print(f"📡 Respuesta HTTP: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Cotización MEP obtenida exitosamente para {simbolo}")
+            
+            # La respuesta es un double según la documentación
+            if isinstance(data, (int, float)):
+                print(f"📊 Cotización MEP {simbolo}: ${data:,.2f}")
+                return data
+            else:
+                print(f"⚠️ Formato de respuesta inesperado para {simbolo}")
+                return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para cotización MEP {simbolo}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error de Autenticación**: No se pudo obtener cotización MEP de {simbolo}")
+            st.info("💡 **Solución**: Reautentíquese en la aplicación")
+            return None
+            
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Acceso prohibido para cotización MEP {simbolo}")
+            st.error(f"❌ **Acceso Prohibido**: No tiene permisos para cotizaciones MEP")
+            st.info("💡 **Solución**: Contacte a IOL para habilitar las APIs")
+            return None
+            
+        else:
+            print(f"❌ Error HTTP {response.status_code} para cotización MEP {simbolo}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code} para cotización MEP")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener cotización MEP de {simbolo}")
+        st.warning(f"⏰ **Timeout**: La consulta tardó demasiado para {simbolo}")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print(f"🌐 Error de conexión al obtener cotización MEP de {simbolo}")
+        st.error(f"🌐 **Error de Conexión**: No se pudo conectar para {simbolo}")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener cotización MEP de {simbolo}: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)} para {simbolo}")
+        return None
+
+def obtener_movimientos_asesor_mejorado(token_portador: str, fecha_desde: str, fecha_hasta: str):
+    """
+    Obtiene movimientos usando la API oficial de IOL v2 para asesores
+    Endpoint: POST /api/v2/Asesor/Movimientos
+    
+    Parámetros:
+    - fecha_desde: formato ISO (ej: "2025-09-02T00:00:00.000Z")
+    - fecha_hasta: formato ISO (ej: "2025-09-02T23:59:59.999Z")
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    url = 'https://api.invertironline.com/api/v2/Asesor/Movimientos'
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    # Obtener cliente seleccionado
+    cliente_actual = st.session_state.get('cliente_seleccionado')
+    if not cliente_actual:
+        print("❌ No hay cliente seleccionado")
+        return None
+    
+    id_cliente = cliente_actual.get('numeroCliente', cliente_actual.get('id'))
+    if not id_cliente:
+        print("❌ No se pudo obtener ID del cliente")
+        return None
+    
+    # Preparar datos según documentación
+    data = {
+        "clientes": [id_cliente],
+        "from": fecha_desde,
+        "to": fecha_hasta,
+        "dateType": "fechaOperacion",
+        "status": "",
+        "type": "",
+        "country": "",
+        "currency": "",
+        "cuentaComitente": ""
+    }
+    
+    print(f"🔍 Obteniendo movimientos desde API oficial para cliente {id_cliente}...")
+    
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        print(f"📡 Respuesta HTTP: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print("✅ Movimientos obtenidos exitosamente")
+            
+            # Verificar estructura de respuesta
+            if isinstance(data, dict):
+                movimientos = data.get('movimientos', [])
+                print(f"📊 Movimientos encontrados: {len(movimientos)}")
+                return data
+            else:
+                print("⚠️ Estructura de respuesta inesperada")
+                return data
+                
+        elif response.status_code == 401:
+            print("❌ Error 401: No autorizado")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Error de Autenticación**: Token expirado o inválido")
+            st.info("💡 **Solución**: Reautentíquese en la aplicación")
+            return None
+            
+        elif response.status_code == 403:
+            print("❌ Error 403: Acceso prohibido")
+            st.error("❌ **Acceso Prohibido**: No tiene permisos de asesor")
+            st.info("💡 **Solución**: Contacte a IOL para habilitar permisos de asesor")
+            return None
+            
+        else:
+            print(f"❌ Error HTTP {response.status_code}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("⏰ Timeout al obtener movimientos")
+        st.warning("⏰ **Timeout**: La consulta tardó demasiado")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print("🌐 Error de conexión al obtener movimientos")
+        st.error("🌐 **Error de Conexión**: No se pudo conectar con la API")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener movimientos: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def obtener_portafolio_pais_mejorado(token_portador: str, pais: str):
+    """
+    Obtiene el portafolio por país usando la API oficial de IOL v2
+    Endpoint: GET /api/v2/portafolio/{pais}
+    
+    Parámetros:
+    - pais: 'argentina' o 'estados_Unidos'
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Normalizar país según documentación IOL
+    if pais.lower() in ['ar', 'arg', 'argentina']:
+        pais_norm = 'argentina'
+    elif pais.lower() in ['us', 'usa', 'eeuu', 'estados_unidos', 'estados unidos']:
+        pais_norm = 'estados_Unidos'
+    else:
+        print(f"❌ País no reconocido: {pais}")
+        return None
+    
+    url = f'https://api.invertironline.com/api/v2/portafolio/{pais_norm}'
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {token_portador}'
+    }
+    
+    print(f"🔍 Obteniendo portafolio de {pais_norm} desde API oficial...")
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=20)
+        print(f"📡 Respuesta HTTP: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Portafolio de {pais_norm} obtenido exitosamente")
+            
+            # Verificar estructura según documentación
+            if isinstance(data, dict) and 'activos' in data:
+                activos = data['activos']
+                print(f"📊 Activos encontrados: {len(activos)}")
+                
+                # Filtrar activos con cantidad > 0
+                activos_validos = [activo for activo in activos if activo.get('cantidad', 0) > 0]
+                print(f"📊 Activos válidos: {len(activos_validos)}")
+                
+                # Actualizar data con solo activos válidos
+                data['activos'] = activos_validos
+                
+                if not activos_validos:
+                    print(f"⚠️ No hay activos válidos en el portafolio de {pais_norm}")
+                    st.info(f"ℹ️ **Portafolio {pais_norm}**: No hay activos con cantidad > 0")
+                
+                return data
+            else:
+                print(f"⚠️ Estructura de respuesta inesperada para {pais_norm}")
+                return data
+                
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para {pais_norm}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error de Autenticación**: No se pudo obtener el portafolio de {pais_norm}")
+            st.info("💡 **Solución**: Reautentíquese en la aplicación")
+            return None
+            
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Acceso prohibido para {pais_norm}")
+            st.error(f"❌ **Acceso Prohibido**: No tiene permisos para el portafolio de {pais_norm}")
+            st.info("💡 **Solución**: Contacte a IOL para habilitar las APIs")
+            return None
+            
+        else:
+            print(f"❌ Error HTTP {response.status_code} para {pais_norm}")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code} para {pais_norm}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener portafolio de {pais_norm}")
+        st.warning(f"⏰ **Timeout**: La consulta tardó demasiado para {pais_norm}")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        print(f"🌐 Error de conexión al obtener portafolio de {pais_norm}")
+        st.error(f"🌐 **Error de Conexión**: No se pudo conectar para {pais_norm}")
+        return None
+        
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener portafolio de {pais_norm}: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)} para {pais_norm}")
         return None
 
 def obtener_portafolio_por_pais(token_portador: str, pais: str):
@@ -9608,13 +9947,13 @@ def mostrar_distribucion_activos_mejorada():
     with st.spinner("🔄 Obteniendo datos de portafolio..."):
         
         # Portafolio argentino con método mejorado
-        portafolio_ar = obtener_portafolio_argentina_mejorado(token_acceso)
+        portafolio_ar = obtener_portafolio_pais_mejorado(token_acceso, "argentina")
         if not portafolio_ar or not portafolio_ar.get('activos'):
             st.warning("⚠️ No se pudieron obtener activos argentinos")
             portafolio_ar = {'activos': [], 'metodo': 'fallback'}
         
         # Portafolio estadounidense con método mejorado
-        portafolio_us = obtener_portafolio_estados_unidos_mejorado(token_acceso)
+        portafolio_us = obtener_portafolio_pais_mejorado(token_acceso, "estados_Unidos")
         if not portafolio_us or not portafolio_us.get('activos'):
             st.warning("⚠️ No se pudieron obtener activos estadounidenses")
             portafolio_us = {'activos': [], 'metodo': 'fallback'}
