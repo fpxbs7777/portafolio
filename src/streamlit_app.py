@@ -6322,38 +6322,38 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                             col1.metric("Valor Total", f"${valor_total_unificado:,.0f}")
                             col2.metric("Retorno Ponderado", f"{retorno_ponderado_unificado:.1f}%")
                             col3.metric("Riesgo Total", f"{riesgo_total_unificado:.1f}%")
-                                                        col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
+                            col4.metric("Ratio Retorno/Riesgo", f"{ratio_unificado:.2f}" if ratio_unificado > 0 else "N/A")
                             
                             # Identificar instrumentos de renta fija
                             instrumentos_renta_fija = []
                             total_renta_fija = 0
                             
                             for activo in datos_activos:
-                                    tipo = activo.get('Tipo', '').lower()
-                                    simbolo = activo.get('Símbolo', '')
-                                    valuacion = activo.get('Valuación', 0)
-                                    
-                                    # Identificar FCIs, bonos y otros instrumentos de renta fija
-                                    if any(keyword in tipo for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra']):
-                                        instrumentos_renta_fija.append({
-                                            'simbolo': simbolo,
-                                            'tipo': tipo,
-                                            'valuacion': valuacion,
-                                            'peso': valuacion / valor_total if valor_total > 0 else 0
-                                        })
-                                        total_renta_fija += valuacion
-                                    
-                                    # También identificar por símbolo (FCIs suelen tener símbolos específicos)
-                                    elif any(keyword in simbolo.lower() for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg']):
-                                        instrumentos_renta_fija.append({
-                                            'simbolo': simbolo,
-                                            'tipo': tipo,
-                                            'valuacion': valuacion,
-                                            'peso': valuacion / valor_total if valor_total > 0 else 0
-                                        })
-                                        total_renta_fija += valuacion
+                                tipo = activo.get('Tipo', '').lower()
+                                simbolo = activo.get('Símbolo', '')
+                                valuacion = activo.get('Valuación', 0)
                                 
-                                if instrumentos_renta_fija:
+                                # Identificar FCIs, bonos y otros instrumentos de renta fija
+                                if any(keyword in tipo for keyword in ['fci', 'fondo', 'bono', 'titulo', 'publico', 'letra']):
+                                    instrumentos_renta_fija.append({
+                                        'simbolo': simbolo,
+                                        'tipo': tipo,
+                                        'valuacion': valuacion,
+                                        'peso': valuacion / valor_total if valor_total > 0 else 0
+                                    })
+                                    total_renta_fija += valuacion
+                                
+                                # También identificar por símbolo (FCIs suelen tener símbolos específicos)
+                                elif any(keyword in simbolo.lower() for keyword in ['fci', 'fondo', 'bono', 'al', 'gd', 'gg']):
+                                    instrumentos_renta_fija.append({
+                                        'simbolo': simbolo,
+                                        'tipo': tipo,
+                                        'valuacion': valuacion,
+                                        'peso': valuacion / valor_total if valor_total > 0 else 0
+                                    })
+                                    total_renta_fija += valuacion
+                            
+                            if instrumentos_renta_fija:
                                     # Mostrar tabla de instrumentos de renta fija
                                     df_renta_fija = pd.DataFrame(instrumentos_renta_fija)
                                     df_renta_fija['Peso (%)'] = df_renta_fija['peso'] * 100
