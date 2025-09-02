@@ -10204,15 +10204,23 @@ def mostrar_datos_historicos_portafolio():
         """)
 
 
-def main():
-    st.markdown("---")
-    st.markdown("""
-    **📝 Notas importantes:**
-    - Los datos se actualizan en tiempo real desde la API de IOL
-    - Las ganancias/pérdidas son calculadas en USD
-    - Considera el impacto de las comisiones en tus cálculos
-    - La diversificación es clave para reducir el riesgo
-    """)
+def verificar_apis_habilitadas(token_portador):
+    """
+    Verifica si las APIs están habilitadas en la cuenta
+    """
+    if not token_portador:
+        return False
+    
+    # Intentar hacer una llamada simple a la API para verificar acceso
+    url = "https://api.invertironline.com/api/v2/estadocuenta"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        return response.status_code == 200
+    except:
+        return False
+
 
 def main():
     st.title("📊 IOL Portfolio Analyzer")
@@ -10232,6 +10240,39 @@ def main():
     if 'fecha_hasta' not in st.session_state:
         st.session_state.fecha_hasta = date.today()
     
+    # ============================================================================
+    # VALIDACIÓN Y RENOVACIÓN AUTOMÁTICA DE TOKEN
+    # ============================================================================
+    
+    # Verificar y renovar token automáticamente si es necesario
+    if st.session_state.token_acceso:
+        # Verificar si el token es válido
+        if not verificar_token_valido(st.session_state.token_acceso):
+            st.warning("⚠️ **Token Expirado**: Intentando renovar automáticamente...")
+            
+            if st.session_state.refresh_token:
+                with st.spinner("🔄 Renovando token..."):
+                    nuevo_token = renovar_token(st.session_state.refresh_token)
+                    if nuevo_token:
+                        st.session_state.token_acceso = nuevo_token
+                        st.success("✅ Token renovado automáticamente")
+                        st.info("🔄 Recargando aplicación...")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ No se pudo renovar el token automáticamente")
+                        st.warning("💡 Debe autenticarse nuevamente")
+                        # Limpiar tokens inválidos
+                        st.session_state.token_acceso = None
+                        st.session_state.refresh_token = None
+                        st.rerun()
+            else:
+                st.error("❌ No hay refresh token disponible")
+                st.warning("💡 Debe autenticarse nuevamente")
+                # Limpiar tokens inválidos
+                st.session_state.token_acceso = None
+                st.rerun()
+    
     # Barra lateral - Autenticación
     with st.sidebar:
         st.header("🔐 Autenticación IOL")
@@ -10248,16 +10289,82 @@ def main():
                             token_acceso, refresh_token = obtener_tokens(usuario, contraseña)
                             
                             if token_acceso:
-                                st.session_state.token_acceso = token_acceso
-                                st.session_state.refresh_token = refresh_token
-                                st.success("✅ Conexión exitosa!")
-                                st.rerun()
+                                # Verificar que las APIs estén habilitadas
+                                if verificar_apis_habilitadas(token_acceso):
+                                    st.session_state.token_acceso = token_acceso
+                                    st.session_state.refresh_token = refresh_token
+                                    st.success("✅ Conexión exitosa!")
+                                    st.info("🔄 Recargando aplicación...")
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Las APIs no están habilitadas en su cuenta")
+                                    st.info("💡 Contacte a IOL para habilitar las APIs")
                             else:
                                 st.error("❌ Error en la autenticación")
                     else:
                         st.warning("⚠️ Complete todos los campos")
         else:
             st.success("✅ Conectado a IOL")
+            
+            # Mostrar información del token
+            st.info(f"🔑 Token válido: {st.session_state.token_acceso[:10]}...")
+            
+            # ============================================================================
+            # SECCIÓN DE DEBUGGING Y DIAGNÓSTICO
+            # ============================================================================
+            
+            with st.expander("🔧 **Diagnóstico de Conexión API**", expanded=False):
+                st.info("💡 **Esta sección ayuda a diagnosticar problemas de conexión**")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("🔍 Probar Conexión API", key="test_api_connection"):
+                        with st.spinner("🔍 Probando conexión..."):
+                            # Probar múltiples endpoints
+                            endpoints = [
+                                ("Estado de Cuenta", "https://api.invertironline.com/api/v2/estadocuenta"),
+                                ("Portafolio Argentina", "https://api.invertironline.com/api/v2/portafolio/argentina"),
+                                ("Operaciones", "https://api.invertironline.com/api/v2/operaciones"),
+                                ("Notificaciones", "https://api.invertironline.com/api/v2/Notificacion")
+                            ]
+                            
+                            resultados = []
+                            for nombre, url in endpoints:
+                                try:
+                                    headers = obtener_encabezado_autorizacion(st.session_state.token_acceso)
+                                    response = requests.get(url, headers=headers, timeout=10)
+                                    status = "✅ OK" if response.status_code == 200 else f"❌ {response.status_code}"
+                                    resultados.append((nombre, status, response.status_code))
+                                except Exception as e:
+                                    resultados.append((nombre, "❌ Error", str(e)))
+                            
+                            # Mostrar resultados
+                            st.subheader("📊 Resultados de Pruebas")
+                            for nombre, status, detalle in resultados:
+                                st.write(f"**{nombre}**: {status}")
+                                if "❌" in status:
+                                    st.caption(f"Detalle: {detalle}")
+                
+                with col2:
+                    if st.button("🔄 Verificar Token", key="verify_token"):
+                        with st.spinner("🔍 Verificando token..."):
+                            es_valido = verificar_token_valido(st.session_state.token_acceso)
+                            if es_valido:
+                                st.success("✅ Token válido y activo")
+                            else:
+                                st.error("❌ Token expirado o inválido")
+                                st.info("💡 Intente renovar el token")
+                
+                # Información adicional de debugging
+                st.subheader("📋 Información de Sesión")
+                st.json({
+                    "token_length": len(st.session_state.token_acceso) if st.session_state.token_acceso else 0,
+                    "refresh_token_exists": bool(st.session_state.refresh_token),
+                    "clientes_cargados": len(st.session_state.clientes),
+                    "cliente_seleccionado": bool(st.session_state.cliente_seleccionado)
+                })
             
             # Botón para renovar token manualmente
             if st.button("🔄 Renovar Token", key="renew_token_main", help="Renueva el token de acceso si ha expirado"):
@@ -10267,10 +10374,20 @@ def main():
                         st.session_state.token_acceso = nuevo_token
                         st.success("✅ Token renovado exitosamente")
                         st.info("🔄 Recargando aplicación...")
+                        time.sleep(1)
                         st.rerun()
                     else:
                         st.error("❌ No se pudo renovar el token")
                         st.warning("💡 Intente autenticarse nuevamente")
+            
+            # Botón para desconectar
+            if st.button("🚪 Desconectar", key="disconnect", help="Cerrar sesión"):
+                st.session_state.token_acceso = None
+                st.session_state.refresh_token = None
+                st.session_state.clientes = []
+                st.session_state.cliente_seleccionado = None
+                st.success("✅ Sesión cerrada")
+                st.rerun()
             
             st.divider()
             
