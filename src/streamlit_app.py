@@ -4192,6 +4192,41 @@ def mostrar_resumen_estado_cuenta(estado_cuenta):
     Los valores mostrados representan el saldo total de cada cuenta, incluyendo títulos valorizados y disponible.
     """)
 
+def _es_activo_estadounidense(simbolo, tipo_activo):
+    """
+    Determina si un activo es estadounidense basado en su símbolo y tipo.
+    Los CEDEARS se consideran argentinos ya que se negocian en el mercado local.
+    """
+    # Los CEDEARS son argentinos aunque representen acciones estadounidenses
+    if tipo_activo and 'CEDEAR' in tipo_activo.upper():
+        return False
+    
+    # Activos argentinos conocidos (renta fija, acciones locales)
+    activos_argentinos_conocidos = [
+        'AL30', 'GD30', 'S10N5', 'S30S5', 'BYMA', 'PAMP', 'YPF', 'GGAL', 'TECO2',
+        'ALUA', 'BMA', 'CRESUD', 'EDN', 'FRAN', 'LOMA', 'PESA', 'TGS', 'TS'
+    ]
+    if simbolo in activos_argentinos_conocidos:
+        return False
+    
+    # Activos que terminan en sufijos estadounidenses
+    sufijos_eeuu = ['.O', '.N', '.A', '.B', '.C', '.D', '.US', '.USO']
+    if any(simbolo.endswith(suffix) for suffix in sufijos_eeuu):
+        return True
+    
+    # Símbolos típicamente estadounidenses (1-5 letras, sin ser argentinos)
+    if (len(simbolo) <= 5 and simbolo.isalpha() and 
+        not simbolo.startswith('AL') and not simbolo.startswith('GD') and
+        not simbolo.startswith('S') and not simbolo.startswith('D') and
+        not simbolo.startswith('P') and not simbolo.startswith('B') and
+        not simbolo.startswith('Y') and not simbolo.startswith('T') and
+        not simbolo.startswith('C') and not simbolo.startswith('E') and
+        not simbolo.startswith('F') and not simbolo.startswith('L')):
+        return True
+    
+    # Por defecto, considerar como argentino
+    return False
+
 def mostrar_resumen_portafolio(portafolio, token_portador):
     """
     Muestra un resumen profesional y organizado del portafolio
@@ -4446,22 +4481,96 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         portafolio_dict = {row['Símbolo']: row for row in datos_activos}
         metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
         
-        # Separar activos por mercado (Argentina vs Estados Unidos)
+        # Separar activos por mercado usando información real de la API
         activos_argentinos = []
         activos_eeuu = []
         
         for activo in datos_activos:
             simbolo = activo['Símbolo']
-            # Identificar activos estadounidenses (generalmente terminan en .O o son símbolos de 1-5 letras)
-            if any(simbolo.endswith(suffix) for suffix in ['.O', '.N', '.A', '.B', '.C', '.D']) or \
-               (len(simbolo) <= 5 and simbolo.isalpha() and not simbolo.startswith('AL') and not simbolo.startswith('GD')):
-                activos_eeuu.append(activo)
+            tipo_activo = activo['Tipo']
+            
+            # Buscar el activo original en el portafolio para obtener el mercado real
+            mercado_real = None
+            for activo_original in activos:
+                if activo_original.get('titulo', {}).get('simbolo') == simbolo:
+                    mercado_real = activo_original.get('titulo', {}).get('mercado', 'BCBA')
+                    break
+            
+            # Clasificar basado en el mercado real y tipo de activo
+            if mercado_real:
+                # Mercados argentinos: BCBA, BYMA, ROFEX, MAE, etc.
+                if mercado_real in ['BCBA', 'BYMA', 'ROFEX', 'MAE', 'MATBA', 'BMA']:
+                    activos_argentinos.append(activo)
+                # Mercados estadounidenses: NASDAQ, NYSE, etc.
+                elif mercado_real in ['NASDAQ', 'NYSE', 'AMEX', 'OTC', 'PINK']:
+                    activos_eeuu.append(activo)
+                # Si no está en la lista, usar lógica de respaldo
+                else:
+                    # Lógica de respaldo basada en el símbolo y tipo
+                    if _es_activo_estadounidense(simbolo, tipo_activo):
+                        activos_eeuu.append(activo)
+                    else:
+                        activos_argentinos.append(activo)
             else:
-                activos_argentinos.append(activo)
+                # Si no se encuentra el mercado, usar lógica de respaldo
+                if _es_activo_estadounidense(simbolo, tipo_activo):
+                    activos_eeuu.append(activo)
+                else:
+                    activos_argentinos.append(activo)
         
         # Calcular totales por mercado
         valor_argentino = sum(activo['Valuación'] for activo in activos_argentinos)
         valor_eeuu = sum(activo['Valuación'] for activo in activos_eeuu)
+        
+        # Debug: Mostrar información de clasificación de mercados
+        if st.checkbox("🔍 Mostrar información de debug de mercados", key="debug_mercados"):
+            st.markdown("### 🔍 Debug: Clasificación de Mercados")
+            
+            debug_data = []
+            for activo in datos_activos:
+                simbolo = activo['Símbolo']
+                tipo_activo = activo['Tipo']
+                mercado_real = None
+                
+                # Buscar el mercado real
+                for activo_original in activos:
+                    if activo_original.get('titulo', {}).get('simbolo') == simbolo:
+                        mercado_real = activo_original.get('titulo', {}).get('mercado', 'BCBA')
+                        break
+                
+                # Determinar clasificación
+                if simbolo in [a['Símbolo'] for a in activos_argentinos]:
+                    clasificacion = "🇦🇷 Argentina"
+                elif simbolo in [a['Símbolo'] for a in activos_eeuu]:
+                    clasificacion = "🇺🇸 Estados Unidos"
+                else:
+                    clasificacion = "❓ No clasificado"
+                
+                # Función de clasificación aplicada
+                es_eeuu = _es_activo_estadounidense(simbolo, tipo_activo)
+                razon_clasificacion = f"Función retorna: {'EEUU' if es_eeuu else 'Argentina'}"
+                
+                debug_data.append({
+                    'Símbolo': simbolo,
+                    'Tipo': tipo_activo,
+                    'Mercado Real': mercado_real or 'N/A',
+                    'Clasificación': clasificacion,
+                    'Razón': razon_clasificacion,
+                    'Valorización': f"${activo['Valuación']:,.2f}"
+                })
+            
+            df_debug = pd.DataFrame(debug_data)
+            st.dataframe(df_debug, use_container_width=True)
+            
+            # Mostrar resumen de clasificación
+            st.markdown("#### 📊 Resumen de Clasificación")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Activos", len(datos_activos))
+            with col2:
+                st.metric("🇦🇷 Argentina", len(activos_argentinos))
+            with col3:
+                st.metric("🇺🇸 Estados Unidos", len(activos_eeuu))
         
         # Obtener totales del estado de cuenta
         cliente_actual = st.session_state.get('cliente_seleccionado')
@@ -4514,22 +4623,32 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         col1, col2 = st.columns(2)
         
         with col1:
+            # Obtener tipos de activos argentinos
+            tipos_argentinos = list(set(activo['Tipo'] for activo in activos_argentinos))
+            tipos_str = ", ".join(tipos_argentinos) if tipos_argentinos else "N/A"
+            
             st.markdown(f"""
             <div class="metric-card">
                 <h3>🇦🇷 Mercado Argentino</h3>
                 <h2>{len(activos_argentinos)} activos</h2>
                 <h3>${valor_argentino:,.2f}</h3>
                 <small>{(valor_argentino/valor_total*100):.1f}% del total</small>
+                <br><small><strong>Tipos:</strong> {tipos_str}</small>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
+            # Obtener tipos de activos estadounidenses
+            tipos_eeuu = list(set(activo['Tipo'] for activo in activos_eeuu))
+            tipos_str = ", ".join(tipos_eeuu) if tipos_eeuu else "N/A"
+            
             st.markdown(f"""
             <div class="metric-card">
                 <h3>🇺🇸 Mercado Estadounidense</h3>
                 <h2>{len(activos_eeuu)} activos</h2>
                 <h3>${valor_eeuu:,.2f}</h3>
                 <small>{(valor_eeuu/valor_total*100):.1f}% del total</small>
+                <br><small><strong>Tipos:</strong> {tipos_str}</small>
             </div>
             """, unsafe_allow_html=True)
         
