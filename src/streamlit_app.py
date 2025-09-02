@@ -8124,18 +8124,159 @@ def obtener_historico_movimientos_portafolio(token_portador, id_cliente, dias_at
         
         print(f"📅 Obteniendo histórico de movimientos desde {fecha_desde} hasta {fecha_hasta}")
         
-        # Obtener movimientos usando la función existente
+        # Verificar token antes de proceder
+        if not verificar_token_valido(token_portador):
+            print("⚠️ Token no válido, intentando renovar...")
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    print("✅ Token renovado exitosamente")
+                    st.session_state['token_acceso'] = nuevo_token
+                    token_portador = nuevo_token
+                else:
+                    print("❌ No se pudo renovar el token")
+                    return None
+        
+        # Estrategia 1: Intentar obtener movimientos completos
+        print("🔍 Estrategia 1: Movimientos completos")
         movimientos = obtener_movimientos_completos(token_portador, id_cliente)
         
         if movimientos and 'movimientos' in movimientos and movimientos['movimientos']:
             print(f"✅ Histórico obtenido: {len(movimientos['movimientos'])} movimientos")
             return movimientos
-        else:
-            print("⚠️ No se pudieron obtener movimientos históricos")
-            return None
+        
+        # Estrategia 2: Intentar obtener movimientos del asesor
+        print("🔍 Estrategia 2: Movimientos del asesor")
+        movimientos = obtener_movimientos_asesor(
+            token_portador=token_portador,
+            clientes=[id_cliente],
+            fecha_desde=fecha_desde + "T00:00:00.000Z",
+            fecha_hasta=fecha_hasta + "T23:59:59.999Z",
+            tipo_fecha="fechaOperacion"
+        )
+        
+        if movimientos and 'movimientos' in movimientos and movimientos['movimientos']:
+            print(f"✅ Histórico obtenido del asesor: {len(movimientos['movimientos'])} movimientos")
+            return movimientos
+        
+        # Estrategia 3: Método alternativo con estado de cuenta histórico
+        print("🔍 Estrategia 3: Estado de cuenta histórico")
+        movimientos = _obtener_movimientos_estado_cuenta_historico(token_portador, id_cliente, fecha_desde, fecha_hasta)
+        
+        if movimientos:
+            print(f"✅ Histórico obtenido del estado de cuenta: {len(movimientos)} movimientos")
+            return {'movimientos': movimientos, 'metodo': 'estado_cuenta_historico'}
+        
+        print("⚠️ No se pudieron obtener movimientos históricos con ningún método")
+        return None
             
     except Exception as e:
         print(f"💥 Error obteniendo histórico de movimientos: {e}")
+        return None
+
+def _obtener_movimientos_estado_cuenta_historico(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Método alternativo para obtener movimientos históricos usando estado de cuenta
+    """
+    try:
+        print("🔄 Generando movimientos históricos desde estado de cuenta")
+        
+        # Obtener estado de cuenta actual
+        estado_cuenta = obtener_estado_cuenta(token_portador, id_cliente)
+        if not estado_cuenta:
+            print("❌ No se pudo obtener estado de cuenta")
+            return None
+        
+        movimientos_historicos = []
+        
+        # Procesar cuentas argentinas
+        for cuenta in estado_cuenta.get('cuentas', []):
+            if cuenta.get('tipo') == 'inversion_Argentina_Pesos':
+                # Crear movimientos históricos simulados
+                if cuenta.get('posicionTotal', 0) > 0:
+                    movimiento_total = {
+                        'fecha': fecha_hasta,
+                        'fechaOperacion': fecha_hasta,
+                        'simbolo': 'TOTAL_inversio',
+                        'tipo': 'posicion_total',
+                        'cantidad': 1,
+                        'precio': cuenta.get('posicionTotal', 0),
+                        'moneda': 'peso_Argentino',
+                        'descripcion': 'Posición total en inversion_Argentina_Pesos',
+                        'valor': cuenta.get('posicionTotal', 0),
+                        'tipoCuenta': 'inversion_Argentina_Pesos'
+                    }
+                    movimientos_historicos.append(movimiento_total)
+                
+                if cuenta.get('titulosValorizados', 0) > 0:
+                    movimiento_titulos = {
+                        'fecha': fecha_hasta,
+                        'fechaOperacion': fecha_hasta,
+                        'simbolo': 'TITULOS_inversio',
+                        'tipo': 'titulos_valorizados',
+                        'cantidad': 1,
+                        'precio': cuenta.get('titulosValorizados', 0),
+                        'moneda': 'peso_Argentino',
+                        'descripcion': 'Títulos valorizados en inversion_Argentina_Pesos',
+                        'valor': cuenta.get('titulosValorizados', 0),
+                        'tipoCuenta': 'inversion_Argentina_Pesos'
+                    }
+                    movimientos_historicos.append(movimiento_titulos)
+        
+        # Procesar cuentas estadounidenses
+        for cuenta in estado_cuenta.get('cuentas', []):
+            if cuenta.get('tipo') == 'inversion_Estados_Unidos_Dolares':
+                # Crear movimientos históricos simulados
+                if cuenta.get('posicionTotal', 0) > 0:
+                    movimiento_total = {
+                        'fecha': fecha_hasta,
+                        'fechaOperacion': fecha_hasta,
+                        'simbolo': 'TOTAL_inversio',
+                        'tipo': 'posicion_total',
+                        'cantidad': 1,
+                        'precio': cuenta.get('posicionTotal', 0),
+                        'moneda': 'dolar_Estadounidense',
+                        'descripcion': 'Posición total en inversion_Estados_Unidos_Dolares',
+                        'valor': cuenta.get('posicionTotal', 0),
+                        'tipoCuenta': 'inversion_Estados_Unidos_Dolares'
+                    }
+                    movimientos_historicos.append(movimiento_total)
+                
+                if cuenta.get('titulosValorizados', 0) > 0:
+                    movimiento_titulos = {
+                        'fecha': fecha_hasta,
+                        'fechaOperacion': fecha_hasta,
+                        'simbolo': 'TITULOS_inversio',
+                        'tipo': 'titulos_valorizados',
+                        'cantidad': 1,
+                        'precio': cuenta.get('titulosValorizados', 0),
+                        'moneda': 'dolar_Estadounidense',
+                        'descripcion': 'Títulos valorizados en inversion_Estados_Unidos_Dolares',
+                        'valor': cuenta.get('titulosValorizados', 0),
+                        'tipoCuenta': 'inversion_Estados_Unidos_Dolares'
+                    }
+                    movimientos_historicos.append(movimiento_titulos)
+                
+                if cuenta.get('disponible', 0) > 0:
+                    movimiento_disponible = {
+                        'fecha': fecha_hasta,
+                        'fechaOperacion': fecha_hasta,
+                        'simbolo': 'DISP_inversio',
+                        'tipo': 'disponible',
+                        'cantidad': 1,
+                        'precio': cuenta.get('disponible', 0),
+                        'moneda': 'dolar_Estadounidense',
+                        'descripcion': 'Disponible en inversion_Estados_Unidos_Dolares',
+                        'valor': cuenta.get('disponible', 0),
+                        'tipoCuenta': 'inversion_Estados_Unidos_Dolares'
+                    }
+                    movimientos_historicos.append(movimiento_disponible)
+        
+        return movimientos_historicos
+        
+    except Exception as e:
+        print(f"💥 Error generando movimientos históricos: {e}")
         return None
 
 def mostrar_historico_movimientos(movimientos_data):
@@ -9941,23 +10082,46 @@ def obtener_movimiento_historico_portafolio(token_portador, id_cliente, dias_atr
         for fecha in df_movimientos['fecha'].unique():
             movimientos_fecha = df_movimientos[df_movimientos['fecha'] == fecha]
             
-            # Calcular totales por moneda
+            # Calcular totales por moneda y tipo
             total_ars = 0
             total_usd = 0
+            titulos_ars = 0
+            titulos_usd = 0
+            disponible_ars = 0
+            disponible_usd = 0
             
             for _, movimiento in movimientos_fecha.iterrows():
                 monto = float(movimiento.get('valor', 0) or 0)
                 moneda = movimiento.get('moneda', '').lower()
+                tipo = movimiento.get('tipo', '').lower()
                 
                 if 'peso' in moneda or 'ars' in moneda:
-                    total_ars += monto
+                    if 'titulos' in tipo:
+                        titulos_ars += monto
+                    elif 'disponible' in tipo:
+                        disponible_ars += monto
+                    else:
+                        total_ars += monto
                 elif 'dolar' in moneda or 'usd' in moneda:
-                    total_usd += monto
+                    if 'titulos' in tipo:
+                        titulos_usd += monto
+                    elif 'disponible' in tipo:
+                        disponible_usd += monto
+                    else:
+                        total_usd += monto
+            
+            # Asegurar que los totales incluyan títulos y disponible
+            total_ars = max(total_ars, titulos_ars + disponible_ars)
+            total_usd = max(total_usd, titulos_usd + disponible_usd)
             
             indice_historico[fecha.strftime('%Y-%m-%d')] = {
                 'fecha': fecha.strftime('%Y-%m-%d'),
                 'total_ars': total_ars,
                 'total_usd': total_usd,
+                'titulos_ars': titulos_ars,
+                'titulos_usd': titulos_usd,
+                'disponible_ars': disponible_ars,
+                'disponible_usd': disponible_usd,
                 'total_ars_formatted': f"${total_ars:,.2f}",
                 'total_usd_formatted': f"${total_usd:,.2f}",
                 'movimientos_count': len(movimientos_fecha),
@@ -9988,7 +10152,7 @@ def mostrar_indice_historico_portafolio(indice_historico):
     df_indice = df_indice.sort_values('fecha')
     
     # Mostrar resumen
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("📅 Período", f"{df_indice['fecha'].min().strftime('%d/%m/%Y')} - {df_indice['fecha'].max().strftime('%d/%m/%Y')}")
     with col2:
@@ -9996,14 +10160,20 @@ def mostrar_indice_historico_portafolio(indice_historico):
     with col3:
         total_movimientos = df_indice['movimientos_count'].sum()
         st.metric("🔄 Movimientos", total_movimientos)
+    with col4:
+        # Calcular crecimiento total
+        if len(df_indice) > 1:
+            crecimiento_ars = ((df_indice['total_ars'].iloc[-1] - df_indice['total_ars'].iloc[0]) / df_indice['total_ars'].iloc[0] * 100) if df_indice['total_ars'].iloc[0] > 0 else 0
+            st.metric("📈 Crecimiento ARS", f"{crecimiento_ars:.1f}%")
     
     # Gráfico de evolución temporal
     st.markdown("#### 📊 Evolución Temporal del Portafolio")
     
-    fig_evolucion = go.Figure()
+    # Crear subplots para diferentes métricas
+    fig = go.Figure()
     
-    # Línea ARS
-    fig_evolucion.add_trace(go.Scatter(
+    # Línea Total ARS
+    fig.add_trace(go.Scatter(
         x=df_indice['fecha'],
         y=df_indice['total_ars'],
         mode='lines+markers',
@@ -10012,8 +10182,18 @@ def mostrar_indice_historico_portafolio(indice_historico):
         marker=dict(size=6)
     ))
     
-    # Línea USD
-    fig_evolucion.add_trace(go.Scatter(
+    # Línea Títulos ARS
+    fig.add_trace(go.Scatter(
+        x=df_indice['fecha'],
+        y=df_indice['titulos_ars'],
+        mode='lines+markers',
+        name='Títulos ARS',
+        line=dict(color='#1d4ed8', width=2),
+        marker=dict(size=4)
+    ))
+    
+    # Línea Total USD
+    fig.add_trace(go.Scatter(
         x=df_indice['fecha'],
         y=df_indice['total_usd'],
         mode='lines+markers',
@@ -10022,7 +10202,17 @@ def mostrar_indice_historico_portafolio(indice_historico):
         marker=dict(size=6)
     ))
     
-    fig_evolucion.update_layout(
+    # Línea Títulos USD
+    fig.add_trace(go.Scatter(
+        x=df_indice['fecha'],
+        y=df_indice['titulos_usd'],
+        mode='lines+markers',
+        name='Títulos USD',
+        line=dict(color='#059669', width=2),
+        marker=dict(size=4)
+    ))
+    
+    fig.update_layout(
         title="Evolución del Portafolio por Fecha",
         xaxis_title="Fecha",
         yaxis_title="Valor Total ($)",
@@ -10037,7 +10227,31 @@ def mostrar_indice_historico_portafolio(indice_historico):
         )
     )
     
-    st.plotly_chart(fig_evolucion, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Gráfico de composición por moneda
+    st.markdown("#### 🏦 Composición por Moneda")
+    
+    # Calcular promedios por moneda
+    promedio_ars = df_indice['total_ars'].mean()
+    promedio_usd = df_indice['total_usd'].mean()
+    total_promedio = promedio_ars + promedio_usd
+    
+    if total_promedio > 0:
+        fig_composicion = go.Figure(data=[go.Pie(
+            labels=['ARS', 'USD'],
+            values=[promedio_ars, promedio_usd],
+            hole=.3,
+            marker_colors=['#3b82f6', '#10b981']
+        )])
+        
+        fig_composicion.update_layout(
+            title="Composición Promedio del Portafolio",
+            height=400,
+            template='plotly_dark'
+        )
+        
+        st.plotly_chart(fig_composicion, use_container_width=True)
     
     # Tabla de datos históricos
     st.markdown("#### 📋 Detalle Histórico")
@@ -10045,8 +10259,8 @@ def mostrar_indice_historico_portafolio(indice_historico):
     # Preparar datos para tabla
     df_tabla = df_indice.copy()
     df_tabla['fecha'] = df_tabla['fecha'].dt.strftime('%d/%m/%Y')
-    df_tabla = df_tabla[['fecha', 'total_ars_formatted', 'total_usd_formatted', 'movimientos_count']]
-    df_tabla.columns = ['Fecha', 'Total ARS', 'Total USD', 'Movimientos']
+    df_tabla = df_tabla[['fecha', 'total_ars_formatted', 'total_usd_formatted', 'titulos_ars', 'titulos_usd', 'movimientos_count']]
+    df_tabla.columns = ['Fecha', 'Total ARS', 'Total USD', 'Títulos ARS', 'Títulos USD', 'Movimientos']
     
     st.dataframe(df_tabla, use_container_width=True)
     
@@ -10063,7 +10277,7 @@ def mostrar_indice_historico_portafolio(indice_historico):
         y_usd = df_indice['total_usd'].values
         slope_usd, intercept_usd, r_value_usd, p_value_usd, std_err_usd = linregress(x_ars, y_usd)
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.metric(
@@ -10078,6 +10292,35 @@ def mostrar_indice_historico_portafolio(indice_historico):
                 f"{slope_usd:,.2f} USD/día",
                 delta=f"{slope_usd/df_indice['total_usd'].iloc[-1]*100:.2f}%" if df_indice['total_usd'].iloc[-1] > 0 else "N/A"
             )
+        
+        with col3:
+            # Calcular volatilidad
+            volatilidad_ars = df_indice['total_ars'].std() / df_indice['total_ars'].mean() * 100 if df_indice['total_ars'].mean() > 0 else 0
+            st.metric(
+                "📊 Volatilidad ARS",
+                f"{volatilidad_ars:.1f}%"
+            )
+    
+    # Resumen ejecutivo
+    st.markdown("#### 📋 Resumen Ejecutivo")
+    
+    if len(df_indice) > 0:
+        ultimo_valor = df_indice.iloc[-1]
+        primer_valor = df_indice.iloc[0]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🇦🇷 Portafolio ARS:**")
+            st.markdown(f"- Valor actual: {ultimo_valor['total_ars_formatted']}")
+            st.markdown(f"- Títulos: ${ultimo_valor['titulos_ars']:,.2f}")
+            st.markdown(f"- Disponible: ${ultimo_valor['disponible_ars']:,.2f}")
+        
+        with col2:
+            st.markdown("**🇺🇸 Portafolio USD:**")
+            st.markdown(f"- Valor actual: {ultimo_valor['total_usd_formatted']}")
+            st.markdown(f"- Títulos: ${ultimo_valor['titulos_usd']:,.2f}")
+            st.markdown(f"- Disponible: ${ultimo_valor['disponible_usd']:,.2f}")
 
 def procesar_movimiento_historico_portafolio(token_portador, id_cliente, dias_atras=90):
     """
