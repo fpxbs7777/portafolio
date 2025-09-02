@@ -522,6 +522,15 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
         if r.status_code == 200:
             data = r.json()
             print(f"✅ Portafolio obtenido exitosamente para {pais}")
+            
+            # Verificar si la API está en mantenimiento
+            if isinstance(data, dict) and 'message' in data:
+                if 'trabajando en la actualización' in data['message'] or 'mantenimiento' in data['message'].lower():
+                    print(f"⚠️ API en mantenimiento para {pais}: {data['message']}")
+                    st.warning(f"⚠️ **API en Mantenimiento**: {data['message']}")
+                    st.info("💡 **Solución**: La aplicación usará datos del estado de cuenta como alternativa")
+                    return obtener_portafolio_alternativo(token_portador, pais)
+            
             if isinstance(data, dict) and 'activos' in data:
                 print(f"📊 Cantidad de activos encontrados: {len(data['activos'])}")
             return data
@@ -4116,12 +4125,122 @@ def calcular_metricas_portafolio(portafolio, valor_total, token_portador, dias_h
     return resultados
 
 # --- Funciones de Visualización ---
+def mostrar_resumen_estado_cuenta(estado_cuenta):
+    """
+    Muestra un resumen del estado de cuenta cuando no hay datos de portafolio disponibles
+    """
+    st.markdown("### 📊 Resumen del Estado de Cuenta")
+    
+    cuentas = estado_cuenta.get('cuentas', [])
+    total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+    
+    # Métricas principales
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("💰 Total en Pesos", f"${total_en_pesos:,.2f}")
+    col2.metric("📊 Cantidad de Cuentas", len(cuentas))
+    
+    # Calcular totales por moneda
+    total_ars = 0
+    total_usd = 0
+    cuentas_operables = 0
+    
+    for cuenta in cuentas:
+        if cuenta.get('estado') == 'operable':
+            cuentas_operables += 1
+            moneda = cuenta.get('moneda', '').lower()
+            total = float(cuenta.get('total', 0))
+            
+            if 'peso' in moneda:
+                total_ars += total
+            elif 'dolar' in moneda:
+                total_usd += total
+    
+    col3.metric("🇦🇷 Total ARS", f"${total_ars:,.2f}")
+    col4.metric("🇺🇸 Total USD", f"${total_usd:,.2f}")
+    
+    # Mostrar cuentas detalladas
+    st.markdown("#### 📋 Detalle de Cuentas")
+    
+    cuentas_argentina = []
+    cuentas_eeuu = []
+    
+    for cuenta in cuentas:
+        if cuenta.get('estado') == 'operable':
+            tipo = cuenta.get('tipo', '')
+            if 'argentina' in tipo.lower() or 'peso' in cuenta.get('moneda', '').lower():
+                cuentas_argentina.append(cuenta)
+            elif 'estados' in tipo.lower() or 'dolar' in cuenta.get('moneda', '').lower():
+                cuentas_eeuu.append(cuenta)
+    
+    # Argentina
+    if cuentas_argentina:
+        st.markdown("**🇦🇷 Argentina**")
+        df_ar = pd.DataFrame(cuentas_argentina)
+        df_ar_display = df_ar[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
+        df_ar_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
+        
+        # Formatear valores monetarios
+        for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
+            if col in df_ar_display.columns:
+                df_ar_display[col] = df_ar_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        
+        st.dataframe(df_ar_display, use_container_width=True)
+    
+    # Estados Unidos
+    if cuentas_eeuu:
+        st.markdown("**🇺🇸 Estados Unidos**")
+        df_us = pd.DataFrame(cuentas_eeuu)
+        df_us_display = df_us[['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total']].copy()
+        df_us_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']
+        
+        # Formatear valores monetarios
+        for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
+            if col in df_us_display.columns:
+                df_us_display[col] = df_us_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        
+        st.dataframe(df_us_display, use_container_width=True)
+    
+    # Nota informativa
+    st.info("""
+    **📝 Nota**: Estos datos provienen del estado de cuenta ya que la API de portafolio está en mantenimiento.
+    Los valores mostrados representan el saldo total de cada cuenta, incluyendo títulos valorizados y disponible.
+    """)
+
 def mostrar_resumen_portafolio(portafolio, token_portador):
     st.markdown("### Resumen del Portafolio")
     
+    # Verificar si el portafolio tiene un mensaje de mantenimiento
+    if isinstance(portafolio, dict) and 'message' in portafolio:
+        if 'trabajando en la actualización' in portafolio['message'] or 'mantenimiento' in portafolio['message'].lower():
+            st.warning(f"⚠️ **API en Mantenimiento**: {portafolio['message']}")
+            st.info("💡 **Solución**: La aplicación usará datos del estado de cuenta como alternativa")
+            
+            # Intentar obtener datos del estado de cuenta
+            estado_cuenta = obtener_estado_cuenta(token_portador)
+            if estado_cuenta:
+                st.success("✅ **Datos obtenidos del estado de cuenta**")
+                mostrar_resumen_estado_cuenta(estado_cuenta)
+            else:
+                st.error("❌ **No se pudieron obtener datos alternativos**")
+            return
+    
     activos = portafolio.get('activos', [])
-    datos_activos = []
-    valor_total = 0
+    if not activos:
+        st.warning("⚠️ **No se encontraron activos en el portafolio**")
+        st.info("💡 **Posibles causas:**")
+        st.info("• El portafolio está vacío")
+        st.info("• La API está en mantenimiento")
+        st.info("• Problemas de conectividad")
+        
+        # Intentar obtener datos del estado de cuenta como alternativa
+        st.info("🔄 **Intentando obtener datos del estado de cuenta...**")
+        estado_cuenta = obtener_estado_cuenta(token_portador)
+        if estado_cuenta:
+            st.success("✅ **Datos obtenidos del estado de cuenta**")
+            mostrar_resumen_estado_cuenta(estado_cuenta)
+        else:
+            st.error("❌ **No se pudieron obtener datos alternativos**")
+        return
     
     for activo in activos:
         try:
