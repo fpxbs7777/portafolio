@@ -254,7 +254,7 @@ def obtener_tokens(usuario, contraseña):
         print(f"📡 Respuesta de autenticación: {respuesta.status_code}")
         
         if respuesta.status_code == 200:
-            respuesta_json = respuesta.json()
+        respuesta_json = respuesta.json()
             access_token = respuesta_json.get('access_token')
             refresh_token = respuesta_json.get('refresh_token')
             
@@ -423,8 +423,8 @@ def obtener_estado_cuenta(token_portador, id_cliente=None):
                         respuesta = requests.get(url_estado_cuenta, headers=encabezados, timeout=30)
                         if respuesta.status_code == 200:
                             print("✅ Estado de cuenta obtenido en reintento")
-                            return respuesta.json()
-                        elif respuesta.status_code == 401:
+            return respuesta.json()
+        elif respuesta.status_code == 401:
                             st.error("❌ **Persiste el problema de autorización**")
                             st.info("🔐 **Solución recomendada:**")
                             st.info("1. Verifica que tu cuenta tenga permisos de asesor")
@@ -548,7 +548,7 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
                         r = requests.get(url, headers=headers, timeout=20)
                         if r.status_code == 200:
                             print("✅ Portafolio obtenido en reintento")
-                            return r.json()
+            return r.json()
                         elif r.status_code == 401:
                             st.error("❌ **Persiste el problema de autorización**")
                             st.info("🔐 **Solución recomendada:**")
@@ -566,7 +566,7 @@ def obtener_portafolio_por_pais(token_portador: str, pais: str):
         else:
             print(f"❌ Error HTTP {r.status_code} para {pais}")
             print(f"📝 Respuesta del servidor: {r.text}")
-            return None
+        return None
     except requests.exceptions.Timeout:
         print(f"⏰ Timeout al obtener portafolio de {pais}")
         return None
@@ -823,7 +823,7 @@ def obtener_tasa_mep_alternativa(token_portador) -> float:
             return mep_rate
         else:
             print("⚠️ Precios inválidos para calcular MEP")
-            return None
+        return None
             
     except Exception as e:
         print(f"💥 Error en método alternativo MEP: {e}")
@@ -833,21 +833,6 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
     Obtiene los movimientos de los clientes de un asesor con reintentos y validación de token
-    
-    Args:
-        token_portador (str): Token de autenticación
-        clientes (list): Lista de IDs de clientes
-        fecha_desde (str): Fecha de inicio (formato ISO)
-        fecha_hasta (str): Fecha de fin (formato ISO)
-        tipo_fecha (str): Tipo de fecha a filtrar ('fechaOperacion' o 'fechaLiquidacion')
-        estado (str, optional): Estado de la operación
-        tipo_operacion (str, optional): Tipo de operación
-        pais (str, optional): País de la operación
-        moneda (str, optional): Moneda de la operación
-        cuenta_comitente (str, optional): Número de cuenta comitente
-        
-    Returns:
-        dict: Diccionario con los movimientos o None en caso de error
     """
     if not token_portador:
         print("❌ Error: Token de acceso no válido")
@@ -882,23 +867,40 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         "clientes": clientes,
         "from": fecha_desde,
         "to": fecha_hasta,
-        "dateType": tipo_fecha,
-        "status": estado or "",
-        "type": tipo_operacion or "",
-        "country": pais or "",
-        "currency": moneda or "",
-        "cuentaComitente": cuenta_comitente or ""
+        "dateType": tipo_fecha
     }
+    
+    # Agregar filtros opcionales solo si tienen valor
+    if estado:
+        payload["status"] = estado
+    if tipo_operacion:
+        payload["type"] = tipo_operacion
+    if pais:
+        payload["country"] = pais
+    if moneda:
+        payload["currency"] = moneda
+    if cuenta_comitente:
+        payload["cuentaComitente"] = cuenta_comitente
     
     try:
         print(f"🔍 Obteniendo movimientos para {len(clientes)} clientes desde {fecha_desde} hasta {fecha_hasta}")
+        print(f"📋 Payload: {payload}")
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         print(f"📡 Respuesta movimientos: {response.status_code}")
         
         if response.status_code == 200:
             data = response.json()
             print(f"✅ Movimientos obtenidos exitosamente")
-            return data
+            
+            # Verificar si la respuesta tiene la estructura esperada
+            if isinstance(data, dict) and 'movimientos' in data:
+                return data['movimientos']
+            elif isinstance(data, list):
+                return data
+            else:
+                print(f"⚠️ Estructura de respuesta inesperada: {type(data)}")
+                return data
+                
         elif response.status_code == 401:
             print(f"❌ Error 401: No autorizado para movimientos")
             st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a los movimientos")
@@ -920,19 +922,42 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
                         response = requests.post(url, headers=headers, json=payload, timeout=30)
                         if response.status_code == 200:
                             print("✅ Movimientos obtenidos en reintento")
-                            return response.json()
+                            data = response.json()
+                            if isinstance(data, dict) and 'movimientos' in data:
+                                return data['movimientos']
+                            elif isinstance(data, list):
+                                return data
+                            else:
+                                return data
                         elif response.status_code == 401:
                             st.error("❌ **Persiste el problema de autorización**")
                             st.info("🔐 **Solución recomendada:**")
                             st.info("1. Verifica que tu cuenta tenga permisos de asesor")
                             st.info("2. Contacta a IOL para solicitar acceso a estos endpoints")
                             st.info("3. La aplicación usará datos simulados como alternativa")
+            
+            return None
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Prohibido para movimientos")
+            st.error("❌ **Acceso Prohibido**: No tienes permisos para acceder a esta funcionalidad")
             return None
         else:
-            print(f"❌ Error HTTP {response.status_code}: {response.text}")
+            print(f"❌ Error HTTP {response.status_code} para movimientos")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
             return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener movimientos")
+        st.error("⏰ **Timeout**: La consulta tardó demasiado en responder")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"🌐 Error de conexión al obtener movimientos: {e}")
+        st.error(f"🌐 **Error de Conexión**: {str(e)}")
+        return None
     except Exception as e:
-        print(f"💥 Error al obtener movimientos: {e}")
+        print(f"💥 Error inesperado al obtener movimientos: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
         return None
 
 def obtener_movimientos_completos(token_portador, id_cliente):
@@ -2813,11 +2838,11 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         
         # Realizar la solicitud con mejor manejo de errores
         try:
-            response = requests.get(url, headers={
-                'Authorization': f'Bearer {token_portador}',
-                'Accept': 'application/json'
-            }, timeout=30)
-            
+        response = requests.get(url, headers={
+            'Authorization': f'Bearer {token_portador}',
+            'Accept': 'application/json'
+        }, timeout=30)
+        
             print(f"📡 Estado de la respuesta: {response.status_code}")
             
             # Manejar diferentes códigos de estado
@@ -2834,7 +2859,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
                 print(f"❌ Error del servidor ({response.status_code}) para {simbolo}")
                 return None
             
-            response.raise_for_status()
+        response.raise_for_status()
             
         except requests.exceptions.Timeout:
             print(f"⏰ Timeout al obtener datos para {simbolo}")
@@ -2848,7 +2873,7 @@ def obtener_serie_historica_iol(token_portador, mercado, simbolo, fecha_desde, f
         
         # Procesar la respuesta
         try:
-            data = response.json()
+        data = response.json()
             print(f"📊 Tipo de datos recibidos: {type(data)}")
         except ValueError as e:
             print(f"❌ Error al parsear JSON para {simbolo}: {e}")
@@ -5441,6 +5466,11 @@ def mostrar_movimientos_asesor():
     
     if buscar and clientes_seleccionados:
         with st.spinner("Buscando movimientos..."):
+            # Mejorar la búsqueda de movimientos con mejor logging
+            st.info(f"🔍 **Buscando movimientos para {len(clientes_seleccionados)} cliente(s)**")
+            st.info(f"📅 **Período**: {fecha_desde} a {fecha_hasta}")
+            st.info(f"📋 **Filtros**: Tipo fecha={tipo_fecha}, Estado={estado or 'Todos'}, Moneda={moneda or 'Todas'}")
+            
             movimientos = obtener_movimientos_asesor(
                 token_portador=token_acceso,
                 clientes=clientes_seleccionados,
@@ -5452,29 +5482,71 @@ def mostrar_movimientos_asesor():
                 moneda=moneda or None
             )
             
-            if movimientos and isinstance(movimientos, list):
+            if movimientos and isinstance(movimientos, list) and len(movimientos) > 0:
                 df = pd.DataFrame(movimientos)
                 if not df.empty:
+                    st.success(f"✅ **Se encontraron {len(df)} movimientos**")
+                    
                     st.subheader("📋 Resultados de la búsqueda")
-                    st.dataframe(df, use_container_width=True)
+                    
+                    # Mostrar columnas disponibles para debugging
+                    if st.session_state.get('debug_mode', False):
+                        st.info(f"📊 **Columnas disponibles**: {list(df.columns)}")
+                    
+                    # Seleccionar columnas relevantes para mostrar
+                    columnas_display = []
+                    for col in ['fechaOperacion', 'fechaLiquidacion', 'simbolo', 'tipo', 'cantidad', 'precio', 'moneda', 'estado', 'descripcion']:
+                        if col in df.columns:
+                            columnas_display.append(col)
+                    
+                    if columnas_display:
+                        df_display = df[columnas_display].copy()
+                        df_display.columns = ['Fecha Operación', 'Fecha Liquidación', 'Símbolo', 'Tipo', 'Cantidad', 'Precio', 'Moneda', 'Estado', 'Descripción']
+                        
+                        # Formatear valores
+                        if 'Precio' in df_display.columns:
+                            df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else "$0.00")
+                        if 'Cantidad' in df_display.columns:
+                            df_display['Cantidad'] = df_display['Cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+                        
+                        st.dataframe(df_display, use_container_width=True)
+                    else:
+                        st.warning("⚠️ No se encontraron columnas relevantes para mostrar")
+                        st.json(df.head())  # Mostrar datos crudos para debugging
                     
                     # Mostrar resumen
                     st.subheader("📊 Resumen de Movimientos")
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Total Movimientos", len(df))
                     
-                    if 'monto' in df.columns:
-                        col2.metric("Monto Total", f"${df['monto'].sum():,.2f}")
+                    if 'precio' in df.columns and 'cantidad' in df.columns:
+                        try:
+                            monto_total = (df['precio'] * df['cantidad']).sum()
+                            col2.metric("Monto Total", f"${monto_total:,.2f}")
+                        except:
+                            col2.metric("Monto Total", "N/A")
+                    else:
+                        col2.metric("Monto Total", "N/A")
                     
                     if 'estado' in df.columns:
                         estados = df['estado'].value_counts().to_dict()
                         col3.metric("Estados", ", ".join([f"{k} ({v})" for k, v in estados.items()]))
+                    else:
+                        col3.metric("Estados", "N/A")
+                        
                 else:
                     st.info("No se encontraron movimientos con los filtros seleccionados")
             else:
                 st.warning("No se encontraron movimientos o hubo un error en la consulta")
                 if movimientos and not isinstance(movimientos, list):
                     st.json(movimientos)  # Mostrar respuesta cruda para depuración
+                elif movimientos is None:
+                    st.error("❌ **Error**: La API no devolvió datos válidos")
+                    st.info("💡 **Posibles causas:**")
+                    st.info("• Problemas de conectividad con la API")
+                    st.info("• Token de acceso expirado")
+                    st.info("• Permisos insuficientes para acceder a los movimientos")
+                    st.info("• Los filtros aplicados no devuelven resultados")
 
 def mostrar_analisis_portafolio():
     cliente = st.session_state.cliente_seleccionado
@@ -5506,7 +5578,7 @@ def mostrar_analisis_portafolio():
                 return
         else:
             st.error("❌ No hay refresh token disponible. Por favor, vuelva a autenticarse.")
-            return
+        return
 
     id_cliente = cliente.get('numeroCliente', cliente.get('id'))
     nombre_cliente = cliente.get('apellidoYNombre', cliente.get('nombre', 'Cliente'))
@@ -5697,7 +5769,7 @@ def mostrar_analisis_portafolio():
                         df_us_display[col] = df_us_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
                 
                 st.dataframe(df_us_display, use_container_width=True)
-        else:
+            else:
             st.error("❌ No se pudo obtener el estado de cuenta")
             
         # Obtener movimientos
@@ -6649,29 +6721,15 @@ def main():
             
             # Toggle para modo debug
             st.sidebar.markdown("---")
-            st.sidebar.subheader("🔧 Configuración")
-            debug_mode = st.sidebar.checkbox("Modo Debug", value=st.session_state.debug_mode, help="Activa validaciones detalladas de valuación")
+            debug_mode = st.sidebar.checkbox("🔍 Modo Debug", value=st.session_state.debug_mode, help="Activa validaciones detalladas de valuación")
             if debug_mode != st.session_state.debug_mode:
                 st.session_state.debug_mode = debug_mode
                 st.rerun()
             
-            # Nota sobre permisos de API
-            st.sidebar.markdown("---")
-            with st.sidebar.expander("🔐 Nota sobre Permisos API"):
-                st.info("""
-                **Algunas funcionalidades requieren permisos especiales:**
-                
-                • **Estado de cuenta detallado**: Requiere permisos de asesor
-                • **Movimientos históricos**: Requiere permisos de asesor
-                • **Análisis de retorno real**: Usa datos simulados si no hay permisos
-                
-                Si ves mensajes de "401 Authorization denied", la aplicación usará datos simulados como alternativa.
-                """)
-            
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Portafolio Estados Unidos", "Rendimiento histórico", "Tasas de caución", "Panel del asesor"),
+                ("Inicio", "Análisis de portafolio", "Panel del asesor"),
                 index=0,
                 key="menu_principal"
             )
@@ -6684,21 +6742,6 @@ def main():
                     mostrar_analisis_portafolio()
                 else:
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "Portafolio Estados Unidos":
-                if st.session_state.cliente_seleccionado:
-                    mostrar_portafolio_eeuu(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
-                else:
-                    st.info("Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "Rendimiento histórico":
-                if st.session_state.cliente_seleccionado:
-                    mostrar_rendimiento_historico_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
-                else:
-                    st.info("Seleccione un cliente en la barra lateral para comenzar")
-            elif opcion == "Tasas de caución":
-                if 'token_acceso' in st.session_state and st.session_state.token_acceso:
-                    mostrar_tasas_caucion(st.session_state.token_acceso)
-                else:
-                    st.warning("Por favor inicie sesión para ver las tasas de caución")
             elif opcion == "Panel del asesor":
                 mostrar_movimientos_asesor()
         else:
@@ -6752,8 +6795,8 @@ def main():
                 st.markdown("""
                 **Datos de mercado**  
                 - Cotizaciones MEP en tiempo real  
-                - Tasas de caución actualizadas  
                 - Estado de cuenta consolidado  
+                - Análisis de movimientos  
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
