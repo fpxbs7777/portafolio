@@ -5483,8 +5483,8 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                                 
                                 st.plotly_chart(fig_contribucion, use_container_width=True)
                                 
-                                                            # Mostrar tabla resumen de métricas individuales y globales
-                            st.markdown("#### Métricas de Retorno y Riesgo por Activo")
+                                # Mostrar tabla resumen de métricas individuales y globales
+                                st.markdown("#### Métricas de Retorno y Riesgo por Activo")
                                 
                                 # Crear DataFrame para la tabla
                                 df_metricas = pd.DataFrame({
