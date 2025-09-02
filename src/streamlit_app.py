@@ -4983,13 +4983,6 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                         except Exception as e:
                             st.error(f"❌ Error calculando retornos del portafolio: {str(e)}")
                             st.exception(e)
-                            
-                    else:
-                        st.warning("⚠️ No hay datos suficientes para generar el histograma")
-                else:
-                    st.warning("⚠️ No se pudieron obtener datos históricos para ningún activo")
-            else:
-                st.warning("⚠️ No hay activos válidos para generar el histograma")
                 
             except Exception as e:
                 st.error(f"❌ Error generando histograma del portafolio: {str(e)}")
