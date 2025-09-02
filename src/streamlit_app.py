@@ -4813,18 +4813,21 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         # Usar la función unificada para cálculos consistentes
         metricas = calcular_metricas_portafolio_unificada(portafolio_dict, valor_total, token_portador)
         
-            # Procesar activos y clasificarlos correctamente
-    activos_argentinos = []
-    activos_eeuu = []
-    
-    for activo in activos_raw:
-        try:
-            titulo = activo.get('titulo', {})
-            simbolo = titulo.get('simbolo', 'N/A')
-            descripcion = titulo.get('descripcion', 'Sin descripción')
-            tipo = titulo.get('tipo', 'N/A')
-            pais = titulo.get('pais', 'argentina')
-            mercado = titulo.get('mercado', 'BCBA')
+        # Procesar activos y clasificarlos correctamente
+        activos_argentinos = []
+        activos_eeuu = []
+        
+        # Obtener activos_raw del portafolio combinado
+        activos_raw = portafolio_ar.get('activos', [])
+        
+        for activo in activos_raw:
+            try:
+                titulo = activo.get('titulo', {})
+                simbolo = titulo.get('simbolo', 'N/A')
+                descripcion = titulo.get('descripcion', 'Sin descripción')
+                tipo = titulo.get('tipo', 'N/A')
+                pais = titulo.get('pais', 'argentina')
+                mercado = titulo.get('mercado', 'BCBA')
             
             # Obtener valuación
             valuacion = 0
@@ -6046,14 +6049,23 @@ def mostrar_cotizaciones_mercado(token_acceso):
 def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
     st.markdown("### 🔄 Optimización de Portafolio")
     
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    # Obtener portafolio combinado (Argentina + EEUU)
+    with st.spinner("Obteniendo portafolios combinados..."):
+        portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+        portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
+        
+        # Combinar portafolios
+        portafolio_combinado = {'activos': []}
+        if portafolio_ar and portafolio_ar.get('activos'):
+            portafolio_combinado['activos'].extend(portafolio_ar['activos'])
+        if portafolio_us and portafolio_us.get('activos'):
+            portafolio_combinado['activos'].extend(portafolio_us['activos'])
     
-    if not portafolio:
+    if not portafolio_combinado or not portafolio_combinado.get('activos'):
         st.warning("No se pudo obtener el portafolio del cliente")
         return
     
-    activos_raw = portafolio.get('activos', [])
+    activos_raw = portafolio_combinado.get('activos', [])
     if not activos_raw:
         st.warning("El portafolio está vacío")
         return
@@ -6310,14 +6322,23 @@ def mostrar_optimizacion_portafolio(token_acceso, id_cliente):
 def mostrar_analisis_tecnico(token_acceso, id_cliente):
     st.markdown("### 📊 Análisis Técnico")
     
-    with st.spinner("Obteniendo portafolio..."):
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
+    # Obtener portafolio combinado (Argentina + EEUU)
+    with st.spinner("Obteniendo portafolios combinados..."):
+        portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+        portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
+        
+        # Combinar portafolios
+        portafolio_combinado = {'activos': []}
+        if portafolio_ar and portafolio_ar.get('activos'):
+            portafolio_combinado['activos'].extend(portafolio_ar['activos'])
+        if portafolio_us and portafolio_us.get('activos'):
+            portafolio_combinado['activos'].extend(portafolio_us['activos'])
     
-    if not portafolio:
+    if not portafolio_combinado or not portafolio_combinado.get('activos'):
         st.warning("No se pudo obtener el portafolio del cliente")
         return
     
-    activos = portafolio.get('activos', [])
+    activos = portafolio_combinado.get('activos', [])
     if not activos:
         st.warning("El portafolio está vacío")
         return
@@ -6593,16 +6614,22 @@ def mostrar_analisis_portafolio():
                 st.session_state.refresh_token = None
                 return
         
-        # Intentar obtener portafolio
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
-        if not portafolio:
-            # Fallback al endpoint genérico por país (Argentina)
-            portafolio = obtener_portafolio_por_pais(token_acceso, 'argentina')
+        # Obtener portafolio combinado (Argentina + EEUU)
+        with st.spinner("Obteniendo portafolios combinados..."):
+            portafolio_ar = obtener_portafolio(token_acceso, id_cliente, 'Argentina')
+            portafolio_us = obtener_portafolio(token_acceso, id_cliente, 'Estados Unidos')
+            
+            # Combinar portafolios
+            portafolio_combinado = {'activos': []}
+            if portafolio_ar and portafolio_ar.get('activos'):
+                portafolio_combinado['activos'].extend(portafolio_ar['activos'])
+            if portafolio_us and portafolio_us.get('activos'):
+                portafolio_combinado['activos'].extend(portafolio_us['activos'])
         
-        if portafolio:
-            mostrar_resumen_portafolio(portafolio, token_acceso)
+        if portafolio_combinado and portafolio_combinado.get('activos'):
+            mostrar_resumen_portafolio(portafolio_combinado, token_acceso)
         else:
-            st.warning("No se pudo obtener el portafolio de Argentina")
+            st.warning("No se pudo obtener el portafolio combinado")
     
     with tab2:
         # Mostrar estado de cuenta y movimientos
@@ -6749,283 +6776,12 @@ def mostrar_analisis_portafolio():
         mostrar_conversion_usd(token_acceso, id_cliente)
 
 
-def mostrar_portafolio_eeuu(token_acceso, id_cliente):
-    """
-    Muestra el análisis completo del portafolio de Estados Unidos
-    """
-    st.header("🇺🇸 Análisis de Portafolio Estados Unidos")
-    st.markdown("""
-    Analiza tu portafolio de activos estadounidenses con métricas detalladas,
-    análisis de rendimiento y herramientas de optimización.
-    """)
-    
-    # Verificar si el token es válido
-    if not verificar_token_valido(token_acceso):
-        st.warning("⚠️ El token de acceso ha expirado. Intentando renovar...")
-        nuevo_token = renovar_token(st.session_state.refresh_token)
-        if nuevo_token:
-            st.session_state.token_acceso = nuevo_token
-            token_acceso = nuevo_token
-            st.success("✅ Token renovado exitosamente")
-        else:
-            st.error("❌ No se pudo renovar el token. Por favor, vuelva a autenticarse.")
-            return
-    
-    # Obtener portafolio estadounidense
-    portafolio_us = obtener_portafolio_por_pais(token_acceso, 'estados_unidos')
-    
-    if not portafolio_us:
-        st.error("❌ No se pudo obtener el portafolio de Estados Unidos")
-        st.info("💡 **Posibles causas:**")
-        st.info("• Problemas de conectividad con la API")
-        st.info("• Token de acceso expirado")
-        st.info("• Permisos insuficientes para acceder al portafolio")
-        st.info("• El portafolio estadounidense está vacío")
-        return
-    
+def mostrar_conversion_usd(token_acceso, id_cliente):
+    st.markdown("### 💵 Conversión USD")
+    st.info("Esta funcionalidad estará disponible próximamente")
 
-    
-    # Verificar si el portafolio tiene activos
-    activos_raw = portafolio_us.get('activos', [])
-    if not activos_raw:
-        st.error("❌ No se encontraron activos en el portafolio estadounidense")
-        st.info("**Estructura del portafolio recibido:**")
-        st.json(portafolio_us)
-        st.warning("""
-        **Posibles causas:**
-        - El portafolio estadounidense está realmente vacío
-        - Los activos no tienen la estructura esperada
-        - Problemas de autenticación o permisos
-        - La API está devolviendo datos en un formato diferente
-        """)
-        
-        # Intentar obtener portafolio con método alternativo
-        st.info("🔄 **Intentando método alternativo...**")
-        try:
-            # Intentar obtener portafolio usando el endpoint de asesor
-            portafolio_alternativo = obtener_portafolio(token_acceso, st.session_state.cliente_seleccionado.get('numeroCliente', ''), 'Estados Unidos')
-            if portafolio_alternativo and portafolio_alternativo.get('activos'):
-                st.success("✅ Se encontraron activos con método alternativo")
-                portafolio_us = portafolio_alternativo
-                activos_raw = portafolio_us.get('activos', [])
-            else:
-                st.warning("⚠️ El método alternativo tampoco encontró activos")
-                st.info("💡 **Sugerencia:** Verifica que tengas activos en tu portafolio estadounidense en la plataforma de IOL")
-                return
-        except Exception as e:
-            st.error(f"❌ Error en método alternativo: {e}")
-            return
-    
-    # Filtrar activos estadounidenses
-    activos_us = []
-    for activo in activos_raw:
-        titulo = activo.get('titulo', {})
-        tipo = titulo.get('tipo', '')
-        simbolo = titulo.get('simbolo', '')
-        descripcion = titulo.get('descripcion', 'Sin descripción')
-        
-        # Incluir todos los activos estadounidenses
-        if simbolo and simbolo != 'N/A':
-            # Crear objeto con datos estructurados
-            activo_info = {
-                'simbolo': simbolo,
-                'descripcion': descripcion,
-                'tipo': tipo,
-                'cantidad': activo.get('cantidad', 0),
-                'precio': 0,
-                'valuacion': 0,
-                'precio_compra': 0,
-                'variacion_diaria': 0,
-                'rendimiento': 0,
-                'ganancia_dinero': 0,
-                'ganancia_porcentaje': 0
-            }
-            
-            # Obtener precio y valuación
-            campos_valuacion = [
-                'valuacionEnMonedaOriginal', 'valuacionActual', 'valorNominalEnMonedaOriginal',
-                'valorNominal', 'valuacionDolar', 'valuacion', 'valorActual',
-                'montoInvertido', 'valorMercado', 'valorTotal', 'importe', 'valorizado'
-            ]
-            
-            for campo in campos_valuacion:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        val = float(activo[campo])
-                        if val > 0:
-                            activo_info['valuacion'] = val
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            # Obtener precio de compra y otros datos
-            campos_precio = [
-                'precioPromedio', 'precioCompra', 'precioActual', 'precio',
-                'precioUnitario', 'ultimoPrecio', 'cotizacion', 'ppc'
-            ]
-            
-            for campo in campos_precio:
-                if campo in activo and activo[campo] is not None:
-                    try:
-                        precio = float(activo[campo])
-                        if precio > 0:
-                            activo_info['precio'] = precio
-                            activo_info['precio_compra'] = precio
-                            break
-                    except (ValueError, TypeError):
-                        continue
-            
-            # Obtener variación diaria y rendimiento
-            if 'variacionDiaria' in activo and activo['variacionDiaria'] is not None:
-                try:
-                    activo_info['variacion_diaria'] = float(activo['variacionDiaria'])
-                except (ValueError, TypeError):
-                    pass
-            
-            if 'gananciaPorcentaje' in activo and activo['gananciaPorcentaje'] is not None:
-                try:
-                    activo_info['rendimiento'] = float(activo['gananciaPorcentaje'])
-                except (ValueError, TypeError):
-                    pass
-            
-            if 'gananciaDinero' in activo and activo['gananciaDinero'] is not None:
-                try:
-                    activo_info['ganancia_dinero'] = float(activo['gananciaDinero'])
-                except (ValueError, TypeError):
-                    pass
-            
-            # Si no hay valuación, calcular con precio y cantidad
-            if activo_info['valuacion'] == 0 and activo_info['cantidad'] and activo_info['precio']:
-                activo_info['valuacion'] = activo_info['cantidad'] * activo_info['precio']
-            
-            activos_us.append(activo_info)
-    
-    if not activos_us:
-        st.error("❌ No se pudieron procesar los activos del portafolio estadounidense")
-        st.info("💡 **Posibles causas:**")
-        st.info("• Los activos no tienen símbolos válidos")
-        st.info("• La estructura de datos es diferente a la esperada")
-        st.info("• Problemas en el procesamiento de los datos")
-        return
-    
-    # Mostrar resumen de todos los activos estadounidenses
-    st.subheader("📊 Resumen de Activos Estadounidenses")
-    
-    # Crear tabla resumen de todos los activos
-    df_activos = pd.DataFrame(activos_us)
-    if not df_activos.empty:
-        # Mostrar métricas clave
-        col1, col2, col3, col4 = st.columns(4)
-        
-        valor_total = df_activos['valuacion'].sum()
-        col1.metric("💰 Valor Total", f"${valor_total:,.2f}")
-        col2.metric("📈 Cantidad Activos", len(activos_us))
-        col3.metric("📊 Rendimiento Promedio", f"{df_activos['rendimiento'].mean():.2f}%")
-        col4.metric("📉 Variación Promedio", f"{df_activos['variacion_diaria'].mean():.2f}%")
-        
-        # Tabla de activos
-        st.markdown("#### 📋 Lista de Activos Disponibles")
-        df_display = df_activos[['simbolo', 'descripcion', 'cantidad', 'precio', 'valuacion', 'rendimiento', 'variacion_diaria', 'ganancia_dinero']].copy()
-        df_display.columns = ['Símbolo', 'Descripción', 'Cantidad', 'Precio', 'Valuación', 'Rendimiento %', 'Var. Diaria %', 'Ganancia $']
-        df_display['Valuación'] = df_display['Valuación'].apply(lambda x: f"${x:,.2f}")
-        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}")
-        df_display['Rendimiento %'] = df_display['Rendimiento %'].apply(lambda x: f"{x:+.2f}%")
-        df_display['Var. Diaria %'] = df_display['Var. Diaria %'].apply(lambda x: f"{x:+.2f}%")
-        df_display['Ganancia $'] = df_display['Ganancia $'].apply(lambda x: f"${x:+,.2f}")
-        
-        st.dataframe(df_display, use_container_width=True)
-    
-    # Análisis de rendimiento por tipo de activo
-    st.markdown("---")
-    st.subheader("📈 Análisis de Rendimiento por Tipo de Activo")
-    
-    if not df_activos.empty:
-        # Agrupar por tipo de activo
-        df_por_tipo = df_activos.groupby('tipo').agg({
-            'valuacion': 'sum',
-            'rendimiento': 'mean',
-            'variacion_diaria': 'mean',
-            'ganancia_dinero': 'sum'
-        }).reset_index()
-        
-        df_por_tipo.columns = ['Tipo de Activo', 'Valor Total', 'Rendimiento Promedio %', 'Variación Promedio %', 'Ganancia Total $']
-        df_por_tipo['Valor Total'] = df_por_tipo['Valor Total'].apply(lambda x: f"${x:,.2f}")
-        df_por_tipo['Rendimiento Promedio %'] = df_por_tipo['Rendimiento Promedio %'].apply(lambda x: f"{x:+.2f}%")
-        df_por_tipo['Variación Promedio %'] = df_por_tipo['Variación Promedio %'].apply(lambda x: f"{x:+.2f}%")
-        df_por_tipo['Ganancia Total $'] = df_por_tipo['Ganancia Total $'].apply(lambda x: f"${x:+,.2f}")
-        
-        st.dataframe(df_por_tipo, use_container_width=True)
-    
-    # Gráfico de distribución de activos
-    st.markdown("---")
-    st.subheader("🥧 Distribución de Activos por Tipo")
-    
-    if not df_activos.empty:
-        # Crear gráfico de torta
-        fig = go.Figure(data=[go.Pie(
-            labels=df_activos['tipo'],
-            values=df_activos['valuacion'],
-            textinfo='label+percent',
-            hole=0.4,
-            marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3'])
-        )])
-        
-        fig.update_layout(
-            title="Distribución del Portafolio por Tipo de Activo",
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Análisis de riesgo y volatilidad
-    st.markdown("---")
-    st.subheader("⚠️ Análisis de Riesgo y Volatilidad")
-    
-    if not df_activos.empty:
-        # Calcular métricas de riesgo
-        volatilidad_promedio = df_activos['variacion_diaria'].std()
-        rendimiento_total = df_activos['rendimiento'].sum()
-        activos_ganadores = len(df_activos[df_activos['rendimiento'] > 0])
-        activos_perdedores = len(df_activos[df_activos['rendimiento'] < 0])
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("📊 Volatilidad Promedio", f"{volatilidad_promedio:.2f}%")
-        col2.metric("📈 Rendimiento Total", f"{rendimiento_total:+.2f}%")
-        col3.metric("✅ Activos Ganadores", activos_ganadores)
-        col4.metric("❌ Activos Perdedores", activos_perdedores)
-        
-        # Recomendaciones basadas en el análisis
-        st.markdown("#### 💡 Recomendaciones")
-        
-        if volatilidad_promedio > 5:
-            st.warning("⚠️ **Alta Volatilidad**: Tu portafolio muestra alta volatilidad. Considera diversificar más.")
-        else:
-            st.success("✅ **Volatilidad Controlada**: Tu portafolio tiene volatilidad moderada.")
-        
-        if activos_perdedores > activos_ganadores:
-            st.warning("⚠️ **Mayoría de Activos Perdedores**: Considera revisar tu estrategia de inversión.")
-        else:
-            st.success("✅ **Mayoría de Activos Ganadores**: Tu portafolio está funcionando bien.")
-        
-        if rendimiento_total < 0:
-            st.error("❌ **Rendimiento Negativo**: Tu portafolio está en pérdidas. Considera rebalancear.")
-        else:
-            st.success("✅ **Rendimiento Positivo**: Tu portafolio está generando ganancias.")
-    
-    # Comparación con índices de referencia
-    st.markdown("---")
-    st.subheader("📊 Comparación con Índices de Referencia")
-    
-    st.info("""
-    **Índices de Referencia para Estados Unidos:**
-    - **S&P 500**: Índice de las 500 empresas más grandes de EE.UU.
-    - **NASDAQ**: Índice de empresas tecnológicas
-    - **DOW JONES**: Índice de 30 empresas industriales importantes
-    
-    Compara tu rendimiento con estos índices para evaluar tu desempeño.
-    """)
-    
-    # Notas importantes
+
+def main():
     st.markdown("---")
     st.markdown("""
     **📝 Notas importantes:**
