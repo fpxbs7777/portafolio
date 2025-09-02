@@ -6571,7 +6571,7 @@ def mostrar_analisis_portafolio():
                 portafolio_combinado['activos'].extend(portafolio_us['activos'])
         
         if portafolio_combinado and portafolio_combinado.get('activos'):
-            mostrar_resumen_portafolio(portafolio_final, token_acceso)
+            mostrar_resumen_portafolio(portafolio_combinado, token_acceso)
         else:
             st.warning("No se pudo obtener el portafolio combinado")
     
