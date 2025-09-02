@@ -5891,6 +5891,17 @@ def mostrar_analisis_portafolio():
         
         # Mostrar análisis integrado unificado
         if estado_cuenta or movimientos:
+            # Mostrar indicador de tipo de datos
+            if movimientos and isinstance(movimientos, dict):
+                metodo = movimientos.get('metodo', 'desconocido')
+                if 'simulado' in metodo.lower() or 'respaldo' in metodo.lower() or 'emergencia' in metodo.lower():
+                    st.warning("⚠️ **Datos Simulados**: Los movimientos mostrados son simulados debido a limitaciones de permisos de la API")
+                    st.info("💡 **Explicación**: Tu cuenta no tiene permisos de asesor, pero los datos del estado de cuenta y portafolio son reales")
+                elif 'datos_reales' in metodo.lower() or 'alternativo' in metodo.lower():
+                    st.success("✅ **Datos Reales**: Los movimientos se generaron a partir de datos reales de tu cuenta")
+                else:
+                    st.success("✅ **Datos Reales**: Movimientos obtenidos directamente de la API")
+            
             mostrar_analisis_integrado_unificado(estado_cuenta, movimientos, token_acceso, nombre_cliente, id_cliente)
         else:
             st.error("❌ **No se pudieron obtener datos**")
@@ -5922,6 +5933,17 @@ def mostrar_analisis_integrado_unificado(estado_cuenta, movimientos, token_acces
     
     # Mostrar información del cliente
     st.info(f"🔍 **Cliente seleccionado**: {nombre_cliente} (ID: {id_cliente})")
+    
+    # Verificar si los datos son reales o simulados
+    if movimientos and isinstance(movimientos, dict):
+        metodo = movimientos.get('metodo', 'desconocido')
+        if 'simulado' in metodo.lower() or 'respaldo' in metodo.lower() or 'emergencia' in metodo.lower():
+            st.warning("⚠️ **Nota**: Los datos de movimientos mostrados son simulados debido a limitaciones de la API")
+            st.info("💡 Los datos del estado de cuenta y portafolio son reales")
+        elif 'datos_reales' in metodo.lower() or 'alternativo' in metodo.lower():
+            st.success("✅ **Datos reales**: Los movimientos se generaron a partir de datos reales de tu cuenta")
+        else:
+            st.success("✅ **Datos reales**: Movimientos obtenidos directamente de la API")
     
     # Crear resumen consolidado
     st.markdown("#### 📊 Resumen Consolidado")
@@ -7092,31 +7114,52 @@ def obtener_series_historicas_movimientos(token_portador, id_cliente, fecha_desd
                     print("❌ No se pudo renovar el token")
                     return None
         
-        # Obtener movimientos para Argentina
-        movimientos_argentina = obtener_movimientos_asesor(
-            token_portador=token_portador,
-            clientes=[id_cliente],
-            fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
-            fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
-            tipo_fecha="fechaOperacion",
-            pais="Argentina" if pais is None or pais == "Argentina" else None,
-            moneda="peso_Argentino" if pais is None or pais == "Argentina" else None
-        )
+        # Intentar obtener movimientos con reintentos para errores 500
+        max_reintentos = 2
+        reintento_actual = 0
         
-        # Obtener movimientos para Estados Unidos
-        movimientos_eeuu = obtener_movimientos_asesor(
-            token_portador=token_portador,
-            clientes=[id_cliente],
-            fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
-            fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
-            tipo_fecha="fechaOperacion",
-            pais="Estados Unidos" if pais is None or pais == "Estados Unidos" else None,
-            moneda="dolar_Estadounidense" if pais is None or pais == "Estados Unidos" else None
-        )
+        while reintento_actual < max_reintentos:
+            try:
+                # Obtener movimientos para Argentina
+                movimientos_argentina = obtener_movimientos_asesor(
+                    token_portador=token_portador,
+                    clientes=[id_cliente],
+                    fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
+                    fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
+                    tipo_fecha="fechaOperacion",
+                    pais="Argentina" if pais is None or pais == "Argentina" else None,
+                    moneda="peso_Argentino" if pais is None or pais == "Argentina" else None
+                )
+                
+                # Obtener movimientos para Estados Unidos
+                movimientos_eeuu = obtener_movimientos_asesor(
+                    token_portador=token_portador,
+                    clientes=[id_cliente],
+                    fecha_desde=fecha_desde.isoformat() + "T00:00:00.000Z",
+                    fecha_hasta=fecha_hasta.isoformat() + "T23:59:59.999Z",
+                    tipo_fecha="fechaOperacion",
+                    pais="Estados Unidos" if pais is None or pais == "Estados Unidos" else None,
+                    moneda="dolar_Estadounidense" if pais is None or pais == "Estados Unidos" else None
+                )
+                
+                # Si al menos uno funciona, salir del bucle
+                if movimientos_argentina or movimientos_eeuu:
+                    break
+                    
+                reintento_actual += 1
+                if reintento_actual < max_reintentos:
+                    print(f"🔄 Reintento {reintento_actual} de {max_reintentos}...")
+                    time.sleep(2)  # Esperar 2 segundos antes del reintento
+                    
+            except Exception as e:
+                print(f"💥 Error en intento {reintento_actual + 1}: {e}")
+                reintento_actual += 1
+                if reintento_actual < max_reintentos:
+                    time.sleep(2)
         
-        # Si ambos fallan, usar método alternativo
+        # Si ambos fallan después de reintentos, usar método alternativo
         if not movimientos_argentina and not movimientos_eeuu:
-            print("🔄 Ambos endpoints fallaron, usando método alternativo...")
+            print("🔄 Ambos endpoints fallaron después de reintentos, usando método alternativo...")
             movimientos_argentina = obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta)
             movimientos_eeuu = obtener_movimientos_alternativo(token_portador, id_cliente, fecha_desde, fecha_hasta)
         
