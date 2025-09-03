@@ -473,18 +473,81 @@ def obtener_totales_estado_cuenta(token_portador, id_cliente):
     except Exception:
         return None
 
-def obtener_portafolio(token_portador, id_cliente, pais='Argentina'):
-    url_portafolio = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
-    encabezados = obtener_encabezado_autorizacion(token_portador)
-    try:
-        respuesta = requests.get(url_portafolio, headers=encabezados)
-        if respuesta.status_code == 200:
-            return respuesta.json()
-        else:
-            return None
-    except Exception as e:
-        st.error(f'Error al obtener portafolio: {str(e)}')
+def obtener_portafolio_mejorado(token_portador, id_cliente=None, pais='Argentina'):
+    """
+    Obtiene el portafolio usando múltiples endpoints y métodos de fallback
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
         return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    # Método 1: Intentar endpoint de asesor específico
+    if id_cliente:
+        print(f"🔍 Método 1: Intentando endpoint de asesor para cliente {id_cliente}")
+        url_asesor = f'https://api.invertironline.com/api/v2/Asesores/Portafolio/{id_cliente}/{pais}'
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        try:
+            respuesta = requests.get(url_asesor, headers=headers, timeout=20)
+            print(f"📡 Respuesta endpoint asesor: {respuesta.status_code}")
+            
+            if respuesta.status_code == 200:
+                data = respuesta.json()
+                print(f"✅ Portafolio obtenido del endpoint de asesor")
+                return data
+            else:
+                print(f"⚠️ Endpoint de asesor falló: {respuesta.status_code}")
+        except Exception as e:
+            print(f"❌ Error en endpoint de asesor: {e}")
+    
+    # Método 2: Intentar endpoint genérico por país
+    print(f"🔍 Método 2: Intentando endpoint genérico para {pais}")
+    pais_norm = normalizar_pais_para_endpoint(pais)
+    url_generico = f'https://api.invertironline.com/api/v2/portafolio/{pais_norm}'
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    try:
+        respuesta = requests.get(url_generico, headers=headers, timeout=20)
+        print(f"📡 Respuesta endpoint genérico: {respuesta.status_code}")
+        
+        if respuesta.status_code == 200:
+            data = respuesta.json()
+            print(f"✅ Portafolio obtenido del endpoint genérico")
+            
+            # Verificar si la API está en mantenimiento
+            if isinstance(data, dict) and 'message' in data:
+                if 'trabajando en la actualización' in data['message'] or 'mantenimiento' in data['message'].lower():
+                    print(f"⚠️ API en mantenimiento: {data['message']}")
+                    st.warning(f"⚠️ **API en Mantenimiento**: {data['message']}")
+                    st.info("💡 **Solución**: La aplicación usará datos del estado de cuenta como alternativa")
+                    return obtener_portafolio_alternativo(token_portador, pais)
+            
+            return data
+        else:
+            print(f"⚠️ Endpoint genérico falló: {respuesta.status_code}")
+    except Exception as e:
+        print(f"❌ Error en endpoint genérico: {e}")
+    
+    # Método 3: Usar estado de cuenta como fallback
+    print(f"🔍 Método 3: Usando estado de cuenta como fallback")
+    return obtener_portafolio_alternativo(token_portador, pais)
 def normalizar_pais_para_endpoint(pais: str) -> str:
     """Normaliza el nombre del país para el endpoint /api/v2/portafolio/{pais}."""
     if not pais:
@@ -707,6 +770,385 @@ def obtener_portafolio_alternativo(token_portador: str, pais: str):
     except Exception as e:
         print(f"💥 Error en método alternativo para {pais}: {e}")
         return None
+
+# ============================================================================
+# NUEVOS ENDPOINTS DE LA API
+# ============================================================================
+
+def obtener_estado_cuenta_v2(token_portador):
+    """
+    Obtiene el estado de cuenta usando el endpoint /api/v2/estadocuenta
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    url = "https://api.invertironline.com/api/v2/estadocuenta"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    try:
+        print(f"🔍 Obteniendo estado de cuenta v2...")
+        print(f"🌐 URL: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta estado cuenta v2: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Estado de cuenta v2 obtenido exitosamente")
+            return data
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para estado de cuenta v2")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder al estado de cuenta")
+            return None
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Prohibido para estado de cuenta v2")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Acceso Prohibido**: No tienes permisos para acceder a esta funcionalidad")
+            return None
+        else:
+            print(f"❌ Error HTTP {response.status_code} para estado de cuenta v2")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener estado de cuenta v2")
+        st.error("⏰ **Timeout**: La consulta tardó demasiado en responder")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"🌐 Error de conexión al obtener estado de cuenta v2: {e}")
+        st.error(f"🌐 **Error de Conexión**: {str(e)}")
+        return None
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener estado de cuenta v2: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def obtener_operaciones(token_portador, numero=None):
+    """
+    Obtiene operaciones usando los endpoints /api/v2/operaciones
+    Si se proporciona numero, obtiene una operación específica
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    if numero:
+        url = f"https://api.invertironline.com/api/v2/operaciones/{numero}"
+        print(f"🔍 Obteniendo operación específica {numero}...")
+    else:
+        url = "https://api.invertironline.com/api/v2/operaciones"
+        print(f"🔍 Obteniendo lista de operaciones...")
+    
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    try:
+        print(f"🌐 URL: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta operaciones: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Operaciones obtenidas exitosamente")
+            return data
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para operaciones")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a las operaciones")
+            return None
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Prohibido para operaciones")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Acceso Prohibido**: No tienes permisos para acceder a esta funcionalidad")
+            return None
+        elif response.status_code == 404:
+            print(f"❌ Error 404: Operación no encontrada")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Operación no encontrada**: El número de operación no existe")
+            return None
+        else:
+            print(f"❌ Error HTTP {response.status_code} para operaciones")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al obtener operaciones")
+        st.error("⏰ **Timeout**: La consulta tardó demasiado en responder")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"🌐 Error de conexión al obtener operaciones: {e}")
+        st.error(f"🌐 **Error de Conexión**: {str(e)}")
+        return None
+    except Exception as e:
+        print(f"💥 Error inesperado al obtener operaciones: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return None
+
+def eliminar_operacion(token_portador, numero):
+    """
+    Elimina una operación usando el endpoint DELETE /api/v2/operaciones/{numero}
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return None
+    
+    # Verificar si el token es válido
+    if not verificar_token_valido(token_portador):
+        print("⚠️ Token no válido, intentando renovar...")
+        refresh_token = st.session_state.get('refresh_token')
+        if refresh_token:
+            nuevo_token = renovar_token(refresh_token)
+            if nuevo_token:
+                print("✅ Token renovado exitosamente")
+                st.session_state['token_acceso'] = nuevo_token
+                token_portador = nuevo_token
+            else:
+                print("❌ No se pudo renovar el token")
+                return None
+        else:
+            print("❌ No hay refresh_token disponible")
+            return None
+    
+    url = f"https://api.invertironline.com/api/v2/operaciones/{numero}"
+    headers = obtener_encabezado_autorizacion(token_portador)
+    
+    if not headers:
+        print("❌ No se pudieron generar headers de autorización")
+        return None
+    
+    try:
+        print(f"🗑️ Eliminando operación {numero}...")
+        print(f"🌐 URL: {url}")
+        
+        response = requests.delete(url, headers=headers, timeout=30)
+        print(f"📡 Respuesta eliminación: {response.status_code}")
+        
+        if response.status_code == 200:
+            print(f"✅ Operación {numero} eliminada exitosamente")
+            st.success(f"✅ **Operación {numero} eliminada exitosamente**")
+            return True
+        elif response.status_code == 401:
+            print(f"❌ Error 401: No autorizado para eliminar operación")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.warning("⚠️ **Problema de Autorización**: No tienes permisos para eliminar operaciones")
+            return False
+        elif response.status_code == 403:
+            print(f"❌ Error 403: Prohibido eliminar operación")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Acceso Prohibido**: No tienes permisos para eliminar operaciones")
+            return False
+        elif response.status_code == 404:
+            print(f"❌ Error 404: Operación no encontrada para eliminar")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Operación no encontrada**: El número de operación no existe")
+            return False
+        else:
+            print(f"❌ Error HTTP {response.status_code} para eliminar operación")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error(f"❌ **Error del Servidor**: Código {response.status_code}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print(f"⏰ Timeout al eliminar operación")
+        st.error("⏰ **Timeout**: La consulta tardó demasiado en responder")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"🌐 Error de conexión al eliminar operación: {e}")
+        st.error(f"🌐 **Error de Conexión**: {str(e)}")
+        return False
+    except Exception as e:
+        print(f"💥 Error inesperado al eliminar operación: {e}")
+        st.error(f"💥 **Error Inesperado**: {str(e)}")
+        return False
+
+# ============================================================================
+# FUNCIONES AUXILIARES PARA LOS NUEVOS ENDPOINTS
+# ============================================================================
+
+def mostrar_operaciones(token_portador):
+    """
+    Muestra las operaciones en una interfaz de usuario
+    """
+    st.subheader("📋 Gestión de Operaciones")
+    
+    # Obtener lista de operaciones
+    with st.spinner("Obteniendo operaciones..."):
+        operaciones = obtener_operaciones(token_portador)
+    
+    if operaciones:
+        if isinstance(operaciones, list):
+            st.success(f"✅ Se encontraron {len(operaciones)} operaciones")
+            
+            # Crear DataFrame para mostrar operaciones
+            df_operaciones = pd.DataFrame(operaciones)
+            
+            # Mostrar operaciones en una tabla
+            if not df_operaciones.empty:
+                # Seleccionar columnas relevantes
+                columnas_display = []
+                for col in ['numero', 'fecha', 'tipo', 'simbolo', 'cantidad', 'precio', 'estado', 'descripcion']:
+                    if col in df_operaciones.columns:
+                        columnas_display.append(col)
+                
+                if columnas_display:
+                    df_display = df_operaciones[columnas_display].copy()
+                    df_display.columns = ['Número', 'Fecha', 'Tipo', 'Símbolo', 'Cantidad', 'Precio', 'Estado', 'Descripción']
+                    
+                    # Formatear valores
+                    if 'Precio' in df_display.columns:
+                        df_display['Precio'] = df_display['Precio'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else "$0.00")
+                    if 'Cantidad' in df_display.columns:
+                        df_display['Cantidad'] = df_display['Cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+                    
+                    st.dataframe(df_display, use_container_width=True)
+                else:
+                    st.warning("⚠️ No se encontraron columnas relevantes para mostrar")
+                    st.json(operaciones[:5])  # Mostrar primeros 5 registros para debugging
+            else:
+                st.warning("⚠️ No hay operaciones para mostrar")
+        else:
+            st.warning("⚠️ Formato de respuesta inesperado")
+            st.json(operaciones)
+    else:
+        st.warning("⚠️ No se pudieron obtener las operaciones")
+    
+    # Sección para eliminar operaciones
+    st.markdown("---")
+    st.subheader("🗑️ Eliminar Operación")
+    
+    with st.form("form_eliminar_operacion"):
+        numero_operacion = st.number_input("Número de operación a eliminar", min_value=1, step=1)
+        eliminar = st.form_submit_button("🗑️ Eliminar operación")
+    
+    if eliminar and numero_operacion:
+        with st.spinner(f"Eliminando operación {numero_operacion}..."):
+            resultado = eliminar_operacion(token_portador, numero_operacion)
+            if resultado:
+                st.success(f"✅ Operación {numero_operacion} eliminada exitosamente")
+                st.rerun()  # Recargar la página para actualizar la lista
+            else:
+                st.error(f"❌ No se pudo eliminar la operación {numero_operacion}")
+
+def mostrar_estado_cuenta_v2_ui(token_portador):
+    """
+    Muestra el estado de cuenta v2 en una interfaz de usuario
+    """
+    st.subheader("🏦 Estado de Cuenta v2")
+    
+    # Obtener estado de cuenta v2
+    with st.spinner("Obteniendo estado de cuenta v2..."):
+        estado_cuenta = obtener_estado_cuenta_v2(token_portador)
+    
+    if estado_cuenta:
+        st.success("✅ Estado de cuenta v2 obtenido exitosamente")
+        
+        # Mostrar datos del estado de cuenta
+        if isinstance(estado_cuenta, dict):
+            # Métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            
+            # Extraer información relevante
+            total_en_pesos = estado_cuenta.get('totalEnPesos', 0)
+            cuentas = estado_cuenta.get('cuentas', [])
+            
+            col1.metric("💰 Total en Pesos", f"${total_en_pesos:,.2f}")
+            col2.metric("📊 Cantidad de Cuentas", len(cuentas))
+            
+            # Calcular totales por moneda
+            total_ars = 0
+            total_usd = 0
+            cuentas_operables = 0
+            
+            for cuenta in cuentas:
+                if cuenta.get('estado') == 'operable':
+                    cuentas_operables += 1
+                    moneda = cuenta.get('moneda', '').lower()
+                    total = float(cuenta.get('total', 0))
+                    
+                    if 'peso' in moneda:
+                        total_ars += total
+                    elif 'dolar' in moneda:
+                        total_usd += total
+            
+            col3.metric("🇦🇷 Total ARS", f"${total_ars:,.2f}")
+            col4.metric("🇺🇸 Total USD", f"${total_usd:,.2f}")
+            
+            # Mostrar cuentas detalladas
+            st.markdown("#### 📋 Detalle de Cuentas")
+            
+            if cuentas:
+                df_cuentas = pd.DataFrame(cuentas)
+                columnas_display = ['tipo', 'moneda', 'disponible', 'comprometido', 'saldo', 'titulosValorizados', 'total', 'estado']
+                columnas_disponibles = [c for c in columnas_display if c in df_cuentas.columns]
+                
+                if columnas_disponibles:
+                    df_display = df_cuentas[columnas_disponibles].copy()
+                    df_display.columns = ['Tipo', 'Moneda', 'Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total', 'Estado']
+                    
+                    # Formatear valores monetarios
+                    for col in ['Disponible', 'Comprometido', 'Saldo', 'Títulos Valorizados', 'Total']:
+                        if col in df_display.columns:
+                            df_display[col] = df_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                    
+                    st.dataframe(df_display, use_container_width=True)
+                else:
+                    st.warning("⚠️ No se encontraron columnas relevantes para mostrar")
+                    st.json(estado_cuenta)
+            else:
+                st.warning("⚠️ No hay cuentas para mostrar")
+        else:
+            st.warning("⚠️ Formato de respuesta inesperado")
+            st.json(estado_cuenta)
+    else:
+        st.warning("⚠️ No se pudo obtener el estado de cuenta v2")
+
+# ============================================================================
 
 
 def obtener_precio_actual(token_portador, mercado, simbolo):
@@ -4497,6 +4939,7 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
                 st.error("❌ **No se pudieron obtener datos alternativos**")
             return
     
+    # Verificar si el portafolio tiene activos
     activos = portafolio.get('activos', [])
     if not activos:
         st.warning("⚠️ **No se encontraron activos en el portafolio**")
@@ -4514,6 +4957,265 @@ def mostrar_resumen_portafolio(portafolio, token_portador):
         else:
             st.error("❌ **No se pudieron obtener datos alternativos**")
         return
+    
+    # Si hay activos, procesarlos normalmente
+    datos_activos = []
+    valor_total = 0
+    
+    for activo in activos:
+        try:
+            titulo = activo.get('titulo', {})
+            simbolo = titulo.get('simbolo', 'N/A')
+            descripcion = titulo.get('descripcion', 'Sin descripción')
+            tipo = titulo.get('tipo', 'N/A')
+            cantidad = activo.get('cantidad', 0)
+            
+            # Campos extra para tabla
+            precio_promedio_compra = None
+            variacion_diaria_pct = None
+            activos_comp = 0
+            
+            campos_valuacion = [
+                'valuacionEnMonedaOriginal',
+                'valuacionActual',
+                'valorNominalEnMonedaOriginal', 
+                'valorNominal',
+                'valuacionDolar',
+                'valuacion',
+                'valorActual',
+                'montoInvertido',
+                'valorMercado',
+                'valorTotal',
+                'importe'
+            ]
+            
+            valuacion = 0
+            for campo in campos_valuacion:
+                if campo in activo and activo[campo] is not None:
+                    try:
+                        val = float(activo[campo])
+                        if val > 0:
+                            valuacion = val
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            if valuacion == 0 and cantidad:
+                campos_precio = [
+                    'precioPromedio',
+                    'precioCompra',
+                    'precioActual',
+                    'precio',
+                    'precioUnitario',
+                    'ultimoPrecio',
+                    'cotizacion'
+                ]
+                
+                precio_unitario = 0
+                for campo in campos_precio:
+                    if campo in activo and activo[campo] is not None:
+                        try:
+                            precio = float(activo[campo])
+                            if precio > 0:
+                                precio_unitario = precio
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                if precio_unitario > 0:
+                    try:
+                        cantidad_num = float(cantidad)
+                        # REGLA DE VALUACIÓN: 
+                        # - Letras del Tesoro (S10N5, S30S5): cantidad × precio (sin división)
+                        # - Bonos tradicionales: cantidad × precio ÷ 100 (cotizan por cada $100 nominal)
+                        # - Acciones y otros: cantidad × precio (sin división)
+                        if necesita_ajuste_por_100(simbolo, tipo):
+                            valuacion = (cantidad_num * precio_unitario) / 100.0
+                            ajuste_aplicado = "SÍ (÷100)"
+                        else:
+                            valuacion = cantidad_num * precio_unitario
+                            ajuste_aplicado = "NO"
+                    except (ValueError, TypeError):
+                        pass
+                if precio_unitario == 0:
+                    for campo in campos_precio:
+                        if campo in titulo and titulo[campo] is not None:
+                            try:
+                                precio = float(titulo[campo])
+                                if precio > 0:
+                                    precio_unitario = precio
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                
+                # Intento final: consultar precio actual vía API si sigue en cero
+            if valuacion == 0:
+                ultimo_precio = None
+                if mercado := titulo.get('mercado'):
+                    ultimo_precio = obtener_precio_actual(token_portador, mercado, simbolo)
+                if ultimo_precio:
+                    try:
+                        cantidad_num = float(cantidad)
+                        # Aplicar la misma regla de valuación para precios de API
+                        if necesita_ajuste_por_100(simbolo, tipo):
+                            valuacion = (cantidad_num * ultimo_precio) / 100.0
+                            ajuste_api = "SÍ (÷100)"
+                        else:
+                            valuacion = cantidad_num * ultimo_precio
+                            ajuste_api = "NO"
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Derivar últimos precios y promedios para la tabla
+            ultimo_precio_view = None
+            for k in ['precioActual', 'ultimoPrecio', 'precio', 'precioUnitario']:
+                if k in activo and activo[k] is not None:
+                    try:
+                        val = float(activo[k])
+                        if val > 0:
+                            ultimo_precio_view = val
+                            break
+                    except Exception:
+                        continue
+            for k in ['precioPromedio', 'precioCompra', 'precioPromedioPonderado']:
+                if k in activo and activo[k] is not None:
+                    try:
+                        precio_promedio_compra = float(activo[k])
+                        break
+                    except Exception:
+                        continue
+            for k in ['variacionPorcentual', 'variacion', 'variacionDiaria']:
+                if k in activo and activo[k] is not None:
+                    try:
+                        variacion_diaria_pct = float(activo[k])
+                        break
+                    except Exception:
+                        continue
+
+            datos_activos.append({
+                'Símbolo': simbolo,
+                'Descripción': descripcion,
+                'Tipo': tipo,
+                'Cantidad': cantidad,
+                'Valuación': valuacion,
+                'UltimoPrecio': ultimo_precio_view,
+                'PrecioPromedioCompra': precio_promedio_compra,
+                'VariacionDiariaPct': variacion_diaria_pct,
+                'ActivosComp': activos_comp,
+                'Ajuste100': 'SÍ' if necesita_ajuste_por_100(simbolo, tipo) else 'NO',
+            })
+            
+            valor_total += valuacion
+        except Exception as e:
+            continue
+    
+    if datos_activos:
+        df_activos = pd.DataFrame(datos_activos)
+        # Convert list to dictionary with symbols as keys
+        portafolio_dict = {row['Símbolo']: row for row in datos_activos}
+        metricas = calcular_metricas_portafolio(portafolio_dict, valor_total, token_portador)
+        
+        # Información General
+        cols = st.columns(4)
+        cols[0].metric("Total de activos", len(datos_activos))
+        cols[1].metric("Símbolos únicos", df_activos['Símbolo'].nunique())
+        cols[2].metric("Tipos de activos", df_activos['Tipo'].nunique())
+        # Recalcular valor total basado en Estado de cuenta + MEP si disponible
+        cliente_actual = st.session_state.get('cliente_seleccionado')
+        id_cliente_actual = cliente_actual.get('numeroCliente', cliente_actual.get('id')) if cliente_actual else None
+        totales_cta = obtener_totales_estado_cuenta(token_portador, id_cliente_actual)
+        if totales_cta and totales_cta.get('total_ars_mep'):
+            cols[3].metric("Valor total (ARS + USD a MEP)", f"${totales_cta['total_ars_mep']:,.2f}")
+        else:
+            cols[3].metric("Valor total (estimado por valuación)", f"${valor_total:,.2f}")
+        
+        if metricas:
+            # Métricas de riesgo
+            st.subheader("Análisis de riesgo")
+            cols = st.columns(3)
+            
+            # Mostrar concentración como porcentaje
+            concentracion_pct = metricas['concentracion'] * 100
+            cols[0].metric("Concentración", 
+                         f"{concentracion_pct:.1f}%",
+                         help="Índice de Herfindahl normalizado: 0%=muy diversificado, 100%=muy concentrado")
+            
+            # Mostrar volatilidad como porcentaje anual
+            volatilidad_pct = metricas['std_dev_activo'] * 100
+            cols[1].metric("Volatilidad Anual", 
+                         f"{volatilidad_pct:.1f}%",
+                         help="Riesgo medido como desviación estándar de retornos anuales")
+            
+            # Nivel de concentración
+            if metricas['concentracion'] < 0.3:
+                concentracion_status = "Baja"
+            elif metricas['concentracion'] < 0.6:
+                concentracion_status = "Media"
+            else:
+                concentracion_status = "Alta"
+            cols[2].metric("Nivel de concentración", concentracion_status)
+            
+            # Proyecciones
+            st.subheader("Proyecciones de rendimiento")
+            cols = st.columns(3)
+            
+            # Mostrar retornos como porcentaje del portafolio
+            retorno_anual_pct = metricas['retorno_esperado_anual'] * 100
+            cols[0].metric("Retorno Esperado Anual", 
+                         f"{retorno_anual_pct:+.1f}%",
+                         help="Retorno anual esperado basado en datos históricos")
+            
+            # Mostrar escenarios como porcentaje del portafolio
+            optimista_pct = (metricas['pl_esperado_max'] / valor_total) * 100 if valor_total > 0 else 0
+            pesimista_pct = (metricas['pl_esperado_min'] / valor_total) * 100 if valor_total > 0 else 0
+            
+            cols[1].metric("Escenario Optimista (95%)", 
+                         f"{optimista_pct:+.1f}%",
+                         help="Mejor escenario con 95% de confianza")
+            cols[2].metric("Escenario Pesimista (5%)", 
+                         f"{pesimista_pct:+.1f}%",
+                         help="Peor escenario con 5% de confianza")
+            
+            # Probabilidades
+            st.subheader("Probabilidades")
+            cols = st.columns(4)
+            probs = metricas['probabilidades']
+            cols[0].metric("Ganancia", f"{probs['ganancia']*100:.1f}%")
+            cols[1].metric("Pérdida", f"{probs['perdida']*100:.1f}%")
+            cols[2].metric("Ganancia >10%", f"{probs['ganancia_mayor_10']*100:.1f}%")
+            cols[3].metric("Pérdida >10%", f"{probs['perdida_mayor_10']*100:.1f}")
+        
+        # Tabla de activos con columnas clave
+        try:
+            df_tabla = pd.DataFrame(datos_activos)
+            if not df_tabla.empty:
+                # Columnas visibles y orden
+                columnas = [
+                    'Símbolo', 'Descripción', 'Cantidad', 'ActivosComp',
+                    'VariacionDiariaPct', 'UltimoPrecio', 'PrecioPromedioCompra',
+                    'Valuación'
+                ]
+                columnas_disponibles = [c for c in columnas if c in df_tabla.columns]
+                df_view = df_tabla[columnas_disponibles].copy()
+                # Formatos
+                if 'Valuación' in df_view.columns:
+                    df_view['Valuación'] = df_view['Valuación'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else "$0.00")
+                if 'UltimoPrecio' in df_view.columns:
+                    df_view['UltimoPrecio'] = df_view['UltimoPrecio'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else "$0.00")
+                if 'PrecioPromedioCompra' in df_view.columns:
+                    df_view['PrecioPromedioCompra'] = df_view['PrecioPromedioCompra'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) and x != 0 else "$0.00")
+                if 'VariacionDiariaPct' in df_view.columns:
+                    df_view['VariacionDiariaPct'] = df_view['VariacionDiariaPct'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "0.00%")
+                if 'Cantidad' in df_view.columns:
+                    df_view['Cantidad'] = df_view['Cantidad'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+                
+                st.dataframe(df_view, use_container_width=True)
+            else:
+                st.warning("⚠️ No hay datos de activos para mostrar")
+        except Exception as e:
+            st.error(f"❌ Error al mostrar tabla de activos: {str(e)}")
+    else:
+        st.warning("⚠️ No se pudieron procesar los activos del portafolio")
     
     # Si hay activos, procesarlos normalmente
     datos_activos = []
@@ -5923,7 +6625,7 @@ def mostrar_analisis_portafolio():
             st.warning("⚠️ No se pudo obtener el estado de cuenta")
         
         # Intentar obtener portafolio
-        portafolio = obtener_portafolio(token_acceso, id_cliente)
+        portafolio = obtener_portafolio_mejorado(token_acceso, id_cliente)
         if not portafolio:
             # Fallback al endpoint genérico por país (Argentina)
             portafolio = obtener_portafolio_por_pais(token_acceso, 'argentina')
@@ -6951,7 +7653,7 @@ def main():
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Panel del asesor"),
+                ("Inicio", "Análisis de portafolio", "Panel del asesor", "Gestión de operaciones", "Estado de cuenta v2"),
                 index=0,
                 key="menu_principal"
             )
@@ -6966,6 +7668,10 @@ def main():
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "Panel del asesor":
                 mostrar_movimientos_asesor()
+            elif opcion == "Gestión de operaciones":
+                mostrar_operaciones(token_acceso)
+            elif opcion == "Estado de cuenta v2":
+                mostrar_estado_cuenta_v2_ui(token_acceso)
         else:
             st.info("Ingrese sus credenciales para comenzar")
             
