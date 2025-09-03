@@ -17,4 +17,4 @@ seaborn
 dotenv
 nest_asyncio
 numpy_financial
-SHDA
+SHDA==0.0.4rc4
