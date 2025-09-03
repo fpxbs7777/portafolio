@@ -843,7 +843,23 @@ def obtener_tasa_mep_alternativa(token_portador) -> float:
 def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hasta, tipo_fecha="fechaOperacion", 
                              estado=None, tipo_operacion=None, pais=None, moneda=None, cuenta_comitente=None):
     """
-    Obtiene los movimientos de los clientes de un asesor con reintentos y validación de token
+    Obtiene los movimientos de los clientes de un asesor usando el endpoint /api/v2/Asesor/Movimientos
+    con reintentos y validación de token
+    
+    Args:
+        token_portador: Token de acceso válido
+        clientes: Lista de IDs de clientes
+        fecha_desde: Fecha de inicio en formato ISO
+        fecha_hasta: Fecha de fin en formato ISO
+        tipo_fecha: Tipo de fecha ("fechaOperacion" o "fechaLiquidacion")
+        estado: Filtro de estado (opcional)
+        tipo_operacion: Filtro de tipo de operación (opcional)
+        pais: Filtro de país (opcional)
+        moneda: Filtro de moneda (opcional)
+        cuenta_comitente: Filtro de cuenta comitente (opcional)
+    
+    Returns:
+        dict: Respuesta de la API con movimientos o None si hay error
     """
     if not token_portador:
         print("❌ Error: Token de acceso no válido")
@@ -873,7 +889,7 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         print("❌ No se pudieron generar headers de autorización para movimientos")
         return None
     
-    # Preparar el cuerpo de la solicitud
+    # Preparar el cuerpo de la solicitud según la especificación de la API
     payload = {
         "clientes": clientes,
         "from": fecha_desde,
@@ -896,24 +912,36 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
     try:
         print(f"🔍 Obteniendo movimientos para {len(clientes)} clientes desde {fecha_desde} hasta {fecha_hasta}")
         print(f"📋 Payload: {payload}")
+        print(f"🌐 URL: {url}")
+        
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         print(f"📡 Respuesta movimientos: {response.status_code}")
         
         if response.status_code == 200:
             data = response.json()
             print(f"✅ Movimientos obtenidos exitosamente")
+            print(f"📊 Estructura de respuesta: {type(data)}")
             
             # Verificar si la respuesta tiene la estructura esperada
-            if isinstance(data, dict) and 'movimientos' in data:
-                return data['movimientos']
+            if isinstance(data, dict):
+                # La API puede devolver un objeto con movimientos o directamente los movimientos
+                if 'movimientos' in data:
+                    return data
+                elif 'data' in data:
+                    return {'movimientos': data['data']}
+                else:
+                    # Si es un dict pero no tiene 'movimientos', asumir que es la respuesta completa
+                    return {'movimientos': data}
             elif isinstance(data, list):
-                return data
+                # Si la respuesta es directamente una lista de movimientos
+                return {'movimientos': data}
             else:
                 print(f"⚠️ Estructura de respuesta inesperada: {type(data)}")
-                return data
+                return {'movimientos': data}
                 
         elif response.status_code == 401:
             print(f"❌ Error 401: No autorizado para movimientos")
+            print(f"📝 Respuesta del servidor: {response.text}")
             st.warning("⚠️ **Problema de Autorización**: No tienes permisos para acceder a los movimientos")
             st.info("💡 **Posibles causas:**")
             st.info("• Tu cuenta no tiene permisos de asesor")
@@ -934,12 +962,17 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
                         if response.status_code == 200:
                             print("✅ Movimientos obtenidos en reintento")
                             data = response.json()
-                            if isinstance(data, dict) and 'movimientos' in data:
-                                return data['movimientos']
+                            if isinstance(data, dict):
+                                if 'movimientos' in data:
+                                    return data
+                                elif 'data' in data:
+                                    return {'movimientos': data['data']}
+                                else:
+                                    return {'movimientos': data}
                             elif isinstance(data, list):
-                                return data
+                                return {'movimientos': data}
                             else:
-                                return data
+                                return {'movimientos': data}
                         elif response.status_code == 401:
                             st.error("❌ **Persiste el problema de autorización**")
                             st.info("🔐 **Solución recomendada:**")
@@ -950,7 +983,18 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
             return None
         elif response.status_code == 403:
             print(f"❌ Error 403: Prohibido para movimientos")
+            print(f"📝 Respuesta del servidor: {response.text}")
             st.error("❌ **Acceso Prohibido**: No tienes permisos para acceder a esta funcionalidad")
+            return None
+        elif response.status_code == 400:
+            print(f"❌ Error 400: Solicitud incorrecta")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Solicitud Incorrecta**: Verifica los parámetros enviados")
+            return None
+        elif response.status_code == 500:
+            print(f"❌ Error 500: Error interno del servidor")
+            print(f"📝 Respuesta del servidor: {response.text}")
+            st.error("❌ **Error del Servidor**: Problema interno en la API de IOL")
             return None
         else:
             print(f"❌ Error HTTP {response.status_code} para movimientos")
@@ -970,6 +1014,249 @@ def obtener_movimientos_asesor(token_portador, clientes, fecha_desde, fecha_hast
         print(f"💥 Error inesperado al obtener movimientos: {e}")
         st.error(f"💥 **Error Inesperado**: {str(e)}")
         return None
+
+def obtener_movimientos_asesor_avanzado(token_portador, clientes, fecha_desde, fecha_hasta, 
+                                       tipo_fecha="fechaOperacion", estado=None, tipo_operacion=None, 
+                                       pais=None, moneda=None, cuenta_comitente=None, max_reintentos=3):
+    """
+    Función avanzada para obtener movimientos de asesor con mejor manejo de errores y reintentos
+    
+    Args:
+        token_portador: Token de acceso válido
+        clientes: Lista de IDs de clientes
+        fecha_desde: Fecha de inicio en formato ISO
+        fecha_hasta: Fecha de fin en formato ISO
+        tipo_fecha: Tipo de fecha ("fechaOperacion" o "fechaLiquidacion")
+        estado: Filtro de estado (opcional)
+        tipo_operacion: Filtro de tipo de operación (opcional)
+        pais: Filtro de país (opcional)
+        moneda: Filtro de moneda (opcional)
+        cuenta_comitente: Filtro de cuenta comitente (opcional)
+        max_reintentos: Número máximo de reintentos en caso de error
+    
+    Returns:
+        dict: Respuesta estructurada con movimientos y metadatos
+    """
+    if not token_portador:
+        print("❌ Error: Token de acceso no válido")
+        return {
+            'success': False,
+            'error': 'Token de acceso no válido',
+            'movimientos': [],
+            'metadatos': {}
+        }
+    
+    # Verificar y renovar token si es necesario
+    token_actual = token_portador
+    for intento in range(max_reintentos):
+        if not verificar_token_valido(token_actual):
+            print(f"⚠️ Token no válido en intento {intento + 1}, intentando renovar...")
+            refresh_token = st.session_state.get('refresh_token')
+            if refresh_token:
+                nuevo_token = renovar_token(refresh_token)
+                if nuevo_token:
+                    print("✅ Token renovado exitosamente")
+                    st.session_state['token_acceso'] = nuevo_token
+                    token_actual = nuevo_token
+                else:
+                    print("❌ No se pudo renovar el token")
+                    return {
+                        'success': False,
+                        'error': 'No se pudo renovar el token de acceso',
+                        'movimientos': [],
+                        'metadatos': {}
+                    }
+            else:
+                print("❌ No hay refresh_token disponible")
+                return {
+                    'success': False,
+                    'error': 'No hay refresh token disponible',
+                    'movimientos': [],
+                    'metadatos': {}
+                }
+        
+        url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
+        headers = obtener_encabezado_autorizacion(token_actual)
+        
+        if not headers:
+            print("❌ No se pudieron generar headers de autorización")
+            return {
+                'success': False,
+                'error': 'No se pudieron generar headers de autorización',
+                'movimientos': [],
+                'metadatos': {}
+            }
+        
+        # Preparar el payload según la especificación de la API
+        payload = {
+            "clientes": clientes,
+            "from": fecha_desde,
+            "to": fecha_hasta,
+            "dateType": tipo_fecha
+        }
+        
+        # Agregar filtros opcionales solo si tienen valor
+        if estado:
+            payload["status"] = estado
+        if tipo_operacion:
+            payload["type"] = tipo_operacion
+        if pais:
+            payload["country"] = pais
+        if moneda:
+            payload["currency"] = moneda
+        if cuenta_comitente:
+            payload["cuentaComitente"] = cuenta_comitente
+        
+        try:
+            print(f"🔍 Intento {intento + 1}: Obteniendo movimientos para {len(clientes)} clientes")
+            print(f"📅 Período: {fecha_desde} a {fecha_hasta}")
+            print(f"📋 Payload: {payload}")
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            print(f"📡 Respuesta: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ Movimientos obtenidos exitosamente en intento {intento + 1}")
+                
+                # Procesar la respuesta según su estructura
+                movimientos = []
+                if isinstance(data, dict):
+                    if 'movimientos' in data:
+                        movimientos = data['movimientos']
+                    elif 'data' in data:
+                        movimientos = data['data']
+                    else:
+                        # Si es un dict pero no tiene campos específicos, asumir que es la respuesta completa
+                        movimientos = data
+                elif isinstance(data, list):
+                    movimientos = data
+                else:
+                    movimientos = data
+                
+                # Crear respuesta estructurada
+                return {
+                    'success': True,
+                    'movimientos': movimientos,
+                    'metadatos': {
+                        'total_movimientos': len(movimientos) if isinstance(movimientos, list) else 0,
+                        'clientes_consultados': len(clientes),
+                        'fecha_desde': fecha_desde,
+                        'fecha_hasta': fecha_hasta,
+                        'tipo_fecha': tipo_fecha,
+                        'filtros_aplicados': {
+                            'estado': estado,
+                            'tipo_operacion': tipo_operacion,
+                            'pais': pais,
+                            'moneda': moneda,
+                            'cuenta_comitente': cuenta_comitente
+                        },
+                        'intento_exitoso': intento + 1
+                    }
+                }
+                
+            elif response.status_code == 401:
+                print(f"❌ Error 401 en intento {intento + 1}")
+                if intento < max_reintentos - 1:
+                    print("🔄 Reintentando con token renovado...")
+                    continue
+                else:
+                    return {
+                        'success': False,
+                        'error': 'Error de autorización después de múltiples intentos',
+                        'movimientos': [],
+                        'metadatos': {'ultimo_codigo_error': 401}
+                    }
+                    
+            elif response.status_code == 403:
+                print(f"❌ Error 403: Acceso prohibido")
+                return {
+                    'success': False,
+                    'error': 'Acceso prohibido - No tienes permisos para esta funcionalidad',
+                    'movimientos': [],
+                    'metadatos': {'ultimo_codigo_error': 403}
+                }
+                
+            elif response.status_code == 400:
+                print(f"❌ Error 400: Solicitud incorrecta")
+                return {
+                    'success': False,
+                    'error': 'Solicitud incorrecta - Verifica los parámetros enviados',
+                    'movimientos': [],
+                    'metadatos': {'ultimo_codigo_error': 400}
+                }
+                
+            elif response.status_code == 500:
+                print(f"❌ Error 500: Error interno del servidor")
+                if intento < max_reintentos - 1:
+                    print("🔄 Reintentando por error del servidor...")
+                    time.sleep(2)  # Esperar antes de reintentar
+                    continue
+                else:
+                    return {
+                        'success': False,
+                        'error': 'Error interno del servidor después de múltiples intentos',
+                        'movimientos': [],
+                        'metadatos': {'ultimo_codigo_error': 500}
+                    }
+                    
+            else:
+                print(f"❌ Error HTTP {response.status_code}")
+                if intento < max_reintentos - 1:
+                    print("🔄 Reintentando por error HTTP...")
+                    time.sleep(1)
+                    continue
+                else:
+                    return {
+                        'success': False,
+                        'error': f'Error HTTP {response.status_code}',
+                        'movimientos': [],
+                        'metadatos': {'ultimo_codigo_error': response.status_code}
+                    }
+                    
+        except requests.exceptions.Timeout:
+            print(f"⏰ Timeout en intento {intento + 1}")
+            if intento < max_reintentos - 1:
+                print("🔄 Reintentando por timeout...")
+                time.sleep(2)
+                continue
+            else:
+                return {
+                    'success': False,
+                    'error': 'Timeout después de múltiples intentos',
+                    'movimientos': [],
+                    'metadatos': {'ultimo_codigo_error': 'timeout'}
+                }
+                
+        except requests.exceptions.RequestException as e:
+            print(f"🌐 Error de conexión en intento {intento + 1}: {e}")
+            if intento < max_reintentos - 1:
+                print("🔄 Reintentando por error de conexión...")
+                time.sleep(2)
+                continue
+            else:
+                return {
+                    'success': False,
+                    'error': f'Error de conexión: {str(e)}',
+                    'movimientos': [],
+                    'metadatos': {'ultimo_codigo_error': 'connection'}
+                }
+                
+        except Exception as e:
+            print(f"💥 Error inesperado en intento {intento + 1}: {e}")
+            return {
+                'success': False,
+                'error': f'Error inesperado: {str(e)}',
+                'movimientos': [],
+                'metadatos': {'ultimo_codigo_error': 'unexpected'}
+            }
+    
+    return {
+        'success': False,
+        'error': 'Se agotaron todos los intentos',
+        'movimientos': [],
+        'metadatos': {'intentos_realizados': max_reintentos}
+    }
 
 def obtener_movimientos_completos(token_portador, id_cliente):
     """
