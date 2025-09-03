@@ -8597,7 +8597,7 @@ def main():
             st.sidebar.markdown("---")
             opcion = st.sidebar.radio(
                 "Seleccione una opción:",
-                ("Inicio", "Análisis de portafolio", "Gestión de operaciones", "Homebroker"),
+                ("Inicio", "Análisis de portafolio", "Composición del portafolio", "Gestión de operaciones", "Homebroker"),
                 index=0,
                 key="menu_principal"
             )
@@ -8608,6 +8608,16 @@ def main():
             elif opcion == "Análisis de portafolio":
                 if st.session_state.cliente_seleccionado:
                     mostrar_analisis_integrado(st.session_state.token_acceso, st.session_state.cliente_seleccionado)
+                else:
+                    st.info("Seleccione un cliente en la barra lateral para comenzar")
+            elif opcion == "Composición del portafolio":
+                if st.session_state.cliente_seleccionado:
+                    # Obtener fechas del período
+                    fecha_desde = st.date_input("Fecha desde", value=date.today() - timedelta(days=30), key="fecha_desde_composicion")
+                    fecha_hasta = st.date_input("Fecha hasta", value=date.today(), key="fecha_hasta_composicion")
+                    
+                    if st.button("📊 Calcular Composición del Portafolio", key="calcular_composicion"):
+                        mostrar_analisis_composicion_portafolio(st.session_state.token_acceso, st.session_state.cliente_seleccionado.get('id'), fecha_desde, fecha_hasta)
                 else:
                     st.info("Seleccione un cliente en la barra lateral para comenzar")
             elif opcion == "Gestión de operaciones":
@@ -8670,6 +8680,322 @@ def main():
                 """)
     except Exception as e:
         st.error(f"❌ Error en la aplicación: {str(e)}")
+
+def obtener_operaciones_cliente(token_portador, id_cliente, estado='todas', pais='Argentina', fecha_desde=None, fecha_hasta=None):
+    """
+    Obtiene las operaciones de un cliente específico
+    """
+    try:
+        url_operaciones = f'https://api.invertironline.com/api/v2/Asesores/Operaciones'
+        params = {
+            'IdClienteAsesorado': id_cliente,
+            'Estado': estado,
+            'Pais': pais
+        }
+        
+        if fecha_desde:
+            params['FechaDesde'] = fecha_desde
+        if fecha_hasta:
+            params['FechaHasta'] = fecha_hasta
+        
+        headers = obtener_encabezado_autorizacion(token_portador)
+        respuesta = requests.get(url_operaciones, headers=headers, params=params, timeout=30)
+        
+        if respuesta.status_code == 200:
+            operaciones = respuesta.json()
+            print(f"✅ Operaciones obtenidas: {len(operaciones) if isinstance(operaciones, list) else 'N/A'}")
+            return operaciones
+        else:
+            print(f"❌ Error al obtener operaciones: {respuesta.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"💥 Error al obtener operaciones: {e}")
+        return None
+
+def obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Obtiene movimientos de un cliente con parámetros optimizados
+    """
+    try:
+        url = "https://api.invertironline.com/api/v2/Asesor/Movimientos"
+        headers = obtener_encabezado_autorizacion(token_portador)
+        
+        payload = {
+            "clientes": [id_cliente],
+            "from": fecha_desde.isoformat() + "T00:00:00.000Z",
+            "to": fecha_hasta.isoformat() + "T23:59:59.999Z",
+            "dateType": "fechaOperacion",
+            "status": "Aprobado",
+            "country": "Argentina"
+        }
+        
+        respuesta = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if respuesta.status_code == 200:
+            data = respuesta.json()
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict) and 'movimientos' in data:
+                return data['movimientos']
+            else:
+                return data
+        else:
+            print(f"❌ Error al obtener movimientos: {respuesta.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"💥 Error al obtener movimientos: {e}")
+        return None
+
+def calcular_composicion_portafolio(movimientos, operaciones, fecha_inicio, fecha_fin):
+    """
+    Calcula la composición del portafolio a lo largo del período
+    """
+    try:
+        # Inicializar estructura de datos para el portafolio
+        portafolio_historico = {}
+        estadisticas_globales = {
+            'total_operaciones': 0,
+            'total_movimientos': 0,
+            'activos_unicos': set(),
+            'volumen_total': 0,
+            'rendimiento_periodo': 0,
+            'volatilidad': 0,
+            'max_drawdown': 0,
+            'sharpe_ratio': 0
+        }
+        
+        # Procesar movimientos
+        if movimientos:
+            estadisticas_globales['total_movimientos'] = len(movimientos)
+            
+            for movimiento in movimientos:
+                fecha = movimiento.get('fechaOperacion', '')
+                simbolo = movimiento.get('simbolo', '')
+                tipo = movimiento.get('tipo', '')
+                cantidad = float(movimiento.get('cantidad', 0))
+                precio = float(movimiento.get('precio', 0))
+                moneda = movimiento.get('moneda', 'peso_Argentino')
+                
+                if fecha and simbolo:
+                    if fecha not in portafolio_historico:
+                        portafolio_historico[fecha] = {}
+                    
+                    if simbolo not in portafolio_historico[fecha]:
+                        portafolio_historico[fecha][simbolo] = {
+                            'cantidad': 0,
+                            'valor_total': 0,
+                            'precio_promedio': 0,
+                            'moneda': moneda
+                        }
+                    
+                    # Actualizar posición
+                    posicion_actual = portafolio_historico[fecha][simbolo]
+                    
+                    if tipo in ['compra', 'buy']:
+                        nueva_cantidad = posicion_actual['cantidad'] + cantidad
+                        nuevo_valor = posicion_actual['valor_total'] + (cantidad * precio)
+                        nuevo_precio_promedio = nuevo_valor / nueva_cantidad if nueva_cantidad > 0 else 0
+                        
+                        posicion_actual['cantidad'] = nueva_cantidad
+                        posicion_actual['valor_total'] = nuevo_valor
+                        posicion_actual['precio_promedio'] = nuevo_precio_promedio
+                        
+                    elif tipo in ['venta', 'sell']:
+                        nueva_cantidad = posicion_actual['cantidad'] - cantidad
+                        if nueva_cantidad < 0:
+                            nueva_cantidad = 0
+                        
+                        posicion_actual['cantidad'] = nueva_cantidad
+                        posicion_actual['valor_total'] = nueva_cantidad * posicion_actual['precio_promedio']
+                    
+                    estadisticas_globales['activos_unicos'].add(simbolo)
+                    estadisticas_globales['volumen_total'] += abs(cantidad * precio)
+        
+        # Procesar operaciones
+        if operaciones:
+            estadisticas_globales['total_operaciones'] = len(operaciones)
+            
+            for operacion in operaciones:
+                fecha = operacion.get('fecha', '')
+                simbolo = operacion.get('simbolo', '')
+                tipo = operacion.get('tipo', '')
+                cantidad = float(operacion.get('cantidad', 0))
+                precio = float(operacion.get('precio', 0))
+                
+                if fecha and simbolo:
+                    if fecha not in portafolio_historico:
+                        portafolio_historico[fecha] = {}
+                    
+                    if simbolo not in portafolio_historico[fecha]:
+                        portafolio_historico[fecha][simbolo] = {
+                            'cantidad': 0,
+                            'valor_total': 0,
+                            'precio_promedio': 0,
+                            'moneda': 'peso_Argentino'
+                        }
+                    
+                    # Similar lógica para operaciones
+                    posicion_actual = portafolio_historico[fecha][simbolo]
+                    
+                    if tipo in ['compra', 'buy']:
+                        nueva_cantidad = posicion_actual['cantidad'] + cantidad
+                        nuevo_valor = posicion_actual['valor_total'] + (cantidad * precio)
+                        nuevo_precio_promedio = nuevo_valor / nueva_cantidad if nueva_cantidad > 0 else 0
+                        
+                        posicion_actual['cantidad'] = nueva_cantidad
+                        posicion_actual['valor_total'] = nuevo_valor
+                        posicion_actual['precio_promedio'] = nuevo_precio_promedio
+                    
+                    estadisticas_globales['activos_unicos'].add(simbolo)
+                    estadisticas_globales['volumen_total'] += abs(cantidad * precio)
+        
+        # Calcular estadísticas adicionales
+        estadisticas_globales['activos_unicos'] = len(estadisticas_globales['activos_unicos'])
+        
+        # Calcular rendimiento del período (simplificado)
+        if portafolio_historico:
+            fechas_ordenadas = sorted(portafolio_historico.keys())
+            if len(fechas_ordenadas) >= 2:
+                primera_fecha = fechas_ordenadas[0]
+                ultima_fecha = fechas_ordenadas[-1]
+                
+                valor_inicial = sum(pos['valor_total'] for pos in portafolio_historico[primera_fecha].values())
+                valor_final = sum(pos['valor_total'] for pos in portafolio_historico[ultima_fecha].values())
+                
+                if valor_inicial > 0:
+                    estadisticas_globales['rendimiento_periodo'] = ((valor_final - valor_inicial) / valor_inicial) * 100
+        
+        return portafolio_historico, estadisticas_globales
+        
+    except Exception as e:
+        print(f"💥 Error al calcular composición: {e}")
+        return {}, {}
+
+def mostrar_analisis_composicion_portafolio(token_portador, id_cliente, fecha_desde, fecha_hasta):
+    """
+    Muestra el análisis completo de la composición del portafolio
+    """
+    st.subheader("📊 Análisis de Composición del Portafolio")
+    
+    with st.spinner("🔄 Calculando composición del portafolio..."):
+        # Obtener datos
+        movimientos = obtener_movimientos_cliente(token_portador, id_cliente, fecha_desde, fecha_hasta)
+        operaciones = obtener_operaciones_cliente(token_portador, id_cliente, fecha_desde=fecha_desde.strftime('%Y-%m-%d'), fecha_hasta=fecha_hasta.strftime('%Y-%m-%d'))
+        
+        # Calcular composición
+        portafolio_historico, estadisticas = calcular_composicion_portafolio(movimientos, operaciones, fecha_desde, fecha_hasta)
+        
+        if not portafolio_historico:
+            st.warning("⚠️ No se encontraron datos para calcular la composición del portafolio")
+            return
+        
+        # Mostrar estadísticas globales
+        st.markdown("#### 📈 Estadísticas Globales del Período")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("📊 Total Operaciones", estadisticas['total_operaciones'])
+            st.metric("📋 Total Movimientos", estadisticas['total_movimientos'])
+        
+        with col2:
+            st.metric("🏢 Activos Únicos", estadisticas['activos_unicos'])
+            st.metric("💰 Volumen Total", f"${estadisticas['volumen_total']:,.2f}")
+        
+        with col3:
+            st.metric("📈 Rendimiento", f"{estadisticas['rendimiento_periodo']:+.2f}%")
+            st.metric("📊 Volatilidad", f"{estadisticas['volatilidad']:.2f}%")
+        
+        with col4:
+            st.metric("📉 Max Drawdown", f"{estadisticas['max_drawdown']:.2f}%")
+            st.metric("⚖️ Sharpe Ratio", f"{estadisticas['sharpe_ratio']:.2f}")
+        
+        # Mostrar evolución temporal
+        st.markdown("#### 📅 Evolución Temporal del Portafolio")
+        
+        if portafolio_historico:
+            fechas_ordenadas = sorted(portafolio_historico.keys())
+            
+            # Crear DataFrame para visualización
+            datos_evolucion = []
+            for fecha in fechas_ordenadas:
+                valor_total_fecha = sum(pos['valor_total'] for pos in portafolio_historico[fecha].values())
+                datos_evolucion.append({
+                    'Fecha': fecha,
+                    'Valor Total': valor_total_fecha,
+                    'Activos': len(portafolio_historico[fecha])
+                })
+            
+            if datos_evolucion:
+                df_evolucion = pd.DataFrame(datos_evolucion)
+                
+                # Gráfico de evolución del valor total
+                fig_valor = px.line(df_evolucion, x='Fecha', y='Valor Total', 
+                                   title='Evolución del Valor Total del Portafolio',
+                                   labels={'Valor Total': 'Valor Total ($)', 'Fecha': 'Fecha'})
+                st.plotly_chart(fig_valor, use_container_width=True)
+                
+                # Gráfico de número de activos
+                fig_activos = px.line(df_evolucion, x='Fecha', y='Activos',
+                                     title='Evolución del Número de Activos',
+                                     labels={'Activos': 'Número de Activos', 'Fecha': 'Fecha'})
+                st.plotly_chart(fig_activos, use_container_width=True)
+        
+        # Mostrar composición actual
+        st.markdown("#### 🏢 Composición Actual del Portafolio")
+        
+        if portafolio_historico:
+            ultima_fecha = max(portafolio_historico.keys())
+            composicion_actual = portafolio_historico[ultima_fecha]
+            
+            if composicion_actual:
+                # Crear DataFrame de composición
+                datos_composicion = []
+                for simbolo, posicion in composicion_actual.items():
+                    if posicion['cantidad'] > 0:
+                        datos_composicion.append({
+                            'Símbolo': simbolo,
+                            'Cantidad': posicion['cantidad'],
+                            'Precio Promedio': posicion['precio_promedio'],
+                            'Valor Total': posicion['valor_total'],
+                            'Moneda': posicion['moneda']
+                        })
+                
+                if datos_composicion:
+                    df_composicion = pd.DataFrame(datos_composicion)
+                    st.dataframe(df_composicion, use_container_width=True)
+                    
+                    # Gráfico de distribución por valor
+                    fig_distribucion = px.pie(df_composicion, values='Valor Total', names='Símbolo',
+                                             title='Distribución del Portafolio por Valor')
+                    st.plotly_chart(fig_distribucion, use_container_width=True)
+                else:
+                    st.info("No hay posiciones activas en la fecha más reciente")
+        
+        # Mostrar detalles de movimientos y operaciones
+        st.markdown("#### 📋 Detalles de Movimientos y Operaciones")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📊 Movimientos**")
+            if movimientos:
+                df_mov = pd.DataFrame(movimientos)
+                if not df_mov.empty:
+                    st.dataframe(df_mov[['fechaOperacion', 'simbolo', 'tipo', 'cantidad', 'precio']].head(10), use_container_width=True)
+            else:
+                st.info("No hay movimientos disponibles")
+        
+        with col2:
+            st.markdown("**📈 Operaciones**")
+            if operaciones:
+                df_op = pd.DataFrame(operaciones)
+                if not df_op.empty:
+                    st.dataframe(df_op.head(10), use_container_width=True)
+            else:
+                st.info("No hay operaciones disponibles")
 
 if __name__ == "__main__":
     main()
